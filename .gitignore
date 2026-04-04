@@ -1,0 +1,7 @@
+/build/
+/.vs/
+/runtime/
+/release/
+/CMakeUserPresets.json
+/tests/__pycache__/
+*.pyc

@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "bench_exe_path": "..\\SVG-MB-Bench\\svg-mb-bench.exe",
+  "poll_ms": 1000,
+  "snapshot_path": "..\\SVG-MB-Bench\\logs\\current_state.json"
+}
