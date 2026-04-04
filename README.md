@@ -127,6 +127,43 @@ Current bridge-command behavior:
 - when `--duration-ms` is omitted, Control uses `poll_ms` from config and then
   falls back to `1000`
 
+## Modes
+
+The `--mode` flag selects the process lifetime:
+
+- `one-shot` (default): Phase 0 behavior. Control launches Bench once, reads
+  the snapshot JSON file, writes it to stdout, and exits.
+- `read-loop`: Phase 1 behavior. Control spawns a persistent
+  `logger-service` child and polls `snapshot_path` at `poll_ms`. Runs until
+  Ctrl+C or Ctrl+Break, or until the child restart budget is exhausted.
+
+The `read-loop` mode requires a control config with `snapshot_path` set.
+
+Example:
+
+```powershell
+build\x64-release\svg-mb-control.exe --mode read-loop --config .\config\control.json
+```
+
+## Runtime Home
+
+In `read-loop` mode, Control writes to a runtime home directory it owns.
+
+Resolution precedence:
+
+1. `runtime_home_path` from the loaded control config
+2. `runtime/` next to `svg-mb-control.exe`
+3. `runtime/` under the current working directory
+
+Contents:
+
+- `control_runtime.json` — status file. Rewritten each poll cycle via
+  temp-file + rename. Fields: `schema_version`, `status`, `status_detail`,
+  `last_refresh`, `snapshot_source`, `restart_count`, `skipped_polls`,
+  `successful_polls`, `stale`, `child_pid`.
+
+`status` values: `running`, `shutdown`, `child-died`.
+
 ## Tests
 
 Run:

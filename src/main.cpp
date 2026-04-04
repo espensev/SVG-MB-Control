@@ -1,6 +1,16 @@
 #include "bench_bridge.h"
 #include "control_config.h"
+#include "read_loop.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#include <atomic>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -18,10 +28,36 @@ enum class BridgeCommand {
     kReadSnapshot,
 };
 
+enum class RunMode {
+    kOneShot,
+    kReadLoop,
+};
+
+svg_mb_control::ReadLoop* g_active_read_loop = nullptr;
+std::atomic<bool> g_stop_signaled{false};
+
+BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
+    switch (ctrl_type) {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            g_stop_signaled.store(true);
+            if (g_active_read_loop != nullptr) {
+                g_active_read_loop->RequestStop();
+            }
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--config <path>] [--bench-exe-path <path>] "
+        << "  svg-mb-control [--mode <one-shot|read-loop>] [--config <path>] "
+           << "[--bench-exe-path <path>] "
            << "[--bridge-command <logger-service|read-snapshot>] "
            << "[--duration-ms <ms>] [--timeout-ms <ms>]\n"
         << "  svg-mb-control --help|-h\n"
@@ -45,6 +81,17 @@ BridgeCommand ParseBridgeCommand(const wchar_t* value) {
         return BridgeCommand::kReadSnapshot;
     }
     throw std::runtime_error("Invalid --bridge-command value.");
+}
+
+RunMode ParseRunMode(const wchar_t* value) {
+    const std::wstring raw(value);
+    if (raw == L"one-shot") {
+        return RunMode::kOneShot;
+    }
+    if (raw == L"read-loop") {
+        return RunMode::kReadLoop;
+    }
+    throw std::runtime_error("Invalid --mode value.");
 }
 
 std::uint32_t ParseTimeoutMs(const wchar_t* value) {
@@ -119,6 +166,7 @@ int wmain(int argc, wchar_t** argv) {
         bool config_path_explicit = false;
         std::filesystem::path bench_exe_path;
         BridgeCommand bridge_command = BridgeCommand::kLoggerService;
+        RunMode run_mode = RunMode::kOneShot;
         std::uint32_t duration_ms = 0u;
         bool duration_ms_explicit = false;
         std::uint32_t timeout_ms = 15000u;
@@ -140,6 +188,8 @@ int wmain(int argc, wchar_t** argv) {
                 config_path_explicit = true;
             } else if (arg == L"--bridge-command") {
                 bridge_command = ParseBridgeCommand(require_value());
+            } else if (arg == L"--mode") {
+                run_mode = ParseRunMode(require_value());
             } else if (arg == L"--duration-ms") {
                 duration_ms = ParseDurationMs(require_value());
                 duration_ms_explicit = true;
@@ -191,6 +241,35 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (bench_exe_path.empty()) {
             throw std::runtime_error("Could not resolve svg-mb-bench.exe. Pass --bench-exe-path or configure bench_exe_path.");
+        }
+
+        if (run_mode == RunMode::kReadLoop) {
+            if (!config.has_value()) {
+                throw std::runtime_error("--mode read-loop requires a control config with snapshot_path.");
+            }
+            if (config->snapshot_path.empty()) {
+                throw std::runtime_error("--mode read-loop requires snapshot_path in the control config.");
+            }
+            if (duration_ms_explicit && duration_ms > 0u) {
+                config->logger_service_duration_ms = duration_ms;
+            }
+
+            const std::filesystem::path runtime_home =
+                svg_mb_control::ResolveRuntimeHomePath(*config);
+
+            svg_mb_control::ReadLoop loop(*config, runtime_home,
+                                          bench_exe_path.wstring());
+            g_active_read_loop = &loop;
+            if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE)) {
+                g_active_read_loop = nullptr;
+                throw std::runtime_error("SetConsoleCtrlHandler failed.");
+            }
+
+            const int loop_exit = loop.RunUntilStopped();
+
+            SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
+            g_active_read_loop = nullptr;
+            return loop_exit;
         }
 
         if (!duration_ms_explicit && config.has_value()) {

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,5 +37,45 @@ JsonArtifactLaunchResult RunLoggerService(
 
 std::string LoadJsonObjectFile(
     const std::filesystem::path& json_path);
+
+// Long-running supervisor for a single Bench child process. Creates pipes,
+// spawns the child with CREATE_NEW_PROCESS_GROUP, and drains stdout and stderr
+// on background threads so the child does not block on a full pipe buffer.
+//
+// Lifetime: call Start() once. Destructor requests graceful stop and joins
+// drain threads. Create a new supervisor instance to restart a child.
+class BenchChildSupervisor {
+  public:
+    BenchChildSupervisor(std::wstring bench_exe_path,
+                         std::vector<std::wstring> args);
+    ~BenchChildSupervisor();
+
+    BenchChildSupervisor(const BenchChildSupervisor&) = delete;
+    BenchChildSupervisor& operator=(const BenchChildSupervisor&) = delete;
+
+    // Spawns the child. Throws std::runtime_error on process creation failure.
+    void Start();
+
+    // Returns true while the child process is still active.
+    bool IsRunning();
+
+    // Exit code observed at child exit. Returns -1 while the child is still
+    // running or if the child was never started.
+    int LastExitCode();
+
+    // Bounded tail buffers of captured output. Thread-safe to call.
+    std::string StdoutTail() const;
+    std::string StderrTail() const;
+
+    // Sends CTRL_BREAK_EVENT to the child and waits up to graceful_timeout_ms.
+    // Falls back to TerminateProcess if the child does not exit in time.
+    // Safe to call multiple times; subsequent calls are no-ops once the child
+    // has exited.
+    void RequestStop(std::uint32_t graceful_timeout_ms);
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 }  // namespace svg_mb_control

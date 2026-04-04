@@ -9,11 +9,14 @@
 #include <windows.h>
 
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cwctype>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 namespace svg_mb_control {
 
@@ -452,6 +455,264 @@ std::string LoadJsonObjectFile(const std::filesystem::path& json_path) {
     }
 
     return json_text;
+}
+
+namespace {
+
+constexpr std::size_t kTailBufferMaxBytes = 64u * 1024u;
+
+void AppendBounded(std::string& buffer, const char* data, std::size_t size) {
+    buffer.append(data, data + size);
+    if (buffer.size() > kTailBufferMaxBytes) {
+        buffer.erase(0, buffer.size() - kTailBufferMaxBytes);
+    }
+}
+
+}  // namespace
+
+struct BenchChildSupervisor::Impl {
+    std::wstring bench_exe_path;
+    std::vector<std::wstring> args;
+
+    HANDLE process_handle = nullptr;
+    DWORD process_id = 0u;
+
+    std::thread stdout_thread;
+    std::thread stderr_thread;
+
+    mutable std::mutex state_mutex;
+    std::string stdout_tail;
+    std::string stderr_tail;
+    std::atomic<bool> started{false};
+    std::atomic<bool> exit_observed{false};
+    std::atomic<int> last_exit_code{-1};
+
+    ~Impl() {
+        if (stdout_thread.joinable()) {
+            stdout_thread.join();
+        }
+        if (stderr_thread.joinable()) {
+            stderr_thread.join();
+        }
+        if (process_handle != nullptr) {
+            CloseHandle(process_handle);
+            process_handle = nullptr;
+        }
+    }
+};
+
+namespace {
+
+void DrainPipe(HANDLE pipe_handle,
+               std::mutex* mutex,
+               std::string* tail) {
+    std::array<char, 4096> buffer{};
+    for (;;) {
+        DWORD bytes_read = 0;
+        const BOOL ok = ReadFile(pipe_handle,
+                                 buffer.data(),
+                                 static_cast<DWORD>(buffer.size()),
+                                 &bytes_read,
+                                 nullptr);
+        if (!ok) {
+            const DWORD error = GetLastError();
+            if (error == ERROR_BROKEN_PIPE || error == ERROR_HANDLE_EOF) {
+                break;
+            }
+            break;
+        }
+        if (bytes_read == 0) {
+            break;
+        }
+        std::lock_guard<std::mutex> lock(*mutex);
+        AppendBounded(*tail, buffer.data(), static_cast<std::size_t>(bytes_read));
+    }
+    CloseHandle(pipe_handle);
+}
+
+}  // namespace
+
+BenchChildSupervisor::BenchChildSupervisor(std::wstring bench_exe_path,
+                                           std::vector<std::wstring> args)
+    : impl_(std::make_unique<Impl>()) {
+    impl_->bench_exe_path = std::move(bench_exe_path);
+    impl_->args = std::move(args);
+}
+
+BenchChildSupervisor::~BenchChildSupervisor() {
+    if (impl_ != nullptr) {
+        RequestStop(2000u);
+    }
+}
+
+void BenchChildSupervisor::Start() {
+    if (impl_->started.load()) {
+        throw std::runtime_error("BenchChildSupervisor already started.");
+    }
+    if (impl_->bench_exe_path.empty()) {
+        throw std::runtime_error("Bench executable path must not be empty.");
+    }
+
+    const std::filesystem::path exe_path = std::filesystem::absolute(
+        std::filesystem::path(impl_->bench_exe_path)).lexically_normal();
+    if (!std::filesystem::exists(exe_path)) {
+        throw std::runtime_error("Bench executable not found: " + exe_path.string());
+    }
+
+    SECURITY_ATTRIBUTES security_attributes{};
+    security_attributes.nLength = sizeof(security_attributes);
+    security_attributes.bInheritHandle = TRUE;
+
+    HANDLE raw_stdout_read = nullptr;
+    HANDLE raw_stdout_write = nullptr;
+    HANDLE raw_stderr_read = nullptr;
+    HANDLE raw_stderr_write = nullptr;
+
+    if (!CreatePipe(&raw_stdout_read, &raw_stdout_write, &security_attributes, 0)) {
+        throw std::runtime_error("CreatePipe failed for stdout: " +
+                                 Win32Message(GetLastError()));
+    }
+    UniqueHandle stdout_read(raw_stdout_read);
+    UniqueHandle stdout_write(raw_stdout_write);
+
+    if (!CreatePipe(&raw_stderr_read, &raw_stderr_write, &security_attributes, 0)) {
+        throw std::runtime_error("CreatePipe failed for stderr: " +
+                                 Win32Message(GetLastError()));
+    }
+    UniqueHandle stderr_read(raw_stderr_read);
+    UniqueHandle stderr_write(raw_stderr_write);
+
+    if (!SetHandleInformation(stdout_read.get(), HANDLE_FLAG_INHERIT, 0)) {
+        throw std::runtime_error("SetHandleInformation failed for stdout read handle: " +
+                                 Win32Message(GetLastError()));
+    }
+    if (!SetHandleInformation(stderr_read.get(), HANDLE_FLAG_INHERIT, 0)) {
+        throw std::runtime_error("SetHandleInformation failed for stderr read handle: " +
+                                 Win32Message(GetLastError()));
+    }
+
+    STARTUPINFOW startup_info{};
+    startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESTDHANDLES;
+    startup_info.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup_info.hStdOutput = stdout_write.get();
+    startup_info.hStdError = stderr_write.get();
+
+    PROCESS_INFORMATION process_info{};
+    std::wstring command_line = BuildCommandLine(exe_path.wstring(), impl_->args);
+    std::wstring working_directory = exe_path.parent_path().wstring();
+
+    const DWORD creation_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
+    if (!CreateProcessW(exe_path.c_str(),
+                        command_line.data(),
+                        nullptr,
+                        nullptr,
+                        TRUE,
+                        creation_flags,
+                        nullptr,
+                        working_directory.empty() ? nullptr : working_directory.c_str(),
+                        &startup_info,
+                        &process_info)) {
+        throw std::runtime_error("CreateProcessW failed: " +
+                                 Win32Message(GetLastError()));
+    }
+
+    CloseHandle(process_info.hThread);
+
+    impl_->process_handle = process_info.hProcess;
+    impl_->process_id = process_info.dwProcessId;
+
+    stdout_write.reset();
+    stderr_write.reset();
+
+    const HANDLE stdout_read_raw = stdout_read.release();
+    const HANDLE stderr_read_raw = stderr_read.release();
+    impl_->stdout_thread = std::thread(DrainPipe,
+                                       stdout_read_raw,
+                                       &impl_->state_mutex,
+                                       &impl_->stdout_tail);
+    impl_->stderr_thread = std::thread(DrainPipe,
+                                       stderr_read_raw,
+                                       &impl_->state_mutex,
+                                       &impl_->stderr_tail);
+
+    impl_->started.store(true);
+}
+
+bool BenchChildSupervisor::IsRunning() {
+    if (!impl_->started.load() || impl_->exit_observed.load()) {
+        return false;
+    }
+    if (impl_->process_handle == nullptr) {
+        return false;
+    }
+
+    DWORD exit_code = 0u;
+    if (!GetExitCodeProcess(impl_->process_handle, &exit_code)) {
+        return false;
+    }
+    if (exit_code == STILL_ACTIVE) {
+        return true;
+    }
+
+    impl_->last_exit_code.store(static_cast<int>(exit_code));
+    impl_->exit_observed.store(true);
+    return false;
+}
+
+int BenchChildSupervisor::LastExitCode() {
+    // Refresh state.
+    (void)IsRunning();
+    return impl_->last_exit_code.load();
+}
+
+std::string BenchChildSupervisor::StdoutTail() const {
+    std::lock_guard<std::mutex> lock(impl_->state_mutex);
+    return impl_->stdout_tail;
+}
+
+std::string BenchChildSupervisor::StderrTail() const {
+    std::lock_guard<std::mutex> lock(impl_->state_mutex);
+    return impl_->stderr_tail;
+}
+
+void BenchChildSupervisor::RequestStop(std::uint32_t graceful_timeout_ms) {
+    if (!impl_->started.load() || impl_->exit_observed.load()) {
+        if (impl_->stdout_thread.joinable()) {
+            impl_->stdout_thread.join();
+        }
+        if (impl_->stderr_thread.joinable()) {
+            impl_->stderr_thread.join();
+        }
+        return;
+    }
+    if (impl_->process_handle == nullptr) {
+        return;
+    }
+
+    // Send CTRL_BREAK_EVENT to the child's process group. The child was
+    // launched with CREATE_NEW_PROCESS_GROUP, so process_id is the group id.
+    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, impl_->process_id);
+
+    const DWORD wait_result = WaitForSingleObject(impl_->process_handle,
+                                                  graceful_timeout_ms);
+    if (wait_result != WAIT_OBJECT_0) {
+        TerminateProcess(impl_->process_handle, 124);
+        WaitForSingleObject(impl_->process_handle, INFINITE);
+    }
+
+    DWORD exit_code = 0u;
+    if (GetExitCodeProcess(impl_->process_handle, &exit_code)) {
+        impl_->last_exit_code.store(static_cast<int>(exit_code));
+    }
+    impl_->exit_observed.store(true);
+
+    if (impl_->stdout_thread.joinable()) {
+        impl_->stdout_thread.join();
+    }
+    if (impl_->stderr_thread.joinable()) {
+        impl_->stderr_thread.join();
+    }
 }
 
 }  // namespace svg_mb_control

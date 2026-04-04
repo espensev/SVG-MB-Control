@@ -28,5 +28,6 @@ rules:
 
 - C++20, MSVC on Windows x64.
 - Keep the Bench boundary external. Do not include or link Bench internals.
-- Phase 0 stays read-only and subprocess-only.
+- Phase 1 extends Phase 0 with a persistent read-loop supervisor. It remains
+  subprocess-only and read-only.
 - The subprocess adapter owns process launch, stdout/stderr capture, timeout, and exit-code handling.

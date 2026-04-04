@@ -4,9 +4,11 @@ import ctypes
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -16,6 +18,7 @@ BUILD_DIR = REPO_ROOT / "build" / "x64-release"
 CONTROL_EXE = BUILD_DIR / "svg-mb-control.exe"
 FAKE_BENCH_EXE = BUILD_DIR / "fake-bench.exe"
 REAL_BENCH_EXE = REPO_ROOT.parent / "SVG-MB-Bench" / "svg-mb-bench.exe"
+FAKE_SNAPSHOT = BUILD_DIR / "fake_logger_service_current_state.json"
 
 
 def _has_build_tools() -> bool:
@@ -272,3 +275,306 @@ class SmokeTests(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertIsInstance(data, dict)
         self.assertTrue(data, msg="live snapshot JSON object is empty")
+
+
+def _write_read_loop_config(
+    td: Path,
+    *,
+    runtime_home: Path,
+    snapshot_path: Path,
+    poll_ms: int,
+    duration_ms: int,
+    staleness_threshold_ms: int | None = None,
+    retry_count: int = 3,
+    retry_backoff_ms: int = 10,
+    child_restart_budget: int = 3,
+    child_restart_backoff_ms: int = 100,
+) -> Path:
+    fields = [
+        '  "schema_version": 2',
+        f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}"',
+        f'  "snapshot_path": "{snapshot_path.as_posix()}"',
+        f'  "poll_ms": {poll_ms}',
+        f'  "runtime_home_path": "{runtime_home.as_posix()}"',
+        f'  "snapshot_read_retry_count": {retry_count}',
+        f'  "snapshot_read_retry_backoff_ms": {retry_backoff_ms}',
+        f'  "child_restart_budget": {child_restart_budget}',
+        f'  "child_restart_backoff_ms": {child_restart_backoff_ms}',
+        f'  "logger_service_duration_ms": {duration_ms}',
+    ]
+    if staleness_threshold_ms is not None:
+        fields.append(f'  "staleness_threshold_ms": {staleness_threshold_ms}')
+    config_path = td / "control.json"
+    config_path.write_text("{\n" + ",\n".join(fields) + "\n}\n", encoding="utf-8")
+    return config_path
+
+
+def _spawn_read_loop(
+    config_path: Path,
+    *,
+    env_additions: dict[str, str] | None = None,
+) -> subprocess.Popen[str]:
+    env = os.environ.copy()
+    if env_additions:
+        env.update(env_additions)
+    return subprocess.Popen(
+        [str(CONTROL_EXE), "--mode", "read-loop", "--config", str(config_path)],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+
+
+def _read_runtime_status(runtime_home: Path) -> dict | None:
+    status_path = runtime_home / "control_runtime.json"
+    if not status_path.is_file():
+        return None
+    try:
+        return json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _wait_for(predicate, timeout_s: float, poll_s: float = 0.05):
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(poll_s)
+    return predicate()
+
+
+class ReadLoopTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest("Windows-only repo")
+        _ensure_release_build()
+
+    def setUp(self) -> None:
+        if FAKE_SNAPSHOT.is_file():
+            FAKE_SNAPSHOT.unlink()
+
+    def _stop_and_wait(
+        self,
+        proc: subprocess.Popen[str],
+        *,
+        graceful_timeout_s: float = 3.0,
+    ) -> tuple[int, str, str]:
+        try:
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        except Exception:
+            pass
+        try:
+            stdout, stderr = proc.communicate(timeout=graceful_timeout_s)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+        return proc.returncode, stdout or "", stderr or ""
+
+    def test_read_loop_runtime_home_created(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                poll_ms=150,
+                duration_ms=3000,
+            )
+            proc = _spawn_read_loop(
+                config_path,
+                env_additions={
+                    "SVG_MB_CONTROL_FAKE_MODE": "emit_snapshots",
+                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
+                },
+            )
+            try:
+                status = _wait_for(
+                    lambda: _read_runtime_status(runtime_home), timeout_s=3.0
+                )
+                self.assertIsNotNone(status, msg="runtime status file never appeared")
+                self.assertTrue(runtime_home.is_dir())
+                self.assertEqual(status["schema_version"], 1)
+            finally:
+                self._stop_and_wait(proc)
+
+    def test_read_loop_refreshes_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                poll_ms=150,
+                duration_ms=5000,
+            )
+            proc = _spawn_read_loop(
+                config_path,
+                env_additions={
+                    "SVG_MB_CONTROL_FAKE_MODE": "emit_snapshots",
+                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
+                },
+            )
+            try:
+                observed = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get(
+                        "successful_polls", 0
+                    )
+                    >= 2,
+                    timeout_s=4.0,
+                )
+                self.assertTrue(
+                    observed,
+                    msg=f"never saw two successful polls; status={_read_runtime_status(runtime_home)}",
+                )
+                status = _read_runtime_status(runtime_home)
+                self.assertEqual(status["status"], "running")
+                self.assertFalse(status["stale"])
+                self.assertTrue(status["last_refresh"])
+            finally:
+                self._stop_and_wait(proc)
+
+    def test_read_loop_restarts_child_on_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                poll_ms=100,
+                duration_ms=10000,
+                child_restart_budget=5,
+                child_restart_backoff_ms=100,
+            )
+            proc = _spawn_read_loop(
+                config_path,
+                env_additions={
+                    "SVG_MB_CONTROL_FAKE_MODE": "crash_after_ms",
+                    "SVG_MB_CONTROL_FAKE_CRASH_AFTER_MS": "200",
+                },
+            )
+            try:
+                observed = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get(
+                        "restart_count", 0
+                    )
+                    >= 1,
+                    timeout_s=4.0,
+                )
+                self.assertTrue(
+                    observed,
+                    msg=f"child never restarted; status={_read_runtime_status(runtime_home)}",
+                )
+            finally:
+                self._stop_and_wait(proc)
+
+    def test_read_loop_exits_on_ctrl_c(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                poll_ms=150,
+                duration_ms=20000,
+            )
+            proc = _spawn_read_loop(
+                config_path,
+                env_additions={
+                    "SVG_MB_CONTROL_FAKE_MODE": "emit_snapshots",
+                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
+                },
+            )
+            _wait_for(lambda: _read_runtime_status(runtime_home), timeout_s=3.0)
+            returncode, _stdout, _stderr = self._stop_and_wait(proc)
+            self.assertEqual(returncode, 0)
+            final_status = _read_runtime_status(runtime_home)
+            self.assertIsNotNone(final_status)
+            self.assertEqual(final_status["status"], "shutdown")
+
+    def test_read_loop_staleness_detection(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                poll_ms=100,
+                duration_ms=20000,
+                staleness_threshold_ms=300,
+                child_restart_budget=0,
+            )
+            proc = _spawn_read_loop(
+                config_path,
+                env_additions={
+                    "SVG_MB_CONTROL_FAKE_MODE": "idle_after_emit",
+                },
+            )
+            try:
+                # Child writes one snapshot, then idles for the configured
+                # logger_service_duration_ms. Control sees mtime stop
+                # advancing, and once staleness_threshold_ms elapses from the
+                # last successful poll, the stale flag must flip to true.
+                observed_stale = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get("stale")
+                    is True,
+                    timeout_s=4.0,
+                )
+                self.assertTrue(
+                    observed_stale,
+                    msg=f"staleness flag never set; status={_read_runtime_status(runtime_home)}",
+                )
+            finally:
+                self._stop_and_wait(proc)
+
+    def test_read_loop_tolerates_torn_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                poll_ms=100,
+                duration_ms=5000,
+                retry_count=0,
+                retry_backoff_ms=5,
+            )
+            proc = _spawn_read_loop(
+                config_path,
+                env_additions={
+                    "SVG_MB_CONTROL_FAKE_MODE": "torn_writes",
+                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
+                    "SVG_MB_CONTROL_FAKE_TORN_HOLD_MS": "50",
+                },
+            )
+            try:
+                observed = _wait_for(
+                    lambda: (
+                        (_read_runtime_status(runtime_home) or {}).get(
+                            "successful_polls", 0
+                        )
+                        >= 1
+                        and (_read_runtime_status(runtime_home) or {}).get(
+                            "skipped_polls", 0
+                        )
+                        >= 1
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(
+                    observed,
+                    msg=f"torn writes not exercised; status={_read_runtime_status(runtime_home)}",
+                )
+            finally:
+                self._stop_and_wait(proc)

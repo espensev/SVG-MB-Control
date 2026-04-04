@@ -190,6 +190,9 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     ControlConfig config;
     config.source_path = absolute_path;
 
+    if (const auto schema_version = ParseOptionalUIntField(text, "schema_version")) {
+        config.schema_version = *schema_version;
+    }
     if (const auto bench_exe = ParseOptionalStringField(text, "bench_exe_path")) {
         config.bench_exe_path = ResolveConfigRelativePath(absolute_path, *bench_exe);
     }
@@ -198,6 +201,28 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     }
     if (const auto poll_ms = ParseOptionalUIntField(text, "poll_ms")) {
         config.poll_ms = *poll_ms;
+    }
+
+    if (const auto runtime_home = ParseOptionalStringField(text, "runtime_home_path")) {
+        config.runtime_home_path = ResolveConfigRelativePath(absolute_path, *runtime_home);
+    }
+    if (const auto staleness = ParseOptionalUIntField(text, "staleness_threshold_ms")) {
+        config.staleness_threshold_ms = *staleness;
+    }
+    if (const auto retry_count = ParseOptionalUIntField(text, "snapshot_read_retry_count")) {
+        config.snapshot_read_retry_count = *retry_count;
+    }
+    if (const auto retry_backoff = ParseOptionalUIntField(text, "snapshot_read_retry_backoff_ms")) {
+        config.snapshot_read_retry_backoff_ms = *retry_backoff;
+    }
+    if (const auto restart_budget = ParseOptionalUIntField(text, "child_restart_budget")) {
+        config.child_restart_budget = *restart_budget;
+    }
+    if (const auto restart_backoff = ParseOptionalUIntField(text, "child_restart_backoff_ms")) {
+        config.child_restart_backoff_ms = *restart_backoff;
+    }
+    if (const auto duration_ms = ParseOptionalUIntField(text, "logger_service_duration_ms")) {
+        config.logger_service_duration_ms = *duration_ms;
     }
 
     return config;
