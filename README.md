@@ -3,9 +3,9 @@
 `SVG-MB-Control` is the long-lived product-runtime repo for the SVG motherboard
 stack.
 
-Phase 0 in this repo is read-only and one-shot. It proves that a separate
-native executable can consume the frozen Bench bridge through an external
-process boundary.
+Phase 0 in this repo is read-only and subprocess-only. It proves that a
+separate native executable can consume the frozen Bench bridge through an
+external process boundary.
 
 Current external bridge contract reference:
 
@@ -17,6 +17,7 @@ Implemented in this repo:
 
 - one native executable: `svg-mb-control.exe`
 - one subprocess adapter for `svg-mb-bench.exe read-snapshot`
+- one bounded subprocess adapter for `svg-mb-bench.exe logger-service`
 - one hermetic fake Bench helper for subprocess tests
 - one optional live integration lane against the real sibling Bench binary
 
@@ -35,15 +36,22 @@ This repo consumes Bench through an external subprocess only.
 
 Phase 0 does not link against Bench and does not include Bench headers.
 
-Current Phase 0 seam:
+Current Phase 0 seams:
 
-1. launch `svg-mb-bench.exe read-snapshot`
-2. capture stdout, stderr, and exit code
-3. extract `snapshot_archive:` from Bench stdout
-4. open the referenced snapshot JSON file
-5. write that JSON to Control stdout
+1. default path:
+   1. launch `svg-mb-bench.exe logger-service --duration-ms <poll_ms>`
+   2. capture stdout, stderr, and exit code
+   3. extract `snapshot_path:` from Bench stdout
+   4. open the refreshed `current_state.json`
+   5. write that JSON to Control stdout
+2. fallback path:
+   1. launch `svg-mb-bench.exe read-snapshot`
+   2. extract `snapshot_archive:` from Bench stdout
+   3. open the referenced snapshot JSON file
+   4. write that JSON to Control stdout
 
-Bench does not currently emit the snapshot JSON directly on stdout.
+Bench does not emit the JSON payload directly on stdout. Control always opens
+the JSON artifact file that Bench reports.
 
 ## Prerequisites
 
@@ -80,6 +88,12 @@ Explicit sibling Bench path:
 build\x64-release\svg-mb-control.exe --bench-exe-path ..\SVG-MB-Bench\svg-mb-bench.exe
 ```
 
+Explicit read-snapshot fallback:
+
+```powershell
+build\x64-release\svg-mb-control.exe --bridge-command read-snapshot --bench-exe-path ..\SVG-MB-Bench\svg-mb-bench.exe
+```
+
 Explicit config path:
 
 ```powershell
@@ -104,6 +118,14 @@ Config resolution precedence is:
 1. `--config`
 2. `SVG_MB_CONTROL_CONFIG`
 3. `config/control.json` near the executable or current working directory
+
+Current bridge-command behavior:
+
+- default: `logger-service`
+- fallback: `read-snapshot`
+- `--duration-ms` applies only to `logger-service`
+- when `--duration-ms` is omitted, Control uses `poll_ms` from config and then
+  falls back to `1000`
 
 ## Tests
 
@@ -134,8 +156,12 @@ Phase 0 documents these fields:
 - `poll_ms`
 - `snapshot_path`
 
-Phase 0 uses only `bench_exe_path` from config today. `poll_ms` and
-`snapshot_path` remain forward-declaration fields for later phases.
+Phase 0 uses:
+
+- `bench_exe_path` to resolve the sibling Bench binary
+- `poll_ms` as the default bounded `logger-service` duration
+- `snapshot_path` as an optional expected `current_state.json` path for the
+  `logger-service` seam
 
 ## Repo Boundary
 

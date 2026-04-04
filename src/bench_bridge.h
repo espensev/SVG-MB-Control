@@ -13,9 +13,9 @@ struct BridgeProcessResult {
     std::string stderr_text;
 };
 
-struct ReadSnapshotLaunchResult {
+struct JsonArtifactLaunchResult {
     BridgeProcessResult process;
-    std::filesystem::path snapshot_archive_path;
+    std::filesystem::path json_artifact_path;
 };
 
 std::filesystem::path ResolveDefaultBenchExecutablePath();
@@ -25,11 +25,16 @@ BridgeProcessResult RunBenchProcess(
     const std::vector<std::wstring>& args,
     std::uint32_t timeout_ms);
 
-ReadSnapshotLaunchResult RunReadSnapshot(
+JsonArtifactLaunchResult RunReadSnapshot(
     const std::wstring& bench_exe_path,
     std::uint32_t timeout_ms);
 
-std::string LoadSnapshotJson(
-    const std::filesystem::path& snapshot_archive_path);
+JsonArtifactLaunchResult RunLoggerService(
+    const std::wstring& bench_exe_path,
+    std::uint32_t duration_ms,
+    std::uint32_t timeout_ms);
+
+std::string LoadJsonObjectFile(
+    const std::filesystem::path& json_path);
 
 }  // namespace svg_mb_control

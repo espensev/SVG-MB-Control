@@ -23,6 +23,7 @@ Phase 0 is read-only and subprocess-only.
 
 This repo currently consumes:
 
+- `logger-service`
 - `read-snapshot`
 
 from the frozen Bench bridge contract at:
@@ -35,3 +36,6 @@ Phase 0 must not:
 - link Bench sources
 - consume Bench internals as if they were a library boundary
 - own the low-level SIO transport boundary from `SVG-MB-SIO`
+
+Phase 0 uses `logger-service` as the default read-only seam and keeps
+`read-snapshot` as the simpler fallback seam.

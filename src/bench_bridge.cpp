@@ -245,6 +245,33 @@ bool LooksLikeJsonObject(std::string_view text) {
     return end > start && text[end - 1] == '}';
 }
 
+JsonArtifactLaunchResult RunBenchJsonArtifactCommand(
+    const std::wstring& bench_exe_path,
+    const std::vector<std::wstring>& args,
+    std::uint32_t timeout_ms,
+    std::string_view command_name,
+    std::string_view summary_key) {
+    JsonArtifactLaunchResult result;
+    result.process = RunBenchProcess(bench_exe_path, args, timeout_ms);
+
+    if (result.process.exit_code != 0) {
+        throw std::runtime_error("Bench " + std::string(command_name) +
+                                 " exited with code " +
+                                 std::to_string(result.process.exit_code) + ".");
+    }
+
+    const std::string artifact_path = ExtractSummaryValue(
+        result.process.stdout_text, std::string(summary_key));
+    if (artifact_path.empty()) {
+        throw std::runtime_error("Bench stdout did not include " +
+                                 std::string(summary_key) + ".");
+    }
+
+    result.json_artifact_path = std::filesystem::absolute(
+        std::filesystem::path(artifact_path)).lexically_normal();
+    return result;
+}
+
 }  // namespace
 
 std::filesystem::path ResolveDefaultBenchExecutablePath() {
@@ -372,52 +399,56 @@ BridgeProcessResult RunBenchProcess(const std::wstring& bench_exe_path,
     return result;
 }
 
-ReadSnapshotLaunchResult RunReadSnapshot(const std::wstring& bench_exe_path,
+JsonArtifactLaunchResult RunReadSnapshot(const std::wstring& bench_exe_path,
                                          std::uint32_t timeout_ms) {
-    ReadSnapshotLaunchResult result;
-    result.process = RunBenchProcess(bench_exe_path, {L"read-snapshot"}, timeout_ms);
-
-    if (result.process.exit_code != 0) {
-        throw std::runtime_error("Bench read-snapshot exited with code " +
-                                 std::to_string(result.process.exit_code) + ".");
-    }
-
-    const std::string snapshot_archive = ExtractSummaryValue(result.process.stdout_text,
-                                                             "snapshot_archive");
-    if (snapshot_archive.empty()) {
-        throw std::runtime_error("Bench stdout did not include snapshot_archive.");
-    }
-
-    result.snapshot_archive_path = std::filesystem::absolute(
-        std::filesystem::path(snapshot_archive)).lexically_normal();
-    return result;
+    return RunBenchJsonArtifactCommand(
+        bench_exe_path,
+        {L"read-snapshot"},
+        timeout_ms,
+        "read-snapshot",
+        "snapshot_archive");
 }
 
-std::string LoadSnapshotJson(const std::filesystem::path& snapshot_archive_path) {
-    if (snapshot_archive_path.empty()) {
-        throw std::runtime_error("Snapshot archive path must not be empty.");
-    }
-    if (!std::filesystem::exists(snapshot_archive_path)) {
-        throw std::runtime_error("Snapshot archive not found: " +
-                                 snapshot_archive_path.string());
+JsonArtifactLaunchResult RunLoggerService(const std::wstring& bench_exe_path,
+                                          std::uint32_t duration_ms,
+                                          std::uint32_t timeout_ms) {
+    if (duration_ms == 0u) {
+        throw std::runtime_error("logger-service duration_ms must be greater than zero.");
     }
 
-    std::ifstream stream(snapshot_archive_path, std::ios::binary);
+    return RunBenchJsonArtifactCommand(
+        bench_exe_path,
+        {L"logger-service", L"--duration-ms", std::to_wstring(duration_ms)},
+        timeout_ms,
+        "logger-service",
+        "snapshot_path");
+}
+
+std::string LoadJsonObjectFile(const std::filesystem::path& json_path) {
+    if (json_path.empty()) {
+        throw std::runtime_error("JSON path must not be empty.");
+    }
+    if (!std::filesystem::exists(json_path)) {
+        throw std::runtime_error("JSON file not found: " +
+                                 json_path.string());
+    }
+
+    std::ifstream stream(json_path, std::ios::binary);
     if (!stream.is_open()) {
-        throw std::runtime_error("Could not open snapshot archive: " +
-                                 snapshot_archive_path.string());
+        throw std::runtime_error("Could not open JSON file: " +
+                                 json_path.string());
     }
 
     std::ostringstream buffer;
     buffer << stream.rdbuf();
     const std::string json_text = buffer.str();
     if (json_text.empty()) {
-        throw std::runtime_error("Snapshot archive is empty: " +
-                                 snapshot_archive_path.string());
+        throw std::runtime_error("JSON file is empty: " +
+                                 json_path.string());
     }
     if (!LooksLikeJsonObject(json_text)) {
-        throw std::runtime_error("Snapshot archive is not a JSON object: " +
-                                 snapshot_archive_path.string());
+        throw std::runtime_error("JSON file is not a JSON object: " +
+                                 json_path.string());
     }
 
     return json_text;
