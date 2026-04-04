@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -100,6 +101,15 @@ class SmokeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("snapshot_archive", result.stderr)
 
+    def test_fake_bench_missing_snapshot_file_fails(self) -> None:
+        result = _run_control(
+            "--bench-exe-path",
+            str(FAKE_BENCH_EXE),
+            env={"SVG_MB_CONTROL_FAKE_MODE": "missing_snapshot_file"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Snapshot archive not found", result.stderr)
+
     def test_fake_bench_nonzero_exit_fails(self) -> None:
         result = _run_control(
             "--bench-exe-path",
@@ -108,6 +118,54 @@ class SmokeTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("read-snapshot exited", result.stderr)
+
+    def test_config_file_supplies_bench_exe_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "control.json"
+            config_path.write_text(
+                "{\n"
+                f'  "schema_version": 1,\n'
+                f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}",\n'
+                '  "poll_ms": 1000,\n'
+                '  "snapshot_path": "logs/current_state.json"\n'
+                "}\n",
+                encoding="utf-8",
+            )
+
+            result = _run_control("--config", str(config_path))
+
+        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["source"], "fake-bench")
+
+    def test_env_bench_path_supplies_bench_exe_path(self) -> None:
+        result = _run_control(env={"SVG_MB_CONTROL_BENCH_EXE": str(FAKE_BENCH_EXE)})
+        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["source"], "fake-bench")
+
+    def test_env_config_path_supplies_bench_exe_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            config_path = Path(td) / "control.json"
+            config_path.write_text(
+                "{\n"
+                '  "schema_version": 1,\n'
+                f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}"\n'
+                "}\n",
+                encoding="utf-8",
+            )
+
+            result = _run_control(env={"SVG_MB_CONTROL_CONFIG": str(config_path)})
+
+        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["source"], "fake-bench")
+
+    def test_explicit_missing_config_fails(self) -> None:
+        missing_path = REPO_ROOT / "config" / "does_not_exist.json"
+        result = _run_control("--config", str(missing_path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Control config not found", result.stderr)
 
     def test_real_bench_integration_if_available(self) -> None:
         if not REAL_BENCH_EXE.is_file():

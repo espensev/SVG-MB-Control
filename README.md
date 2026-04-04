@@ -80,14 +80,30 @@ Explicit sibling Bench path:
 build\x64-release\svg-mb-control.exe --bench-exe-path ..\SVG-MB-Bench\svg-mb-bench.exe
 ```
 
+Explicit config path:
+
+```powershell
+build\x64-release\svg-mb-control.exe --config .\config\control.json
+```
+
 Hermetic fake Bench path:
 
 ```powershell
 build\x64-release\svg-mb-control.exe --bench-exe-path build\x64-release\fake-bench.exe
 ```
 
-If `--bench-exe-path` is omitted, the binary probes sibling workspace patterns
-rooted at its own executable directory and the current working directory.
+Resolution precedence for the Bench executable is:
+
+1. `--bench-exe-path`
+2. `SVG_MB_CONTROL_BENCH_EXE`
+3. `bench_exe_path` from the loaded control config
+4. sibling workspace auto-resolution
+
+Config resolution precedence is:
+
+1. `--config`
+2. `SVG_MB_CONTROL_CONFIG`
+3. `config/control.json` near the executable or current working directory
 
 ## Tests
 
@@ -108,7 +124,9 @@ batch-file stub.
 
 ## Config
 
-`config/control.example.json` is a forward-declaration file for later phases.
+`config/control.example.json` remains the example file for the repo.
+
+Phase 0 now supports loading a real `control.json` file.
 
 Phase 0 documents these fields:
 
@@ -116,8 +134,8 @@ Phase 0 documents these fields:
 - `poll_ms`
 - `snapshot_path`
 
-Phase 0 execution does not require config loading. The active input is
-`--bench-exe-path`.
+Phase 0 uses only `bench_exe_path` from config today. `poll_ms` and
+`snapshot_path` remain forward-declaration fields for later phases.
 
 ## Repo Boundary
 

@@ -22,6 +22,7 @@ endif()
 
 add_executable(svg_mb_control
     src/bench_bridge.cpp
+    src/control_config.cpp
     src/main.cpp
 )
 
