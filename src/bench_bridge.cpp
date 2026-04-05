@@ -280,13 +280,18 @@ JsonArtifactLaunchResult RunBenchJsonArtifactCommand(
 std::filesystem::path ResolveDefaultBenchExecutablePath() {
     std::vector<std::filesystem::path> candidates;
     const std::filesystem::path exe_dir = CurrentExecutableDirectory();
+    const std::filesystem::path exe_parent = exe_dir.parent_path();
+    const std::filesystem::path exe_grandparent = exe_parent.parent_path();
+    const std::filesystem::path exe_great_grandparent = exe_grandparent.parent_path();
     const std::filesystem::path cwd = std::filesystem::current_path();
 
     candidates.push_back(exe_dir / "svg-mb-bench.exe");
-    candidates.push_back(exe_dir.parent_path() / "svg-mb-bench.exe");
-    candidates.push_back(exe_dir.parent_path().parent_path().parent_path() /
-                         "SVG-MB-Bench" / "svg-mb-bench.exe");
+    candidates.push_back(exe_dir / "bench" / "svg-mb-bench.exe");
+    candidates.push_back(exe_parent / "svg-mb-bench.exe");
+    candidates.push_back(exe_grandparent / "SVG-MB-Bench" / "svg-mb-bench.exe");
+    candidates.push_back(exe_great_grandparent / "SVG-MB-Bench" / "svg-mb-bench.exe");
     candidates.push_back(cwd / "svg-mb-bench.exe");
+    candidates.push_back(cwd / "bench" / "svg-mb-bench.exe");
     candidates.push_back(cwd / "SVG-MB-Bench" / "svg-mb-bench.exe");
     candidates.push_back(cwd.parent_path() / "SVG-MB-Bench" / "svg-mb-bench.exe");
 

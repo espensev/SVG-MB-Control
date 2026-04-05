@@ -10,6 +10,7 @@ namespace svg_mb_control {
 struct ControlConfig {
     std::filesystem::path source_path;
     std::uint32_t schema_version = 1u;
+    std::string default_mode;
     std::filesystem::path bench_exe_path;
     std::filesystem::path snapshot_path;
     std::uint32_t poll_ms = 1000u;

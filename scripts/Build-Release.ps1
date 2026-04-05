@@ -49,7 +49,7 @@ Set-StrictMode -Version Latest
 # ── Project Configuration ────────────────────────────────────────────
 $ProjectName         = 'svg-mb-control'
 $MainExeName         = "$ProjectName.exe"
-$SupportExeNames     = @('fake-bench.exe')
+$SupportExeNames     = @()
 $ProcessNames        = @('svg-mb-control', 'fake-bench')
 $ReleaseDir          = 'release'
 $DistExtras          = @(
@@ -130,6 +130,26 @@ function Copy-DistExtra {
     }
 
     Write-Host "Copied: $RelativePath" -ForegroundColor Green
+}
+
+function Copy-DistFileAs {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath)) {
+        throw "Dist file not found: $SourcePath"
+    }
+
+    $destParent = Split-Path -Parent $DestinationPath
+    if ($destParent -and -not (Test-Path -LiteralPath $destParent)) {
+        New-Item -ItemType Directory -Path $destParent -Force | Out-Null
+    }
+
+    Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+    Write-Host "Copied: $(Split-Path -Leaf $SourcePath) -> $(Split-Path -Leaf $DestinationPath)" -ForegroundColor Green
 }
 
 function Invoke-External {
@@ -887,6 +907,9 @@ try {
     foreach ($extra in $DistExtras) {
         Copy-DistExtra -SourceRoot $RepoRoot -DestRoot $DistDir -RelativePath $extra
     }
+    Copy-DistFileAs `
+        -SourcePath (Join-Path $RepoRoot 'config\control.release.json') `
+        -DestinationPath (Join-Path $DistDir 'control.json')
 
     Write-Host "`n[7/11] Verifying artifacts..." -ForegroundColor Yellow
     $mainBuiltHash = Get-Sha256Hex -Path $builtMainExe

@@ -220,6 +220,99 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(data["source"], "fake-bench")
         self.assertEqual(data["command"], "logger-service")
 
+    def test_zero_arg_release_style_launch_uses_control_json_default_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            staged_control = td / "svg-mb-control.exe"
+            staged_fake_bench = td / "fake-bench.exe"
+            runtime_home = td / "runtime"
+            snapshot_path = td / "fake_logger_service_current_state.json"
+            shutil.copy2(CONTROL_EXE, staged_control)
+            shutil.copy2(FAKE_BENCH_EXE, staged_fake_bench)
+
+            cfg = {
+                "schema_version": 4,
+                "default_mode": "control-loop",
+                "bench_exe_path": "fake-bench.exe",
+                "snapshot_path": "fake_logger_service_current_state.json",
+                "runtime_home_path": "runtime",
+                "poll_ms": 100,
+                "snapshot_read_retry_count": 3,
+                "snapshot_read_retry_backoff_ms": 10,
+                "baseline_freshness_ceiling_ms": 10000,
+                "restore_timeout_ms": 5000,
+                "control_loop": {
+                    "poll_tick_ms": 200,
+                    "write_cooldown_ms": 400,
+                    "deadband_pct": 2.0,
+                    "control_hold_ms": 800,
+                    "cpu_temp_label": "Tctl/Tdie",
+                    "logger_service_duration_ms": 10000,
+                    "channels": [
+                        {
+                            "channel": 0,
+                            "temp_blend": "cpu_only",
+                            "min_duty_pct": 40.0,
+                            "curve": [
+                                {"temp_c": 30.0, "duty_pct": 40.0},
+                                {"temp_c": 60.0, "duty_pct": 55.0},
+                                {"temp_c": 80.0, "duty_pct": 80.0},
+                                {"temp_c": 95.0, "duty_pct": 100.0},
+                            ],
+                        }
+                    ],
+                },
+            }
+            (td / "control.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+            env = os.environ.copy()
+            env["SVG_MB_CONTROL_FAKE_MODE"] = "emit_snapshots"
+            env["SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS"] = "100"
+            env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = "1"
+            env["SVG_MB_CONTROL_FAKE_CPU_TCTL_C"] = "75"
+
+            proc = subprocess.Popen(
+                [str(staged_control)],
+                cwd=td,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            try:
+                observed = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get(
+                        "mode"
+                    )
+                    == "control-loop",
+                    timeout_s=5.0,
+                )
+                self.assertTrue(
+                    observed,
+                    msg=(
+                        "zero-arg release-style launch did not enter control-loop; "
+                        f"status={_read_runtime_status(runtime_home)}"
+                    ),
+                )
+            finally:
+                try:
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                except Exception:
+                    pass
+                try:
+                    _stdout, _stderr = proc.communicate(timeout=4.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    _stdout, _stderr = proc.communicate()
+                final_status = _read_runtime_status(runtime_home)
+                self.assertIsNotNone(final_status)
+                self.assertEqual(
+                    final_status["status"],
+                    "shutdown",
+                    msg=f"zero-arg release-style launch did not reach shutdown; stderr={_stderr}",
+                )
+
     def test_config_snapshot_path_mismatch_fails_for_logger_service(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             config_path = Path(td) / "control.json"

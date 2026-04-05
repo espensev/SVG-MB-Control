@@ -8,9 +8,10 @@ The repo now provides a repo-local release entrypoint:
 .\build-release.ps1
 ```
 
-It performs a clean `x64-release` configure/build, stages `svg-mb-control.exe`
-plus `fake-bench.exe`, runs `python -m unittest discover tests -v` unless
-`-SkipTests` is supplied, then publishes `release\` and a timestamped archive.
+It performs a clean `x64-release` configure/build, stages
+`svg-mb-control.exe` plus the packaged `control.json`, runs
+`python -m unittest discover tests -v` unless `-SkipTests` is supplied, then
+publishes `release\` and a timestamped archive.
 
 Manual CMake remains valid for incremental local work:
 
@@ -36,9 +37,8 @@ rules:
 
 - C++20, MSVC on Windows x64.
 - Keep the Bench boundary external. Do not include or link Bench internals.
-- Phase 1 extends Phase 0 with a persistent read-loop supervisor. It remains
-  subprocess-only and read-only.
-- Phase 2 adds bounded write orchestration through the existing
-  `set-fixed-duty` and `restore-auto` bridge commands. The write path is
-  separate from the read loop.
+- The read loop, write orchestration, and control loop all remain
+  subprocess-only.
+- Bounded writes go through the existing `set-fixed-duty` and
+  `restore-auto` bridge commands.
 - The subprocess adapter owns process launch, stdout/stderr capture, timeout, and exit-code handling.

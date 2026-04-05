@@ -1,4 +1,4 @@
-# SVG-MB-Control
+# SVG-MB-Control Repo Role
 
 Role: long-lived product-runtime repo for the SVG motherboard stack.
 
@@ -7,7 +7,9 @@ Role: long-lived product-runtime repo for the SVG motherboard stack.
 - the product runtime executable
 - product-owned runtime config and runtime home
 - subprocess consumption of the frozen Bench bridge
-- later service-lifetime control behavior
+- read-loop and control-loop process lifetimes
+- bounded write orchestration through the Bench bridge
+- optional in-process GPU telemetry through linked `gpu_telemetry`
 
 ## Does Not Own
 
@@ -17,25 +19,26 @@ Role: long-lived product-runtime repo for the SVG motherboard stack.
 - reference-observer workflows
 - the reserved LibreHardwareMonitor tree
 
-## Current Phase 0 Rule
+## Boundary Rule
 
-Phase 0 is read-only and subprocess-only.
-
-This repo currently consumes:
+This repo may consume these Bench commands through subprocess launch only:
 
 - `logger-service`
 - `read-snapshot`
+- `set-fixed-duty`
+- `restore-auto`
 
-from the frozen Bench bridge contract at:
+Frozen contract source:
 
 - `D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\BRIDGE_CONTRACT.md`
 
-Phase 0 must not:
+This repo must not:
 
 - include Bench headers
 - link Bench sources
 - consume Bench internals as if they were a library boundary
 - own the low-level SIO transport boundary from `SVG-MB-SIO`
 
-Phase 0 uses `logger-service` as the default read-only seam and keeps
-`read-snapshot` as the simpler fallback seam.
+GPU input is allowed through the `gpu_telemetry` package produced by
+`D:\Development\Thermals\Nvida-fancontrol-unofficial\nvapi-controller`, but
+Control remains the owner of the runtime process and control policy.

@@ -1,8 +1,9 @@
 {
   "schema_version": 4,
-  "bench_exe_path": "../SVG-MB-Bench/svg-mb-bench.exe",
-  "snapshot_path": "../SVG-MB-Bench/logs/current_state.json",
-  "bench_runtime_policy_path": "../SVG-MB-Bench/config/runtime_policy_write_live.json",
+  "default_mode": "control-loop",
+  "bench_exe_path": "..\\..\\SVG-MB-Bench\\svg-mb-bench.exe",
+  "snapshot_path": "..\\..\\SVG-MB-Bench\\logs\\current_state.json",
+  "bench_runtime_policy_path": "..\\..\\SVG-MB-Bench\\config\\runtime_policy_write_live.json",
   "runtime_home_path": "runtime",
   "poll_ms": 500,
   "snapshot_read_retry_count": 3,

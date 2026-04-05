@@ -61,10 +61,11 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--mode <one-shot|read-loop>] [--config <path>] "
+        << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop>] [--config <path>] "
            << "[--bench-exe-path <path>] "
            << "[--bridge-command <logger-service|read-snapshot>] "
-           << "[--duration-ms <ms>] [--timeout-ms <ms>]\n"
+           << "[--duration-ms <ms>] [--timeout-ms <ms>] "
+           << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
         << "  svg-mb-control --help|-h\n"
         << "  svg-mb-control --version\n";
 }
@@ -103,6 +104,22 @@ RunMode ParseRunMode(const wchar_t* value) {
         return RunMode::kControlLoop;
     }
     throw std::runtime_error("Invalid --mode value.");
+}
+
+RunMode ParseRunMode(std::string_view value) {
+    if (value == "one-shot") {
+        return RunMode::kOneShot;
+    }
+    if (value == "read-loop") {
+        return RunMode::kReadLoop;
+    }
+    if (value == "write-once") {
+        return RunMode::kWriteOnce;
+    }
+    if (value == "control-loop") {
+        return RunMode::kControlLoop;
+    }
+    throw std::runtime_error("Invalid default_mode in control config.");
 }
 
 std::uint32_t ParseWriteChannel(const wchar_t* value) {
@@ -204,6 +221,7 @@ int wmain(int argc, wchar_t** argv) {
         std::filesystem::path bench_exe_path;
         BridgeCommand bridge_command = BridgeCommand::kLoggerService;
         RunMode run_mode = RunMode::kOneShot;
+        bool run_mode_explicit = false;
         std::uint32_t duration_ms = 0u;
         bool duration_ms_explicit = false;
         std::uint32_t timeout_ms = 15000u;
@@ -233,6 +251,7 @@ int wmain(int argc, wchar_t** argv) {
                 bridge_command = ParseBridgeCommand(require_value());
             } else if (arg == L"--mode") {
                 run_mode = ParseRunMode(require_value());
+                run_mode_explicit = true;
             } else if (arg == L"--duration-ms") {
                 duration_ms = ParseDurationMs(require_value());
                 duration_ms_explicit = true;
@@ -296,6 +315,11 @@ int wmain(int argc, wchar_t** argv) {
             } else {
                 config = svg_mb_control::LoadControlConfig(absolute_config_path);
             }
+        }
+
+        if (!run_mode_explicit && config.has_value() &&
+            !config->default_mode.empty()) {
+            run_mode = ParseRunMode(config->default_mode);
         }
 
         if (bench_exe_path.empty()) {

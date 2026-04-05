@@ -230,6 +230,9 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     if (const auto schema_version = ParseOptionalUIntField(text, "schema_version")) {
         config.schema_version = *schema_version;
     }
+    if (const auto default_mode = ParseOptionalStringField(text, "default_mode")) {
+        config.default_mode = *default_mode;
+    }
     if (const auto bench_exe = ParseOptionalStringField(text, "bench_exe_path")) {
         config.bench_exe_path = ResolveConfigRelativePath(absolute_path, *bench_exe);
     }
