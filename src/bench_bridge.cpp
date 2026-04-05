@@ -676,7 +676,17 @@ std::string BenchChildSupervisor::StderrTail() const {
     return impl_->stderr_tail;
 }
 
-void BenchChildSupervisor::RequestStop(std::uint32_t graceful_timeout_ms) {
+void BenchChildSupervisor::SendStopSignal() {
+    if (!impl_->started.load() || impl_->exit_observed.load()) {
+        return;
+    }
+    if (impl_->process_handle == nullptr) {
+        return;
+    }
+    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, impl_->process_id);
+}
+
+void BenchChildSupervisor::WaitForStop(std::uint32_t graceful_timeout_ms) {
     if (!impl_->started.load() || impl_->exit_observed.load()) {
         if (impl_->stdout_thread.joinable()) {
             impl_->stdout_thread.join();
@@ -689,10 +699,6 @@ void BenchChildSupervisor::RequestStop(std::uint32_t graceful_timeout_ms) {
     if (impl_->process_handle == nullptr) {
         return;
     }
-
-    // Send CTRL_BREAK_EVENT to the child's process group. The child was
-    // launched with CREATE_NEW_PROCESS_GROUP, so process_id is the group id.
-    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, impl_->process_id);
 
     const DWORD wait_result = WaitForSingleObject(impl_->process_handle,
                                                   graceful_timeout_ms);
@@ -713,6 +719,11 @@ void BenchChildSupervisor::RequestStop(std::uint32_t graceful_timeout_ms) {
     if (impl_->stderr_thread.joinable()) {
         impl_->stderr_thread.join();
     }
+}
+
+void BenchChildSupervisor::RequestStop(std::uint32_t graceful_timeout_ms) {
+    SendStopSignal();
+    WaitForStop(graceful_timeout_ms);
 }
 
 }  // namespace svg_mb_control

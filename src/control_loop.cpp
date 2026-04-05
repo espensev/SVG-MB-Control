@@ -496,10 +496,18 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     GpuReader gpu_reader;
 
     std::uint64_t tick_count = 0u;
-    WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
-                    "spawned children", tick_count,
-                    FormatLocalIso8601(std::chrono::system_clock::now()),
-                    impl_->channels);
+    {
+        std::ostringstream detail;
+        detail << "spawned children (poll_tick_ms=" << impl_->loop.poll_tick_ms
+               << " cooldown_ms=" << impl_->loop.write_cooldown_ms
+               << " deadband_pct=" << impl_->loop.deadband_pct
+               << " hold_ms=" << impl_->loop.control_hold_ms
+               << " channels=" << impl_->channels.size() << ")";
+        WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
+                        detail.str(), tick_count,
+                        FormatLocalIso8601(std::chrono::system_clock::now()),
+                        impl_->channels);
+    }
 
     while (!stop_flag.load()) {
         ++tick_count;
@@ -616,8 +624,14 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             ++channel.total_writes;
         }
 
-        WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
-                        "tick", tick_count, eval_iso, impl_->channels);
+        {
+            std::ostringstream td;
+            td << "tick poll_tick_ms=" << impl_->loop.poll_tick_ms
+               << " cooldown=" << impl_->loop.write_cooldown_ms
+               << " deadband=" << impl_->loop.deadband_pct;
+            WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
+                            td.str(), tick_count, eval_iso, impl_->channels);
+        }
 
         std::unique_lock<std::mutex> lock(impl_->wake_mutex);
         impl_->wake_cv.wait_for(
@@ -627,13 +641,28 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     }
 
     // Shutdown: terminate active writes + clear their sidecars.
+    // Phase 1 of shutdown: signal all active children concurrently so they
+    // all process their ctrl handlers in parallel. Phase 2: wait on each.
+    // This avoids the "last channel starves under SIO contention and gets
+    // TerminateProcess'd before restore completes" problem.
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",
                     "stop requested", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     impl_->channels);
     for (auto& channel : impl_->channels) {
         if (channel.active_write) {
-            channel.active_write->RequestStop(2000u);
+            channel.active_write->SendStopSignal();
+        }
+    }
+    logger.SendStopSignal();
+    for (auto& channel : impl_->channels) {
+        if (channel.active_write) {
+            // Larger per-channel budget because children may contend on
+            // PawnIO/SIO serialization during restore + snapshot capture.
+            // Real observation 2026-04-05: 6 concurrent bench children
+            // stacking on SIO during shutdown take ~8-15s for the last
+            // one to finish post-loop work.
+            channel.active_write->WaitForStop(20000u);
             channel.active_write.reset();
         }
         try {
@@ -642,7 +671,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             // Best-effort; shutdown continues regardless.
         }
     }
-    logger.RequestStop(2000u);
+    logger.WaitForStop(4000u);
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",
                     "children stopped", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),

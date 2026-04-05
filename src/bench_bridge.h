@@ -67,10 +67,20 @@ class BenchChildSupervisor {
     std::string StdoutTail() const;
     std::string StderrTail() const;
 
-    // Sends CTRL_BREAK_EVENT to the child and waits up to graceful_timeout_ms.
-    // Falls back to TerminateProcess if the child does not exit in time.
-    // Safe to call multiple times; subsequent calls are no-ops once the child
+    // Sends CTRL_BREAK_EVENT to the child without waiting. Safe to call
+    // multiple times. Callers that need to shut down multiple supervisors
+    // should call this on each first, then call WaitForStop() on each, so
+    // all children process their ctrl handlers concurrently.
+    void SendStopSignal();
+
+    // Waits up to graceful_timeout_ms for the child to exit after a
+    // SendStopSignal() call. Falls back to TerminateProcess if the child
+    // does not exit in time. Safe to call multiple times once the child
     // has exited.
+    void WaitForStop(std::uint32_t graceful_timeout_ms);
+
+    // Convenience: SendStopSignal() followed by WaitForStop(). Equivalent
+    // to the previous single-call contract.
     void RequestStop(std::uint32_t graceful_timeout_ms);
 
   private:
