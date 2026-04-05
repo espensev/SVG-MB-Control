@@ -136,13 +136,29 @@ The `--mode` flag selects the process lifetime:
 - `read-loop`: Phase 1 behavior. Control spawns a persistent
   `logger-service` child and polls `snapshot_path` at `poll_ms`. Runs until
   Ctrl+C or Ctrl+Break, or until the child restart budget is exhausted.
+- `write-once`: Phase 2 behavior. Control captures the current fan state
+  baseline via `read-snapshot`, writes a pending-writes sidecar, spawns a
+  bounded `set-fixed-duty` child, waits for exit, and clears the sidecar
+  on clean exit. Requires `--write-channel`, `--write-pct`, and
+  `--write-hold-ms` (or equivalents in the control config).
 
 The `read-loop` mode requires a control config with `snapshot_path` set.
 
-Example:
+Regardless of mode, every Control startup reconciles
+`pending_writes.json` in the runtime home before dispatching: for each
+recorded entry, Control invokes `restore-auto` with the captured
+baseline. A failed restore blocks startup with a non-zero exit code.
+
+Example read-loop:
 
 ```powershell
 build\x64-release\svg-mb-control.exe --mode read-loop --config .\config\control.json
+```
+
+Example write-once:
+
+```powershell
+build\x64-release\svg-mb-control.exe --mode write-once --config .\config\control.json --write-channel 3 --write-pct 60 --write-hold-ms 10000
 ```
 
 ## Runtime Home

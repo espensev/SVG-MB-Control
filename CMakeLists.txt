@@ -24,7 +24,9 @@ add_executable(svg_mb_control
     src/bench_bridge.cpp
     src/control_config.cpp
     src/main.cpp
+    src/pending_writes.cpp
     src/read_loop.cpp
+    src/write_orchestrator.cpp
 )
 
 set_target_properties(svg_mb_control PROPERTIES OUTPUT_NAME "svg-mb-control")

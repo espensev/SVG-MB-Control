@@ -59,6 +59,61 @@ MOVEFILE_REPLACE_EXISTING), so external readers do not observe torn content.
   `staleness_threshold_ms`.
 - `child_pid`: currently unused. Reserved for Phase 2.
 
+## `pending_writes.json`
+
+Phase 2 adds a second file owned by Control in the runtime home. It
+records fan writes that have been requested but not yet confirmed
+restored. Every Control startup reconciles this file before doing
+anything else.
+
+### Publish mechanism
+
+Written to `pending_writes.json.tmp` and published via
+`std::filesystem::rename`. Atomic on Windows.
+
+### Schema
+
+```json
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "channel": 3,
+      "baseline_duty_raw": 128,
+      "baseline_mode_raw": 5,
+      "target_pct": 60.0,
+      "requested_hold_ms": 30000,
+      "bench_started_iso": "2026-04-05T13:10:22",
+      "bench_child_pid": 0
+    }
+  ]
+}
+```
+
+### Field definitions
+
+- `schema_version`: integer. Always `1` in Phase 2.
+- `entries`: array. At most one entry per channel (upsert replaces).
+- `channel`: integer 0-6. Target fan channel.
+- `baseline_duty_raw`: integer 0-255. Pre-write duty register value
+  captured from a `read-snapshot` snapshot.
+- `baseline_mode_raw`: integer 0-255. Pre-write mode register value.
+- `target_pct`: number. The duty target Control requested.
+- `requested_hold_ms`: integer. Control's requested hold duration.
+- `bench_started_iso`: string. Local time when Control wrote the entry.
+- `bench_child_pid`: integer. Reserved for future use (Phase 2 writes 0).
+
+### Entry lifecycle
+
+1. Control writes the entry before spawning `set-fixed-duty`.
+2. Control removes the entry after `set-fixed-duty` exits with code 0.
+3. If the child exits non-zero or Control is killed, the entry stays
+   in the file.
+4. On next Control startup, reconciliation invokes
+   `restore-auto --channel <N> --saved-duty-raw <d> --saved-mode-raw <m>`
+   for each entry. Successful restore removes the entry. Failed restore
+   keeps the entry and blocks Control startup.
+
 ## Log files
 
 Phase 1 does not write separate log files to the runtime home. Bench child

@@ -1,6 +1,7 @@
 #include "bench_bridge.h"
 #include "control_config.h"
 #include "read_loop.h"
+#include "write_orchestrator.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +32,7 @@ enum class BridgeCommand {
 enum class RunMode {
     kOneShot,
     kReadLoop,
+    kWriteOnce,
 };
 
 svg_mb_control::ReadLoop* g_active_read_loop = nullptr;
@@ -91,7 +93,36 @@ RunMode ParseRunMode(const wchar_t* value) {
     if (raw == L"read-loop") {
         return RunMode::kReadLoop;
     }
+    if (raw == L"write-once") {
+        return RunMode::kWriteOnce;
+    }
     throw std::runtime_error("Invalid --mode value.");
+}
+
+std::uint32_t ParseWriteChannel(const wchar_t* value) {
+    try {
+        const unsigned long parsed = std::stoul(std::wstring(value));
+        return static_cast<std::uint32_t>(parsed);
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid --write-channel value.");
+    }
+}
+
+double ParseWritePct(const wchar_t* value) {
+    try {
+        return std::stod(std::wstring(value));
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid --write-pct value.");
+    }
+}
+
+std::uint32_t ParseWriteHoldMs(const wchar_t* value) {
+    try {
+        const unsigned long parsed = std::stoul(std::wstring(value));
+        return static_cast<std::uint32_t>(parsed);
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid --write-hold-ms value.");
+    }
 }
 
 std::uint32_t ParseTimeoutMs(const wchar_t* value) {
@@ -170,6 +201,12 @@ int wmain(int argc, wchar_t** argv) {
         std::uint32_t duration_ms = 0u;
         bool duration_ms_explicit = false;
         std::uint32_t timeout_ms = 15000u;
+        std::uint32_t write_channel = 0u;
+        bool write_channel_explicit = false;
+        double write_pct = 0.0;
+        bool write_pct_explicit = false;
+        std::uint32_t write_hold_ms = 0u;
+        bool write_hold_ms_explicit = false;
 
         for (int index = 1; index < argc; ++index) {
             const std::wstring arg = argv[index];
@@ -195,6 +232,15 @@ int wmain(int argc, wchar_t** argv) {
                 duration_ms_explicit = true;
             } else if (arg == L"--timeout-ms") {
                 timeout_ms = ParseTimeoutMs(require_value());
+            } else if (arg == L"--write-channel") {
+                write_channel = ParseWriteChannel(require_value());
+                write_channel_explicit = true;
+            } else if (arg == L"--write-pct") {
+                write_pct = ParseWritePct(require_value());
+                write_pct_explicit = true;
+            } else if (arg == L"--write-hold-ms") {
+                write_hold_ms = ParseWriteHoldMs(require_value());
+                write_hold_ms_explicit = true;
             } else if (arg == L"--help" || arg == L"-h") {
                 PrintUsage();
                 return 0;
@@ -241,6 +287,56 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (bench_exe_path.empty()) {
             throw std::runtime_error("Could not resolve svg-mb-bench.exe. Pass --bench-exe-path or configure bench_exe_path.");
+        }
+
+        // Unconditional startup reconciliation of any pending writes from a
+        // prior crashed Control session, before dispatching on run mode.
+        const std::uint32_t reconcile_timeout_ms =
+            config.has_value() ? config->restore_timeout_ms : 5000u;
+        const std::filesystem::path reconcile_runtime_home =
+            config.has_value()
+                ? svg_mb_control::ResolveRuntimeHomePath(*config)
+                : svg_mb_control::ResolveRuntimeHomePath(
+                      svg_mb_control::ControlConfig{});
+        const int reconcile_result = svg_mb_control::ReconcilePendingWrites(
+            bench_exe_path.wstring(), reconcile_runtime_home,
+            reconcile_timeout_ms);
+        if (reconcile_result != 0) {
+            std::cerr << "Error: pending writes reconciliation failed. "
+                      << "Refusing to proceed." << '\n';
+            return reconcile_result;
+        }
+
+        if (run_mode == RunMode::kWriteOnce) {
+            if (!config.has_value()) {
+                svg_mb_control::ControlConfig defaults;
+                config = defaults;
+            }
+            if (!write_channel_explicit && !config->write_channel_set) {
+                throw std::runtime_error("--mode write-once requires --write-channel or write_channel in config.");
+            }
+            if (!write_pct_explicit && !config->write_target_pct_set) {
+                throw std::runtime_error("--mode write-once requires --write-pct or write_target_pct in config.");
+            }
+            if (!write_hold_ms_explicit && !config->write_hold_ms_set) {
+                throw std::runtime_error("--mode write-once requires --write-hold-ms or write_hold_ms in config.");
+            }
+            svg_mb_control::WriteRequest request;
+            request.channel = write_channel_explicit
+                ? write_channel : config->write_channel;
+            request.target_pct = write_pct_explicit
+                ? write_pct : config->write_target_pct;
+            request.hold_ms = write_hold_ms_explicit
+                ? write_hold_ms : config->write_hold_ms;
+
+            if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE)) {
+                throw std::runtime_error("SetConsoleCtrlHandler failed.");
+            }
+            const int result = svg_mb_control::RunWriteOnce(
+                *config, bench_exe_path.wstring(),
+                reconcile_runtime_home, request, g_stop_signaled);
+            SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
+            return result;
         }
 
         if (run_mode == RunMode::kReadLoop) {

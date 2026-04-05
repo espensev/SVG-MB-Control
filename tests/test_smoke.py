@@ -578,3 +578,403 @@ class ReadLoopTests(unittest.TestCase):
                 )
             finally:
                 self._stop_and_wait(proc)
+
+
+def _write_phase2_config(
+    td: Path,
+    *,
+    runtime_home: Path,
+    baseline_freshness_ceiling_ms: int = 10000,
+    restore_timeout_ms: int = 5000,
+) -> Path:
+    cfg = {
+        "schema_version": 3,
+        "bench_exe_path": FAKE_BENCH_EXE.as_posix(),
+        "runtime_home_path": runtime_home.as_posix(),
+        "baseline_freshness_ceiling_ms": baseline_freshness_ceiling_ms,
+        "restore_timeout_ms": restore_timeout_ms,
+    }
+    config_path = td / "control.json"
+    config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return config_path
+
+
+def _read_pending_writes(runtime_home: Path) -> list[dict]:
+    path = runtime_home / "pending_writes.json"
+    if not path.is_file():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data.get("entries", [])
+
+
+def _seed_pending_writes(runtime_home: Path, entries: list[dict]) -> None:
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    path = runtime_home / "pending_writes.json"
+    payload = {"schema_version": 1, "entries": entries}
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+class WriteOnceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest("Windows-only repo")
+        _ensure_release_build()
+
+    def test_write_once_happy_path(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = {"SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0"}
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"stdout={result.stdout}\nstderr={result.stderr}",
+            )
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_write_once_baseline_stale_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(
+                td,
+                runtime_home=runtime_home,
+                baseline_freshness_ceiling_ms=500,
+            )
+            env = {
+                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
+                "SVG_MB_CONTROL_FAKE_SNAPSHOT_OFFSET_MS": "5000",
+            }
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("snapshot age", result.stderr)
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_write_once_refused_on_policy_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = {
+                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
+                "SVG_MB_CONTROL_FAKE_EFFECTIVE_WRITE_ALLOWED": "false",
+                "SVG_MB_CONTROL_FAKE_POLICY_BLOCKED": "true",
+            }
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("effective_write_allowed=false", result.stderr)
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_write_once_refused_on_writes_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = {
+                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
+                "SVG_MB_CONTROL_FAKE_POLICY_WRITES_ENABLED": "false",
+            }
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("writes_enabled=false", result.stderr)
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_write_once_child_exit_2_clears_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            # Snapshot has policy_writes_enabled=true so Control passes the
+            # pre-spawn check and writes the sidecar. The fake child then
+            # exits with code 2 (policy refusal), which Control treats as
+            # "no fan touched" and clears the sidecar.
+            env = {
+                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
+                "SVG_MB_CONTROL_FAKE_POLICY_WRITES_ENABLED": "true",
+                "SVG_MB_CONTROL_FAKE_WRITE_MODE": "policy_refused",
+            }
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_write_once_child_nonzero_keeps_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = {
+                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
+                "SVG_MB_CONTROL_FAKE_WRITE_MODE": "fail_immediate",
+            }
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            entries = _read_pending_writes(runtime_home)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["channel"], 0)
+
+    def test_write_once_channel_not_in_snapshot_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = {"SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0"}
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "3",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "200",
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("not present in snapshot", result.stderr)
+
+    def test_reconcile_runs_restore_on_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            _seed_pending_writes(
+                runtime_home,
+                [
+                    {
+                        "channel": 4,
+                        "baseline_duty_raw": 200,
+                        "baseline_mode_raw": 5,
+                        "target_pct": 60.0,
+                        "requested_hold_ms": 0,
+                        "bench_started_iso": "2026-04-05T01:00:00",
+                        "bench_child_pid": 0,
+                    }
+                ],
+            )
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            # Use one-shot mode; reconciliation runs first regardless of mode.
+            result = _run_control(
+                "--bench-exe-path",
+                str(FAKE_BENCH_EXE),
+                "--config",
+                str(config_path),
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"stdout={result.stdout}\nstderr={result.stderr}",
+            )
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_reconcile_failure_blocks_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            _seed_pending_writes(
+                runtime_home,
+                [
+                    {
+                        "channel": 4,
+                        "baseline_duty_raw": 200,
+                        "baseline_mode_raw": 5,
+                        "target_pct": 60.0,
+                        "requested_hold_ms": 0,
+                        "bench_started_iso": "2026-04-05T01:00:00",
+                        "bench_child_pid": 0,
+                    }
+                ],
+            )
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = {"SVG_MB_CONTROL_FAKE_RESTORE_MODE": "fail"}
+            result = _run_control(
+                "--bench-exe-path",
+                str(FAKE_BENCH_EXE),
+                "--config",
+                str(config_path),
+                env=env,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("reconciliation failed", result.stderr)
+            entries = _read_pending_writes(runtime_home)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0]["channel"], 4)
+
+    def test_write_once_ctrl_break_terminates_child(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+            env = os.environ.copy()
+            env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = "0"
+            proc = subprocess.Popen(
+                [
+                    str(CONTROL_EXE),
+                    "--mode",
+                    "write-once",
+                    "--config",
+                    str(config_path),
+                    "--write-channel",
+                    "0",
+                    "--write-pct",
+                    "50",
+                    "--write-hold-ms",
+                    "30000",
+                ],
+                cwd=REPO_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            # Give Control a moment to spawn the child.
+            time.sleep(0.5)
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+            try:
+                stdout, stderr = proc.communicate(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+            self.assertEqual(
+                proc.returncode,
+                0,
+                msg=f"Control did not exit cleanly on CTRL_BREAK; stderr={stderr}",
+            )
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_two_concurrent_control_instances_share_sidecar(self) -> None:
+        """Observational test: two Control processes against the same runtime
+        home writing different channels. Records the resulting sidecar state
+        and exit codes rather than enforcing a specific ordering."""
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_phase2_config(td, runtime_home=runtime_home)
+
+            def spawn(channel: int) -> subprocess.Popen:
+                env = os.environ.copy()
+                env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = str(channel)
+                return subprocess.Popen(
+                    [
+                        str(CONTROL_EXE),
+                        "--mode",
+                        "write-once",
+                        "--config",
+                        str(config_path),
+                        "--write-channel",
+                        str(channel),
+                        "--write-pct",
+                        "50",
+                        "--write-hold-ms",
+                        "500",
+                    ],
+                    cwd=REPO_ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=env,
+                )
+
+            # Note: fake-bench emits its snapshot with a single channel set
+            # via env var, but each Control reads its own snapshot, so both
+            # will see the expected fan for their target channel. This does
+            # not perfectly model real hardware.
+            proc_a = spawn(0)
+            proc_b = spawn(1)
+            out_a, err_a = proc_a.communicate(timeout=15.0)
+            out_b, err_b = proc_b.communicate(timeout=15.0)
+            final_entries = _read_pending_writes(runtime_home)
+            # Loose assertions: the test documents observed behavior.
+            self.assertIn(
+                proc_a.returncode,
+                [0, 1, 3, 4, 5],
+                msg=f"unexpected exit {proc_a.returncode}; stderr={err_a}",
+            )
+            self.assertIn(
+                proc_b.returncode,
+                [0, 1, 3, 4, 5],
+                msg=f"unexpected exit {proc_b.returncode}; stderr={err_b}",
+            )
+            # Not asserting final_entries length — this test records behavior.
+            # A cleanup restore may be needed in real operation.
+            if final_entries:
+                print(
+                    "\n[observation] two concurrent Control instances left "
+                    f"{len(final_entries)} pending entries in the sidecar"
+                )

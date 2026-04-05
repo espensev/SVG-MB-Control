@@ -1,5 +1,7 @@
+#include <array>
 #include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -40,6 +42,21 @@ std::string fake_mode() {
     return env_value("SVG_MB_CONTROL_FAKE_MODE", "success");
 }
 
+std::string format_local_iso8601(std::chrono::system_clock::time_point tp) {
+    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
+    std::tm local{};
+    if (localtime_s(&local, &tt) != 0) {
+        return {};
+    }
+    std::array<char, 32> buffer{};
+    const std::size_t written = std::strftime(buffer.data(), buffer.size(),
+                                              "%Y-%m-%dT%H:%M:%S", &local);
+    if (written == 0u) {
+        return {};
+    }
+    return std::string(buffer.data(), written);
+}
+
 void write_complete_snapshot(const std::filesystem::path& path,
                              const std::string& command,
                              const std::string& mode,
@@ -50,13 +67,49 @@ void write_complete_snapshot(const std::filesystem::path& path,
         throw std::runtime_error("Could not open fake snapshot file.");
     }
 
+    const long snapshot_offset_ms = static_cast<long>(env_ulong(
+        "SVG_MB_CONTROL_FAKE_SNAPSHOT_OFFSET_MS", 0ul));
+    const auto snapshot_time = std::chrono::system_clock::now() -
+        std::chrono::milliseconds(snapshot_offset_ms);
+    const std::string snapshot_time_iso = format_local_iso8601(snapshot_time);
+
+    const std::string policy_writes_enabled = env_value(
+        "SVG_MB_CONTROL_FAKE_POLICY_WRITES_ENABLED", "true");
+    const std::string policy_restore_on_exit = env_value(
+        "SVG_MB_CONTROL_FAKE_POLICY_RESTORE_ON_EXIT", "true");
+    const unsigned long fan_channel = env_ulong(
+        "SVG_MB_CONTROL_FAKE_FAN_CHANNEL", 0ul);
+    const unsigned long fan_duty_raw = env_ulong(
+        "SVG_MB_CONTROL_FAKE_FAN_DUTY_RAW", 128ul);
+    const unsigned long fan_mode_raw = env_ulong(
+        "SVG_MB_CONTROL_FAKE_FAN_MODE_RAW", 5ul);
+    const std::string effective_write =
+        env_value("SVG_MB_CONTROL_FAKE_EFFECTIVE_WRITE_ALLOWED", "true");
+    const std::string write_allowed =
+        env_value("SVG_MB_CONTROL_FAKE_WRITE_ALLOWED", "true");
+    const std::string policy_blocked =
+        env_value("SVG_MB_CONTROL_FAKE_POLICY_BLOCKED", "false");
+
     stream
         << "{\n"
         << "  \"source\": \"fake-bench\",\n"
         << "  \"command\": \"" << command << "\",\n"
         << "  \"mode\": \"" << mode << "\",\n"
         << "  \"duration_ms\": " << duration_ms << ",\n"
-        << "  \"sample\": " << sample_index << "\n"
+        << "  \"sample\": " << sample_index << ",\n"
+        << "  \"snapshot_time\": \"" << snapshot_time_iso << "\",\n"
+        << "  \"policy_writes_enabled\": " << policy_writes_enabled << ",\n"
+        << "  \"policy_restore_on_exit\": " << policy_restore_on_exit << ",\n"
+        << "  \"fans\": [\n"
+        << "    {\n"
+        << "      \"channel\": " << fan_channel << ",\n"
+        << "      \"duty_raw\": " << fan_duty_raw << ",\n"
+        << "      \"mode_raw\": " << fan_mode_raw << ",\n"
+        << "      \"write_allowed\": " << write_allowed << ",\n"
+        << "      \"policy_blocked\": " << policy_blocked << ",\n"
+        << "      \"effective_write_allowed\": " << effective_write << "\n"
+        << "    }\n"
+        << "  ]\n"
         << "}\n";
 }
 
@@ -101,9 +154,81 @@ int main(int argc, char** argv) {
         }
 
         const std::string command = argv[1];
-        if (command != "read-snapshot" && command != "logger-service") {
-            std::cerr << "fake-bench supports read-snapshot or logger-service\n";
+        if (command != "read-snapshot" && command != "logger-service" &&
+            command != "set-fixed-duty" && command != "restore-auto") {
+            std::cerr << "fake-bench unsupported command: " << command << '\n';
             return 2;
+        }
+
+        if (command == "set-fixed-duty") {
+            unsigned long channel = 0ul;
+            double pct = 0.0;
+            unsigned long hold_ms = 0ul;
+            for (int index = 2; index < argc; ++index) {
+                const std::string arg = argv[index];
+                if (arg == "--channel" && index + 1 < argc) {
+                    channel = std::stoul(argv[++index]);
+                } else if (arg == "--pct" && index + 1 < argc) {
+                    pct = std::stod(argv[++index]);
+                } else if (arg == "--hold-ms" && index + 1 < argc) {
+                    hold_ms = std::stoul(argv[++index]);
+                }
+            }
+            const std::string write_mode = env_value(
+                "SVG_MB_CONTROL_FAKE_WRITE_MODE", "default");
+            if (write_mode == "fail_immediate") {
+                std::cerr << "simulated set-fixed-duty failure\n";
+                return 13;
+            }
+            if (write_mode == "policy_refused") {
+                std::cerr << "runtime policy disables write commands\n";
+                return 2;
+            }
+            if (hold_ms > 0ul) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(hold_ms));
+            } else {
+                // hold_ms == 0 means run until CTRL_BREAK. Default handler
+                // on Windows terminates the process; we simulate that by
+                // sleeping for a long time.
+                std::this_thread::sleep_for(std::chrono::hours(1));
+            }
+            std::cout << "set-fixed-duty\n";
+            std::cout << "channel: " << channel << '\n';
+            std::cout << "target_pct: " << pct << '\n';
+            std::cout << "hold_ms: " << hold_ms << '\n';
+            std::cout << "baseline_duty_raw: 128\n";
+            std::cout << "baseline_mode_raw: 5\n";
+            std::cout << "manifest_archive: fake_set_fixed_duty_manifest.json\n";
+            return 0;
+        }
+
+        if (command == "restore-auto") {
+            unsigned long channel = 0ul;
+            unsigned long saved_duty_raw = 0ul;
+            unsigned long saved_mode_raw = 0ul;
+            for (int index = 2; index < argc; ++index) {
+                const std::string arg = argv[index];
+                if (arg == "--channel" && index + 1 < argc) {
+                    channel = std::stoul(argv[++index]);
+                } else if (arg == "--saved-duty-raw" && index + 1 < argc) {
+                    saved_duty_raw = std::stoul(argv[++index]);
+                } else if (arg == "--saved-mode-raw" && index + 1 < argc) {
+                    saved_mode_raw = std::stoul(argv[++index]);
+                }
+            }
+            const std::string restore_mode = env_value(
+                "SVG_MB_CONTROL_FAKE_RESTORE_MODE", "success");
+            if (restore_mode == "fail") {
+                std::cerr << "simulated restore-auto failure\n";
+                return 14;
+            }
+            std::cout << "restore-auto\n";
+            std::cout << "channel: " << channel << '\n';
+            std::cout << "saved_duty_raw: " << saved_duty_raw << '\n';
+            std::cout << "saved_mode_raw: " << saved_mode_raw << '\n';
+            std::cout << "manifest_archive: fake_restore_auto_manifest.json\n";
+            return 0;
         }
 
         const std::string mode = fake_mode();

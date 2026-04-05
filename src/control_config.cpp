@@ -124,6 +124,33 @@ std::optional<std::uint32_t> ParseOptionalUIntField(const std::string& text,
     return static_cast<std::uint32_t>(value);
 }
 
+std::optional<double> ParseOptionalDoubleField(const std::string& text,
+                                               std::string_view key) {
+    const std::size_t offset = FindValueStart(text, key);
+    if (offset == std::string::npos) {
+        return std::nullopt;
+    }
+    std::size_t end = offset;
+    if (end < text.size() && (text[end] == '-' || text[end] == '+')) {
+        ++end;
+    }
+    while (end < text.size() &&
+           (std::isdigit(static_cast<unsigned char>(text[end])) != 0 ||
+            text[end] == '.' || text[end] == 'e' || text[end] == 'E' ||
+            text[end] == '-' || text[end] == '+')) {
+        ++end;
+    }
+    const std::string token = text.substr(offset, end - offset);
+    if (token.empty()) {
+        throw std::runtime_error("Expected numeric value for key: " + std::string(key));
+    }
+    try {
+        return std::stod(token);
+    } catch (const std::exception&) {
+        throw std::runtime_error("Invalid numeric value for key: " + std::string(key));
+    }
+}
+
 std::filesystem::path ResolveConfigRelativePath(const std::filesystem::path& config_path,
                                                 const std::string& raw_value) {
     std::filesystem::path path(raw_value);
@@ -223,6 +250,25 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     }
     if (const auto duration_ms = ParseOptionalUIntField(text, "logger_service_duration_ms")) {
         config.logger_service_duration_ms = *duration_ms;
+    }
+
+    if (const auto write_channel = ParseOptionalUIntField(text, "write_channel")) {
+        config.write_channel = *write_channel;
+        config.write_channel_set = true;
+    }
+    if (const auto write_pct = ParseOptionalDoubleField(text, "write_target_pct")) {
+        config.write_target_pct = *write_pct;
+        config.write_target_pct_set = true;
+    }
+    if (const auto hold_ms = ParseOptionalUIntField(text, "write_hold_ms")) {
+        config.write_hold_ms = *hold_ms;
+        config.write_hold_ms_set = true;
+    }
+    if (const auto freshness = ParseOptionalUIntField(text, "baseline_freshness_ceiling_ms")) {
+        config.baseline_freshness_ceiling_ms = *freshness;
+    }
+    if (const auto restore_timeout = ParseOptionalUIntField(text, "restore_timeout_ms")) {
+        config.restore_timeout_ms = *restore_timeout;
     }
 
     return config;

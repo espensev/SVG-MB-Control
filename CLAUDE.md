@@ -30,4 +30,7 @@ rules:
 - Keep the Bench boundary external. Do not include or link Bench internals.
 - Phase 1 extends Phase 0 with a persistent read-loop supervisor. It remains
   subprocess-only and read-only.
+- Phase 2 adds bounded write orchestration through the existing
+  `set-fixed-duty` and `restore-auto` bridge commands. The write path is
+  separate from the read loop.
 - The subprocess adapter owns process launch, stdout/stderr capture, timeout, and exit-code handling.
