@@ -978,3 +978,151 @@ class WriteOnceTests(unittest.TestCase):
                     "\n[observation] two concurrent Control instances left "
                     f"{len(final_entries)} pending entries in the sidecar"
                 )
+
+
+def _write_control_loop_config(
+    td: Path,
+    *,
+    runtime_home: Path,
+    snapshot_path: Path,
+    channel: int,
+    poll_tick_ms: int = 200,
+    write_cooldown_ms: int = 500,
+    deadband_pct: float = 3.0,
+    control_hold_ms: int = 1000,
+    logger_service_duration_ms: int = 10000,
+    curve: list[tuple[float, float]] | None = None,
+    min_duty_pct: float = 40.0,
+    temp_blend: str = "cpu_only",
+) -> Path:
+    if curve is None:
+        curve = [(30.0, 40.0), (60.0, 55.0), (80.0, 80.0), (95.0, 100.0)]
+    cfg = {
+        "schema_version": 4,
+        "bench_exe_path": FAKE_BENCH_EXE.as_posix(),
+        "snapshot_path": snapshot_path.as_posix(),
+        "runtime_home_path": runtime_home.as_posix(),
+        "poll_ms": 100,
+        "baseline_freshness_ceiling_ms": 10000,
+        "restore_timeout_ms": 5000,
+        "snapshot_read_retry_count": 3,
+        "snapshot_read_retry_backoff_ms": 10,
+        "control_loop": {
+            "poll_tick_ms": poll_tick_ms,
+            "write_cooldown_ms": write_cooldown_ms,
+            "deadband_pct": deadband_pct,
+            "control_hold_ms": control_hold_ms,
+            "cpu_temp_label": "Tctl/Tdie",
+            "logger_service_duration_ms": logger_service_duration_ms,
+            "channels": [
+                {
+                    "channel": channel,
+                    "temp_blend": temp_blend,
+                    "min_duty_pct": min_duty_pct,
+                    "curve": [
+                        {"temp_c": t, "duty_pct": d} for (t, d) in curve
+                    ],
+                }
+            ],
+        },
+    }
+    config_path = td / "control.json"
+    config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    return config_path
+
+
+class ControlLoopTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest("Windows-only repo")
+        _ensure_release_build()
+
+    def setUp(self) -> None:
+        if FAKE_SNAPSHOT.is_file():
+            FAKE_SNAPSHOT.unlink()
+
+    def test_control_loop_ticks_and_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=FAKE_SNAPSHOT,
+                channel=0,
+                poll_tick_ms=200,
+                write_cooldown_ms=400,
+                deadband_pct=2.0,
+                control_hold_ms=800,
+            )
+            env = os.environ.copy()
+            env["SVG_MB_CONTROL_FAKE_MODE"] = "emit_snapshots"
+            env["SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS"] = "100"
+            env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = "0"
+            env["SVG_MB_CONTROL_FAKE_CPU_TCTL_C"] = "75"
+            proc = subprocess.Popen(
+                [
+                    str(CONTROL_EXE),
+                    "--mode",
+                    "control-loop",
+                    "--config",
+                    str(config_path),
+                ],
+                cwd=REPO_ROOT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            try:
+                observed = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get(
+                        "loop_tick_count", 0
+                    )
+                    >= 3,
+                    timeout_s=5.0,
+                )
+                self.assertTrue(
+                    observed,
+                    msg=f"control loop did not tick; status={_read_runtime_status(runtime_home)}",
+                )
+                status = _read_runtime_status(runtime_home)
+                self.assertEqual(status["mode"], "control-loop")
+                self.assertGreaterEqual(
+                    status["controlled_channels"][0]["total_writes"], 1
+                )
+            finally:
+                try:
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                except Exception:
+                    pass
+                try:
+                    proc.communicate(timeout=4.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.communicate()
+
+    def test_control_loop_empty_channels_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            cfg = {
+                "schema_version": 4,
+                "bench_exe_path": FAKE_BENCH_EXE.as_posix(),
+                "snapshot_path": FAKE_SNAPSHOT.as_posix(),
+                "runtime_home_path": runtime_home.as_posix(),
+                "control_loop": {
+                    "poll_tick_ms": 200,
+                    "cpu_temp_label": "Tctl/Tdie",
+                    "channels": [],
+                },
+            }
+            config_path = td / "control.json"
+            config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            result = _run_control(
+                "--mode", "control-loop", "--config", str(config_path)
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("channels", result.stderr)

@@ -2,14 +2,22 @@
 
 ## Build
 
-Phase 0 uses the manual CMake path:
+The repo now provides a repo-local release entrypoint:
+
+```powershell
+.\build-release.ps1
+```
+
+It performs a clean `x64-release` configure/build, stages `svg-mb-control.exe`
+plus `fake-bench.exe`, runs `python -m unittest discover tests -v` unless
+`-SkipTests` is supplied, then publishes `release\` and a timestamped archive.
+
+Manual CMake remains valid for incremental local work:
 
 ```powershell
 cmake --preset x64-release
 cmake --build --preset x64-release
 ```
-
-There is no `Build-Release.ps1` in Phase 0.
 
 ## Documentation standard
 

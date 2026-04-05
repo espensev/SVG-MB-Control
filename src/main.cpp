@@ -1,5 +1,7 @@
 #include "bench_bridge.h"
 #include "control_config.h"
+#include "control_loop.h"
+#include "gpu_reader.h"
 #include "read_loop.h"
 #include "write_orchestrator.h"
 
@@ -33,6 +35,7 @@ enum class RunMode {
     kOneShot,
     kReadLoop,
     kWriteOnce,
+    kControlLoop,
 };
 
 svg_mb_control::ReadLoop* g_active_read_loop = nullptr;
@@ -95,6 +98,9 @@ RunMode ParseRunMode(const wchar_t* value) {
     }
     if (raw == L"write-once") {
         return RunMode::kWriteOnce;
+    }
+    if (raw == L"control-loop") {
+        return RunMode::kControlLoop;
     }
     throw std::runtime_error("Invalid --mode value.");
 }
@@ -247,6 +253,22 @@ int wmain(int argc, wchar_t** argv) {
             } else if (arg == L"--version") {
                 PrintVersion();
                 return 0;
+            } else if (arg == L"--diagnose-gpu") {
+                svg_mb_control::GpuReader reader;
+                std::cout << "gpu_reader.available: "
+                          << (reader.available() ? "true" : "false") << '\n';
+                std::cout << "gpu_reader.init_warning: \""
+                          << reader.init_warning() << "\"\n";
+                const auto sample = reader.Sample();
+                std::cout << "sample.available: "
+                          << (sample.available ? "true" : "false") << '\n';
+                std::cout << "sample.gpu_name: \"" << sample.gpu_name << "\"\n";
+                std::cout << "sample.core_c: " << sample.core_c << '\n';
+                std::cout << "sample.memjn_c: " << sample.memjn_c << '\n';
+                std::cout << "sample.hotspot_c: " << sample.hotspot_c << '\n';
+                std::cout << "sample.last_warning: \""
+                          << sample.last_warning << "\"\n";
+                return sample.available ? 0 : 1;
             } else {
                 throw std::runtime_error("Unknown option.");
             }
@@ -335,6 +357,32 @@ int wmain(int argc, wchar_t** argv) {
             const int result = svg_mb_control::RunWriteOnce(
                 *config, bench_exe_path.wstring(),
                 reconcile_runtime_home, request, g_stop_signaled);
+            SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
+            return result;
+        }
+
+        if (run_mode == RunMode::kControlLoop) {
+            if (!config.has_value()) {
+                throw std::runtime_error("--mode control-loop requires a control config.");
+            }
+            if (config->snapshot_path.empty()) {
+                throw std::runtime_error("--mode control-loop requires snapshot_path in the control config.");
+            }
+            if (config_path.empty()) {
+                throw std::runtime_error("--mode control-loop requires a resolvable config path.");
+            }
+            const svg_mb_control::ControlLoopConfig loop_config =
+                svg_mb_control::LoadControlLoopConfig(
+                    std::filesystem::absolute(config_path).lexically_normal());
+
+            svg_mb_control::ControlLoop control_loop(
+                *config, loop_config, reconcile_runtime_home,
+                bench_exe_path.wstring());
+
+            if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE)) {
+                throw std::runtime_error("SetConsoleCtrlHandler failed.");
+            }
+            const int result = control_loop.RunUntilStopped(g_stop_signaled);
             SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
             return result;
         }

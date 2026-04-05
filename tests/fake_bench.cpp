@@ -90,6 +90,9 @@ void write_complete_snapshot(const std::filesystem::path& path,
     const std::string policy_blocked =
         env_value("SVG_MB_CONTROL_FAKE_POLICY_BLOCKED", "false");
 
+    const double cpu_tctl_c = static_cast<double>(env_ulong(
+        "SVG_MB_CONTROL_FAKE_CPU_TCTL_C", 65ul));
+
     stream
         << "{\n"
         << "  \"source\": \"fake-bench\",\n"
@@ -100,6 +103,10 @@ void write_complete_snapshot(const std::filesystem::path& path,
         << "  \"snapshot_time\": \"" << snapshot_time_iso << "\",\n"
         << "  \"policy_writes_enabled\": " << policy_writes_enabled << ",\n"
         << "  \"policy_restore_on_exit\": " << policy_restore_on_exit << ",\n"
+        << "  \"amd_sensors\": [\n"
+        << "    { \"label\": \"Tctl/Tdie\", \"temperature_c\": "
+        << cpu_tctl_c << " }\n"
+        << "  ],\n"
         << "  \"fans\": [\n"
         << "    {\n"
         << "      \"channel\": " << fan_channel << ",\n"

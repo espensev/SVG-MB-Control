@@ -68,14 +68,33 @@ Optional live integration prerequisites:
 
 ## Build
 
-Manual Phase 0 build:
+Release build:
+
+```powershell
+.\build-release.ps1
+```
+
+Useful options:
+
+- `-KeepBuildDir` keeps `build\` after a successful release build
+- `-SkipTests` skips `python -m unittest discover tests -v`
+
+Manual CMake build remains available for incremental local work:
 
 ```powershell
 cmake --preset x64-release
 cmake --build --preset x64-release
 ```
 
-Expected output:
+Release-script outputs:
+
+- `release\svg-mb-control.exe`
+- `release\fake-bench.exe`
+- `release\build-info.json`
+- `release\VERSION_TABLE.json`
+- `release\archive\svg-mb-control-<timestamp>.zip`
+
+Manual-build outputs:
 
 - `build\x64-release\svg-mb-control.exe`
 - `build\x64-release\fake-bench.exe`
@@ -141,6 +160,13 @@ The `--mode` flag selects the process lifetime:
   bounded `set-fixed-duty` child, waits for exit, and clears the sidecar
   on clean exit. Requires `--write-channel`, `--write-pct`, and
   `--write-hold-ms` (or equivalents in the control config).
+- `control-loop`: Phase 3 behavior. Control runs a persistent
+  `logger-service` supervisor for snapshot reads, samples GPU
+  temperatures via linked `gpu_telemetry`, evaluates a per-channel
+  piecewise-linear curve per tick, and issues bounded `set-fixed-duty`
+  writes when the setpoint exceeds the per-channel deadband AND the
+  cooldown has elapsed. Requires a `control_loop` object in the control
+  config with a non-empty `channels` array.
 
 The `read-loop` mode requires a control config with `snapshot_path` set.
 
@@ -160,6 +186,22 @@ Example write-once:
 ```powershell
 build\x64-release\svg-mb-control.exe --mode write-once --config .\config\control.json --write-channel 3 --write-pct 60 --write-hold-ms 10000
 ```
+
+Example control-loop:
+
+```powershell
+$env:SVG_MB_RUNTIME_POLICY = "D:\...\SVG-MB-Bench\config\runtime_policy_write_live.json"
+build\x64-release\svg-mb-control.exe --mode control-loop --config .\config\control_loop.json
+```
+
+Diagnostic flag:
+
+```powershell
+build\x64-release\svg-mb-control.exe --diagnose-gpu
+```
+
+Prints `gpu_telemetry` init state, GPU name, and a single temperature
+sample. Exits 0 on success, non-zero when GPU telemetry is unavailable.
 
 ## Runtime Home
 
