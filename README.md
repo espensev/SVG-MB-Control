@@ -187,12 +187,21 @@ Example write-once:
 build\x64-release\svg-mb-control.exe --mode write-once --config .\config\control.json --write-channel 3 --write-pct 60 --write-hold-ms 10000
 ```
 
-Example control-loop:
+Example control-loop (minimal invocation):
 
 ```powershell
-$env:SVG_MB_RUNTIME_POLICY = "D:\...\SVG-MB-Bench\config\runtime_policy_write_live.json"
-build\x64-release\svg-mb-control.exe --mode control-loop --config .\config\control_loop.json
+copy control.example.json control.json
+# edit control.json curves/thresholds to taste, then:
+build\x64-release\svg-mb-control.exe --mode control-loop
 ```
+
+`control.example.json` at the repo root carries a full control-loop
+config for a 6-channel NCT6701D on ROG STRIX X870-F with an RTX 5090.
+`bench_runtime_policy_path` in the config makes Control export
+`SVG_MB_RUNTIME_POLICY` to its own environment before spawning Bench
+children, so a live write-loop does not need an explicit env var set
+by the operator. An explicit env var at launch time still takes
+precedence.
 
 Diagnostic flag:
 

@@ -1,0 +1,208 @@
+{
+  "schema_version": 4,
+  "bench_exe_path": "../SVG-MB-Bench/svg-mb-bench.exe",
+  "snapshot_path": "../SVG-MB-Bench/logs/current_state.json",
+  "bench_runtime_policy_path": "../SVG-MB-Bench/config/runtime_policy_write_live.json",
+  "runtime_home_path": "runtime",
+  "poll_ms": 500,
+  "snapshot_read_retry_count": 3,
+  "snapshot_read_retry_backoff_ms": 20,
+  "baseline_freshness_ceiling_ms": 10000,
+  "restore_timeout_ms": 10000,
+  "control_loop": {
+    "poll_tick_ms": 2000,
+    "write_cooldown_ms": 10000,
+    "deadband_pct": 4.0,
+    "control_hold_ms": 60000,
+    "cpu_temp_label": "Tctl/Tdie",
+    "logger_service_duration_ms": 3600000,
+    "channels": [
+      {
+        "channel": 0,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 25.0,
+        "curve": [
+          {
+            "temp_c": 60,
+            "duty_pct": 25
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 32
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 45
+          },
+          {
+            "temp_c": 87,
+            "duty_pct": 65
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 85
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 100
+          }
+        ]
+      },
+      {
+        "channel": 1,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 20.0,
+        "curve": [
+          {
+            "temp_c": 60,
+            "duty_pct": 20
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 28
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 40
+          },
+          {
+            "temp_c": 87,
+            "duty_pct": 60
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 80
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 100
+          }
+        ]
+      },
+      {
+        "channel": 2,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 45.0,
+        "curve": [
+          {
+            "temp_c": 60,
+            "duty_pct": 45
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 48
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 60
+          },
+          {
+            "temp_c": 87,
+            "duty_pct": 75
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 90
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 100
+          }
+        ]
+      },
+      {
+        "channel": 3,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 45.0,
+        "curve": [
+          {
+            "temp_c": 60,
+            "duty_pct": 45
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 48
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 60
+          },
+          {
+            "temp_c": 87,
+            "duty_pct": 75
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 90
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 100
+          }
+        ]
+      },
+      {
+        "channel": 4,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 22.0,
+        "curve": [
+          {
+            "temp_c": 60,
+            "duty_pct": 22
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 28
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 38
+          },
+          {
+            "temp_c": 87,
+            "duty_pct": 55
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 80
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 100
+          }
+        ]
+      },
+      {
+        "channel": 5,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 22.0,
+        "curve": [
+          {
+            "temp_c": 60,
+            "duty_pct": 22
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 28
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 38
+          },
+          {
+            "temp_c": 87,
+            "duty_pct": 55
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 80
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 100
+          }
+        ]
+      }
+    ]
+  }
+}

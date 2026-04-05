@@ -3,6 +3,7 @@
 /.vs/
 /runtime/
 /release/
+/control.json
 /CMakeUserPresets.json
 /tests/__pycache__/
 *.pyc

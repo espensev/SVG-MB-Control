@@ -32,6 +32,13 @@ struct ControlConfig {
     bool write_hold_ms_set = false;
     std::uint32_t baseline_freshness_ceiling_ms = 2000u;
     std::uint32_t restore_timeout_ms = 5000u;
+
+    // Phase 3 field: Bench runtime policy path. When set, Control exports
+    // SVG_MB_RUNTIME_POLICY=<resolved path> into its own process
+    // environment before spawning Bench children, so writes to
+    // runtime_policy_write_live.json (or similar) flow to the children
+    // without the operator setting the env var manually.
+    std::filesystem::path bench_runtime_policy_path;
 };
 
 std::filesystem::path GetEnvironmentPath(std::wstring_view name);

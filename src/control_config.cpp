@@ -187,11 +187,21 @@ std::filesystem::path ResolveDefaultControlConfigPath() {
         return std::filesystem::path(buffer.data(), buffer.data() + length).parent_path();
     }();
 
+    const std::filesystem::path exe_parent =
+        current_exe_dir.empty() ? std::filesystem::path{}
+                                : current_exe_dir.parent_path();
+    const std::filesystem::path exe_grandparent =
+        exe_parent.empty() ? std::filesystem::path{}
+                           : exe_parent.parent_path();
     const std::vector<std::filesystem::path> candidates = {
-        current_exe_dir / "config" / "control.json",
         current_exe_dir / "control.json",
-        std::filesystem::current_path() / "config" / "control.json",
+        current_exe_dir / "config" / "control.json",
+        exe_parent / "control.json",           // repo root when exe is in release/ (one level deep)
+        exe_parent / "config" / "control.json",
+        exe_grandparent / "control.json",      // repo root when exe is in build/x64-release/ (two levels)
+        exe_grandparent / "config" / "control.json",
         std::filesystem::current_path() / "control.json",
+        std::filesystem::current_path() / "config" / "control.json",
     };
 
     for (const auto& candidate : candidates) {
@@ -250,6 +260,10 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     }
     if (const auto duration_ms = ParseOptionalUIntField(text, "logger_service_duration_ms")) {
         config.logger_service_duration_ms = *duration_ms;
+    }
+
+    if (const auto policy = ParseOptionalStringField(text, "bench_runtime_policy_path")) {
+        config.bench_runtime_policy_path = ResolveConfigRelativePath(absolute_path, *policy);
     }
 
     if (const auto write_channel = ParseOptionalUIntField(text, "write_channel")) {

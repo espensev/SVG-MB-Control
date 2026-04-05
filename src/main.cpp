@@ -311,6 +311,22 @@ int wmain(int argc, wchar_t** argv) {
             throw std::runtime_error("Could not resolve svg-mb-bench.exe. Pass --bench-exe-path or configure bench_exe_path.");
         }
 
+        // If the config provides a Bench runtime policy path, export it to
+        // this process's environment so Bench children inherit it. This
+        // lets the operator run `svg-mb-control.exe` without manually
+        // setting SVG_MB_RUNTIME_POLICY. An explicit env var set by the
+        // operator before launch still takes precedence (we do not
+        // overwrite an existing value).
+        if (config.has_value() && !config->bench_runtime_policy_path.empty()) {
+            const DWORD existing = GetEnvironmentVariableW(
+                L"SVG_MB_RUNTIME_POLICY", nullptr, 0);
+            if (existing == 0) {
+                SetEnvironmentVariableW(
+                    L"SVG_MB_RUNTIME_POLICY",
+                    config->bench_runtime_policy_path.wstring().c_str());
+            }
+        }
+
         // Unconditional startup reconciliation of any pending writes from a
         // prior crashed Control session, before dispatching on run mode.
         const std::uint32_t reconcile_timeout_ms =
