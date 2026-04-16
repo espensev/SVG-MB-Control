@@ -156,9 +156,9 @@ std::string FormatEntries(const std::vector<PendingWriteEntry>& entries) {
             << static_cast<unsigned>(entry.baseline_mode_raw) << ",\n"
             << "      \"target_pct\": " << entry.target_pct << ",\n"
             << "      \"requested_hold_ms\": " << entry.requested_hold_ms << ",\n"
-            << "      \"bench_started_iso\": \""
-            << JsonEscape(entry.bench_started_iso) << "\",\n"
-            << "      \"bench_child_pid\": " << entry.bench_child_pid << "\n"
+            << "      \"started_iso\": \""
+            << JsonEscape(entry.started_iso) << "\",\n"
+            << "      \"child_pid\": " << entry.child_pid << "\n"
             << "    }";
     }
     if (!entries.empty()) {
@@ -274,8 +274,8 @@ std::vector<PendingWriteEntry> ReadPendingWrites(
         const auto mode = FindNumericField(text, obj_open, obj_close, "baseline_mode_raw");
         const auto target = FindNumericField(text, obj_open, obj_close, "target_pct");
         const auto hold = FindNumericField(text, obj_open, obj_close, "requested_hold_ms");
-        const auto pid = FindNumericField(text, obj_open, obj_close, "bench_child_pid");
-        const auto iso = FindStringField(text, obj_open, obj_close, "bench_started_iso");
+        const auto pid = FindNumericField(text, obj_open, obj_close, "child_pid");
+        const auto iso = FindStringField(text, obj_open, obj_close, "started_iso");
         if (!channel || !duty || !mode || !target || !hold) {
             throw std::runtime_error("pending-writes entry missing required field.");
         }
@@ -284,8 +284,8 @@ std::vector<PendingWriteEntry> ReadPendingWrites(
         entry.baseline_mode_raw = static_cast<std::uint8_t>(*mode);
         entry.target_pct = *target;
         entry.requested_hold_ms = static_cast<std::uint32_t>(*hold);
-        entry.bench_child_pid = pid ? static_cast<std::uint32_t>(*pid) : 0u;
-        entry.bench_started_iso = iso ? *iso : std::string();
+        entry.child_pid = pid ? static_cast<std::uint32_t>(*pid) : 0u;
+        entry.started_iso = iso ? *iso : std::string();
         result.push_back(std::move(entry));
 
         cursor = obj_close + 1u;

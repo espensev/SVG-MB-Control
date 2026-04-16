@@ -1,6 +1,11 @@
 #include "read_loop.h"
 
-#include "bench_bridge.h"
+#include "amd_reader.h"
+#include "direct_runtime_snapshot.h"
+#include "fan_writer.h"
+#include "gpu_reader.h"
+#include "runtime_snapshot.h"
+#include "runtime_write_policy.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -12,17 +17,14 @@
 
 #include <array>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
 #include <fstream>
 #include <mutex>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
-#include <thread>
 
 namespace svg_mb_control {
 
@@ -54,30 +56,13 @@ std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
     return std::string(buffer.data(), written);
 }
 
-bool LooksLikeCompleteJsonObject(std::string_view text) {
-    std::size_t start = 0u;
-    while (start < text.size() &&
-           std::isspace(static_cast<unsigned char>(text[start])) != 0) {
-        ++start;
-    }
-    if (start >= text.size() || text[start] != '{') {
-        return false;
-    }
-    std::size_t end = text.size();
-    while (end > start &&
-           std::isspace(static_cast<unsigned char>(text[end - 1u])) != 0) {
-        --end;
-    }
-    return end > start && text[end - 1u] == '}';
-}
-
 std::string JsonEscape(const std::string& text) {
     std::string output;
     output.reserve(text.size() + 2u);
     for (char ch : text) {
         switch (ch) {
             case '\\': output += "\\\\"; break;
-            case '"':  output += "\\\""; break;
+            case '"': output += "\\\""; break;
             case '\b': output += "\\b"; break;
             case '\f': output += "\\f"; break;
             case '\n': output += "\\n"; break;
@@ -141,49 +126,6 @@ bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
     return true;
 }
 
-bool TryReadSnapshot(const std::filesystem::path& path,
-                     std::string* parsed_text) {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream.is_open()) {
-        return false;
-    }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    const std::string text = buffer.str();
-    if (text.empty() || !LooksLikeCompleteJsonObject(text)) {
-        return false;
-    }
-    *parsed_text = text;
-    return true;
-}
-
-bool ReadSnapshotWithRetries(const std::filesystem::path& path,
-                             std::uint32_t retry_count,
-                             std::uint32_t backoff_ms,
-                             std::string* parsed_text) {
-    const std::uint32_t attempts = retry_count + 1u;
-    for (std::uint32_t attempt = 0u; attempt < attempts; ++attempt) {
-        if (TryReadSnapshot(path, parsed_text)) {
-            return true;
-        }
-        if (attempt + 1u < attempts) {
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(backoff_ms));
-        }
-    }
-    return false;
-}
-
-std::filesystem::file_time_type SafeModificationTime(
-    const std::filesystem::path& path) {
-    std::error_code ec;
-    const auto value = std::filesystem::last_write_time(path, ec);
-    if (ec) {
-        return std::filesystem::file_time_type::min();
-    }
-    return value;
-}
-
 std::uint32_t ResolveStalenessThresholdMs(const ControlConfig& config) {
     if (config.staleness_threshold_ms > 0u) {
         return config.staleness_threshold_ms;
@@ -208,20 +150,16 @@ std::filesystem::path ResolveRuntimeHomePath(const ControlConfig& config) {
 struct ReadLoop::Impl {
     ControlConfig config;
     std::filesystem::path runtime_home;
-    std::wstring bench_exe_path;
 
     std::mutex wake_mutex;
     std::condition_variable wake_cv;
     std::atomic<bool> stop_requested{false};
 };
 
-ReadLoop::ReadLoop(ControlConfig config,
-                   std::filesystem::path runtime_home,
-                   std::wstring bench_exe_path)
+ReadLoop::ReadLoop(ControlConfig config, std::filesystem::path runtime_home)
     : impl_(std::make_unique<Impl>()) {
     impl_->config = std::move(config);
     impl_->runtime_home = std::move(runtime_home);
-    impl_->bench_exe_path = std::move(bench_exe_path);
 }
 
 ReadLoop::~ReadLoop() = default;
@@ -238,12 +176,6 @@ int ReadLoop::RunUntilStopped() {
                                       : 1000u;
     const std::uint32_t staleness_threshold_ms =
         ResolveStalenessThresholdMs(impl_->config);
-    const std::uint32_t duration_ms = impl_->config.logger_service_duration_ms;
-    const std::vector<std::wstring> child_args = {
-        L"logger-service",
-        L"--duration-ms",
-        std::to_wstring(duration_ms),
-    };
 
     std::error_code ec;
     std::filesystem::create_directories(impl_->runtime_home, ec);
@@ -251,7 +183,7 @@ int ReadLoop::RunUntilStopped() {
     Status status;
     status.status = "running";
     status.status_detail = "starting";
-    status.snapshot_source = impl_->config.snapshot_path.string();
+    status.snapshot_source = "direct-runtime-snapshot";
 
     auto publish_status = [&](const std::string& state,
                               const std::string& detail) {
@@ -260,81 +192,56 @@ int ReadLoop::RunUntilStopped() {
         WriteRuntimeStatusFile(impl_->runtime_home, status);
     };
 
-    publish_status("running", "spawning child");
+    publish_status("running", "initializing direct readers");
 
-    std::unique_ptr<BenchChildSupervisor> supervisor =
-        std::make_unique<BenchChildSupervisor>(impl_->bench_exe_path,
-                                               child_args);
+    const RuntimeWritePolicy runtime_policy =
+        ResolveRuntimeWritePolicy(&impl_->config);
+    std::unique_ptr<FanWriter> fan_writer;
     try {
-        supervisor->Start();
+        fan_writer = CreateFanWriter(runtime_policy);
     } catch (const std::exception& error) {
-        publish_status("child-died", std::string("initial start failed: ") +
-                                         error.what());
+        publish_status("direct-read-failed",
+                       std::string("direct reader init failed: ") +
+                           error.what());
         return 1;
     }
 
-    std::filesystem::file_time_type last_mtime =
-        std::filesystem::file_time_type::min();
+    AmdReader amd_reader;
+    GpuReader gpu_reader;
     auto last_success_time = std::chrono::steady_clock::now();
 
     while (!impl_->stop_requested.load()) {
-        if (!supervisor->IsRunning()) {
-            const int exit_code = supervisor->LastExitCode();
-            if (status.restart_count >= impl_->config.child_restart_budget) {
-                publish_status("child-died",
-                               std::string("restart budget exhausted after exit code ") +
-                                   std::to_string(exit_code));
-                return exit_code != 0 ? exit_code : 1;
-            }
-            ++status.restart_count;
-            publish_status("running",
-                           std::string("restarting child after exit code ") +
-                               std::to_string(exit_code));
+        try {
+            RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
+                amd_reader, gpu_reader, *fan_writer, runtime_policy);
 
-            {
-                std::unique_lock<std::mutex> lock(impl_->wake_mutex);
-                impl_->wake_cv.wait_for(
-                    lock,
-                    std::chrono::milliseconds(
-                        impl_->config.child_restart_backoff_ms),
-                    [this] { return impl_->stop_requested.load(); });
-            }
-            if (impl_->stop_requested.load()) {
-                break;
+            bool wrote_outputs = WriteRuntimeSnapshotFile(
+                impl_->runtime_home, runtime_snapshot);
+            if (!impl_->config.snapshot_path.empty()) {
+                wrote_outputs = WriteRuntimeSnapshotJsonFile(
+                                    impl_->config.snapshot_path,
+                                    runtime_snapshot) &&
+                                wrote_outputs;
             }
 
-            supervisor = std::make_unique<BenchChildSupervisor>(
-                impl_->bench_exe_path, child_args);
-            try {
-                supervisor->Start();
-            } catch (const std::exception& error) {
-                publish_status("child-died",
-                               std::string("restart failed: ") + error.what());
-                return 1;
-            }
-            status.child_pid = 0u;
-            last_mtime = std::filesystem::file_time_type::min();
-            continue;
-        }
-
-        const auto current_mtime = SafeModificationTime(
-            impl_->config.snapshot_path);
-        if (current_mtime != last_mtime &&
-            current_mtime != std::filesystem::file_time_type::min()) {
-            std::string snapshot_text;
-            if (ReadSnapshotWithRetries(impl_->config.snapshot_path,
-                                        impl_->config.snapshot_read_retry_count,
-                                        impl_->config.snapshot_read_retry_backoff_ms,
-                                        &snapshot_text)) {
-                last_mtime = current_mtime;
+            if (wrote_outputs &&
+                RuntimeSnapshotHasTelemetry(runtime_snapshot)) {
                 last_success_time = std::chrono::steady_clock::now();
                 ++status.successful_polls;
                 status.stale = false;
                 status.last_refresh_iso = FormatLocalIso8601(
                     std::chrono::system_clock::now());
+                status.status_detail = "direct sample refreshed";
             } else {
                 ++status.skipped_polls;
+                status.status_detail = wrote_outputs
+                    ? "direct sample had no telemetry"
+                    : "direct sample could not be published";
             }
+        } catch (const std::exception& error) {
+            ++status.skipped_polls;
+            status.status_detail =
+                std::string("direct sample failed: ") + error.what();
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -343,21 +250,16 @@ int ReadLoop::RunUntilStopped() {
                 now - last_success_time).count();
         status.stale = static_cast<std::uint64_t>(since_success_ms) >
                        static_cast<std::uint64_t>(staleness_threshold_ms);
-
         WriteRuntimeStatusFile(impl_->runtime_home, status);
 
-        {
-            std::unique_lock<std::mutex> lock(impl_->wake_mutex);
-            impl_->wake_cv.wait_for(
-                lock,
-                std::chrono::milliseconds(poll_ms),
-                [this] { return impl_->stop_requested.load(); });
-        }
+        std::unique_lock<std::mutex> lock(impl_->wake_mutex);
+        impl_->wake_cv.wait_for(
+            lock,
+            std::chrono::milliseconds(poll_ms),
+            [this] { return impl_->stop_requested.load(); });
     }
 
     publish_status("shutdown", "stop requested");
-    supervisor->RequestStop(2000u);
-    publish_status("shutdown", "child stopped");
     return 0;
 }
 

@@ -9,14 +9,13 @@
 
 namespace svg_mb_control {
 
-// Long-running read-only supervisor. Keeps one logger-service child alive,
-// polls current_state.json at the configured cadence, writes Control-owned
-// status to the runtime home, and tolerates non-atomic Bench publishes
-// through a bounded retry loop.
+// Long-running read-only supervisor. It samples AMD, GPU, and fan telemetry
+// in-process and republishes a Control-owned current_state.json plus
+// control_runtime.json into the runtime home.
 class ReadLoop {
   public:
     struct Status {
-        std::string status;              // "running" | "shutdown" | "child-died"
+        std::string status;              // "running" | "shutdown" | "direct-read-failed"
         std::string status_detail;
         std::string last_refresh_iso;    // empty until the first successful parse
         std::string snapshot_source;
@@ -27,16 +26,14 @@ class ReadLoop {
         std::uint32_t child_pid = 0u;
     };
 
-    ReadLoop(ControlConfig config,
-             std::filesystem::path runtime_home,
-             std::wstring bench_exe_path);
+    ReadLoop(ControlConfig config, std::filesystem::path runtime_home);
     ~ReadLoop();
 
     ReadLoop(const ReadLoop&) = delete;
     ReadLoop& operator=(const ReadLoop&) = delete;
 
-    // Runs until RequestStop() is called or the restart budget is exhausted.
-    // Returns 0 on clean shutdown, non-zero on terminal child failure.
+    // Runs until RequestStop() is called. Returns 0 on clean shutdown,
+    // non-zero on terminal direct reader failure.
     int RunUntilStopped();
 
     // Thread-safe. Signals the run loop to stop cooperatively.

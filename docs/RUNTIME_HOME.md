@@ -1,126 +1,105 @@
 # Runtime Home
 
-The runtime home is a Control-owned directory used by `--mode read-loop`.
-
 ## Location
 
-Resolution precedence, highest first:
+Runtime-home resolution precedence:
 
-1. `runtime_home_path` field from the loaded control config
-2. `runtime/` next to `svg-mb-control.exe`
-3. `runtime/` under the current working directory
+1. `runtime_home_path` from the loaded control config
+2. `runtime\` next to `svg-mb-control.exe`
+3. `runtime\` under the current working directory
 
-The directory is created at read-loop start via
-`std::filesystem::create_directories` if it does not exist.
+## Files
 
-`runtime_home_path` in the config is resolved relative to the config file's
-parent directory when given as a relative path.
+Control owns these files:
 
-## `control_runtime.json`
+- `current_state.json`
+- `control_runtime.json`
+- `pending_writes.json`
 
-One status file, rewritten on every poll cycle.
+## current_state.json
 
-### Publish mechanism
+Published by `one-shot`, `read-loop`, and `control-loop` payload builders.
 
-Written to `control_runtime.json.tmp` and published via
-`std::filesystem::rename`. This is atomic on Windows (MoveFileExW with
-MOVEFILE_REPLACE_EXISTING), so external readers do not observe torn content.
+Key fields:
 
-### Schema
+- `snapshot_time`
+- `policy_writes_enabled_present`
+- `policy_writes_enabled`
+- `amd_sensors`
+- `gpu`
+- `fans`
 
-```json
-{
-  "schema_version": 1,
-  "status": "running",
-  "status_detail": "spawning child",
-  "last_refresh": "2026-04-05T12:34:56",
-  "snapshot_source": "...absolute path...",
-  "restart_count": 0,
-  "skipped_polls": 0,
-  "successful_polls": 42,
-  "stale": false,
-  "child_pid": 0
-}
-```
+Each fan entry can include:
 
-### Field definitions
+- `channel`
+- `label`
+- `rpm`
+- `tach_raw`
+- `duty_raw`
+- `mode_raw`
+- `duty_percent`
+- `tach_valid`
+- `manual_override`
+- `write_allowed`
+- `policy_blocked`
+- `effective_write_allowed`
 
-- `schema_version`: integer. Always `1` in Phase 1.
-- `status`: one of `running`, `shutdown`, `child-died`.
-- `status_detail`: human-readable detail string for the last state transition.
-- `last_refresh`: local time ISO 8601 of the most recent successful
-  `snapshot_path` parse. Empty string until the first successful parse.
-- `snapshot_source`: absolute path of the Bench snapshot file being polled.
-- `restart_count`: number of times the Bench child has been re-spawned.
-- `skipped_polls`: count of polls that observed an unparseable snapshot (for
-  example, a torn Bench write) after exhausting the read retry budget.
-- `successful_polls`: count of polls that produced a parsed snapshot.
-- `stale`: `true` when time since the last successful parse exceeds
-  `staleness_threshold_ms`.
-- `child_pid`: currently unused. Reserved for Phase 2.
+## control_runtime.json
 
-## `pending_writes.json`
+`read-loop` writes a poll/status view:
 
-Phase 2 adds a second file owned by Control in the runtime home. It
-records fan writes that have been requested but not yet confirmed
-restored. Every Control startup reconciles this file before doing
-anything else.
+- `status`
+- `status_detail`
+- `last_refresh`
+- `snapshot_source`
+- `successful_polls`
+- `skipped_polls`
+- `stale`
+- `restart_count`
+- `child_pid`
 
-### Publish mechanism
+`restart_count` and `child_pid` remain `0` in the direct-only runtime.
 
-Written to `pending_writes.json.tmp` and published via
-`std::filesystem::rename`. Atomic on Windows.
+`control-loop` writes a control-status view:
 
-### Schema
+- `schema_version`
+- `mode`
+- `status`
+- `status_detail`
+- `loop_tick_count`
+- `loop_last_evaluation`
+- `controlled_channels`
 
-```json
-{
-  "schema_version": 1,
-  "entries": [
-    {
-      "channel": 3,
-      "baseline_duty_raw": 128,
-      "baseline_mode_raw": 5,
-      "target_pct": 60.0,
-      "requested_hold_ms": 30000,
-      "bench_started_iso": "2026-04-05T13:10:22",
-      "bench_child_pid": 0
-    }
-  ]
-}
-```
+Each controlled-channel entry includes:
 
-### Field definitions
+- `channel`
+- `total_writes`
+- `last_setpoint_pct`
+- `last_observed_temp_c`
+- `baseline_captured`
 
-- `schema_version`: integer. Always `1` in Phase 2.
-- `entries`: array. At most one entry per channel (upsert replaces).
-- `channel`: integer 0-6. Target fan channel.
-- `baseline_duty_raw`: integer 0-255. Pre-write duty register value
-  captured from a `read-snapshot` snapshot.
-- `baseline_mode_raw`: integer 0-255. Pre-write mode register value.
-- `target_pct`: number. The duty target Control requested.
-- `requested_hold_ms`: integer. Control's requested hold duration.
-- `bench_started_iso`: string. Local time when Control wrote the entry.
-- `bench_child_pid`: integer. Reserved for future use (Phase 2 writes 0).
+## pending_writes.json
 
-### Entry lifecycle
+Created by `write-once` and `control-loop` before a direct duty write is
+applied.
 
-1. Control writes the entry before spawning `set-fixed-duty`.
-2. Control removes the entry after `set-fixed-duty` exits with code 0.
-3. If the child exits non-zero or Control is killed, the entry stays
-   in the file.
-4. On next Control startup, reconciliation invokes
-   `restore-auto --channel <N> --saved-duty-raw <d> --saved-mode-raw <m>`
-   for each entry. Successful restore removes the entry. Failed restore
-   keeps the entry and blocks Control startup.
+Each entry includes:
 
-## Log files
+- `channel`
+- `baseline_duty_raw`
+- `baseline_mode_raw`
+- `target_pct`
+- `requested_hold_ms`
+- `started_iso`
+- `child_pid`
 
-Phase 1 does not write separate log files to the runtime home. Bench child
-stdout and stderr are drained into bounded in-memory tail buffers on the
-supervisor and are not persisted in Phase 1.
+`child_pid` is retained for schema continuity and is written as `0` by the
+current direct runtime.
 
-## Cleanup
+## Ownership Rules
 
-The runtime home is not cleaned up on Control exit. Operators may delete it
-between runs.
+- Control is the only writer of these files.
+- `snapshot_path`, when configured, is a mirror target for `current_state.json`;
+  it is not a separate authority.
+- Startup reconciliation uses `pending_writes.json` to restore incomplete writes
+  before any requested mode begins.

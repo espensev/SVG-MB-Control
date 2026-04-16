@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import shutil
@@ -16,419 +15,100 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = REPO_ROOT / "build" / "x64-release"
 CONTROL_EXE = BUILD_DIR / "svg-mb-control.exe"
-FAKE_BENCH_EXE = BUILD_DIR / "fake-bench.exe"
-REAL_BENCH_EXE = REPO_ROOT.parent / "SVG-MB-Bench" / "svg-mb-bench.exe"
-FAKE_SNAPSHOT = BUILD_DIR / "fake_logger_service_current_state.json"
-
-
-def _has_build_tools() -> bool:
-    return shutil.which("cmake") is not None and shutil.which("ninja") is not None
+BUILD_SCRIPT = REPO_ROOT / "build-release.ps1"
 
 
 def _ensure_release_build() -> None:
-    if CONTROL_EXE.is_file() and FAKE_BENCH_EXE.is_file():
+    if CONTROL_EXE.is_file():
         return
 
-    if not _has_build_tools():
-        raise unittest.SkipTest("cmake or ninja is not available")
-
-    configure = subprocess.run(
-        ["cmake", "--preset", "x64-release"],
+    result = subprocess.run(
+        [
+            "powershell",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(BUILD_SCRIPT),
+            "-SkipTests",
+            "-KeepBuildDir",
+        ],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
     )
-    if configure.returncode != 0:
+    if result.returncode != 0:
         raise unittest.SkipTest(
-            "cmake configure failed:\n"
-            f"{configure.stdout}\n{configure.stderr}"
-        )
-
-    build = subprocess.run(
-        ["cmake", "--build", "--preset", "x64-release"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if build.returncode != 0:
-        raise unittest.SkipTest(
-            "cmake build failed:\n"
-            f"{build.stdout}\n{build.stderr}"
+            "release build failed:\n"
+            f"{result.stdout}\n{result.stderr}"
         )
 
 
-def _run_control(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
-    merged_env = os.environ.copy()
-    if env:
-        merged_env.update(env)
-    return subprocess.run(
-        [str(CONTROL_EXE), *args],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        env=merged_env,
-    )
-
-
-def _is_elevated() -> bool:
-    if sys.platform != "win32":
-        return False
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
-
-
-class SmokeTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
-    def test_default_logger_service_outputs_json(self) -> None:
-        result = _run_control("--bench-exe-path", str(FAKE_BENCH_EXE))
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-
-        data = json.loads(result.stdout)
-        self.assertEqual(data["source"], "fake-bench")
-        self.assertEqual(data["command"], "logger-service")
-        self.assertEqual(data["mode"], "success")
-        self.assertEqual(data["duration_ms"], 1000)
-        self.assertEqual(data["sample"], 1)
-
-    def test_read_snapshot_mode_outputs_json(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            "--bridge-command",
-            "read-snapshot",
-        )
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-
-        data = json.loads(result.stdout)
-        self.assertEqual(data["source"], "fake-bench")
-        self.assertEqual(data["command"], "read-snapshot")
-        self.assertEqual(data["duration_ms"], 0)
-
-    def test_logger_service_missing_snapshot_path_fails(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            env={"SVG_MB_CONTROL_FAKE_MODE": "missing_snapshot_path"},
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("snapshot_path", result.stderr)
-
-    def test_read_snapshot_missing_snapshot_archive_fails(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            "--bridge-command",
-            "read-snapshot",
-            env={"SVG_MB_CONTROL_FAKE_MODE": "missing_snapshot_path"},
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("snapshot_archive", result.stderr)
-
-    def test_logger_service_missing_snapshot_file_fails(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            env={"SVG_MB_CONTROL_FAKE_MODE": "missing_snapshot_file"},
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("JSON file not found", result.stderr)
-
-    def test_logger_service_nonzero_exit_fails(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            env={"SVG_MB_CONTROL_FAKE_MODE": "fail_exit"},
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("logger-service exited", result.stderr)
-
-    def test_logger_service_duration_override_flows_to_bench(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            "--duration-ms",
-            "2500",
-        )
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-        data = json.loads(result.stdout)
-        self.assertEqual(data["command"], "logger-service")
-        self.assertEqual(data["duration_ms"], 2500)
-
-    def test_read_snapshot_rejects_duration_override(self) -> None:
-        result = _run_control(
-            "--bench-exe-path",
-            str(FAKE_BENCH_EXE),
-            "--bridge-command",
-            "read-snapshot",
-            "--duration-ms",
-            "2500",
-        )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("only valid with --bridge-command logger-service", result.stderr)
-
-    def test_config_file_supplies_bench_exe_path(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            config_path = Path(td) / "control.json"
-            snapshot_path = BUILD_DIR / "fake_logger_service_current_state.json"
-            config_path.write_text(
-                "{\n"
-                f'  "schema_version": 1,\n'
-                f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}",\n'
-                '  "poll_ms": 2100,\n'
-                f'  "snapshot_path": "{snapshot_path.as_posix()}"\n'
-                "}\n",
-                encoding="utf-8",
-            )
-
-            result = _run_control("--config", str(config_path))
-
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-        data = json.loads(result.stdout)
-        self.assertEqual(data["source"], "fake-bench")
-        self.assertEqual(data["command"], "logger-service")
-        self.assertEqual(data["duration_ms"], 2100)
-
-    def test_env_bench_path_supplies_bench_exe_path(self) -> None:
-        result = _run_control(env={"SVG_MB_CONTROL_BENCH_EXE": str(FAKE_BENCH_EXE)})
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-        data = json.loads(result.stdout)
-        self.assertEqual(data["source"], "fake-bench")
-        self.assertEqual(data["command"], "logger-service")
-
-    def test_env_config_path_supplies_bench_exe_path(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            config_path = Path(td) / "control.json"
-            config_path.write_text(
-                "{\n"
-                '  "schema_version": 1,\n'
-                f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}"\n'
-                "}\n",
-                encoding="utf-8",
-            )
-
-            result = _run_control(env={"SVG_MB_CONTROL_CONFIG": str(config_path)})
-
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-        data = json.loads(result.stdout)
-        self.assertEqual(data["source"], "fake-bench")
-        self.assertEqual(data["command"], "logger-service")
-
-    def test_zero_arg_release_style_launch_uses_control_json_default_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            staged_control = td / "svg-mb-control.exe"
-            staged_fake_bench = td / "fake-bench.exe"
-            runtime_home = td / "runtime"
-            snapshot_path = td / "fake_logger_service_current_state.json"
-            shutil.copy2(CONTROL_EXE, staged_control)
-            shutil.copy2(FAKE_BENCH_EXE, staged_fake_bench)
-
-            cfg = {
-                "schema_version": 4,
-                "default_mode": "control-loop",
-                "bench_exe_path": "fake-bench.exe",
-                "snapshot_path": "fake_logger_service_current_state.json",
-                "runtime_home_path": "runtime",
-                "poll_ms": 100,
-                "snapshot_read_retry_count": 3,
-                "snapshot_read_retry_backoff_ms": 10,
-                "baseline_freshness_ceiling_ms": 10000,
-                "restore_timeout_ms": 5000,
-                "control_loop": {
-                    "poll_tick_ms": 200,
-                    "write_cooldown_ms": 400,
-                    "deadband_pct": 2.0,
-                    "control_hold_ms": 800,
-                    "cpu_temp_label": "Tctl/Tdie",
-                    "logger_service_duration_ms": 10000,
-                    "channels": [
-                        {
-                            "channel": 0,
-                            "temp_blend": "cpu_only",
-                            "min_duty_pct": 40.0,
-                            "curve": [
-                                {"temp_c": 30.0, "duty_pct": 40.0},
-                                {"temp_c": 60.0, "duty_pct": 55.0},
-                                {"temp_c": 80.0, "duty_pct": 80.0},
-                                {"temp_c": 95.0, "duty_pct": 100.0},
-                            ],
-                        }
-                    ],
-                },
-            }
-            (td / "control.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-
-            env = os.environ.copy()
-            env["SVG_MB_CONTROL_FAKE_MODE"] = "emit_snapshots"
-            env["SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS"] = "100"
-            env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = "1"
-            env["SVG_MB_CONTROL_FAKE_CPU_TCTL_C"] = "75"
-
-            proc = subprocess.Popen(
-                [str(staged_control)],
-                cwd=td,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-            )
-            try:
-                observed = _wait_for(
-                    lambda: (_read_runtime_status(runtime_home) or {}).get(
-                        "mode"
-                    )
-                    == "control-loop",
-                    timeout_s=5.0,
-                )
-                self.assertTrue(
-                    observed,
-                    msg=(
-                        "zero-arg release-style launch did not enter control-loop; "
-                        f"status={_read_runtime_status(runtime_home)}"
-                    ),
-                )
-            finally:
-                try:
-                    proc.send_signal(signal.CTRL_BREAK_EVENT)
-                except Exception:
-                    pass
-                try:
-                    _stdout, _stderr = proc.communicate(timeout=4.0)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    _stdout, _stderr = proc.communicate()
-                final_status = _read_runtime_status(runtime_home)
-                self.assertIsNotNone(final_status)
-                self.assertEqual(
-                    final_status["status"],
-                    "shutdown",
-                    msg=f"zero-arg release-style launch did not reach shutdown; stderr={_stderr}",
-                )
-
-    def test_config_snapshot_path_mismatch_fails_for_logger_service(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            config_path = Path(td) / "control.json"
-            wrong_snapshot_path = Path(td) / "wrong_current_state.json"
-            config_path.write_text(
-                "{\n"
-                '  "schema_version": 1,\n'
-                f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}",\n'
-                '  "poll_ms": 1000,\n'
-                f'  "snapshot_path": "{wrong_snapshot_path.as_posix()}"\n'
-                "}\n",
-                encoding="utf-8",
-            )
-
-            result = _run_control("--config", str(config_path))
-
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("snapshot_path does not match", result.stderr)
-
-    def test_explicit_missing_config_fails(self) -> None:
-        missing_path = REPO_ROOT / "config" / "does_not_exist.json"
-        result = _run_control("--config", str(missing_path))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Control config not found", result.stderr)
-
-    def test_real_bench_integration_if_available(self) -> None:
-        if not REAL_BENCH_EXE.is_file():
-            self.skipTest("real sibling Bench exe is not present")
-        if not _is_elevated():
-            self.skipTest("real Bench integration requires elevation")
-
-        result = _run_control("--bench-exe-path", str(REAL_BENCH_EXE))
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-
-        data = json.loads(result.stdout)
-        self.assertIsInstance(data, dict)
-        self.assertTrue(data, msg="live snapshot JSON object is empty")
-
-    def test_real_bench_read_snapshot_integration_if_available(self) -> None:
-        if not REAL_BENCH_EXE.is_file():
-            self.skipTest("real sibling Bench exe is not present")
-        if not _is_elevated():
-            self.skipTest("real Bench integration requires elevation")
-
-        result = _run_control(
-            "--bench-exe-path",
-            str(REAL_BENCH_EXE),
-            "--bridge-command",
-            "read-snapshot",
-        )
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-
-        data = json.loads(result.stdout)
-        self.assertIsInstance(data, dict)
-        self.assertTrue(data, msg="live snapshot JSON object is empty")
-
-
-def _write_read_loop_config(
-    td: Path,
-    *,
-    runtime_home: Path,
-    snapshot_path: Path,
-    poll_ms: int,
-    duration_ms: int,
-    staleness_threshold_ms: int | None = None,
-    retry_count: int = 3,
-    retry_backoff_ms: int = 10,
-    child_restart_budget: int = 3,
-    child_restart_backoff_ms: int = 100,
-) -> Path:
-    fields = [
-        '  "schema_version": 2',
-        f'  "bench_exe_path": "{FAKE_BENCH_EXE.as_posix()}"',
-        f'  "snapshot_path": "{snapshot_path.as_posix()}"',
-        f'  "poll_ms": {poll_ms}',
-        f'  "runtime_home_path": "{runtime_home.as_posix()}"',
-        f'  "snapshot_read_retry_count": {retry_count}',
-        f'  "snapshot_read_retry_backoff_ms": {retry_backoff_ms}',
-        f'  "child_restart_budget": {child_restart_budget}',
-        f'  "child_restart_backoff_ms": {child_restart_backoff_ms}',
-        f'  "logger_service_duration_ms": {duration_ms}',
-    ]
-    if staleness_threshold_ms is not None:
-        fields.append(f'  "staleness_threshold_ms": {staleness_threshold_ms}')
-    config_path = td / "control.json"
-    config_path.write_text("{\n" + ",\n".join(fields) + "\n}\n", encoding="utf-8")
-    return config_path
-
-
-def _spawn_read_loop(
-    config_path: Path,
-    *,
-    env_additions: dict[str, str] | None = None,
-) -> subprocess.Popen[str]:
+def _merged_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
-    if env_additions:
-        env.update(env_additions)
+    env.setdefault("SVG_MB_CONTROL_SIM_DIRECT_AMD_MODE", "disabled")
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _sim_direct_env(
+    *,
+    channel: int = 0,
+    amd_temp_c: float = 75.0,
+    duty_raw: int = 128,
+    mode_raw: int = 5,
+    read_channel: int | None = None,
+    read_duty_raw: int | None = None,
+    read_mode_raw: int | None = None,
+) -> dict[str, str]:
+    env = {
+        "SVG_MB_CONTROL_SIM_DIRECT_WRITE_MODE": "enabled",
+        "SVG_MB_CONTROL_SIM_DIRECT_AMD_MODE": "enabled",
+        "SVG_MB_CONTROL_SIM_AMD_TCTL_C": str(amd_temp_c),
+        "SVG_MB_CONTROL_SIM_FAN_CHANNEL": str(channel),
+        "SVG_MB_CONTROL_SIM_FAN_DUTY_RAW": str(duty_raw),
+        "SVG_MB_CONTROL_SIM_FAN_MODE_RAW": str(mode_raw),
+    }
+    if read_channel is not None:
+        env["SVG_MB_CONTROL_SIM_READ_FAN_CHANNEL"] = str(read_channel)
+    if read_duty_raw is not None:
+        env["SVG_MB_CONTROL_SIM_READ_FAN_DUTY_RAW"] = str(read_duty_raw)
+    if read_mode_raw is not None:
+        env["SVG_MB_CONTROL_SIM_READ_FAN_MODE_RAW"] = str(read_mode_raw)
+    return env
+
+
+def _run_control(
+    *args: str,
+    env: dict[str, str] | None = None,
+    cwd: Path = REPO_ROOT,
+    exe: Path = CONTROL_EXE,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(exe), *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=_merged_env(env),
+    )
+
+
+def _spawn_control(
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+    cwd: Path = REPO_ROOT,
+    exe: Path = CONTROL_EXE,
+) -> subprocess.Popen[str]:
     return subprocess.Popen(
-        [str(CONTROL_EXE), "--mode", "read-loop", "--config", str(config_path)],
-        cwd=REPO_ROOT,
+        [str(exe), *args],
+        cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        env=env,
+        env=_merged_env(env),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
-
-
-def _read_runtime_status(runtime_home: Path) -> dict | None:
-    status_path = runtime_home / "control_runtime.json"
-    if not status_path.is_file():
-        return None
-    try:
-        return json.loads(status_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
 
 
 def _wait_for(predicate, timeout_s: float, poll_s: float = 0.05):
@@ -441,6 +121,274 @@ def _wait_for(predicate, timeout_s: float, poll_s: float = 0.05):
     return predicate()
 
 
+def _stop_and_wait(
+    proc: subprocess.Popen[str], *, graceful_timeout_s: float = 4.0
+) -> tuple[int, str, str]:
+    try:
+        proc.send_signal(signal.CTRL_BREAK_EVENT)
+    except Exception:
+        pass
+    try:
+        stdout, stderr = proc.communicate(timeout=graceful_timeout_s)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+    return proc.returncode, stdout or "", stderr or ""
+
+
+def _read_json(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _read_runtime_status(runtime_home: Path) -> dict | None:
+    return _read_json(runtime_home / "control_runtime.json")
+
+
+def _read_runtime_current_state(runtime_home: Path) -> dict | None:
+    return _read_json(runtime_home / "current_state.json")
+
+
+def _read_pending_writes(runtime_home: Path) -> list[dict]:
+    data = _read_json(runtime_home / "pending_writes.json")
+    if not data:
+        return []
+    return data.get("entries", [])
+
+
+def _seed_pending_writes(runtime_home: Path, entries: list[dict]) -> None:
+    runtime_home.mkdir(parents=True, exist_ok=True)
+    payload = {"schema_version": 1, "entries": entries}
+    (runtime_home / "pending_writes.json").write_text(
+        json.dumps(payload, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_json(path: Path, payload: dict) -> Path:
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _write_read_loop_config(
+    td: Path,
+    *,
+    runtime_home: Path,
+    snapshot_path: Path | None = None,
+    default_mode: str | None = None,
+    poll_ms: int = 100,
+    staleness_threshold_ms: int | None = None,
+) -> Path:
+    cfg: dict[str, object] = {
+        "schema_version": 4,
+        "runtime_home_path": runtime_home.as_posix(),
+        "poll_ms": poll_ms,
+        "baseline_freshness_ceiling_ms": 10000,
+        "restore_timeout_ms": 5000,
+    }
+    if default_mode is not None:
+        cfg["default_mode"] = default_mode
+    if snapshot_path is not None:
+        cfg["snapshot_path"] = snapshot_path.as_posix()
+    if staleness_threshold_ms is not None:
+        cfg["staleness_threshold_ms"] = staleness_threshold_ms
+    return _write_json(td / "control.json", cfg)
+
+
+def _write_write_once_config(
+    td: Path,
+    *,
+    runtime_home: Path,
+    baseline_freshness_ceiling_ms: int = 10000,
+    restore_timeout_ms: int = 5000,
+    write_channel: int | None = None,
+    write_target_pct: float | None = None,
+    write_hold_ms: int | None = None,
+) -> Path:
+    cfg: dict[str, object] = {
+        "schema_version": 4,
+        "runtime_home_path": runtime_home.as_posix(),
+        "baseline_freshness_ceiling_ms": baseline_freshness_ceiling_ms,
+        "restore_timeout_ms": restore_timeout_ms,
+    }
+    if write_channel is not None:
+        cfg["write_channel"] = write_channel
+    if write_target_pct is not None:
+        cfg["write_target_pct"] = write_target_pct
+    if write_hold_ms is not None:
+        cfg["write_hold_ms"] = write_hold_ms
+    return _write_json(td / "control.json", cfg)
+
+
+def _write_control_loop_config(
+    td: Path,
+    *,
+    runtime_home: Path,
+    channel: int,
+    runtime_policy_path: Path | None = None,
+    poll_tick_ms: int = 200,
+    write_cooldown_ms: int = 500,
+    deadband_pct: float = 3.0,
+    control_hold_ms: int = 1000,
+    curve: list[tuple[float, float]] | None = None,
+    min_duty_pct: float = 40.0,
+    temp_blend: str = "cpu_only",
+    channel_write_cooldown_ms: int | None = None,
+    channel_deadband_pct: float | None = None,
+    channel_control_hold_ms: int | None = None,
+) -> Path:
+    if curve is None:
+        curve = [(30.0, 40.0), (60.0, 55.0), (80.0, 80.0), (95.0, 100.0)]
+
+    channel_cfg: dict[str, object] = {
+        "channel": channel,
+        "temp_blend": temp_blend,
+        "min_duty_pct": min_duty_pct,
+        "curve": [{"temp_c": t, "duty_pct": d} for (t, d) in curve],
+    }
+    if channel_write_cooldown_ms is not None:
+        channel_cfg["write_cooldown_ms"] = channel_write_cooldown_ms
+    if channel_deadband_pct is not None:
+        channel_cfg["deadband_pct"] = channel_deadband_pct
+    if channel_control_hold_ms is not None:
+        channel_cfg["control_hold_ms"] = channel_control_hold_ms
+
+    cfg: dict[str, object] = {
+        "schema_version": 4,
+        "runtime_home_path": runtime_home.as_posix(),
+        "poll_ms": 100,
+        "baseline_freshness_ceiling_ms": 10000,
+        "restore_timeout_ms": 5000,
+        "control_loop": {
+            "poll_tick_ms": poll_tick_ms,
+            "write_cooldown_ms": write_cooldown_ms,
+            "deadband_pct": deadband_pct,
+            "control_hold_ms": control_hold_ms,
+            "cpu_temp_label": "Tctl/Tdie",
+            "channels": [channel_cfg],
+        },
+    }
+    if runtime_policy_path is not None:
+        cfg["runtime_policy_path"] = runtime_policy_path.as_posix()
+    return _write_json(td / "control.json", cfg)
+
+
+class SmokeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest("Windows-only repo")
+        _ensure_release_build()
+
+    def test_direct_one_shot_outputs_json(self) -> None:
+        result = _run_control(
+            "--mode",
+            "one-shot",
+            env=_sim_direct_env(channel=0, amd_temp_c=81.5, duty_raw=128, mode_raw=5),
+        )
+        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["amd_sensors"][0]["label"], "Tctl/Tdie")
+        self.assertEqual(data["amd_sensors"][0]["temperature_c"], 81.5)
+        self.assertEqual(data["fans"][0]["channel"], 0)
+        self.assertEqual(data["fans"][0]["duty_raw"], 128)
+        self.assertEqual(data["fans"][0]["mode_raw"], 5)
+
+    def test_diagnose_amd_sim_mode_outputs_snapshot(self) -> None:
+        result = _run_control(
+            "--diagnose-amd",
+            env={
+                "SVG_MB_CONTROL_SIM_DIRECT_AMD_MODE": "enabled",
+                "SVG_MB_CONTROL_SIM_AMD_TCTL_C": "82.5",
+            },
+        )
+        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+        self.assertIn("amd_reader.available: true", result.stdout)
+        self.assertIn('sample.available: true', result.stdout)
+        self.assertIn('sample[0].label: "Tctl/Tdie"', result.stdout)
+        self.assertIn("sample[0].temperature_c: 82.5", result.stdout)
+
+    def test_removed_bridge_flags_fail_clearly(self) -> None:
+        result = _run_control("--bridge-exe-path", "legacy-bridge.exe")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Legacy bridge options were removed", result.stderr)
+
+    def test_removed_bridge_config_fields_fail_clearly(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            config_path = _write_json(
+                td / "control.json",
+                {
+                    "schema_version": 4,
+                    "default_mode": "one-shot",
+                    "bridge_exe_path": "legacy-bridge.exe",
+                },
+            )
+            result = _run_control("--config", str(config_path))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Legacy control config field was removed: bridge_exe_path",
+                result.stderr,
+            )
+
+    def test_removed_bench_runtime_policy_alias_fails_clearly(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            config_path = _write_json(
+                td / "control.json",
+                {
+                    "schema_version": 4,
+                    "default_mode": "one-shot",
+                    "bench_runtime_policy_path": "runtime_policy_write_live.json",
+                },
+            )
+            result = _run_control("--config", str(config_path))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Legacy control config field was removed: bench_runtime_policy_path",
+                result.stderr,
+            )
+
+    def test_zero_arg_staged_launch_uses_control_json_default_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            staged_exe = td / "svg-mb-control.exe"
+            runtime_home = td / "runtime"
+            shutil.copy2(CONTROL_EXE, staged_exe)
+            _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                default_mode="read-loop",
+                poll_ms=100,
+            )
+
+            proc = _spawn_control(
+                [],
+                cwd=td,
+                exe=staged_exe,
+                env=_sim_direct_env(channel=1, amd_temp_c=74.0),
+            )
+            try:
+                status = _wait_for(
+                    lambda: _read_runtime_status(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status, msg="control_runtime.json never appeared")
+                state = _wait_for(
+                    lambda: _read_runtime_current_state(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(state, msg="current_state.json never appeared")
+                self.assertEqual(state["fans"][0]["channel"], 1)
+                self.assertEqual(state["amd_sensors"][0]["temperature_c"], 74.0)
+            finally:
+                _stop_and_wait(proc)
+
+
 class ReadLoopTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -448,263 +396,87 @@ class ReadLoopTests(unittest.TestCase):
             raise unittest.SkipTest("Windows-only repo")
         _ensure_release_build()
 
-    def setUp(self) -> None:
-        if FAKE_SNAPSHOT.is_file():
-            FAKE_SNAPSHOT.unlink()
-
-    def _stop_and_wait(
-        self,
-        proc: subprocess.Popen[str],
-        *,
-        graceful_timeout_s: float = 3.0,
-    ) -> tuple[int, str, str]:
-        try:
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        except Exception:
-            pass
-        try:
-            stdout, stderr = proc.communicate(timeout=graceful_timeout_s)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            stdout, stderr = proc.communicate()
-        return proc.returncode, stdout or "", stderr or ""
-
-    def test_read_loop_runtime_home_created(self) -> None:
+    def test_read_loop_publishes_control_owned_current_state_and_mirror(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
+            snapshot_path = td / "mirror" / "current_state.json"
             config_path = _write_read_loop_config(
                 td,
                 runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
-                poll_ms=150,
-                duration_ms=3000,
+                snapshot_path=snapshot_path,
+                poll_ms=100,
             )
-            proc = _spawn_read_loop(
-                config_path,
-                env_additions={
-                    "SVG_MB_CONTROL_FAKE_MODE": "emit_snapshots",
-                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
-                },
+            proc = _spawn_control(
+                ["--mode", "read-loop", "--config", str(config_path)],
+                env=_sim_direct_env(
+                    channel=0,
+                    amd_temp_c=83.0,
+                    duty_raw=90,
+                    mode_raw=7,
+                    read_channel=0,
+                    read_duty_raw=222,
+                    read_mode_raw=7,
+                ),
             )
             try:
-                status = _wait_for(
-                    lambda: _read_runtime_status(runtime_home), timeout_s=3.0
+                state = _wait_for(
+                    lambda: _read_runtime_current_state(runtime_home),
+                    timeout_s=5.0,
                 )
-                self.assertIsNotNone(status, msg="runtime status file never appeared")
-                self.assertTrue(runtime_home.is_dir())
-                self.assertEqual(status["schema_version"], 1)
-            finally:
-                self._stop_and_wait(proc)
+                self.assertIsNotNone(state, msg="current_state.json never appeared")
+                status = _wait_for(
+                    lambda: _read_runtime_status(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status, msg="control_runtime.json never appeared")
+                mirror = _wait_for(
+                    lambda: _read_json(snapshot_path),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(mirror, msg="snapshot mirror never appeared")
 
-    def test_read_loop_refreshes_snapshot(self) -> None:
+                fan0 = next(fan for fan in state["fans"] if fan["channel"] == 0)
+                self.assertEqual(fan0["duty_raw"], 222)
+                self.assertEqual(fan0["mode_raw"], 7)
+                self.assertEqual(state["amd_sensors"][0]["temperature_c"], 83.0)
+                self.assertEqual(mirror["fans"][0]["duty_raw"], 222)
+                self.assertGreaterEqual(status["successful_polls"], 1)
+                self.assertEqual(status["restart_count"], 0)
+                self.assertEqual(status["child_pid"], 0)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_read_loop_shutdown_updates_runtime_status(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
             config_path = _write_read_loop_config(
                 td,
                 runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
-                poll_ms=150,
-                duration_ms=5000,
+                poll_ms=100,
             )
-            proc = _spawn_read_loop(
-                config_path,
-                env_additions={
-                    "SVG_MB_CONTROL_FAKE_MODE": "emit_snapshots",
-                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
-                },
+            proc = _spawn_control(
+                ["--mode", "read-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=70.0),
             )
             try:
                 observed = _wait_for(
                     lambda: (_read_runtime_status(runtime_home) or {}).get(
                         "successful_polls", 0
                     )
-                    >= 2,
-                    timeout_s=4.0,
-                )
-                self.assertTrue(
-                    observed,
-                    msg=f"never saw two successful polls; status={_read_runtime_status(runtime_home)}",
-                )
-                status = _read_runtime_status(runtime_home)
-                self.assertEqual(status["status"], "running")
-                self.assertFalse(status["stale"])
-                self.assertTrue(status["last_refresh"])
-            finally:
-                self._stop_and_wait(proc)
-
-    def test_read_loop_restarts_child_on_crash(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
-                poll_ms=100,
-                duration_ms=10000,
-                child_restart_budget=5,
-                child_restart_backoff_ms=100,
-            )
-            proc = _spawn_read_loop(
-                config_path,
-                env_additions={
-                    "SVG_MB_CONTROL_FAKE_MODE": "crash_after_ms",
-                    "SVG_MB_CONTROL_FAKE_CRASH_AFTER_MS": "200",
-                },
-            )
-            try:
-                observed = _wait_for(
-                    lambda: (_read_runtime_status(runtime_home) or {}).get(
-                        "restart_count", 0
-                    )
                     >= 1,
-                    timeout_s=4.0,
+                    timeout_s=5.0,
                 )
-                self.assertTrue(
-                    observed,
-                    msg=f"child never restarted; status={_read_runtime_status(runtime_home)}",
-                )
+                self.assertTrue(observed)
             finally:
-                self._stop_and_wait(proc)
+                code, _, stderr = _stop_and_wait(proc)
 
-    def test_read_loop_exits_on_ctrl_c(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
-                poll_ms=150,
-                duration_ms=20000,
-            )
-            proc = _spawn_read_loop(
-                config_path,
-                env_additions={
-                    "SVG_MB_CONTROL_FAKE_MODE": "emit_snapshots",
-                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
-                },
-            )
-            _wait_for(lambda: _read_runtime_status(runtime_home), timeout_s=3.0)
-            returncode, _stdout, _stderr = self._stop_and_wait(proc)
-            self.assertEqual(returncode, 0)
+            self.assertEqual(code, 0, msg=stderr)
             final_status = _read_runtime_status(runtime_home)
             self.assertIsNotNone(final_status)
             self.assertEqual(final_status["status"], "shutdown")
-
-    def test_read_loop_staleness_detection(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
-                poll_ms=100,
-                duration_ms=20000,
-                staleness_threshold_ms=300,
-                child_restart_budget=0,
-            )
-            proc = _spawn_read_loop(
-                config_path,
-                env_additions={
-                    "SVG_MB_CONTROL_FAKE_MODE": "idle_after_emit",
-                },
-            )
-            try:
-                # Child writes one snapshot, then idles for the configured
-                # logger_service_duration_ms. Control sees mtime stop
-                # advancing, and once staleness_threshold_ms elapses from the
-                # last successful poll, the stale flag must flip to true.
-                observed_stale = _wait_for(
-                    lambda: (_read_runtime_status(runtime_home) or {}).get("stale")
-                    is True,
-                    timeout_s=4.0,
-                )
-                self.assertTrue(
-                    observed_stale,
-                    msg=f"staleness flag never set; status={_read_runtime_status(runtime_home)}",
-                )
-            finally:
-                self._stop_and_wait(proc)
-
-    def test_read_loop_tolerates_torn_writes(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
-                poll_ms=100,
-                duration_ms=5000,
-                retry_count=0,
-                retry_backoff_ms=5,
-            )
-            proc = _spawn_read_loop(
-                config_path,
-                env_additions={
-                    "SVG_MB_CONTROL_FAKE_MODE": "torn_writes",
-                    "SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS": "100",
-                    "SVG_MB_CONTROL_FAKE_TORN_HOLD_MS": "50",
-                },
-            )
-            try:
-                observed = _wait_for(
-                    lambda: (
-                        (_read_runtime_status(runtime_home) or {}).get(
-                            "successful_polls", 0
-                        )
-                        >= 1
-                        and (_read_runtime_status(runtime_home) or {}).get(
-                            "skipped_polls", 0
-                        )
-                        >= 1
-                    ),
-                    timeout_s=5.0,
-                )
-                self.assertTrue(
-                    observed,
-                    msg=f"torn writes not exercised; status={_read_runtime_status(runtime_home)}",
-                )
-            finally:
-                self._stop_and_wait(proc)
-
-
-def _write_phase2_config(
-    td: Path,
-    *,
-    runtime_home: Path,
-    baseline_freshness_ceiling_ms: int = 10000,
-    restore_timeout_ms: int = 5000,
-) -> Path:
-    cfg = {
-        "schema_version": 3,
-        "bench_exe_path": FAKE_BENCH_EXE.as_posix(),
-        "runtime_home_path": runtime_home.as_posix(),
-        "baseline_freshness_ceiling_ms": baseline_freshness_ceiling_ms,
-        "restore_timeout_ms": restore_timeout_ms,
-    }
-    config_path = td / "control.json"
-    config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    return config_path
-
-
-def _read_pending_writes(runtime_home: Path) -> list[dict]:
-    path = runtime_home / "pending_writes.json"
-    if not path.is_file():
-        return []
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data.get("entries", [])
-
-
-def _seed_pending_writes(runtime_home: Path, entries: list[dict]) -> None:
-    runtime_home.mkdir(parents=True, exist_ok=True)
-    path = runtime_home / "pending_writes.json"
-    payload = {"schema_version": 1, "entries": entries}
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            self.assertEqual(final_status["status_detail"], "stop requested")
 
 
 class WriteOnceTests(unittest.TestCase):
@@ -718,8 +490,7 @@ class WriteOnceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = {"SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0"}
+            config_path = _write_write_once_config(td, runtime_home=runtime_home)
             result = _run_control(
                 "--mode",
                 "write-once",
@@ -731,28 +502,42 @@ class WriteOnceTests(unittest.TestCase):
                 "50",
                 "--write-hold-ms",
                 "200",
-                env=env,
+                env=_sim_direct_env(channel=0, amd_temp_c=76.0),
             )
-            self.assertEqual(
-                result.returncode,
-                0,
-                msg=f"stdout={result.stdout}\nstderr={result.stderr}",
+            self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+            self.assertEqual(_read_pending_writes(runtime_home), [])
+
+    def test_write_once_uses_env_config_path_and_config_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_write_once_config(
+                td,
+                runtime_home=runtime_home,
+                write_channel=0,
+                write_target_pct=45.0,
+                write_hold_ms=150,
             )
+            result = _run_control(
+                "--mode",
+                "write-once",
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=76.0),
+                    "SVG_MB_CONTROL_CONFIG": str(config_path),
+                },
+            )
+            self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
             self.assertEqual(_read_pending_writes(runtime_home), [])
 
     def test_write_once_baseline_stale_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
-            config_path = _write_phase2_config(
+            config_path = _write_write_once_config(
                 td,
                 runtime_home=runtime_home,
                 baseline_freshness_ceiling_ms=500,
             )
-            env = {
-                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
-                "SVG_MB_CONTROL_FAKE_SNAPSHOT_OFFSET_MS": "5000",
-            }
             result = _run_control(
                 "--mode",
                 "write-once",
@@ -764,7 +549,10 @@ class WriteOnceTests(unittest.TestCase):
                 "50",
                 "--write-hold-ms",
                 "200",
-                env=env,
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=76.0),
+                    "SVG_MB_CONTROL_SIM_SNAPSHOT_OFFSET_MS": "5000",
+                },
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("snapshot age", result.stderr)
@@ -774,12 +562,7 @@ class WriteOnceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = {
-                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
-                "SVG_MB_CONTROL_FAKE_EFFECTIVE_WRITE_ALLOWED": "false",
-                "SVG_MB_CONTROL_FAKE_POLICY_BLOCKED": "true",
-            }
+            config_path = _write_write_once_config(td, runtime_home=runtime_home)
             result = _run_control(
                 "--mode",
                 "write-once",
@@ -791,116 +574,15 @@ class WriteOnceTests(unittest.TestCase):
                 "50",
                 "--write-hold-ms",
                 "200",
-                env=env,
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=76.0),
+                    "SVG_MB_CONTROL_SIM_EFFECTIVE_WRITE_ALLOWED": "false",
+                    "SVG_MB_CONTROL_SIM_POLICY_BLOCKED": "true",
+                },
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("effective_write_allowed=false", result.stderr)
             self.assertEqual(_read_pending_writes(runtime_home), [])
-
-    def test_write_once_refused_on_writes_disabled(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = {
-                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
-                "SVG_MB_CONTROL_FAKE_POLICY_WRITES_ENABLED": "false",
-            }
-            result = _run_control(
-                "--mode",
-                "write-once",
-                "--config",
-                str(config_path),
-                "--write-channel",
-                "0",
-                "--write-pct",
-                "50",
-                "--write-hold-ms",
-                "200",
-                env=env,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("writes_enabled=false", result.stderr)
-            self.assertEqual(_read_pending_writes(runtime_home), [])
-
-    def test_write_once_child_exit_2_clears_sidecar(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            # Snapshot has policy_writes_enabled=true so Control passes the
-            # pre-spawn check and writes the sidecar. The fake child then
-            # exits with code 2 (policy refusal), which Control treats as
-            # "no fan touched" and clears the sidecar.
-            env = {
-                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
-                "SVG_MB_CONTROL_FAKE_POLICY_WRITES_ENABLED": "true",
-                "SVG_MB_CONTROL_FAKE_WRITE_MODE": "policy_refused",
-            }
-            result = _run_control(
-                "--mode",
-                "write-once",
-                "--config",
-                str(config_path),
-                "--write-channel",
-                "0",
-                "--write-pct",
-                "50",
-                "--write-hold-ms",
-                "200",
-                env=env,
-            )
-            self.assertEqual(result.returncode, 2)
-            self.assertEqual(_read_pending_writes(runtime_home), [])
-
-    def test_write_once_child_nonzero_keeps_sidecar(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = {
-                "SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0",
-                "SVG_MB_CONTROL_FAKE_WRITE_MODE": "fail_immediate",
-            }
-            result = _run_control(
-                "--mode",
-                "write-once",
-                "--config",
-                str(config_path),
-                "--write-channel",
-                "0",
-                "--write-pct",
-                "50",
-                "--write-hold-ms",
-                "200",
-                env=env,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            entries = _read_pending_writes(runtime_home)
-            self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]["channel"], 0)
-
-    def test_write_once_channel_not_in_snapshot_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = {"SVG_MB_CONTROL_FAKE_FAN_CHANNEL": "0"}
-            result = _run_control(
-                "--mode",
-                "write-once",
-                "--config",
-                str(config_path),
-                "--write-channel",
-                "3",
-                "--write-pct",
-                "50",
-                "--write-hold-ms",
-                "200",
-                env=env,
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("not present in snapshot", result.stderr)
 
     def test_reconcile_runs_restore_on_startup(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -915,24 +597,18 @@ class WriteOnceTests(unittest.TestCase):
                         "baseline_mode_raw": 5,
                         "target_pct": 60.0,
                         "requested_hold_ms": 0,
-                        "bench_started_iso": "2026-04-05T01:00:00",
-                        "bench_child_pid": 0,
+                        "started_iso": "2026-04-05T01:00:00",
+                        "child_pid": 0,
                     }
                 ],
             )
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            # Use one-shot mode; reconciliation runs first regardless of mode.
+            config_path = _write_write_once_config(td, runtime_home=runtime_home)
             result = _run_control(
-                "--bench-exe-path",
-                str(FAKE_BENCH_EXE),
                 "--config",
                 str(config_path),
+                env=_sim_direct_env(channel=4, amd_temp_c=76.0),
             )
-            self.assertEqual(
-                result.returncode,
-                0,
-                msg=f"stdout={result.stdout}\nstderr={result.stderr}",
-            )
+            self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
             self.assertEqual(_read_pending_writes(runtime_home), [])
 
     def test_reconcile_failure_blocks_startup(self) -> None:
@@ -948,36 +624,31 @@ class WriteOnceTests(unittest.TestCase):
                         "baseline_mode_raw": 5,
                         "target_pct": 60.0,
                         "requested_hold_ms": 0,
-                        "bench_started_iso": "2026-04-05T01:00:00",
-                        "bench_child_pid": 0,
+                        "started_iso": "2026-04-05T01:00:00",
+                        "child_pid": 0,
                     }
                 ],
             )
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = {"SVG_MB_CONTROL_FAKE_RESTORE_MODE": "fail"}
+            config_path = _write_write_once_config(td, runtime_home=runtime_home)
             result = _run_control(
-                "--bench-exe-path",
-                str(FAKE_BENCH_EXE),
                 "--config",
                 str(config_path),
-                env=env,
+                env={
+                    **_sim_direct_env(channel=4, amd_temp_c=76.0),
+                    "SVG_MB_CONTROL_SIM_RESTORE_MODE": "fail",
+                },
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("reconciliation failed", result.stderr)
-            entries = _read_pending_writes(runtime_home)
-            self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0]["channel"], 4)
+            self.assertEqual(len(_read_pending_writes(runtime_home)), 1)
 
-    def test_write_once_ctrl_break_terminates_child(self) -> None:
+    def test_write_once_ctrl_break_clears_pending_write(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-            env = os.environ.copy()
-            env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = "0"
-            proc = subprocess.Popen(
+            config_path = _write_write_once_config(td, runtime_home=runtime_home)
+            proc = _spawn_control(
                 [
-                    str(CONTROL_EXE),
                     "--mode",
                     "write-once",
                     "--config",
@@ -989,139 +660,19 @@ class WriteOnceTests(unittest.TestCase):
                     "--write-hold-ms",
                     "30000",
                 ],
-                cwd=REPO_ROOT,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                env=_sim_direct_env(channel=0, amd_temp_c=76.0),
             )
-            # Give Control a moment to spawn the child.
-            time.sleep(0.5)
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
             try:
-                stdout, stderr = proc.communicate(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr = proc.communicate()
-            self.assertEqual(
-                proc.returncode,
-                0,
-                msg=f"Control did not exit cleanly on CTRL_BREAK; stderr={stderr}",
-            )
+                observed = _wait_for(
+                    lambda: len(_read_pending_writes(runtime_home)) == 1,
+                    timeout_s=5.0,
+                )
+                self.assertTrue(observed, msg="pending_writes.json was never created")
+            finally:
+                code, _, stderr = _stop_and_wait(proc)
+
+            self.assertEqual(code, 0, msg=stderr)
             self.assertEqual(_read_pending_writes(runtime_home), [])
-
-    def test_two_concurrent_control_instances_share_sidecar(self) -> None:
-        """Observational test: two Control processes against the same runtime
-        home writing different channels. Records the resulting sidecar state
-        and exit codes rather than enforcing a specific ordering."""
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            config_path = _write_phase2_config(td, runtime_home=runtime_home)
-
-            def spawn(channel: int) -> subprocess.Popen:
-                env = os.environ.copy()
-                env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = str(channel)
-                return subprocess.Popen(
-                    [
-                        str(CONTROL_EXE),
-                        "--mode",
-                        "write-once",
-                        "--config",
-                        str(config_path),
-                        "--write-channel",
-                        str(channel),
-                        "--write-pct",
-                        "50",
-                        "--write-hold-ms",
-                        "500",
-                    ],
-                    cwd=REPO_ROOT,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    env=env,
-                )
-
-            # Note: fake-bench emits its snapshot with a single channel set
-            # via env var, but each Control reads its own snapshot, so both
-            # will see the expected fan for their target channel. This does
-            # not perfectly model real hardware.
-            proc_a = spawn(0)
-            proc_b = spawn(1)
-            out_a, err_a = proc_a.communicate(timeout=15.0)
-            out_b, err_b = proc_b.communicate(timeout=15.0)
-            final_entries = _read_pending_writes(runtime_home)
-            # Loose assertions: the test documents observed behavior.
-            self.assertIn(
-                proc_a.returncode,
-                [0, 1, 3, 4, 5],
-                msg=f"unexpected exit {proc_a.returncode}; stderr={err_a}",
-            )
-            self.assertIn(
-                proc_b.returncode,
-                [0, 1, 3, 4, 5],
-                msg=f"unexpected exit {proc_b.returncode}; stderr={err_b}",
-            )
-            # Not asserting final_entries length — this test records behavior.
-            # A cleanup restore may be needed in real operation.
-            if final_entries:
-                print(
-                    "\n[observation] two concurrent Control instances left "
-                    f"{len(final_entries)} pending entries in the sidecar"
-                )
-
-
-def _write_control_loop_config(
-    td: Path,
-    *,
-    runtime_home: Path,
-    snapshot_path: Path,
-    channel: int,
-    poll_tick_ms: int = 200,
-    write_cooldown_ms: int = 500,
-    deadband_pct: float = 3.0,
-    control_hold_ms: int = 1000,
-    logger_service_duration_ms: int = 10000,
-    curve: list[tuple[float, float]] | None = None,
-    min_duty_pct: float = 40.0,
-    temp_blend: str = "cpu_only",
-) -> Path:
-    if curve is None:
-        curve = [(30.0, 40.0), (60.0, 55.0), (80.0, 80.0), (95.0, 100.0)]
-    cfg = {
-        "schema_version": 4,
-        "bench_exe_path": FAKE_BENCH_EXE.as_posix(),
-        "snapshot_path": snapshot_path.as_posix(),
-        "runtime_home_path": runtime_home.as_posix(),
-        "poll_ms": 100,
-        "baseline_freshness_ceiling_ms": 10000,
-        "restore_timeout_ms": 5000,
-        "snapshot_read_retry_count": 3,
-        "snapshot_read_retry_backoff_ms": 10,
-        "control_loop": {
-            "poll_tick_ms": poll_tick_ms,
-            "write_cooldown_ms": write_cooldown_ms,
-            "deadband_pct": deadband_pct,
-            "control_hold_ms": control_hold_ms,
-            "cpu_temp_label": "Tctl/Tdie",
-            "logger_service_duration_ms": logger_service_duration_ms,
-            "channels": [
-                {
-                    "channel": channel,
-                    "temp_blend": temp_blend,
-                    "min_duty_pct": min_duty_pct,
-                    "curve": [
-                        {"temp_c": t, "duty_pct": d} for (t, d) in curve
-                    ],
-                }
-            ],
-        },
-    }
-    config_path = td / "control.json"
-    config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    return config_path
 
 
 class ControlLoopTests(unittest.TestCase):
@@ -1131,10 +682,6 @@ class ControlLoopTests(unittest.TestCase):
             raise unittest.SkipTest("Windows-only repo")
         _ensure_release_build()
 
-    def setUp(self) -> None:
-        if FAKE_SNAPSHOT.is_file():
-            FAKE_SNAPSHOT.unlink()
-
     def test_control_loop_ticks_and_writes(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
@@ -1142,32 +689,15 @@ class ControlLoopTests(unittest.TestCase):
             config_path = _write_control_loop_config(
                 td,
                 runtime_home=runtime_home,
-                snapshot_path=FAKE_SNAPSHOT,
                 channel=0,
                 poll_tick_ms=200,
                 write_cooldown_ms=400,
                 deadband_pct=2.0,
                 control_hold_ms=800,
             )
-            env = os.environ.copy()
-            env["SVG_MB_CONTROL_FAKE_MODE"] = "emit_snapshots"
-            env["SVG_MB_CONTROL_FAKE_PUBLISH_INTERVAL_MS"] = "100"
-            env["SVG_MB_CONTROL_FAKE_FAN_CHANNEL"] = "0"
-            env["SVG_MB_CONTROL_FAKE_CPU_TCTL_C"] = "75"
-            proc = subprocess.Popen(
-                [
-                    str(CONTROL_EXE),
-                    "--mode",
-                    "control-loop",
-                    "--config",
-                    str(config_path),
-                ],
-                cwd=REPO_ROOT,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0),
             )
             try:
                 observed = _wait_for(
@@ -1177,45 +707,155 @@ class ControlLoopTests(unittest.TestCase):
                     >= 3,
                     timeout_s=5.0,
                 )
-                self.assertTrue(
-                    observed,
-                    msg=f"control loop did not tick; status={_read_runtime_status(runtime_home)}",
-                )
+                self.assertTrue(observed)
                 status = _read_runtime_status(runtime_home)
+                self.assertIsNotNone(status)
                 self.assertEqual(status["mode"], "control-loop")
                 self.assertGreaterEqual(
                     status["controlled_channels"][0]["total_writes"], 1
                 )
             finally:
-                try:
-                    proc.send_signal(signal.CTRL_BREAK_EVENT)
-                except Exception:
-                    pass
-                try:
-                    proc.communicate(timeout=4.0)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.communicate()
+                _stop_and_wait(proc)
+
+    def test_control_loop_current_state_prefers_direct_fan_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(
+                    channel=0,
+                    amd_temp_c=75.0,
+                    duty_raw=80,
+                    mode_raw=3,
+                    read_channel=0,
+                    read_duty_raw=222,
+                    read_mode_raw=7,
+                ),
+            )
+            try:
+                state = _wait_for(
+                    lambda: _read_runtime_current_state(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(state, msg="current_state.json never appeared")
+                fan0 = next(fan for fan in state["fans"] if fan["channel"] == 0)
+                self.assertEqual(fan0["duty_raw"], 222)
+                self.assertEqual(fan0["mode_raw"], 7)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_uses_local_runtime_policy_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            policy_path = td / "runtime_policy.json"
+            _write_json(
+                policy_path,
+                {
+                    "schema_version": 1,
+                    "profile_name": "blocked",
+                    "board": "test",
+                    "control": {
+                        "writes_enabled": True,
+                        "restore_on_exit": True,
+                        "blocked_channels": [0],
+                    },
+                },
+            )
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                runtime_policy_path=policy_path,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=82.0),
+            )
+            try:
+                state = _wait_for(
+                    lambda: _read_runtime_current_state(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(state)
+                fan0 = next(fan for fan in state["fans"] if fan["channel"] == 0)
+                self.assertTrue(fan0["policy_blocked"])
+                self.assertFalse(fan0["effective_write_allowed"])
+
+                status = _wait_for(
+                    lambda: _read_runtime_status(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                self.assertEqual(status["controlled_channels"][0]["total_writes"], 0)
+            finally:
+                _stop_and_wait(proc)
 
     def test_control_loop_empty_channels_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = td / "runtime"
-            cfg = {
-                "schema_version": 4,
-                "bench_exe_path": FAKE_BENCH_EXE.as_posix(),
-                "snapshot_path": FAKE_SNAPSHOT.as_posix(),
-                "runtime_home_path": runtime_home.as_posix(),
-                "control_loop": {
-                    "poll_tick_ms": 200,
-                    "cpu_temp_label": "Tctl/Tdie",
-                    "channels": [],
+            config_path = _write_json(
+                td / "control.json",
+                {
+                    "schema_version": 4,
+                    "runtime_home_path": runtime_home.as_posix(),
+                    "control_loop": {
+                        "poll_tick_ms": 200,
+                        "channels": [],
+                    },
                 },
-            }
-            config_path = td / "control.json"
-            config_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+            )
             result = _run_control(
-                "--mode", "control-loop", "--config", str(config_path)
+                "--mode",
+                "control-loop",
+                "--config",
+                str(config_path),
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("channels", result.stderr)
+            self.assertIn("empty channels array", result.stderr)
+
+    def test_control_loop_channel_hold_override_flows_to_pending_write(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=100,
+                write_cooldown_ms=100,
+                deadband_pct=2.0,
+                control_hold_ms=800,
+                channel_control_hold_ms=2222,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0),
+            )
+            try:
+                entry = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_pending_writes(runtime_home)
+                            if item.get("channel") == 0
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(entry, msg="pending write entry was not created")
+                self.assertEqual(entry["requested_hold_ms"], 2222)
+            finally:
+                _stop_and_wait(proc)
+
+
+if __name__ == "__main__":
+    unittest.main()

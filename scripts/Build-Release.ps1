@@ -33,7 +33,7 @@ PIPELINE
     5  CMake configure + build    11  Cleanup
 
 OUTPUT
-    release/             Latest build (exe + helper + build-info.json + docs/config)
+    release/             Latest build (exe + build-info.json + docs/config)
     release/archive/     Timestamped zip archives
 
 NOTES
@@ -50,16 +50,19 @@ Set-StrictMode -Version Latest
 $ProjectName         = 'svg-mb-control'
 $MainExeName         = "$ProjectName.exe"
 $SupportExeNames     = @()
-$ProcessNames        = @('svg-mb-control', 'fake-bench')
+$ProcessNames        = @('svg-mb-control')
 $ReleaseDir          = 'release'
 $DistExtras          = @(
     'README.md'
     'CLAUDE.md'
     'docs'
     'config\control.example.json'
+    'config\runtime_policy_write_live.json'
+    'resources'
     'VERSION'
 )
 $SourceGlobs         = @(
+    '*.bin',
     '*.cpp', '*.cc', '*.cxx',
     '*.h', '*.hpp', '*.hh', '*.inl',
     '*.ps1', '*.py',
@@ -150,6 +153,52 @@ function Copy-DistFileAs {
 
     Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
     Write-Host "Copied: $(Split-Path -Leaf $SourcePath) -> $(Split-Path -Leaf $DestinationPath)" -ForegroundColor Green
+}
+
+function Resolve-AmdFamily17BinaryPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+
+    $envCandidates = @(
+        $env:SVG_MB_CONTROL_PAWNIO_BIN,
+        $env:SVG_MB_PAWNIO_BIN
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($candidate in $envCandidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        }
+    }
+
+    $pathCandidates = @(
+        (Join-Path $RepositoryRoot 'resources\pawnio\AMDFamily17.bin')
+    )
+
+    foreach ($candidate in $pathCandidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        }
+    }
+
+    return $null
+}
+
+function Copy-DistAmdFamily17Binary {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$DestRoot
+    )
+
+    $source = Resolve-AmdFamily17BinaryPath -RepositoryRoot $RepositoryRoot
+    if (-not $source) {
+        Write-Warning 'AMDFamily17.bin was not found; release package will rely on SVG_MB_CONTROL_PAWNIO_BIN or SVG_MB_PAWNIO_BIN at runtime.'
+        return
+    }
+
+    Copy-DistFileAs `
+        -SourcePath $source `
+        -DestinationPath (Join-Path $DestRoot 'resources\pawnio\AMDFamily17.bin')
 }
 
 function Invoke-External {
@@ -910,6 +959,9 @@ try {
     Copy-DistFileAs `
         -SourcePath (Join-Path $RepoRoot 'config\control.release.json') `
         -DestinationPath (Join-Path $DistDir 'control.json')
+    Copy-DistFileAs `
+        -SourcePath (Join-Path $RepoRoot 'config\runtime_policy_write_live.json') `
+        -DestinationPath (Join-Path $DistDir 'runtime_policy_write_live.json')
 
     Write-Host "`n[7/11] Verifying artifacts..." -ForegroundColor Yellow
     $mainBuiltHash = Get-Sha256Hex -Path $builtMainExe

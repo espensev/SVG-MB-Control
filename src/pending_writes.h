@@ -13,8 +13,8 @@ struct PendingWriteEntry {
     std::uint8_t baseline_mode_raw = 0u;
     double target_pct = 0.0;
     std::uint32_t requested_hold_ms = 0u;
-    std::string bench_started_iso;
-    std::uint32_t bench_child_pid = 0u;
+    std::string started_iso;
+    std::uint32_t child_pid = 0u;
 };
 
 // Returns the entries currently recorded in the pending-writes sidecar.

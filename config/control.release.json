@@ -1,13 +1,10 @@
 {
   "schema_version": 4,
-  "default_mode": "control-loop",
-  "bench_exe_path": "..\\..\\SVG-MB-Bench\\svg-mb-bench.exe",
-  "snapshot_path": "..\\..\\SVG-MB-Bench\\logs\\current_state.json",
-  "bench_runtime_policy_path": "..\\..\\SVG-MB-Bench\\config\\runtime_policy_write_live.json",
+  "default_mode": "read-loop",
+  "snapshot_path": "runtime\\current_state.json",
+  "runtime_policy_path": "runtime_policy_write_live.json",
   "runtime_home_path": "runtime",
   "poll_ms": 500,
-  "snapshot_read_retry_count": 3,
-  "snapshot_read_retry_backoff_ms": 20,
   "baseline_freshness_ceiling_ms": 10000,
   "restore_timeout_ms": 10000,
   "control_loop": {
@@ -16,7 +13,6 @@
     "deadband_pct": 4.0,
     "control_hold_ms": 60000,
     "cpu_temp_label": "Tctl/Tdie",
-    "logger_service_duration_ms": 3600000,
     "channels": [
       {
         "channel": 0,
@@ -84,6 +80,9 @@
         "channel": 2,
         "temp_blend": "max_cpu_gpu",
         "min_duty_pct": 45.0,
+        "write_cooldown_ms": 18000,
+        "deadband_pct": 6.0,
+        "control_hold_ms": 90000,
         "curve": [
           {
             "temp_c": 60,
@@ -115,6 +114,9 @@
         "channel": 3,
         "temp_blend": "max_cpu_gpu",
         "min_duty_pct": 45.0,
+        "write_cooldown_ms": 18000,
+        "deadband_pct": 6.0,
+        "control_hold_ms": 90000,
         "curve": [
           {
             "temp_c": 60,

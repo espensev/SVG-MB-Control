@@ -44,6 +44,10 @@ std::size_t FindKeyStart(const std::string& text, std::string_view key) {
     return text.find(token);
 }
 
+bool ContainsKey(const std::string& text, std::string_view key) {
+    return FindKeyStart(text, key) != std::string::npos;
+}
+
 std::size_t FindValueStart(const std::string& text, std::string_view key) {
     const std::size_t key_start = FindKeyStart(text, key);
     if (key_start == std::string::npos) {
@@ -163,6 +167,22 @@ std::filesystem::path ResolveConfigRelativePath(const std::filesystem::path& con
     return std::filesystem::absolute(path).lexically_normal();
 }
 
+void RejectLegacyFieldIfPresent(const std::string& text,
+                                std::string_view key,
+                                std::string_view guidance) {
+    if (!ContainsKey(text, key)) {
+        return;
+    }
+
+    std::string message = "Legacy control config field was removed: ";
+    message += key;
+    if (!guidance.empty()) {
+        message += ". ";
+        message += guidance;
+    }
+    throw std::runtime_error(message);
+}
+
 }  // namespace
 
 std::filesystem::path GetEnvironmentPath(std::wstring_view name) {
@@ -227,14 +247,39 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     ControlConfig config;
     config.source_path = absolute_path;
 
+    RejectLegacyFieldIfPresent(
+        text, "bridge_exe_path",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "bench_exe_path",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "bridge_command",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "bench_runtime_policy_path",
+        "Use runtime_policy_path instead.");
+    RejectLegacyFieldIfPresent(
+        text, "logger_service_duration_ms",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "snapshot_read_retry_count",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "snapshot_read_retry_backoff_ms",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "child_restart_budget",
+        "This branch runs direct-only. Remove the field from the config.");
+    RejectLegacyFieldIfPresent(
+        text, "child_restart_backoff_ms",
+        "This branch runs direct-only. Remove the field from the config.");
+
     if (const auto schema_version = ParseOptionalUIntField(text, "schema_version")) {
         config.schema_version = *schema_version;
     }
     if (const auto default_mode = ParseOptionalStringField(text, "default_mode")) {
         config.default_mode = *default_mode;
-    }
-    if (const auto bench_exe = ParseOptionalStringField(text, "bench_exe_path")) {
-        config.bench_exe_path = ResolveConfigRelativePath(absolute_path, *bench_exe);
     }
     if (const auto snapshot_path = ParseOptionalStringField(text, "snapshot_path")) {
         config.snapshot_path = ResolveConfigRelativePath(absolute_path, *snapshot_path);
@@ -249,24 +294,9 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     if (const auto staleness = ParseOptionalUIntField(text, "staleness_threshold_ms")) {
         config.staleness_threshold_ms = *staleness;
     }
-    if (const auto retry_count = ParseOptionalUIntField(text, "snapshot_read_retry_count")) {
-        config.snapshot_read_retry_count = *retry_count;
-    }
-    if (const auto retry_backoff = ParseOptionalUIntField(text, "snapshot_read_retry_backoff_ms")) {
-        config.snapshot_read_retry_backoff_ms = *retry_backoff;
-    }
-    if (const auto restart_budget = ParseOptionalUIntField(text, "child_restart_budget")) {
-        config.child_restart_budget = *restart_budget;
-    }
-    if (const auto restart_backoff = ParseOptionalUIntField(text, "child_restart_backoff_ms")) {
-        config.child_restart_backoff_ms = *restart_backoff;
-    }
-    if (const auto duration_ms = ParseOptionalUIntField(text, "logger_service_duration_ms")) {
-        config.logger_service_duration_ms = *duration_ms;
-    }
 
-    if (const auto policy = ParseOptionalStringField(text, "bench_runtime_policy_path")) {
-        config.bench_runtime_policy_path = ResolveConfigRelativePath(absolute_path, *policy);
+    if (const auto policy = ParseOptionalStringField(text, "runtime_policy_path")) {
+        config.runtime_policy_path = ResolveConfigRelativePath(absolute_path, *policy);
     }
 
     if (const auto write_channel = ParseOptionalUIntField(text, "write_channel")) {

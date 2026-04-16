@@ -1,6 +1,7 @@
 #pragma once
 
 #include "control_config.h"
+#include "runtime_write_policy.h"
 
 #include <atomic>
 #include <chrono>
@@ -18,6 +19,7 @@ struct WriteRequest {
 
 struct BaselineCapture {
     bool present = false;                  // true when target channel found in snapshot
+    bool snapshot_channel_present = false; // true when snapshot carried per-channel policy metadata
     std::uint32_t channel = 0u;
     std::uint8_t duty_raw = 0u;
     std::uint8_t mode_raw = 0u;
@@ -31,7 +33,7 @@ struct BaselineCapture {
     bool policy_writes_enabled = false;
 };
 
-// Parses a Bench current_state snapshot JSON and extracts the baseline
+// Parses a runtime snapshot JSON and extracts the baseline
 // state for the given channel. Also validates snapshot freshness against
 // the provided `now` wall clock using snapshot_time parsed as local time.
 BaselineCapture CaptureBaselineFromSnapshotJson(
@@ -41,22 +43,22 @@ BaselineCapture CaptureBaselineFromSnapshotJson(
     std::chrono::system_clock::time_point now);
 
 // Runs one bounded write-once session:
-//   snapshot -> baseline check -> sidecar upsert -> set-fixed-duty child
-//   -> wait for exit -> sidecar remove on clean exit.
+//   snapshot -> baseline check -> sidecar upsert -> direct duty write
+//   -> hold -> direct restore -> sidecar remove on clean exit.
 // Returns 0 on clean exit, non-zero on failure (including policy refusal
-// and child non-zero exit).
+// and restore failure).
 int RunWriteOnce(const ControlConfig& config,
-                 const std::wstring& bench_exe_path,
                  const std::filesystem::path& runtime_home,
                  const WriteRequest& request,
                  const std::atomic<bool>& stop_flag);
 
-// Reads the pending-writes sidecar and invokes `restore-auto` for each
-// entry. Entries are removed after a successful restore. Returns 0 when
-// all entries were restored (or there were none). Returns non-zero when
-// any restore fails; remaining entries stay in the sidecar.
-int ReconcilePendingWrites(const std::wstring& bench_exe_path,
-                           const std::filesystem::path& runtime_home,
+// Reads the pending-writes sidecar and restores each entry directly
+// through the Control-owned writer. Entries are removed after a
+// successful restore. Returns 0 when all entries were restored (or
+// there were none). Returns non-zero when any restore fails; remaining
+// entries stay in the sidecar.
+int ReconcilePendingWrites(const std::filesystem::path& runtime_home,
+                           const RuntimeWritePolicy& runtime_policy,
                            std::uint32_t restore_timeout_ms);
 
 }  // namespace svg_mb_control

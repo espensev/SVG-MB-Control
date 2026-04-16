@@ -1,9 +1,11 @@
 #include "control_loop.h"
 
-#include "bench_bridge.h"
+#include "amd_reader.h"
+#include "direct_runtime_snapshot.h"
+#include "fan_writer.h"
 #include "gpu_reader.h"
 #include "pending_writes.h"
-#include "read_loop.h"
+#include "runtime_snapshot.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -251,6 +253,27 @@ std::string JsonEscape(const std::string& text) {
     return output;
 }
 
+std::uint32_t EffectiveWriteCooldownMs(const ControlLoopConfig& loop,
+                                       const ChannelControlConfig& channel) {
+    return channel.write_cooldown_ms > 0u
+        ? channel.write_cooldown_ms
+        : loop.write_cooldown_ms;
+}
+
+double EffectiveDeadbandPct(const ControlLoopConfig& loop,
+                            const ChannelControlConfig& channel) {
+    return std::isnan(channel.deadband_pct)
+        ? loop.deadband_pct
+        : channel.deadband_pct;
+}
+
+std::uint32_t EffectiveControlHoldMs(const ControlLoopConfig& loop,
+                                     const ChannelControlConfig& channel) {
+    return channel.control_hold_ms > 0u
+        ? channel.control_hold_ms
+        : loop.control_hold_ms;
+}
+
 }  // namespace
 
 // ------------------------ Config loader --------------------------------
@@ -285,10 +308,6 @@ ControlLoopConfig LoadControlLoopConfig(
     if (!std::isnan(hold) && hold > 0.0) {
         cfg.control_hold_ms = static_cast<std::uint32_t>(hold);
     }
-    const double duration = FindNumericInRange(text, "logger_service_duration_ms", loop_begin, loop_end);
-    if (!std::isnan(duration) && duration > 0.0) {
-        cfg.logger_service_duration_ms = static_cast<std::uint32_t>(duration);
-    }
     const std::string cpu_label = FindStringInRange(text, "cpu_temp_label", loop_begin, loop_end);
     if (!cpu_label.empty()) {
         cfg.cpu_temp_label = cpu_label;
@@ -309,6 +328,18 @@ ControlLoopConfig LoadControlLoopConfig(
             channel.channel = static_cast<std::uint32_t>(ch_idx);
             const double floor = FindNumericInRange(text, "min_duty_pct", obj_open, obj_close);
             if (!std::isnan(floor)) channel.min_duty_pct = floor;
+            const double cooldown = FindNumericInRange(text, "write_cooldown_ms", obj_open, obj_close);
+            if (!std::isnan(cooldown) && cooldown > 0.0) {
+                channel.write_cooldown_ms = static_cast<std::uint32_t>(cooldown);
+            }
+            const double deadband = FindNumericInRange(text, "deadband_pct", obj_open, obj_close);
+            if (!std::isnan(deadband)) {
+                channel.deadband_pct = deadband;
+            }
+            const double hold = FindNumericInRange(text, "control_hold_ms", obj_open, obj_close);
+            if (!std::isnan(hold) && hold > 0.0) {
+                channel.control_hold_ms = static_cast<std::uint32_t>(hold);
+            }
             const std::string blend = FindStringInRange(text, "temp_blend", obj_open, obj_close);
             if (!blend.empty()) {
                 try {
@@ -353,7 +384,9 @@ struct ChannelState {
     double last_issued_pct = std::numeric_limits<double>::quiet_NaN();
     std::chrono::steady_clock::time_point last_write_time =
         std::chrono::steady_clock::time_point{};
-    std::unique_ptr<BenchChildSupervisor> active_write;
+    bool write_active = false;
+    std::chrono::steady_clock::time_point hold_deadline =
+        std::chrono::steady_clock::time_point{};
     std::uint64_t total_writes = 0u;
     double last_observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double last_setpoint_pct = std::numeric_limits<double>::quiet_NaN();
@@ -363,7 +396,7 @@ struct ControlLoop::Impl {
     ControlConfig base;
     ControlLoopConfig loop;
     std::filesystem::path runtime_home;
-    std::wstring bench_exe_path;
+    RuntimeWritePolicy runtime_policy;
     std::vector<ChannelState> channels;
     std::mutex wake_mutex;
     std::condition_variable wake_cv;
@@ -371,13 +404,12 @@ struct ControlLoop::Impl {
 
 ControlLoop::ControlLoop(ControlConfig base_config,
                          ControlLoopConfig loop_config,
-                         std::filesystem::path runtime_home,
-                         std::wstring bench_exe_path)
+                         std::filesystem::path runtime_home)
     : impl_(std::make_unique<Impl>()) {
     impl_->base = std::move(base_config);
     impl_->loop = std::move(loop_config);
     impl_->runtime_home = std::move(runtime_home);
-    impl_->bench_exe_path = std::move(bench_exe_path);
+    impl_->runtime_policy = ResolveRuntimeWritePolicy(&impl_->base);
     impl_->channels.reserve(impl_->loop.channels.size());
     for (const auto& ch_cfg : impl_->loop.channels) {
         ChannelState state;
@@ -389,36 +421,6 @@ ControlLoop::ControlLoop(ControlConfig base_config,
 ControlLoop::~ControlLoop() = default;
 
 namespace {
-
-// Reads the snapshot file with a small retry budget to tolerate Bench's
-// non-atomic publish window. Returns empty string on failure.
-std::string ReadSnapshotWithRetries(const std::filesystem::path& path,
-                                    std::uint32_t retry_count,
-                                    std::uint32_t backoff_ms) {
-    for (std::uint32_t attempt = 0u; attempt <= retry_count; ++attempt) {
-        std::ifstream stream(path, std::ios::binary);
-        if (stream.is_open()) {
-            std::ostringstream buffer;
-            buffer << stream.rdbuf();
-            const std::string text = buffer.str();
-            if (!text.empty()) {
-                std::size_t end = text.size();
-                while (end > 0u &&
-                       std::isspace(static_cast<unsigned char>(text[end - 1u])) != 0) {
-                    --end;
-                }
-                if (end > 0u && text[end - 1u] == '}') {
-                    return text;
-                }
-            }
-        }
-        if (attempt < retry_count) {
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(backoff_ms));
-        }
-    }
-    return {};
-}
 
 bool WriteLoopStatus(const std::filesystem::path& runtime_home,
                      const std::string& mode_label,
@@ -475,30 +477,31 @@ bool WriteLoopStatus(const std::filesystem::path& runtime_home,
 }  // namespace
 
 int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
-    // Start logger-service supervisor.
-    const std::vector<std::wstring> logger_args = {
-        L"logger-service",
-        L"--duration-ms",
-        std::to_wstring(impl_->loop.logger_service_duration_ms),
-    };
-    BenchChildSupervisor logger(impl_->bench_exe_path, logger_args);
+    AmdReader amd_reader;
+    GpuReader gpu_reader;
+
+    std::unique_ptr<FanWriter> fan_writer;
     try {
-        logger.Start();
+        fan_writer = CreateFanWriter(impl_->runtime_policy);
     } catch (const std::exception& error) {
         WriteLoopStatus(impl_->runtime_home, "control-loop", "failed",
-                        std::string("logger-service start failed: ") + error.what(),
+                        std::string("direct writer init failed: ") + error.what(),
                         0u, FormatLocalIso8601(std::chrono::system_clock::now()),
                         impl_->channels);
         return 1;
     }
 
-    // GPU reader is optional; failure means GPU temps are unavailable.
-    GpuReader gpu_reader;
-
     std::uint64_t tick_count = 0u;
     {
         std::ostringstream detail;
-        detail << "spawned children (poll_tick_ms=" << impl_->loop.poll_tick_ms
+        detail << "direct telemetry active; fan_writer="
+               << fan_writer->BackendLabel()
+               << " policy="
+               << (impl_->runtime_policy.present
+                       ? impl_->runtime_policy.source_path.string()
+                       : std::string("(none)"))
+               << " poll_tick_ms="
+               << impl_->loop.poll_tick_ms
                << " cooldown_ms=" << impl_->loop.write_cooldown_ms
                << " deadband_pct=" << impl_->loop.deadband_pct
                << " hold_ms=" << impl_->loop.control_hold_ms
@@ -514,40 +517,70 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         const auto now_steady = std::chrono::steady_clock::now();
         const auto eval_iso = FormatLocalIso8601(std::chrono::system_clock::now());
 
-        // Read snapshot.
-        const std::string snapshot_text = ReadSnapshotWithRetries(
-            impl_->base.snapshot_path,
-            impl_->base.snapshot_read_retry_count,
-            impl_->base.snapshot_read_retry_backoff_ms);
+        RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
+            amd_reader, gpu_reader, *fan_writer, impl_->runtime_policy);
+        const bool runtime_snapshot_available =
+            RuntimeSnapshotHasTelemetry(runtime_snapshot);
 
         // Extract CPU temp.
         TempInputs temp_inputs;
-        if (!snapshot_text.empty()) {
-            const double cpu_c = ExtractAmdSensorTemperature(
-                snapshot_text, impl_->loop.cpu_temp_label);
+        if (runtime_snapshot_available) {
+            const double cpu_c = FindRuntimeAmdSensorTemperature(
+                runtime_snapshot, impl_->loop.cpu_temp_label);
             if (!std::isnan(cpu_c)) {
                 temp_inputs.cpu_c = cpu_c;
                 temp_inputs.cpu_available = true;
                 temp_inputs.cpu_label = impl_->loop.cpu_temp_label;
             }
         }
-
-        // Sample GPU.
-        const GpuTempSample gpu_sample = gpu_reader.Sample();
-        if (gpu_sample.available) {
-            temp_inputs.gpu_c = (std::max)(gpu_sample.core_c, gpu_sample.memjn_c);
+        if (runtime_snapshot.gpu.available) {
+            temp_inputs.gpu_c = (std::max)(runtime_snapshot.gpu.core_c,
+                                           runtime_snapshot.gpu.memjn_c);
             temp_inputs.gpu_available = true;
             temp_inputs.gpu_label = "gpu_max";
         }
 
+        if (runtime_snapshot_available) {
+            WriteRuntimeSnapshotFile(impl_->runtime_home, runtime_snapshot);
+        }
+
         // Per-channel decisions.
         for (auto& channel : impl_->channels) {
-            if (!channel.baseline_captured && !snapshot_text.empty()) {
-                const FanRawState raw = ExtractFanRawState(snapshot_text, channel.config.channel);
-                if (raw.present) {
-                    channel.baseline_duty_raw = raw.duty_raw;
-                    channel.baseline_mode_raw = raw.mode_raw;
+            const std::uint32_t effective_cooldown_ms =
+                EffectiveWriteCooldownMs(impl_->loop, channel.config);
+            const double effective_deadband_pct =
+                EffectiveDeadbandPct(impl_->loop, channel.config);
+            const std::uint32_t effective_hold_ms =
+                EffectiveControlHoldMs(impl_->loop, channel.config);
+
+            if (!channel.baseline_captured) {
+                if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
+                        runtime_snapshot, channel.config.channel)) {
+                    channel.baseline_duty_raw = fan->duty_raw;
+                    channel.baseline_mode_raw = fan->mode_raw;
                     channel.baseline_captured = true;
+                }
+            }
+
+            if (channel.write_active &&
+                effective_hold_ms > 0u &&
+                now_steady >= channel.hold_deadline &&
+                channel.baseline_captured) {
+                const FanWriteResult restore_result =
+                    fan_writer->RestoreSavedState(channel.config.channel,
+                                                  channel.baseline_duty_raw,
+                                                  channel.baseline_mode_raw);
+                if (restore_result) {
+                    channel.write_active = false;
+                    channel.last_issued_pct =
+                        std::numeric_limits<double>::quiet_NaN();
+                    try {
+                        RemovePendingWrite(impl_->runtime_home,
+                                           channel.config.channel);
+                    } catch (const std::exception&) {
+                        // Best-effort; stale sidecar can still be reconciled
+                        // on a future startup.
+                    }
                 }
             }
 
@@ -561,7 +594,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
 
             if (!std::isnan(channel.last_issued_pct)) {
                 const double delta = std::abs(setpoint - channel.last_issued_pct);
-                if (delta < impl_->loop.deadband_pct) continue;
+                if (delta < effective_deadband_pct) continue;
             }
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -569,20 +602,20 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             if (std::isnan(channel.last_issued_pct)) {
                 // First write for this channel — allow immediately.
             } else if (static_cast<std::uint64_t>(elapsed) <
-                       static_cast<std::uint64_t>(impl_->loop.write_cooldown_ms)) {
+                       static_cast<std::uint64_t>(effective_cooldown_ms)) {
                 continue;
-            }
-
-            // Cancel prior active write to avoid overlapping set-fixed-duty
-            // children holding the same channel.
-            if (channel.active_write) {
-                channel.active_write->RequestStop(1000u);
-                channel.active_write.reset();
             }
 
             // Ensure we have a baseline before recording the sidecar.
             if (!channel.baseline_captured) {
                 continue;  // skip until snapshot provides baseline
+            }
+
+            if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
+                    runtime_snapshot, channel.config.channel)) {
+                if (!fan->effective_write_allowed) {
+                    continue;
+                }
             }
 
             // Record sidecar entry.
@@ -591,34 +624,33 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             entry.baseline_duty_raw = channel.baseline_duty_raw;
             entry.baseline_mode_raw = channel.baseline_mode_raw;
             entry.target_pct = setpoint;
-            entry.requested_hold_ms = impl_->loop.control_hold_ms;
-            entry.bench_started_iso = eval_iso;
-            entry.bench_child_pid = 0u;
+            entry.requested_hold_ms = effective_hold_ms;
+            entry.started_iso = eval_iso;
+            entry.child_pid = 0u;
             try {
                 UpsertPendingWrite(impl_->runtime_home, entry);
             } catch (const std::exception&) {
                 continue;
             }
 
-            // Spawn set-fixed-duty.
-            std::ostringstream pct_stream;
-            pct_stream << setpoint;
-            const std::string pct_narrow = pct_stream.str();
-            const std::wstring pct_wide(pct_narrow.begin(), pct_narrow.end());
-            std::vector<std::wstring> args = {
-                L"set-fixed-duty",
-                L"--channel", std::to_wstring(channel.config.channel),
-                L"--pct", pct_wide,
-                L"--hold-ms", std::to_wstring(impl_->loop.control_hold_ms),
-            };
-            auto supervisor = std::make_unique<BenchChildSupervisor>(
-                impl_->bench_exe_path, args);
-            try {
-                supervisor->Start();
-            } catch (const std::exception&) {
+            const FanWriteResult write_result =
+                fan_writer->ApplyDuty(channel.config.channel, setpoint);
+            if (!write_result) {
+                if (write_result.error == FanWriteError::kPolicyRefused) {
+                    try {
+                        RemovePendingWrite(impl_->runtime_home,
+                                           channel.config.channel);
+                    } catch (const std::exception&) {
+                        // Best-effort.
+                    }
+                }
                 continue;
             }
-            channel.active_write = std::move(supervisor);
+            channel.write_active = true;
+            channel.hold_deadline =
+                effective_hold_ms == 0u
+                    ? std::chrono::steady_clock::time_point::max()
+                    : now_steady + std::chrono::milliseconds(effective_hold_ms);
             channel.last_issued_pct = setpoint;
             channel.last_write_time = now_steady;
             ++channel.total_writes;
@@ -640,43 +672,36 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             [&stop_flag] { return stop_flag.load(); });
     }
 
-    // Shutdown: terminate active writes + clear their sidecars.
-    // Phase 1 of shutdown: signal all active children concurrently so they
-    // all process their ctrl handlers in parallel. Phase 2: wait on each.
-    // This avoids the "last channel starves under SIO contention and gets
-    // TerminateProcess'd before restore completes" problem.
+    // Shutdown: restore controlled channels back to their captured baseline.
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",
                     "stop requested", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     impl_->channels);
+    bool restore_failure = false;
     for (auto& channel : impl_->channels) {
-        if (channel.active_write) {
-            channel.active_write->SendStopSignal();
-        }
-    }
-    logger.SendStopSignal();
-    for (auto& channel : impl_->channels) {
-        if (channel.active_write) {
-            // Larger per-channel budget because children may contend on
-            // PawnIO/SIO serialization during restore + snapshot capture.
-            // Real observation 2026-04-05: 6 concurrent bench children
-            // stacking on SIO during shutdown take ~8-15s for the last
-            // one to finish post-loop work.
-            channel.active_write->WaitForStop(20000u);
-            channel.active_write.reset();
+        if (channel.write_active && channel.baseline_captured) {
+            const FanWriteResult restore_result =
+                fan_writer->RestoreSavedState(channel.config.channel,
+                                              channel.baseline_duty_raw,
+                                              channel.baseline_mode_raw);
+            if (!restore_result) {
+                restore_failure = true;
+                continue;
+            }
         }
         try {
             RemovePendingWrite(impl_->runtime_home, channel.config.channel);
         } catch (const std::exception&) {
-            // Best-effort; shutdown continues regardless.
+            restore_failure = true;
         }
     }
-    logger.WaitForStop(4000u);
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",
-                    "children stopped", tick_count,
+                    restore_failure ? "restore failed"
+                                    : "channels restored",
+                    tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     impl_->channels);
-    return 0;
+    return restore_failure ? 1 : 0;
 }
 
 }  // namespace svg_mb_control

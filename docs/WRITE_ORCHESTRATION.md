@@ -1,96 +1,58 @@
 # Write Orchestration
 
-Phase 2's bounded single-channel write path. Selected with
-`--mode write-once`.
+## Purpose
 
-## Write-once sequence
+`write-once` is the bounded direct write path. It captures a fresh baseline,
+applies one duty override, holds for a bounded window, then restores the
+baseline.
 
-1. **Startup reconciliation.** Before any mode work, Control reads
-   `runtime/pending_writes.json`. For each entry, it invokes
-   `restore-auto --channel <N> --saved-duty-raw <d> --saved-mode-raw <m>`
-   and waits for clean exit. Entries are removed on success. A failed
-   restore blocks Control startup with a non-zero exit code.
-2. **Baseline snapshot.** Control runs `svg-mb-bench.exe read-snapshot`
-   and parses the resulting `current_state.json`.
-3. **Baseline validation.** Control checks two preconditions on the
-   target channel's fan object:
-   - `snapshot_time` within `baseline_freshness_ceiling_ms` of the
-     current wall clock (default 2000 ms).
-   - `effective_write_allowed == true`.
-   Either failure aborts the write before the sidecar is written.
-4. **Sidecar upsert.** Control writes the target channel's entry to
-   `pending_writes.json` via temp-file + rename.
-5. **Child spawn.** Control spawns
-   `svg-mb-bench.exe set-fixed-duty --channel <N> --pct <X> --hold-ms <Y>`
-   through `BenchChildSupervisor` (Phase 1 module) with
-   `CREATE_NEW_PROCESS_GROUP` and asynchronous pipe drainage.
-6. **Wait.** Control blocks in a 50 ms polling loop until the child
-   exits. If the console delivers CTRL_C or CTRL_BREAK during the wait,
-   Control sends CTRL_BREAK_EVENT to the child's process group and
-   waits up to 2 seconds for graceful exit.
-7. **Outcome.** On child exit code 0 or signal-initiated stop, Control
-   removes the sidecar entry and exits 0. On any other exit code,
-   Control leaves the sidecar entry in place, prints the child's
-   stderr tail, and exits with the child's exit code.
+## Inputs
 
-## Baseline freshness
+Top-level config fields used by `write-once`:
 
-The freshness ceiling guards against basing a write on stale fan
-state. If `FanControl.exe` or LibreHardwareMonitor changed the channel
-after the snapshot but before Control's write, the restore baseline
-would be wrong.
+- `runtime_home_path`
+- `baseline_freshness_ceiling_ms`
+- `restore_timeout_ms`
+- `runtime_policy_path`
+- optional `write_channel`
+- optional `write_target_pct`
+- optional `write_hold_ms`
 
-Configurable via `baseline_freshness_ceiling_ms`. Default 2000 ms.
+CLI can override the write fields with:
 
-## Signal stop treated as clean exit
+- `--write-channel`
+- `--write-pct`
+- `--write-hold-ms`
 
-Set-fixed-duty's own console handler calls
-`controller.restore_auto(channel)` on CTRL_BREAK, returning the channel
-to motherboard auto mode. Control treats a signal-initiated stop the
-same as a clean hold completion: the sidecar entry is removed. The
-channel is not left in a held state.
+## Runtime Flow
 
-## Reconciliation on every startup
+1. Reconcile any existing `pending_writes.json` entries before mode dispatch.
+2. Initialize the direct fan backend.
+3. Sample a fresh direct runtime snapshot.
+4. Capture the baseline duty and mode for the target channel.
+5. Reject stale snapshots or policy-blocked targets.
+6. Write a pending-write sidecar entry before touching hardware.
+7. Apply the requested duty directly.
+8. Hold until timeout or stop request.
+9. Restore the baseline duty and mode.
+10. Remove the pending-write sidecar entry.
 
-Reconciliation runs for all modes (`one-shot`, `read-loop`,
-`write-once`), not just `write-once`. This makes Control self-heal any
-prior unclean exit before the user-facing mode work begins.
+## Reconciliation
 
-## Operator constraints
+Startup reconciliation reads `runtime\pending_writes.json` and attempts to
+restore each stored baseline directly through Control's own writer. Successful
+entries are removed. Failed entries remain on disk and block further startup.
 
-These are not enforced by code in Phase 2.
+## Exit Behavior
 
-### Single Control instance per runtime home
+- Policy refusal before a write returns exit code `2` and clears the sidecar.
+- Write or restore failures return non-zero and leave any unresolved sidecar
+  state in place.
+- `Ctrl+C` / `Ctrl+Break` during the hold window triggers restore and normal
+  sidecar cleanup.
 
-The sidecar has no lock. Two concurrent Control instances sharing a
-runtime home can overwrite each other's entries. Operator policy: run
-at most one Control process against any given runtime home.
+## Constraints
 
-### Single active SIO writer per channel
-
-If `FanControl.exe`, LibreHardwareMonitor, or another writer touches a
-channel during Control's hold window, Control's baseline becomes
-incorrect and restore behavior is undefined. Operator policy: ensure
-no other writer is active on the target channel during a write-once
-run.
-
-Phase 2 includes a hermetic observational test
-(`test_two_concurrent_control_instances_share_sidecar`) and a live
-observational procedure for FanControl.exe coexistence. Neither adds
-enforcement; both characterize behavior.
-
-## Live observational procedure: FanControl.exe coexistence
-
-Runs write-once against a known-safe channel while `FanControl.exe` is
-active on the same machine. Captures:
-
-- whether Bench's baseline snapshot matches the operator's expected
-  pre-write state
-- whether the channel's fan speed follows Control's target during the
-  hold window, or whether FanControl.exe overrides it
-- whether the channel returns to its pre-Control state after restore
-- whether `FanControl.exe` reports its own state consistently across
-  the sequence
-
-This procedure is not automated. Its purpose is to characterize
-real-world coexistence, not to certify it.
+- Writes are owned here; they are not delegated to another executable.
+- New feature work must keep baseline capture, sidecar ownership, write, and
+  restore inside this repo.

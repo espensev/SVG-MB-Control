@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "profile_name": "control-live",
+  "board": "rog-strix-x870-f",
+  "control": {
+    "writes_enabled": true,
+    "restore_on_exit": true,
+    "blocked_channels": []
+  }
+}

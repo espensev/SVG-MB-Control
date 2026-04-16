@@ -47,22 +47,4 @@ double LookupCurve(const std::vector<CurvePoint>& curve,
                    double temp_c,
                    double min_floor_pct);
 
-// Reads a labeled AMD sensor temperature from a current_state snapshot
-// JSON. Returns NaN when the label is not found. Matches on exact label
-// equality.
-double ExtractAmdSensorTemperature(const std::string& snapshot_json,
-                                   const std::string& label);
-
-struct FanRawState {
-    bool present = false;
-    std::uint8_t duty_raw = 0u;
-    std::uint8_t mode_raw = 0u;
-};
-
-// Reads duty_raw and mode_raw for the given channel from the fans array
-// in a current_state snapshot JSON. Returns `present=false` when the
-// channel is not present.
-FanRawState ExtractFanRawState(const std::string& snapshot_json,
-                               std::uint32_t channel);
-
 }  // namespace svg_mb_control
