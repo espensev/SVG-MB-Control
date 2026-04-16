@@ -1,0 +1,4 @@
+@PACKAGE_INIT@
+include("${CMAKE_CURRENT_LIST_DIR}/svg_mb_sioTargets.cmake")
+check_required_components(svg_mb_sio)
+

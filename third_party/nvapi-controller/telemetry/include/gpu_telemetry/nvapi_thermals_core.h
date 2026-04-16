@@ -1,0 +1,6 @@
+#ifndef GPU_TELEMETRY_NVAPI_THERMALS_CORE_SHIM_H
+#define GPU_TELEMETRY_NVAPI_THERMALS_CORE_SHIM_H
+
+#include "../../../src/nvapi_thermals.h"
+
+#endif /* GPU_TELEMETRY_NVAPI_THERMALS_CORE_SHIM_H */
