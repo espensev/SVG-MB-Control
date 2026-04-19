@@ -2,17 +2,23 @@
 
 ## Build
 
-Preferred release entrypoint:
+Preferred release entrypoint for agents:
 
 ```powershell
 .\build-release.ps1
 ```
 
+Use the repo's documented build and workflow entrypoints before inventing a new
+bootstrap path. Do not search for `vcvars.bat`, hand-roll a Visual Studio
+environment, or replace the repo workflow with ad hoc raw `cmake`, `ninja`, or
+`msbuild` commands unless the user explicitly asks for low-level build
+debugging.
 It performs a clean `x64-release` configure/build, stages the packaged release,
 runs `python -m unittest discover tests -v` unless `-SkipTests` is supplied,
 then publishes `release\` and the archive bundle.
 
-Manual CMake remains valid for incremental local work:
+Manual CMake remains valid only for explicit incremental local work or when the
+task is to debug the lower-level CMake path itself:
 
 ```powershell
 cmake --preset x64-release
