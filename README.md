@@ -114,6 +114,8 @@ Common fields:
 - `runtime_policy_path`
 - `runtime_home_path`
 - `poll_ms`
+- `log_rotate_hours`
+- `log_retain_days`
 - `baseline_freshness_ceiling_ms`
 - `restore_timeout_ms`
 - `control_loop`
@@ -124,6 +126,8 @@ Field notes:
   `runtime\current_state.json` and mirrors the same payload to `snapshot_path`
   when configured.
 - `runtime_policy_path` is read locally by direct write and control flows.
+- `log_rotate_hours` controls CSV chunk rotation under `runtime\logs\archive\`.
+- `log_retain_days` controls archive pruning for rotated CSV chunks.
 - Legacy bridge-era config keys such as `bridge_exe_path`,
   `bench_runtime_policy_path`, `logger_service_duration_ms`, and the old child
   restart / snapshot retry fields are rejected during config load.
@@ -144,6 +148,13 @@ Control writes:
 - `current_state.json`
 - `control_runtime.json`
 - `pending_writes.json`
+- `logs\svg_mb_control_output.csv`
+- `logs\svg_mb_control_events.jsonl`
+- `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
+
+`current_state.json`, `control_runtime.json`, and `pending_writes.json` remain
+the authoritative live state and recovery plane. `control_runtime.json` also
+publishes `log_csv_path` and `event_log_path` for the active mode.
 
 See `docs\RUNTIME_HOME.md` for field definitions.
 
@@ -160,7 +171,11 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 
 ## Documentation
 
+- `docs\MEASUREMENT_GATE.md`
 - `docs\CONTROL_LOOP.md`
 - `docs\READ_LOOP.md`
 - `docs\WRITE_ORCHESTRATION.md`
 - `docs\RUNTIME_HOME.md`
+
+Before more controller tuning or cadence changes are made here, complete the
+measurement and characterization gate described in `docs\MEASUREMENT_GATE.md`.

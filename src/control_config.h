@@ -17,6 +17,8 @@ struct ControlConfig {
     // Runtime layout fields.
     std::filesystem::path runtime_home_path;
     std::uint32_t staleness_threshold_ms = 0u;
+    std::uint32_t log_rotate_hours = 4u;
+    std::uint32_t log_retain_days = 7u;
 
     // Write-once fields.
     std::uint32_t write_channel = 0u;

@@ -43,6 +43,15 @@ Startup reconciliation reads `runtime\pending_writes.json` and attempts to
 restore each stored baseline directly through Control's own writer. Successful
 entries are removed. Failed entries remain on disk and block further startup.
 
+## Logging
+
+`write-once` and startup reconciliation append durable events to
+`runtime\logs\svg_mb_control_events.jsonl` for validation failures, policy
+refusals, applied writes, restores, reconcile work, and failures.
+
+They do not create a dedicated CSV telemetry chunk; the event log is the write
+orchestration trace surface for this tier.
+
 ## Exit Behavior
 
 - Policy refusal before a write returns exit code `2` and clears the sidecar.
@@ -56,3 +65,5 @@ entries are removed. Failed entries remain on disk and block further startup.
 - Writes are owned here; they are not delegated to another executable.
 - New feature work must keep baseline capture, sidecar ownership, write, and
   restore inside this repo.
+- Any broader write-cadence or fan-response retuning should follow the
+  prerequisite measurement work in `docs\MEASUREMENT_GATE.md`.

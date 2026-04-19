@@ -24,6 +24,8 @@ class ReadLoop {
         std::uint64_t successful_polls = 0u;
         bool stale = true;
         std::uint32_t child_pid = 0u;
+        std::string log_csv_path;
+        std::string event_log_path;
     };
 
     ReadLoop(ControlConfig config, std::filesystem::path runtime_home);

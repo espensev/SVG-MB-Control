@@ -15,6 +15,13 @@ Control owns these files:
 - `current_state.json`
 - `control_runtime.json`
 - `pending_writes.json`
+- `logs\svg_mb_control_output.csv`
+- `logs\svg_mb_control_events.jsonl`
+- `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
+
+The JSON files remain the authoritative live state and recovery plane. The log
+files add history and operator traceability; they do not replace the JSON
+contract.
 
 ## current_state.json
 
@@ -57,6 +64,8 @@ Each fan entry can include:
 - `stale`
 - `restart_count`
 - `child_pid`
+- `log_csv_path`
+- `event_log_path`
 
 `restart_count` and `child_pid` remain `0` in the direct-only runtime.
 
@@ -68,6 +77,8 @@ Each fan entry can include:
 - `status_detail`
 - `loop_tick_count`
 - `loop_last_evaluation`
+- `log_csv_path`
+- `event_log_path`
 - `controlled_channels`
 
 Each controlled-channel entry includes:
@@ -96,6 +107,23 @@ Each entry includes:
 `child_pid` is retained for schema continuity and is written as `0` by the
 current direct runtime.
 
+## logs\
+
+`read-loop` and `control-loop` can publish historical CSV telemetry and a
+shared event log under `runtime\logs\`.
+
+- `svg_mb_control_output.csv` is the fixed-path live mirror of the active CSV
+  chunk.
+- `archive\svg_mb_control_<mode>_<timestamp>.csv` stores rotated mode-specific
+  CSV chunks. The active chunk path is surfaced in `control_runtime.json` as
+  `log_csv_path`.
+- `svg_mb_control_events.jsonl` stores append-only JSONL events for starts,
+  rotations, write attempts, restores, reconcile work, and failures. Its path
+  is surfaced in `control_runtime.json` as `event_log_path`.
+
+Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
+`log_retain_days` in the control config.
+
 ## Ownership Rules
 
 - Control is the only writer of these files.
@@ -103,3 +131,5 @@ current direct runtime.
   it is not a separate authority.
 - Startup reconciliation uses `pending_writes.json` to restore incomplete writes
   before any requested mode begins.
+- Logging is product-owned inside this repo; it must not delegate CSV or event
+  emission to external helper repos or sibling-runtime processes.

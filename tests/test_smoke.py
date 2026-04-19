@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -158,6 +159,39 @@ def _read_pending_writes(runtime_home: Path) -> list[dict]:
     if not data:
         return []
     return data.get("entries", [])
+
+
+def _read_runtime_events(runtime_home: Path) -> list[dict]:
+    path = runtime_home / "logs" / "svg_mb_control_events.jsonl"
+    if not path.is_file():
+        return []
+    events: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        events.append(json.loads(line))
+    return events
+
+
+def _runtime_archive_files(runtime_home: Path) -> list[Path]:
+    archive_dir = runtime_home / "logs" / "archive"
+    if not archive_dir.is_dir():
+        return []
+    return sorted(archive_dir.glob("*.csv"))
+
+
+def _read_runtime_csv_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    lines = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith("#")
+    ]
+    if len(lines) < 2:
+        return []
+    return list(csv.DictReader(lines))
 
 
 def _seed_pending_writes(runtime_home: Path, entries: list[dict]) -> None:
@@ -444,6 +478,60 @@ class ReadLoopTests(unittest.TestCase):
                 self.assertGreaterEqual(status["successful_polls"], 1)
                 self.assertEqual(status["restart_count"], 0)
                 self.assertEqual(status["child_pid"], 0)
+                self.assertTrue(status["log_csv_path"])
+                self.assertTrue(status["event_log_path"])
+                self.assertTrue(Path(status["log_csv_path"]).is_file())
+                self.assertTrue(Path(status["event_log_path"]).is_file())
+                self.assertTrue(_runtime_archive_files(runtime_home))
+                self.assertTrue(
+                    (runtime_home / "logs" / "svg_mb_control_output.csv").is_file()
+                )
+                archive_rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(archive_rows, msg="archive csv never received rows")
+                mirror_rows = _read_runtime_csv_rows(
+                    runtime_home / "logs" / "svg_mb_control_output.csv"
+                )
+                self.assertTrue(mirror_rows, msg="live mirror csv never received rows")
+                archive_row = archive_rows[-1]
+                mirror_row = mirror_rows[-1]
+                self.assertEqual(archive_row["mode"], "read-loop")
+                self.assertEqual(archive_row["amd_sensor_count"], "1")
+                self.assertIn("Tctl/Tdie=83.000", archive_row["amd_sensor_summary"])
+                self.assertEqual(archive_row["cpu_tctl_c"], "83.000")
+                self.assertEqual(archive_row["fan_count"], "1")
+                self.assertEqual(archive_row["fan0_present"], "true")
+                self.assertEqual(archive_row["fan0_label"], "sim-channel-0")
+                self.assertEqual(archive_row["fan0_duty_raw"], "222")
+                self.assertEqual(archive_row["fan0_mode_raw"], "7")
+                self.assertEqual(archive_row["fan0_write_allowed"], "true")
+                self.assertEqual(archive_row["fan0_policy_blocked"], "false")
+                self.assertEqual(
+                    archive_row["fan0_effective_write_allowed"], "true"
+                )
+                self.assertEqual(archive_row["runtime_home_published"], "true")
+                self.assertEqual(archive_row["snapshot_mirror_configured"], "true")
+                self.assertEqual(archive_row["snapshot_mirror_published"], "true")
+                self.assertEqual(archive_row["status_detail"], "direct sample refreshed")
+                self.assertEqual(
+                    mirror_row["fan0_duty_raw"], archive_row["fan0_duty_raw"]
+                )
+                events = _read_runtime_events(runtime_home)
+                start_events = [
+                    item
+                    for item in events
+                    if item.get("event_type") == "read_loop.start"
+                ]
+                self.assertTrue(start_events, msg="read-loop start event missing")
+                self.assertEqual(
+                    start_events[-1]["log_csv_path"], status["log_csv_path"]
+                )
+                self.assertEqual(
+                    start_events[-1]["event_log_path"], status["event_log_path"]
+                )
+                self.assertTrue(start_events[-1]["snapshot_mirror_configured"])
             finally:
                 _stop_and_wait(proc)
 
@@ -477,6 +565,17 @@ class ReadLoopTests(unittest.TestCase):
             self.assertIsNotNone(final_status)
             self.assertEqual(final_status["status"], "shutdown")
             self.assertEqual(final_status["status_detail"], "stop requested")
+            events = _read_runtime_events(runtime_home)
+            shutdown_events = [
+                item
+                for item in events
+                if item.get("event_type") == "read_loop.shutdown"
+            ]
+            self.assertTrue(shutdown_events, msg="read-loop shutdown event missing")
+            self.assertEqual(
+                shutdown_events[-1]["successful_polls"],
+                final_status["successful_polls"],
+            )
 
 
 class WriteOnceTests(unittest.TestCase):
@@ -506,6 +605,13 @@ class WriteOnceTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
             self.assertEqual(_read_pending_writes(runtime_home), [])
+            events = _read_runtime_events(runtime_home)
+            self.assertTrue(
+                any(item.get("event_type") == "write_once.write_applied" for item in events)
+            )
+            self.assertTrue(
+                any(item.get("event_type") == "write_once.restore_applied" for item in events)
+            )
 
     def test_write_once_uses_env_config_path_and_config_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -714,6 +820,18 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertGreaterEqual(
                     status["controlled_channels"][0]["total_writes"], 1
                 )
+                self.assertTrue(status["log_csv_path"])
+                self.assertTrue(status["event_log_path"])
+                self.assertTrue(Path(status["log_csv_path"]).is_file())
+                self.assertTrue((runtime_home / "logs" / "svg_mb_control_output.csv").is_file())
+                event_observed = _wait_for(
+                    lambda: any(
+                        item.get("event_type") == "control_loop.write_applied"
+                        for item in _read_runtime_events(runtime_home)
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(event_observed)
             finally:
                 _stop_and_wait(proc)
 

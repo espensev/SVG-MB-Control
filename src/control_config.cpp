@@ -294,6 +294,12 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     if (const auto staleness = ParseOptionalUIntField(text, "staleness_threshold_ms")) {
         config.staleness_threshold_ms = *staleness;
     }
+    if (const auto rotate_hours = ParseOptionalUIntField(text, "log_rotate_hours")) {
+        config.log_rotate_hours = *rotate_hours;
+    }
+    if (const auto retain_days = ParseOptionalUIntField(text, "log_retain_days")) {
+        config.log_retain_days = *retain_days;
+    }
 
     if (const auto policy = ParseOptionalStringField(text, "runtime_policy_path")) {
         config.runtime_policy_path = ResolveConfigRelativePath(absolute_path, *policy);

@@ -5,6 +5,7 @@
 #include "fan_writer.h"
 #include "gpu_reader.h"
 #include "pending_writes.h"
+#include "runtime_logging.h"
 #include "runtime_snapshot.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -428,7 +429,9 @@ bool WriteLoopStatus(const std::filesystem::path& runtime_home,
                      const std::string& status_detail,
                      std::uint64_t tick_count,
                      const std::string& last_evaluation_iso,
-                     const std::vector<ChannelState>& channels) {
+                     const std::vector<ChannelState>& channels,
+                     const std::string& log_csv_path,
+                     const std::string& event_log_path) {
     std::error_code ec;
     std::filesystem::create_directories(runtime_home, ec);
     if (ec) return false;
@@ -446,6 +449,8 @@ bool WriteLoopStatus(const std::filesystem::path& runtime_home,
                << "  \"status_detail\": \"" << JsonEscape(status_detail) << "\",\n"
                << "  \"loop_tick_count\": " << tick_count << ",\n"
                << "  \"loop_last_evaluation\": \"" << JsonEscape(last_evaluation_iso) << "\",\n"
+               << "  \"log_csv_path\": \"" << JsonEscape(log_csv_path) << "\",\n"
+               << "  \"event_log_path\": \"" << JsonEscape(event_log_path) << "\",\n"
                << "  \"controlled_channels\": [";
         for (std::size_t i = 0u; i < channels.size(); ++i) {
             const ChannelState& ch = channels[i];
@@ -474,9 +479,37 @@ bool WriteLoopStatus(const std::filesystem::path& runtime_home,
     return true;
 }
 
+std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
+    const std::vector<ChannelState>& channels) {
+    std::vector<RuntimeControlChannelLogState> log_states;
+    log_states.reserve(channels.size());
+    for (const auto& channel : channels) {
+        RuntimeControlChannelLogState state;
+        state.channel = channel.config.channel;
+        state.observed_temp_c = channel.last_observed_temp_c;
+        state.setpoint_pct = channel.last_setpoint_pct;
+        state.total_writes = channel.total_writes;
+        state.write_active = channel.write_active;
+        state.baseline_captured = channel.baseline_captured;
+        log_states.push_back(state);
+    }
+    return log_states;
+}
+
 }  // namespace
 
 int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
+    const std::string event_log_path =
+        ResolveRuntimeEventLogPath(impl_->runtime_home).string();
+    RuntimeCsvLogger csv_logger(
+        impl_->runtime_home,
+        impl_->base.log_rotate_hours,
+        impl_->base.log_retain_days);
+    std::string log_csv_path;
+    if (csv_logger.Open("control-loop", BuildControlLoopCsvHeader())) {
+        log_csv_path = csv_logger.active_archive_path().string();
+    }
+
     AmdReader amd_reader;
     GpuReader gpu_reader;
 
@@ -484,10 +517,19 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     try {
         fan_writer = CreateFanWriter(impl_->runtime_policy);
     } catch (const std::exception& error) {
+        AppendRuntimeEvent(
+            impl_->runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.init_failed",
+                .detail = std::string("direct writer init failed: ") +
+                          error.what(),
+                .success = false,
+            });
         WriteLoopStatus(impl_->runtime_home, "control-loop", "failed",
                         std::string("direct writer init failed: ") + error.what(),
                         0u, FormatLocalIso8601(std::chrono::system_clock::now()),
-                        impl_->channels);
+                        impl_->channels, log_csv_path, event_log_path);
         return 1;
     }
 
@@ -509,8 +551,16 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
                         detail.str(), tick_count,
                         FormatLocalIso8601(std::chrono::system_clock::now()),
-                        impl_->channels);
+                        impl_->channels, log_csv_path, event_log_path);
     }
+    AppendRuntimeEvent(
+        impl_->runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.start",
+            .detail = "control-loop started",
+            .success = true,
+        });
 
     while (!stop_flag.load()) {
         ++tick_count;
@@ -521,6 +571,19 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             amd_reader, gpu_reader, *fan_writer, impl_->runtime_policy);
         const bool runtime_snapshot_available =
             RuntimeSnapshotHasTelemetry(runtime_snapshot);
+
+        if (csv_logger.MaybeRotate()) {
+            log_csv_path = csv_logger.active_archive_path().string();
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.log_rotated",
+                    .detail = "telemetry log rotated",
+                    .tick_count = tick_count,
+                    .success = true,
+                });
+        }
 
         // Extract CPU temp.
         TempInputs temp_inputs;
@@ -559,6 +622,16 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     channel.baseline_duty_raw = fan->duty_raw;
                     channel.baseline_mode_raw = fan->mode_raw;
                     channel.baseline_captured = true;
+                    AppendRuntimeEvent(
+                        impl_->runtime_home,
+                        RuntimeLogEvent{
+                            .mode = "control-loop",
+                            .event_type = "control_loop.baseline_captured",
+                            .detail = "captured baseline for control channel",
+                            .channel = channel.config.channel,
+                            .tick_count = tick_count,
+                            .success = true,
+                        });
                 }
             }
 
@@ -571,6 +644,16 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                                   channel.baseline_duty_raw,
                                                   channel.baseline_mode_raw);
                 if (restore_result) {
+                    AppendRuntimeEvent(
+                        impl_->runtime_home,
+                        RuntimeLogEvent{
+                            .mode = "control-loop",
+                            .event_type = "control_loop.restore_applied",
+                            .detail = "restored channel to captured baseline",
+                            .channel = channel.config.channel,
+                            .tick_count = tick_count,
+                            .success = true,
+                        });
                     channel.write_active = false;
                     channel.last_issued_pct =
                         std::numeric_limits<double>::quiet_NaN();
@@ -581,6 +664,17 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         // Best-effort; stale sidecar can still be reconciled
                         // on a future startup.
                     }
+                } else {
+                    AppendRuntimeEvent(
+                        impl_->runtime_home,
+                        RuntimeLogEvent{
+                            .mode = "control-loop",
+                            .event_type = "control_loop.restore_failed",
+                            .detail = restore_result.detail,
+                            .channel = channel.config.channel,
+                            .tick_count = tick_count,
+                            .success = false,
+                        });
                 }
             }
 
@@ -644,6 +738,18 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         // Best-effort.
                     }
                 }
+                AppendRuntimeEvent(
+                    impl_->runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type = "control_loop.write_failed",
+                        .detail = write_result.detail,
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .observed_temp_c = blended,
+                        .setpoint_pct = setpoint,
+                        .success = false,
+                    });
                 continue;
             }
             channel.write_active = true;
@@ -654,6 +760,26 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             channel.last_issued_pct = setpoint;
             channel.last_write_time = now_steady;
             ++channel.total_writes;
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.write_applied",
+                    .detail = "applied control-loop setpoint",
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .observed_temp_c = blended,
+                    .setpoint_pct = setpoint,
+                    .success = true,
+                });
+        }
+
+        if (csv_logger.is_open()) {
+            csv_logger.WriteRow(
+                BuildControlLoopCsvRow(
+                    runtime_snapshot,
+                    tick_count,
+                    BuildChannelLogStates(impl_->channels)));
         }
 
         {
@@ -662,7 +788,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                << " cooldown=" << impl_->loop.write_cooldown_ms
                << " deadband=" << impl_->loop.deadband_pct;
             WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
-                            td.str(), tick_count, eval_iso, impl_->channels);
+                            td.str(), tick_count, eval_iso, impl_->channels,
+                            log_csv_path, event_log_path);
         }
 
         std::unique_lock<std::mutex> lock(impl_->wake_mutex);
@@ -676,7 +803,16 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",
                     "stop requested", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
-                    impl_->channels);
+                    impl_->channels, log_csv_path, event_log_path);
+    AppendRuntimeEvent(
+        impl_->runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.shutdown_requested",
+            .detail = "stop requested",
+            .tick_count = tick_count,
+            .success = true,
+        });
     bool restore_failure = false;
     for (auto& channel : impl_->channels) {
         if (channel.write_active && channel.baseline_captured) {
@@ -686,8 +822,28 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                               channel.baseline_mode_raw);
             if (!restore_result) {
                 restore_failure = true;
+                AppendRuntimeEvent(
+                    impl_->runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type = "control_loop.shutdown_restore_failed",
+                        .detail = restore_result.detail,
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .success = false,
+                    });
                 continue;
             }
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.shutdown_restore_applied",
+                    .detail = "restored channel during shutdown",
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .success = true,
+                });
         }
         try {
             RemovePendingWrite(impl_->runtime_home, channel.config.channel);
@@ -700,7 +856,17 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                     : "channels restored",
                     tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
-                    impl_->channels);
+                    impl_->channels, log_csv_path, event_log_path);
+    AppendRuntimeEvent(
+        impl_->runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.shutdown",
+            .detail = restore_failure ? "restore failed"
+                                      : "channels restored",
+            .tick_count = tick_count,
+            .success = !restore_failure,
+        });
     return restore_failure ? 1 : 0;
 }
 

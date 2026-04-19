@@ -4,6 +4,7 @@
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
+#include "runtime_logging.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 
@@ -22,6 +23,7 @@
 #include <ctime>
 #include <fstream>
 #include <mutex>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -110,7 +112,9 @@ bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
                << "  \"skipped_polls\": " << status.skipped_polls << ",\n"
                << "  \"successful_polls\": " << status.successful_polls << ",\n"
                << "  \"stale\": " << (status.stale ? "true" : "false") << ",\n"
-               << "  \"child_pid\": " << status.child_pid << "\n"
+               << "  \"child_pid\": " << status.child_pid << ",\n"
+               << "  \"log_csv_path\": \"" << JsonEscape(status.log_csv_path) << "\",\n"
+               << "  \"event_log_path\": \"" << JsonEscape(status.event_log_path) << "\"\n"
                << "}\n";
         stream.flush();
         if (stream.fail()) {
@@ -184,6 +188,8 @@ int ReadLoop::RunUntilStopped() {
     status.status = "running";
     status.status_detail = "starting";
     status.snapshot_source = "direct-runtime-snapshot";
+    status.event_log_path =
+        ResolveRuntimeEventLogPath(impl_->runtime_home).string();
 
     auto publish_status = [&](const std::string& state,
                               const std::string& detail) {
@@ -191,6 +197,14 @@ int ReadLoop::RunUntilStopped() {
         status.status_detail = detail;
         WriteRuntimeStatusFile(impl_->runtime_home, status);
     };
+
+    RuntimeCsvLogger csv_logger(
+        impl_->runtime_home,
+        impl_->config.log_rotate_hours,
+        impl_->config.log_retain_days);
+    if (csv_logger.Open("read-loop", BuildReadLoopCsvHeader())) {
+        status.log_csv_path = csv_logger.active_archive_path().string();
+    }
 
     publish_status("running", "initializing direct readers");
 
@@ -200,11 +214,47 @@ int ReadLoop::RunUntilStopped() {
     try {
         fan_writer = CreateFanWriter(runtime_policy);
     } catch (const std::exception& error) {
+        AppendRuntimeEvent(
+            impl_->runtime_home,
+            RuntimeLogEvent{
+                .mode = "read-loop",
+                .event_type = "read_loop.init_failed",
+                .detail = std::string("direct reader init failed: ") +
+                          error.what(),
+                .success = false,
+                .log_csv_path = status.log_csv_path,
+                .event_log_path = status.event_log_path,
+            });
         publish_status("direct-read-failed",
                        std::string("direct reader init failed: ") +
                            error.what());
         return 1;
     }
+
+    std::ostringstream start_detail;
+    start_detail << "read-loop started"
+                 << " poll_ms=" << poll_ms
+                 << " staleness_threshold_ms=" << staleness_threshold_ms
+                 << " snapshot_mirror_configured="
+                 << (!impl_->config.snapshot_path.empty() ? "true" : "false");
+    if (!impl_->config.snapshot_path.empty()) {
+        start_detail << " snapshot_path=" << impl_->config.snapshot_path.string();
+    }
+    AppendRuntimeEvent(
+        impl_->runtime_home,
+        RuntimeLogEvent{
+            .mode = "read-loop",
+            .event_type = "read_loop.start",
+            .detail = start_detail.str(),
+            .success = true,
+            .log_csv_path = status.log_csv_path,
+            .event_log_path = status.event_log_path,
+            .successful_polls = status.successful_polls,
+            .skipped_polls = status.skipped_polls,
+            .stale = status.stale,
+            .snapshot_mirror_configured =
+                !impl_->config.snapshot_path.empty(),
+        });
 
     AmdReader amd_reader;
     GpuReader gpu_reader;
@@ -215,17 +265,41 @@ int ReadLoop::RunUntilStopped() {
             RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
                 amd_reader, gpu_reader, *fan_writer, runtime_policy);
 
-            bool wrote_outputs = WriteRuntimeSnapshotFile(
-                impl_->runtime_home, runtime_snapshot);
-            if (!impl_->config.snapshot_path.empty()) {
-                wrote_outputs = WriteRuntimeSnapshotJsonFile(
-                                    impl_->config.snapshot_path,
-                                    runtime_snapshot) &&
-                                wrote_outputs;
+            if (csv_logger.MaybeRotate()) {
+                status.log_csv_path =
+                    csv_logger.active_archive_path().string();
+                AppendRuntimeEvent(
+                    impl_->runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "read-loop",
+                        .event_type = "read_loop.log_rotated",
+                        .detail = "telemetry log rotated",
+                        .success = true,
+                        .log_csv_path = status.log_csv_path,
+                        .event_log_path = status.event_log_path,
+                        .successful_polls = status.successful_polls,
+                        .skipped_polls = status.skipped_polls,
+                        .stale = status.stale,
+                    });
             }
 
-            if (wrote_outputs &&
-                RuntimeSnapshotHasTelemetry(runtime_snapshot)) {
+            const bool telemetry_available =
+                RuntimeSnapshotHasTelemetry(runtime_snapshot);
+            const bool runtime_home_published = WriteRuntimeSnapshotFile(
+                impl_->runtime_home, runtime_snapshot);
+            const bool snapshot_mirror_configured =
+                !impl_->config.snapshot_path.empty();
+            bool snapshot_mirror_published = false;
+            if (!impl_->config.snapshot_path.empty()) {
+                snapshot_mirror_published = WriteRuntimeSnapshotJsonFile(
+                    impl_->config.snapshot_path,
+                    runtime_snapshot);
+            }
+            const bool wrote_outputs =
+                runtime_home_published &&
+                (!snapshot_mirror_configured || snapshot_mirror_published);
+
+            if (wrote_outputs && telemetry_available) {
                 last_success_time = std::chrono::steady_clock::now();
                 ++status.successful_polls;
                 status.stale = false;
@@ -234,14 +308,87 @@ int ReadLoop::RunUntilStopped() {
                 status.status_detail = "direct sample refreshed";
             } else {
                 ++status.skipped_polls;
-                status.status_detail = wrote_outputs
-                    ? "direct sample had no telemetry"
-                    : "direct sample could not be published";
+                if (!telemetry_available) {
+                    status.status_detail = "direct sample had no telemetry";
+                } else if (!runtime_home_published &&
+                           snapshot_mirror_configured &&
+                           !snapshot_mirror_published) {
+                    status.status_detail =
+                        "direct sample could not publish runtime home or snapshot mirror";
+                } else if (!runtime_home_published) {
+                    status.status_detail =
+                        "direct sample could not publish runtime home";
+                } else {
+                    status.status_detail =
+                        "direct sample could not publish snapshot mirror";
+                }
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+            const auto since_success_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - last_success_time).count();
+            status.stale = static_cast<std::uint64_t>(since_success_ms) >
+                           static_cast<std::uint64_t>(staleness_threshold_ms);
+
+            if (csv_logger.is_open()) {
+                csv_logger.WriteRow(BuildReadLoopCsvRow(
+                    runtime_snapshot,
+                    RuntimeReadLoopLogState{
+                        .telemetry_available = telemetry_available,
+                        .runtime_home_published = runtime_home_published,
+                        .snapshot_mirror_configured = snapshot_mirror_configured,
+                        .snapshot_mirror_published = snapshot_mirror_published,
+                        .successful_polls = status.successful_polls,
+                        .skipped_polls = status.skipped_polls,
+                        .stale = status.stale,
+                        .status_detail = status.status_detail,
+                    }));
+            }
+
+            if (!telemetry_available || !wrote_outputs) {
+                AppendRuntimeEvent(
+                    impl_->runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "read-loop",
+                        .event_type = "read_loop.sample_skipped",
+                        .detail = status.status_detail,
+                        .success = false,
+                        .snapshot_time_iso = runtime_snapshot.snapshot_time_iso,
+                        .log_csv_path = status.log_csv_path,
+                        .event_log_path = status.event_log_path,
+                        .amd_sensor_count = static_cast<std::uint32_t>(
+                            runtime_snapshot.amd_sensors.size()),
+                        .fan_count = static_cast<std::uint32_t>(
+                            runtime_snapshot.fans.size()),
+                        .gpu_available = runtime_snapshot.gpu.available,
+                        .successful_polls = status.successful_polls,
+                        .skipped_polls = status.skipped_polls,
+                        .stale = status.stale,
+                        .telemetry_available = telemetry_available,
+                        .runtime_home_published = runtime_home_published,
+                        .snapshot_mirror_configured =
+                            snapshot_mirror_configured,
+                        .snapshot_mirror_published =
+                            snapshot_mirror_published,
+                    });
             }
         } catch (const std::exception& error) {
             ++status.skipped_polls;
             status.status_detail =
                 std::string("direct sample failed: ") + error.what();
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "read-loop",
+                    .event_type = "read_loop.sample_failed",
+                    .detail = status.status_detail,
+                    .success = false,
+                    .log_csv_path = status.log_csv_path,
+                    .event_log_path = status.event_log_path,
+                    .successful_polls = status.successful_polls,
+                    .skipped_polls = status.skipped_polls,
+                });
         }
 
         const auto now = std::chrono::steady_clock::now();
@@ -260,6 +407,21 @@ int ReadLoop::RunUntilStopped() {
     }
 
     publish_status("shutdown", "stop requested");
+    AppendRuntimeEvent(
+        impl_->runtime_home,
+        RuntimeLogEvent{
+            .mode = "read-loop",
+            .event_type = "read_loop.shutdown",
+            .detail = "stop requested",
+            .success = true,
+            .log_csv_path = status.log_csv_path,
+            .event_log_path = status.event_log_path,
+            .successful_polls = status.successful_polls,
+            .skipped_polls = status.skipped_polls,
+            .stale = status.stale,
+            .snapshot_mirror_configured =
+                !impl_->config.snapshot_path.empty(),
+        });
     return 0;
 }
 

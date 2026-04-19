@@ -5,6 +5,8 @@
   "runtime_policy_path": "runtime_policy_write_live.json",
   "runtime_home_path": "runtime",
   "poll_ms": 500,
+  "log_rotate_hours": 4,
+  "log_retain_days": 7,
   "baseline_freshness_ceiling_ms": 10000,
   "restore_timeout_ms": 10000,
   "control_loop": {
