@@ -1,6 +1,6 @@
 {
   "schema_version": 4,
-  "default_mode": "read-loop",
+  "default_mode": "control-loop",
   "snapshot_path": "..\\runtime\\current_state.json",
   "runtime_policy_path": "runtime_policy_write_live.json",
   "runtime_home_path": "..\\runtime",

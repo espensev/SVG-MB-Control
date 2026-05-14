@@ -102,7 +102,9 @@ cd .\release
 .\svg-mb-control.exe
 ```
 
-The packaged `control.json` sets `default_mode` to `read-loop`.
+The packaged `control.json` sets `default_mode` to `control-loop`, so a plain
+launch starts normal fan control and writes runtime output under
+`release\runtime`.
 
 Direct one-shot snapshot to stdout:
 
@@ -125,7 +127,7 @@ release\svg-mb-control.exe --mode write-once --config .\config\control.example.j
 Direct control loop:
 
 ```powershell
-release\svg-mb-control.exe --mode control-loop --config .\config\control.example.json
+release\svg-mb-control.exe
 ```
 
 When `--mode` is omitted, Control uses `default_mode` from the loaded config.

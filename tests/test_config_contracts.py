@@ -4,6 +4,19 @@ from tests.helpers import *
 
 
 class ConfigContractTests(unittest.TestCase):
+    def test_shipped_configs_default_to_control_loop(self) -> None:
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            self.assertEqual(
+                payload["default_mode"],
+                "control-loop",
+                msg=f"{rel_path} should start normal control on plain launch",
+            )
+
     def test_shipped_control_loop_configs_use_characterized_tick(self) -> None:
         for rel_path in (
             Path("config") / "control.example.json",
