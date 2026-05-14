@@ -142,6 +142,11 @@ Each controlled channel also publishes `last_thermal_pressure_boost_pct` in
 control-loop CSV. That value is the slow leaky-integral term added on top of
 the base curve/EMA demand.
 
+The control-loop CSV also includes `channelN_feedforward_pct` and
+`channelN_correction_pct`. Feedforward is the raw curve/overlay demand before
+the control loop applies smoothing, thermal pressure, and rate limits;
+correction is the final setpoint minus that feedforward term.
+
 The current status JSON also publishes `last_raw_demand_pct` and
 `last_smoothed_demand_pct` so a live reader can distinguish the curve/overlay
 demand from the smoothed demand and final rate-limited setpoint.

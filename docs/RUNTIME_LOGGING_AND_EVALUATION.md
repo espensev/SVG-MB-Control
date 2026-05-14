@@ -59,8 +59,8 @@ source. Use the CSV for timing and response analysis.
 
 - The logging plane is product-owned inside `SVG-MB-Control`; it does not need a
   sibling process or bridge helper.
-- Control logs per-tick telemetry, fan state, setpoints, thermal-pressure boost,
-  timing quality, and process resource cost.
+- Control logs per-tick telemetry, fan state, setpoints, feedforward/correction
+  split, thermal-pressure boost, timing quality, and process resource cost.
 - The 50 ms loop is currently observable and stable enough for the shipped
   channel set under local testing.
 - JSONL events separate discrete control actions and failures from the dense CSV

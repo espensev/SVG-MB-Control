@@ -20,6 +20,7 @@ struct RuntimeControlChannelLogState {
     std::uint32_t channel = 0u;
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double setpoint_pct = std::numeric_limits<double>::quiet_NaN();
+    double feedforward_pct = std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_boost_pct = 0.0;
     std::uint64_t total_writes = 0u;
     bool write_active = false;

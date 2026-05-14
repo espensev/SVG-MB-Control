@@ -90,6 +90,7 @@ std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
         state.channel = channel.config.channel;
         state.observed_temp_c = channel.last_observed_temp_c;
         state.setpoint_pct = channel.last_setpoint_pct;
+        state.feedforward_pct = channel.last_raw_demand_pct;
         state.thermal_pressure_boost_pct =
             channel.thermal_pressure_boost_pct;
         state.total_writes = channel.total_writes;

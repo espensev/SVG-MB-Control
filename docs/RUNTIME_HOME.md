@@ -167,8 +167,8 @@ Control-loop CSV rows include the common telemetry/fan columns plus:
 
 - loop tick and timing-quality fields
 - process CPU and memory fields
-- per-channel observed temperature, setpoint, thermal-pressure boost, write
-  count, active-write flag, and baseline flag
+- per-channel observed temperature, setpoint, feedforward demand, correction,
+  thermal-pressure boost, write count, active-write flag, and baseline flag
 
 The JSONL event stream uses schema `svg_mb_control.event.v1`. It is the source
 for discrete operational events such as startup, rotation, write attempts,

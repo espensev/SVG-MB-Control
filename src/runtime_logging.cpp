@@ -651,7 +651,9 @@ std::string BuildControlLoopCsvHeader() {
                << ",channel" << channel << "_thermal_pressure_boost_pct"
                << ",channel" << channel << "_total_writes"
                << ",channel" << channel << "_write_active"
-               << ",channel" << channel << "_baseline_captured";
+               << ",channel" << channel << "_baseline_captured"
+               << ",channel" << channel << "_feedforward_pct"
+               << ",channel" << channel << "_correction_pct";
     }
     return header.str();
 }
@@ -708,6 +710,16 @@ std::string BuildControlLoopCsvRow(
         csv << ',';
         if (state != nullptr) {
             AppendCsvBool(csv, state->baseline_captured);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->feedforward_pct);
+        }
+        csv << ',';
+        if (state != nullptr &&
+            !std::isnan(state->setpoint_pct) &&
+            !std::isnan(state->feedforward_pct)) {
+            AppendCsvDouble(csv, state->setpoint_pct - state->feedforward_pct);
         }
     }
     return csv.str();
