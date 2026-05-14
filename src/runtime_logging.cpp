@@ -12,9 +12,19 @@
 #include <string>
 #include <system_error>
 
+#ifndef SVG_MB_CONTROL_VERSION
+#define SVG_MB_CONTROL_VERSION "unknown"
+#endif
+
+#ifndef SVG_MB_CONTROL_GIT_HASH
+#define SVG_MB_CONTROL_GIT_HASH "unknown"
+#endif
+
 namespace svg_mb_control {
 
 namespace {
+
+constexpr std::uint64_t kRuntimeManifestUpdateIntervalRows = 100u;
 
 std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
     const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
@@ -38,6 +48,21 @@ std::string FormatArchiveTimestamp(std::chrono::system_clock::time_point tp) {
     const std::size_t written = std::strftime(buffer.data(), buffer.size(),
                                               "%Y%m%d_%H%M%S", &local);
     return written > 0u ? std::string(buffer.data(), written) : std::string();
+}
+
+std::uint64_t CountNonEmptyLines(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+        return 0u;
+    }
+    std::uint64_t count = 0u;
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty()) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 std::optional<std::chrono::system_clock::time_point> ParseLocalIso8601(
@@ -291,6 +316,11 @@ std::filesystem::path ResolveRuntimeEventLogPath(
     return ResolveRuntimeLogsDir(runtime_home) / "svg_mb_control_events.jsonl";
 }
 
+std::filesystem::path ResolveRuntimeLogManifestPath(
+    const std::filesystem::path& runtime_home) {
+    return ResolveRuntimeLogsDir(runtime_home) / "svg_mb_control_manifest.json";
+}
+
 RuntimeCsvLogger::RuntimeCsvLogger(std::filesystem::path runtime_home,
                                    std::uint32_t rotate_hours,
                                    std::uint32_t retain_days)
@@ -298,6 +328,7 @@ RuntimeCsvLogger::RuntimeCsvLogger(std::filesystem::path runtime_home,
       logs_dir_(ResolveRuntimeLogsDir(runtime_home_)),
       archive_dir_(ResolveRuntimeArchiveDir(runtime_home_)),
       mirror_path_(ResolveRuntimeLogMirrorPath(runtime_home_)),
+      manifest_path_(ResolveRuntimeLogManifestPath(runtime_home_)),
       rotate_hours_(rotate_hours),
       retain_days_(retain_days) {}
 
@@ -312,7 +343,7 @@ bool RuntimeCsvLogger::Open(std::string_view mode, std::string_view header_line)
 }
 
 bool RuntimeCsvLogger::OpenNewChunk() {
-    Close();
+    CloseActiveChunk("rotated");
 
     std::error_code ec;
     std::filesystem::create_directories(archive_dir_, ec);
@@ -328,21 +359,27 @@ bool RuntimeCsvLogger::OpenNewChunk() {
     active_archive_path_ = archive_dir_ /
         ("svg_mb_control_" + mode_ + "_" + FormatArchiveTimestamp(opened_at_) +
          ".csv");
+    active_manifest_path_ = active_archive_path_;
+    active_manifest_path_.replace_extension(".manifest.json");
+    row_count_ = 0u;
 
     archive_stream_.open(active_archive_path_,
                          std::ios::binary | std::ios::trunc);
     if (!archive_stream_.is_open()) {
         active_archive_path_.clear();
+        active_manifest_path_.clear();
         return false;
     }
     mirror_stream_.open(mirror_path_, std::ios::binary | std::ios::trunc);
     if (!mirror_stream_.is_open()) {
         archive_stream_.close();
         active_archive_path_.clear();
+        active_manifest_path_.clear();
         return false;
     }
 
     WritePrologue();
+    WriteManifest("running");
     PruneOldArchives();
     return archive_stream_.good() && mirror_stream_.good();
 }
@@ -359,6 +396,91 @@ void RuntimeCsvLogger::WritePrologue() {
         *stream << "# session_start=" << opened_iso << '\n';
         *stream << header_line_ << '\n';
         stream->flush();
+    }
+}
+
+void RuntimeCsvLogger::WriteManifest(std::string_view status) {
+    if (active_archive_path_.empty() || active_manifest_path_.empty()) {
+        return;
+    }
+
+    const std::filesystem::path event_log_path =
+        ResolveRuntimeEventLogPath(runtime_home_);
+    nlohmann::json payload = {
+        {"schema", "svg_mb_control.runtime_log_manifest.v1"},
+        {"status", std::string(status)},
+        {"mode", mode_},
+        {"session_start", FormatLocalIso8601(opened_at_)},
+        {"last_update", FormatLocalIso8601(std::chrono::system_clock::now())},
+        {"row_count", row_count_},
+        {"event_count", CountNonEmptyLines(event_log_path)},
+        {"producer",
+         {
+             {"tool", "svg-mb-control"},
+             {"version", SVG_MB_CONTROL_VERSION},
+             {"git_hash", SVG_MB_CONTROL_GIT_HASH},
+         }},
+        {"external_logging",
+         {
+             {"required", false},
+             {"preferred_source", "svg-mb-control runtime CSV/JSONL"},
+         }},
+        {"artifacts",
+         {
+             {"csv_archive",
+              {
+                  {"path", active_archive_path_.string()},
+                  {"schema", "svg_mb_control.log.v1"},
+              }},
+             {"csv_latest",
+              {
+                  {"path", mirror_path_.string()},
+                  {"schema", "svg_mb_control.log.v1"},
+              }},
+             {"events",
+              {
+                  {"path", event_log_path.string()},
+                  {"schema", "svg_mb_control.event.v1"},
+              }},
+             {"manifest_archive",
+              {
+                  {"path", active_manifest_path_.string()},
+                  {"schema", "svg_mb_control.runtime_log_manifest.v1"},
+              }},
+             {"manifest_latest",
+              {
+                  {"path", manifest_path_.string()},
+                  {"schema", "svg_mb_control.runtime_log_manifest.v1"},
+              }},
+         }},
+        {"writer",
+         {
+             {"csv_flush_policy", "per_row"},
+             {"mirror_mode", "write_through"},
+         }},
+    };
+
+    TryWriteJsonFileAtomic(active_manifest_path_, payload);
+    TryWriteJsonFileAtomic(manifest_path_, payload);
+}
+
+void RuntimeCsvLogger::CloseActiveChunk(std::string_view status) {
+    const bool had_open_stream =
+        archive_stream_.is_open() || mirror_stream_.is_open();
+    if (archive_stream_.is_open()) {
+        archive_stream_.flush();
+    }
+    if (mirror_stream_.is_open()) {
+        mirror_stream_.flush();
+    }
+    if (had_open_stream) {
+        WriteManifest(status);
+    }
+    if (archive_stream_.is_open()) {
+        archive_stream_.close();
+    }
+    if (mirror_stream_.is_open()) {
+        mirror_stream_.close();
     }
 }
 
@@ -423,18 +545,18 @@ bool RuntimeCsvLogger::WriteRow(std::string_view row) {
     mirror_stream_ << row << '\n';
     archive_stream_.flush();
     mirror_stream_.flush();
-    return archive_stream_.good() && mirror_stream_.good();
+    if (!archive_stream_.good() || !mirror_stream_.good()) {
+        return false;
+    }
+    ++row_count_;
+    if ((row_count_ % kRuntimeManifestUpdateIntervalRows) == 0u) {
+        WriteManifest("running");
+    }
+    return true;
 }
 
 void RuntimeCsvLogger::Close() {
-    if (archive_stream_.is_open()) {
-        archive_stream_.flush();
-        archive_stream_.close();
-    }
-    if (mirror_stream_.is_open()) {
-        mirror_stream_.flush();
-        mirror_stream_.close();
-    }
+    CloseActiveChunk("completed");
 }
 
 bool RuntimeCsvLogger::is_open() const {
@@ -445,8 +567,20 @@ const std::filesystem::path& RuntimeCsvLogger::active_archive_path() const {
     return active_archive_path_;
 }
 
+const std::filesystem::path& RuntimeCsvLogger::active_manifest_path() const {
+    return active_manifest_path_;
+}
+
 const std::filesystem::path& RuntimeCsvLogger::mirror_path() const {
     return mirror_path_;
+}
+
+const std::filesystem::path& RuntimeCsvLogger::manifest_path() const {
+    return manifest_path_;
+}
+
+std::uint64_t RuntimeCsvLogger::row_count() const {
+    return row_count_;
 }
 
 void PutOptionalDouble(nlohmann::json& payload,

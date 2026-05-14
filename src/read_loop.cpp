@@ -71,6 +71,7 @@ bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
     payload["stale"] = status.stale;
     payload["child_pid"] = status.child_pid;
     payload["log_csv_path"] = status.log_csv_path;
+    payload["log_manifest_path"] = status.log_manifest_path;
     payload["event_log_path"] = status.event_log_path;
     return TryWriteJsonFileAtomic(runtime_home / "control_runtime.json",
                                   payload);
@@ -150,6 +151,7 @@ int ReadLoop::RunUntilStopped() {
         impl_->config.log_retain_days);
     if (csv_logger.Open("read-loop", BuildReadLoopCsvHeader())) {
         status.log_csv_path = csv_logger.active_archive_path().string();
+        status.log_manifest_path = csv_logger.manifest_path().string();
     }
 
     publish_status("running", "initializing direct readers");
@@ -214,6 +216,8 @@ int ReadLoop::RunUntilStopped() {
             if (csv_logger.MaybeRotate()) {
                 status.log_csv_path =
                     csv_logger.active_archive_path().string();
+                status.log_manifest_path =
+                    csv_logger.manifest_path().string();
                 AppendRuntimeEvent(
                     impl_->runtime_home,
                     RuntimeLogEvent{

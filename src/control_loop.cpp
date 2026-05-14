@@ -375,8 +375,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         context.base.log_rotate_hours,
         context.base.log_retain_days);
     std::string log_csv_path;
+    std::string log_manifest_path;
     if (csv_logger.Open("control-loop", BuildControlLoopCsvHeader())) {
         log_csv_path = csv_logger.active_archive_path().string();
+        log_manifest_path = csv_logger.manifest_path().string();
     }
     RuntimeControlLoopTimingState last_timing;
     last_timing.loop_intended_interval_ms = context.loop.poll_tick_ms;
@@ -400,7 +402,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         WriteControlLoopStatus(context.runtime_home, "control-loop", "failed",
                         std::string("direct writer init failed: ") + error.what(),
                         0u, FormatLocalIso8601(std::chrono::system_clock::now()),
-                        last_timing, context.channels, log_csv_path, event_log_path);
+                        last_timing, context.channels, log_csv_path,
+                        log_manifest_path, event_log_path);
         return 1;
     }
 
@@ -428,7 +431,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         WriteControlLoopStatus(context.runtime_home, "control-loop", "running",
                         detail.str(), tick_count,
                         FormatLocalIso8601(std::chrono::system_clock::now()),
-                        last_timing, context.channels, log_csv_path, event_log_path);
+                        last_timing, context.channels, log_csv_path,
+                        log_manifest_path, event_log_path);
     }
     AppendRuntimeEvent(
         context.runtime_home,
@@ -473,6 +477,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
 
         if (csv_logger.MaybeRotate()) {
             log_csv_path = csv_logger.active_archive_path().string();
+            log_manifest_path = csv_logger.manifest_path().string();
             AppendRuntimeEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
@@ -881,7 +886,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                        : std::string("default"));
             WriteControlLoopStatus(context.runtime_home, "control-loop", "running",
                             td.str(), tick_count, eval_iso, last_timing,
-                            context.channels, log_csv_path, event_log_path);
+                            context.channels, log_csv_path, log_manifest_path,
+                            event_log_path);
         }
 
         WaitForNextControlTick(context, tick_started_steady, stop_flag);
@@ -891,7 +897,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     WriteControlLoopStatus(context.runtime_home, "control-loop", "shutdown",
                     "stop requested", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
-                    last_timing, context.channels, log_csv_path, event_log_path);
+                    last_timing, context.channels, log_csv_path,
+                    log_manifest_path, event_log_path);
     AppendRuntimeEvent(
         context.runtime_home,
         RuntimeLogEvent{
@@ -969,7 +976,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                     : "channels restored",
                     tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
-                    last_timing, context.channels, log_csv_path, event_log_path);
+                    last_timing, context.channels, log_csv_path,
+                    log_manifest_path, event_log_path);
     AppendRuntimeEvent(
         context.runtime_home,
         RuntimeLogEvent{

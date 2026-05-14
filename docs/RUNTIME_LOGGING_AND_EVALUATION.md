@@ -44,6 +44,13 @@ Control owns the runtime logging plane:
 - `logs\svg_mb_control_events.jsonl` is the append-only event stream for
   starts, rotations, writes, restores, policy refusals, sensor failures,
   circuit-breaker transitions, and sidecar warnings.
+- `logs\svg_mb_control_manifest.json` is the latest native runtime manifest.
+  It points at the active archive CSV, live CSV mirror, event log, archive
+  manifest, and records row/event counts plus producer identity. Its
+  `external_logging.required=false` field is intentional: normal controller
+  logging should use this plane, not HWiNFO.
+- `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json` is the
+  per-archive manifest for the matching CSV chunk.
 
 `control_runtime.json` is intentionally a status view, not the per-tick data
 source. Use the CSV for timing and response analysis.
@@ -60,6 +67,8 @@ source. Use the CSV for timing and response analysis.
   stream.
 - Rotation and retention are local config fields, so long runs do not require
   external cleanup tooling.
+- Runtime manifests now make a Control run self-describing enough for normal
+  validation without an external logger.
 
 This is a solid early-phase data substrate. The next improvement should be
 better experiment accounting and automated summarization, not a wholesale
@@ -70,9 +79,9 @@ logging replacement.
 - `scripts\analyze_control_run.py` can turn a control-loop CSV plus optional
   event JSONL into a repeatable Markdown or JSON summary and an analysis
   manifest with artifact hashes.
-- Manifest generation records profile, notes, run id, row/event counts, and
-  artifact paths plus SHA-256 values. It still relies on the operator to pass
-  config/build artifacts until the controller writes that identity directly.
+- The controller writes the native runtime manifest during the run. The analyzer
+  can still create a separate analysis manifest with profile, notes, run id,
+  artifact hashes, and before/after decision context.
 
 ## Remaining Gaps
 
@@ -106,8 +115,9 @@ Use this loop for controller changes:
    - combined CPU plus GPU,
    - CPU-only diagnostic only when needed,
    - cooldown.
-4. Collect the active CSV archive, `control_runtime.json`,
-   `current_state.json`, and `svg_mb_control_events.jsonl`.
+4. Collect the native runtime manifest first, then the active CSV archive,
+   `control_runtime.json`, `current_state.json`, and
+   `svg_mb_control_events.jsonl`.
 5. Summarize the run before tuning. Use the repo analyzer as the default first
    pass:
    ```powershell

@@ -19,6 +19,7 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const RuntimeControlLoopTimingState& timing,
                             const std::vector<ChannelState>& channels,
                             const std::string& log_csv_path,
+                            const std::string& log_manifest_path,
                             const std::string& event_log_path);
 
 std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(

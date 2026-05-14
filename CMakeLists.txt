@@ -67,6 +67,14 @@ if(SVG_MB_CONTROL_ENABLE_GPU)
     endif()
 endif()
 
+set(SVG_MB_CONTROL_RESOURCE_SOURCES)
+if(WIN32)
+    enable_language(RC)
+    list(APPEND SVG_MB_CONTROL_RESOURCE_SOURCES
+        resources/svg_mb_control.rc
+    )
+endif()
+
 add_executable(svg_mb_control
     src/amd_reader.cpp
     src/channel_evaluator.cpp
@@ -87,6 +95,7 @@ add_executable(svg_mb_control
     src/runtime_snapshot.cpp
     src/runtime_write_policy.cpp
     src/write_orchestrator.cpp
+    ${SVG_MB_CONTROL_RESOURCE_SOURCES}
 )
 
 target_link_libraries(svg_mb_control PRIVATE

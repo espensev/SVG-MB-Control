@@ -177,6 +177,10 @@ def _read_runtime_events(runtime_home: Path) -> list[dict]:
     return events
 
 
+def _read_runtime_manifest(runtime_home: Path) -> dict | None:
+    return _read_json(runtime_home / "logs" / "svg_mb_control_manifest.json")
+
+
 def _runtime_archive_files(runtime_home: Path) -> list[Path]:
     archive_dir = runtime_home / "logs" / "archive"
     if not archive_dir.is_dir():

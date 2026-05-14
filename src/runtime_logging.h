@@ -85,6 +85,8 @@ std::filesystem::path ResolveRuntimeLogMirrorPath(
     const std::filesystem::path& runtime_home);
 std::filesystem::path ResolveRuntimeEventLogPath(
     const std::filesystem::path& runtime_home);
+std::filesystem::path ResolveRuntimeLogManifestPath(
+    const std::filesystem::path& runtime_home);
 
 class RuntimeCsvLogger {
   public:
@@ -103,20 +105,28 @@ class RuntimeCsvLogger {
 
     bool is_open() const;
     const std::filesystem::path& active_archive_path() const;
+    const std::filesystem::path& active_manifest_path() const;
     const std::filesystem::path& mirror_path() const;
+    const std::filesystem::path& manifest_path() const;
+    std::uint64_t row_count() const;
 
   private:
     bool OpenNewChunk();
     void WritePrologue();
+    void WriteManifest(std::string_view status);
+    void CloseActiveChunk(std::string_view status);
     void PruneOldArchives();
 
     std::filesystem::path runtime_home_;
     std::filesystem::path logs_dir_;
     std::filesystem::path archive_dir_;
     std::filesystem::path active_archive_path_;
+    std::filesystem::path active_manifest_path_;
     std::filesystem::path mirror_path_;
+    std::filesystem::path manifest_path_;
     std::uint32_t rotate_hours_ = 0u;
     std::uint32_t retain_days_ = 0u;
+    std::uint64_t row_count_ = 0u;
     std::chrono::system_clock::time_point opened_at_{};
     std::string mode_;
     std::string header_line_;

@@ -46,8 +46,10 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertFalse(channel_status["circuit_breaker_open"])
                 self.assertEqual(channel_status["consecutive_write_failures"], 0)
                 self.assertTrue(status["log_csv_path"])
+                self.assertTrue(status["log_manifest_path"])
                 self.assertTrue(status["event_log_path"])
                 self.assertTrue(Path(status["log_csv_path"]).is_file())
+                self.assertTrue(Path(status["log_manifest_path"]).is_file())
                 self.assertTrue((runtime_home / "logs" / "svg_mb_control_output.csv").is_file())
                 timing_fields = [
                     "loop_started_wall_clock",

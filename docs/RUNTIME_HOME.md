@@ -17,7 +17,9 @@ Control owns these files:
 - `pending_writes.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
+- `logs\svg_mb_control_manifest.json`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
+- `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json`
 
 The JSON files remain the authoritative live state and recovery plane. The log
 files add history and operator traceability; they do not replace the JSON
@@ -65,6 +67,7 @@ Each fan entry can include:
 - `restart_count`
 - `child_pid`
 - `log_csv_path`
+- `log_manifest_path`
 - `event_log_path`
 
 `restart_count` and `child_pid` remain `0` in the direct-only runtime.
@@ -89,6 +92,7 @@ Each fan entry can include:
 - `process_working_set_bytes`
 - `process_private_bytes`
 - `log_csv_path`
+- `log_manifest_path`
 - `event_log_path`
 - `controlled_channels`
 
@@ -146,6 +150,12 @@ shared event log under `runtime\logs\`.
 - `archive\svg_mb_control_<mode>_<timestamp>.csv` stores rotated mode-specific
   CSV chunks. The active chunk path is surfaced in `control_runtime.json` as
   `log_csv_path`.
+- `svg_mb_control_manifest.json` is the fixed-path manifest for the active
+  runtime log bundle. It records row count, event count, producer identity,
+  artifact paths, and `external_logging.required=false`.
+- `archive\svg_mb_control_<mode>_<timestamp>.manifest.json` stores the manifest
+  beside the matching archive CSV chunk. The latest manifest path is surfaced in
+  `control_runtime.json` as `log_manifest_path`.
 - `svg_mb_control_events.jsonl` stores append-only JSONL events for starts,
   rotations, write attempts, restores, reconcile work, and failures. Its path
   is surfaced in `control_runtime.json` as `event_log_path`.

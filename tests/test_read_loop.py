@@ -59,8 +59,10 @@ class ReadLoopTests(unittest.TestCase):
                 self.assertEqual(status["restart_count"], 0)
                 self.assertEqual(status["child_pid"], 0)
                 self.assertTrue(status["log_csv_path"])
+                self.assertTrue(status["log_manifest_path"])
                 self.assertTrue(status["event_log_path"])
                 self.assertTrue(Path(status["log_csv_path"]).is_file())
+                self.assertTrue(Path(status["log_manifest_path"]).is_file())
                 self.assertTrue(Path(status["event_log_path"]).is_file())
                 self.assertTrue(_runtime_archive_files(runtime_home))
                 self.assertTrue(
@@ -145,6 +147,24 @@ class ReadLoopTests(unittest.TestCase):
             self.assertIsNotNone(final_status)
             self.assertEqual(final_status["status"], "shutdown")
             self.assertEqual(final_status["status_detail"], "stop requested")
+            manifest = _read_runtime_manifest(runtime_home)
+            self.assertIsNotNone(manifest)
+            self.assertEqual(
+                manifest["schema"], "svg_mb_control.runtime_log_manifest.v1"
+            )
+            self.assertEqual(manifest["status"], "completed")
+            self.assertEqual(manifest["mode"], "read-loop")
+            self.assertFalse(manifest["external_logging"]["required"])
+            self.assertGreaterEqual(
+                manifest["row_count"],
+                final_status["successful_polls"],
+            )
+            self.assertTrue(Path(manifest["artifacts"]["csv_archive"]["path"]).is_file())
+            self.assertTrue(Path(manifest["artifacts"]["csv_latest"]["path"]).is_file())
+            self.assertEqual(
+                manifest["artifacts"]["manifest_latest"]["path"],
+                str(runtime_home / "logs" / "svg_mb_control_manifest.json"),
+            )
             events = _read_runtime_events(runtime_home)
             shutdown_events = [
                 item

@@ -6,6 +6,15 @@ Make controller tuning data-driven without turning the runtime into a larger
 service. Keep the live runtime simple, keep raw logs local by default, and add
 just enough structure to compare runs and justify config changes.
 
+## Current Status
+
+- Phase 1 analyzer support is implemented in `scripts\analyze_control_run.py`.
+- Runtime manifests are implemented by the controller itself:
+  `logs\svg_mb_control_manifest.json` and
+  `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json`.
+- Analysis manifests remain useful as curated decision artifacts that attach a
+  profile, notes, and hashes to a chosen run.
+
 ## Phase 1: Offline Summaries
 
 Add a repo-owned analyzer for `control-loop` CSV plus
@@ -46,7 +55,9 @@ Acceptance:
 
 ## Phase 2: Run Manifests
 
-Add a manifest file beside each curated analysis summary.
+The controller now writes a native runtime manifest during each run. Keep adding
+curated analysis manifests beside important summaries when a run supports a
+tuning decision.
 
 Minimum fields:
 
@@ -58,6 +69,7 @@ Minimum fields:
 - `config_sha256`,
 - `build_info_path`,
 - `git_commit`,
+- `runtime_manifest_path`,
 - `csv_path`,
 - `event_log_path`,
 - `operator_notes`,

@@ -25,6 +25,7 @@ class ReadLoop {
         bool stale = true;
         std::uint32_t child_pid = 0u;
         std::string log_csv_path;
+        std::string log_manifest_path;
         std::string event_log_path;
     };
 

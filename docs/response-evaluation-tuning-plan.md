@@ -248,7 +248,8 @@ Tight-envelope rule:
 
 ## Implementation Plan
 
-1. Add an offline response analyzer for Control CSV plus HWiNFO-style CSV.
+1. Add an offline response analyzer for Control native runtime manifests, CSV,
+   and JSONL events. HWiNFO is not part of the normal logging workflow.
    Output idle/load/cooldown summaries, p50/p90/max, response delay, and
    authority-loss events.
 2. Run the evaluation passes above and save the result summaries under

@@ -3,7 +3,7 @@
 **Goal:** Evaluate the updated SVG-MB-Bench logger against SVG-MB-Control so Control can stop relying on external loggers.
 **Date:** 2026-05-14
 **Status:** complete
-**Recommended next:** implement the missing native evidence fields directly in SVG-MB-Control; do not introduce runtime dependency on SVG-MB-Bench.
+**Recommended next:** implement the remaining richer hardware evidence fields directly in SVG-MB-Control; do not introduce runtime dependency on SVG-MB-Bench.
 
 ---
 
@@ -67,7 +67,7 @@
 
 ### Q3: What does Control already log?
 
-**Answer:** Control now has a solid internal control-loop logging base: archive CSV, latest CSV mirror, JSONL events, current state, control runtime status, pending write recovery, control setpoints, timing, process resource fields, and a post-run analyzer.
+**Answer:** Control now has a solid internal control-loop logging base: archive CSV, latest CSV mirror, JSONL events, native runtime manifests, current state, control runtime status, pending write recovery, control setpoints, timing, process resource fields, and a post-run analyzer.
 
 **Evidence:**
 - `src\runtime_logging.cpp:151` - Control builds a common CSV header.
@@ -79,6 +79,7 @@
 - `src\runtime_logging.cpp:497` - Control builds a control-loop CSV header.
 - `src\runtime_logging.cpp:506` - Control logs loop slip.
 - `src\runtime_logging.cpp:509` - Control logs process CPU percent.
+- `src\runtime_logging.cpp` - Control writes `svg_mb_control.runtime_log_manifest.v1` manifests beside runtime CSV artifacts and at the fixed latest path.
 - `scripts\analyze_control_run.py:399` - Control has post-run manifest generation.
 - `scripts\analyze_control_run.py:424` - Control's analysis manifest records row count.
 - `scripts\analyze_control_run.py:425` - Control's analysis manifest records event count.
@@ -93,13 +94,12 @@
 
 ### Q4: What gaps remain?
 
-**Answer:** Five gaps remain.
+**Answer:** Four main gaps remain.
 
 **Evidence and implications:**
 - Full GPU evidence is missing. Control samples only `core_c`, `memjn_c`, `hotspot_c`, and GPU name/warning (`src\gpu_reader.h:7`, `src\gpu_reader.cpp:45`). Bench records NVML temp, utilization, power/source, clocks, P-state, GPU fan rows, VRAM, PCIe, voltage, throttle reasons, validity flags, and change flags (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\logger\logger_gpu.h:32`).
 - SIO voltage and motherboard temperature evidence is missing. Bench current state includes voltage and temperature arrays (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\state_snapshot.h:150`, `D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\state_snapshot.h:151`); Control currently records AMD sensors and fans plus narrow GPU fields.
 - Raw fan count-byte evidence and change flags are missing. Control logs `tach_raw`, `duty_raw`, and `mode_raw` (`src\runtime_logging.cpp:165`, `src\runtime_logging.cpp:167`, `src\runtime_logging.cpp:169`), but Bench contract preserves `tach_hi_raw`, `tach_lo_raw`, rpm/duty changed flags, and full field semantics (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:299`).
-- Native run manifests are missing. Control can create an analysis manifest after the run (`scripts\analyze_control_run.py:399`), while Bench treats manifests as part of the producing run and records row/event accounting and external writers (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:7`, `D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:99`).
 - Phase/load/external-writer context is incomplete. Bench contract explicitly preserves phase transitions and load state (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:202`), plus external writer accounting (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\logger\logger_segment.cpp:202`).
 
 ---
@@ -119,7 +119,7 @@
 | Logging hot-path cost regresses control cadence | Medium | High | Bench records backend read and scheduler timing; Control should do the same before enabling heavier fields by default. |
 | GPU full sampling is too expensive for every 50 ms control tick | Medium | Medium | Bench exposes sample modes; Control should use tiered GPU sampling or split control envelope from diagnostic capture. |
 | Adding SIO voltage/temp reads under the control loop increases mutex contention | Medium | Medium | Prefer optional lower-rate side capture or measured cadence gate. |
-| No native manifest means incomplete evidence after crash/stop | High | Medium | Post-run analyzer helps only after manual collection. |
+| Native manifests lack artifact hashes today | Medium | Medium | The controller now writes row/event counts and artifact paths during the run; hash capture still belongs in a finalize/analysis pass. |
 
 ### Open Questions
 
@@ -168,10 +168,10 @@ If a smaller first step is preferred, keep the current flat style and introduce 
 
 Proceed in this order:
 
-1. Add native run manifest lifecycle to Control's `RuntimeCsvLogger`: start manifest, row/event counters, final status, artifact hashes, config/build metadata, external-writer field.
+1. Extend the native runtime manifests with finalized artifact hashes and any config/policy hashes needed for standalone archival.
 2. Port the richer GPU telemetry model into Control's `GpuReader`, with configurable sample mode and CSV/current-state fields.
 3. Add optional SIO voltage and temperature capture to Control's runtime snapshot, gated by config and cadence.
 4. Extend fan evidence with tach high/low bytes and changed flags.
 5. Add phase/load markers and feed them through CSV, events, and manifest.
 
-After those land, Control can replace the external logger for normal controller validation. Bench can remain the characterization tool, but not a required live sidecar.
+Control's native CSV/JSONL/manifest logger is now the default for normal controller validation. After the remaining richer hardware evidence lands, Bench can remain the characterization tool, but not a required live sidecar.
