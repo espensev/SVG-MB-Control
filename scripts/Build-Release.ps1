@@ -748,7 +748,10 @@ function Sync-ReleaseMetadataIntoArchive {
 
 function Invoke-HermeticTests {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][string]$ControlExePath
+    )
 
     $pythonRunner = Resolve-PythonRunner
     if (-not $pythonRunner) {
@@ -756,11 +759,18 @@ function Invoke-HermeticTests {
     }
 
     $arguments = @($pythonRunner['PrefixArgs']) + @('-m', 'unittest', 'discover', 'tests', '-v')
+    $previousTestExe = $env:SVG_MB_CONTROL_TEST_EXE
+    $env:SVG_MB_CONTROL_TEST_EXE = $ControlExePath
     Push-Location -LiteralPath $RepositoryRoot
     try {
         Invoke-External -FilePath $pythonRunner['FilePath'] -Arguments $arguments -FailureMessage 'Hermetic test lane failed'
     } finally {
         Pop-Location
+        if ($null -eq $previousTestExe) {
+            Remove-Item Env:\SVG_MB_CONTROL_TEST_EXE -ErrorAction SilentlyContinue
+        } else {
+            $env:SVG_MB_CONTROL_TEST_EXE = $previousTestExe
+        }
     }
 }
 
@@ -941,6 +951,7 @@ try {
         throw "Build completed but $MainExeName was not found under $BuildDir."
     }
 
+    New-Item -ItemType Directory -Path $DistDir -Force | Out-Null
     $distMainExe = Join-Path $DistDir $MainExeName
     Copy-Item -LiteralPath $builtMainExe -Destination $distMainExe -Force
     Write-Host "Copied: $MainExeName" -ForegroundColor Green
@@ -1003,7 +1014,7 @@ try {
         Write-Host "`n[8/11] Hermetic tests skipped." -ForegroundColor DarkGray
     } else {
         Write-Host "`n[8/11] Running hermetic tests..." -ForegroundColor Yellow
-        Invoke-HermeticTests -RepositoryRoot $RepoRoot
+        Invoke-HermeticTests -RepositoryRoot $RepoRoot -ControlExePath $builtMainExe
         $testsPassed = $true
         Write-Host "Hermetic test lane passed." -ForegroundColor Green
     }

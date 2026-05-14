@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from tests.helpers import *
 
 
@@ -92,12 +94,20 @@ class SmokeTests(unittest.TestCase):
                 poll_ms=100,
             )
 
-            proc = _spawn_control(
-                [],
+            result = _run_control(
                 cwd=td,
                 exe=staged_exe,
                 env=_sim_direct_env(channel=1, amd_temp_c=74.0),
             )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"{result.stdout}\n{result.stderr}",
+            )
+            self.assertIn("launched read-loop in background", result.stdout)
+            match = re.search(r"pid:\s*(\d+)", result.stdout)
+            self.assertIsNotNone(match, msg=result.stdout)
+            child_pid = int(match.group(1))
             try:
                 status = _wait_for(
                     lambda: _read_runtime_status(runtime_home),
@@ -112,4 +122,13 @@ class SmokeTests(unittest.TestCase):
                 self.assertEqual(state["fans"][0]["channel"], 1)
                 self.assertEqual(state["amd_sensors"][0]["temperature_c"], 74.0)
             finally:
-                _stop_and_wait(proc)
+                subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        f"Stop-Process -Id {child_pid} -Force -ErrorAction SilentlyContinue",
+                    ],
+                    capture_output=True,
+                    text=True,
+                )

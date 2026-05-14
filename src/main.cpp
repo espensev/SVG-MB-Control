@@ -17,6 +17,7 @@
 #endif
 #include <windows.h>
 
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <iostream>
@@ -24,6 +25,8 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -75,6 +78,225 @@ void PrintVersion() {
         std::cout << " (" << kGitHash << ")";
     }
     std::cout << '\n';
+}
+
+bool IsLongRunningMode(RunMode mode) {
+    return mode == RunMode::kReadLoop || mode == RunMode::kControlLoop;
+}
+
+std::wstring RunModeArgument(RunMode mode) {
+    switch (mode) {
+        case RunMode::kOneShot:
+            return L"one-shot";
+        case RunMode::kReadLoop:
+            return L"read-loop";
+        case RunMode::kWriteOnce:
+            return L"write-once";
+        case RunMode::kControlLoop:
+            return L"control-loop";
+    }
+    throw std::runtime_error("Unknown run mode.");
+}
+
+std::string_view RunModeLabel(RunMode mode) {
+    switch (mode) {
+        case RunMode::kOneShot:
+            return "one-shot";
+        case RunMode::kReadLoop:
+            return "read-loop";
+        case RunMode::kWriteOnce:
+            return "write-once";
+        case RunMode::kControlLoop:
+            return "control-loop";
+    }
+    throw std::runtime_error("Unknown run mode.");
+}
+
+std::filesystem::path CurrentExecutablePath() {
+    std::vector<wchar_t> buffer(MAX_PATH);
+    for (;;) {
+        const DWORD length = GetModuleFileNameW(
+            nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0u) {
+            return {};
+        }
+        if (length < buffer.size()) {
+            return std::filesystem::path(buffer.data(),
+                                         buffer.data() + length);
+        }
+        buffer.resize(buffer.size() * 2u);
+    }
+}
+
+std::wstring QuoteCommandLineArg(std::wstring_view value) {
+    std::wstring quoted;
+    quoted.reserve(value.size() + 2u);
+    quoted.push_back(L'"');
+    std::size_t backslashes = 0u;
+    for (const wchar_t ch : value) {
+        if (ch == L'\\') {
+            ++backslashes;
+            continue;
+        }
+        if (ch == L'"') {
+            quoted.append(backslashes * 2u + 1u, L'\\');
+            quoted.push_back(ch);
+            backslashes = 0u;
+            continue;
+        }
+        quoted.append(backslashes, L'\\');
+        backslashes = 0u;
+        quoted.push_back(ch);
+    }
+    quoted.append(backslashes * 2u, L'\\');
+    quoted.push_back(L'"');
+    return quoted;
+}
+
+HANDLE OpenInheritedFile(const std::filesystem::path& path,
+                         DWORD desired_access,
+                         DWORD creation_disposition) {
+    SECURITY_ATTRIBUTES security_attributes{};
+    security_attributes.nLength = sizeof(security_attributes);
+    security_attributes.bInheritHandle = TRUE;
+    return CreateFileW(path.wstring().c_str(),
+                       desired_access,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       &security_attributes,
+                       creation_disposition,
+                       FILE_ATTRIBUTE_NORMAL,
+                       nullptr);
+}
+
+int LaunchDetachedLongRunningMode(RunMode mode,
+                                  const svg_mb_control::ControlConfig& config) {
+    const std::filesystem::path exe_path = CurrentExecutablePath();
+    if (exe_path.empty()) {
+        throw std::runtime_error("Could not resolve current executable path.");
+    }
+
+    const std::filesystem::path runtime_home =
+        svg_mb_control::ResolveRuntimeHomePath(config);
+    std::error_code ec;
+    std::filesystem::create_directories(runtime_home, ec);
+    if (ec) {
+        throw std::runtime_error("Could not create runtime home: " +
+                                 ec.message());
+    }
+
+    const std::filesystem::path stdout_path =
+        runtime_home / "svg-mb-control.stdout.log";
+    const std::filesystem::path stderr_path =
+        runtime_home / "svg-mb-control.stderr.log";
+
+    HANDLE stdout_handle =
+        OpenInheritedFile(stdout_path, FILE_APPEND_DATA, OPEN_ALWAYS);
+    if (stdout_handle == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("Could not open launcher stdout log.");
+    }
+    HANDLE stderr_handle =
+        OpenInheritedFile(stderr_path, FILE_APPEND_DATA, OPEN_ALWAYS);
+    if (stderr_handle == INVALID_HANDLE_VALUE) {
+        CloseHandle(stdout_handle);
+        throw std::runtime_error("Could not open launcher stderr log.");
+    }
+    HANDLE stdin_handle =
+        OpenInheritedFile("NUL", GENERIC_READ, OPEN_EXISTING);
+    if (stdin_handle == INVALID_HANDLE_VALUE) {
+        CloseHandle(stdout_handle);
+        CloseHandle(stderr_handle);
+        throw std::runtime_error("Could not open launcher stdin handle.");
+    }
+
+    std::wstring command_line = QuoteCommandLineArg(exe_path.wstring());
+    command_line += L" --run-foreground --mode ";
+    command_line += RunModeArgument(mode);
+    command_line += L" --config ";
+    command_line += QuoteCommandLineArg(config.source_path.wstring());
+
+    STARTUPINFOW startup_info{};
+    startup_info.cb = sizeof(startup_info);
+    startup_info.dwFlags = STARTF_USESTDHANDLES;
+    startup_info.hStdInput = stdin_handle;
+    startup_info.hStdOutput = stdout_handle;
+    startup_info.hStdError = stderr_handle;
+
+    std::array<HANDLE, 3> inherited_handles{
+        stdin_handle,
+        stdout_handle,
+        stderr_handle,
+    };
+    SIZE_T attribute_list_size = 0u;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_list_size);
+    std::vector<unsigned char> attribute_list_storage(attribute_list_size);
+    auto* attribute_list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(
+        attribute_list_storage.data());
+    if (!InitializeProcThreadAttributeList(
+            attribute_list, 1, 0, &attribute_list_size)) {
+        CloseHandle(stdin_handle);
+        CloseHandle(stdout_handle);
+        CloseHandle(stderr_handle);
+        throw std::runtime_error("Could not initialize process attributes.");
+    }
+    if (!UpdateProcThreadAttribute(
+            attribute_list,
+            0,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+            inherited_handles.data(),
+            sizeof(HANDLE) * inherited_handles.size(),
+            nullptr,
+            nullptr)) {
+        DeleteProcThreadAttributeList(attribute_list);
+        CloseHandle(stdin_handle);
+        CloseHandle(stdout_handle);
+        CloseHandle(stderr_handle);
+        throw std::runtime_error("Could not configure child handle inheritance.");
+    }
+
+    STARTUPINFOEXW startup_info_ex{};
+    startup_info_ex.StartupInfo = startup_info;
+    startup_info_ex.StartupInfo.cb = sizeof(startup_info_ex);
+    startup_info_ex.lpAttributeList = attribute_list;
+
+    PROCESS_INFORMATION process_info{};
+    std::wstring mutable_command_line = command_line;
+    const std::filesystem::path working_directory = exe_path.parent_path();
+    const BOOL created = CreateProcessW(
+        exe_path.wstring().c_str(),
+        mutable_command_line.data(),
+        nullptr,
+        nullptr,
+        TRUE,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+        nullptr,
+        working_directory.wstring().c_str(),
+        &startup_info_ex.StartupInfo,
+        &process_info);
+
+    DeleteProcThreadAttributeList(attribute_list);
+    CloseHandle(stdin_handle);
+    CloseHandle(stdout_handle);
+    CloseHandle(stderr_handle);
+
+    if (!created) {
+        throw std::runtime_error("Could not launch background controller.");
+    }
+
+    const DWORD child_pid = process_info.dwProcessId;
+    CloseHandle(process_info.hThread);
+    CloseHandle(process_info.hProcess);
+
+    std::cout << "svg-mb-control: launched "
+              << RunModeLabel(mode)
+              << " in background\n"
+              << "  pid: " << child_pid << '\n'
+              << "  config: " << config.source_path.string() << '\n'
+              << "  runtime_home: " << runtime_home.string() << '\n'
+              << "  status: " << (runtime_home / "control_runtime.json").string()
+              << '\n'
+              << "  stdout: " << stdout_path.string() << '\n'
+              << "  stderr: " << stderr_path.string() << '\n';
+    return 0;
 }
 
 void PrintBlockedChannels(const std::vector<std::uint32_t>& channels) {
@@ -258,8 +480,10 @@ std::string SampleDirectSnapshotJson(
 
 int wmain(int argc, wchar_t** argv) {
     try {
+        const bool no_launch_args = argc == 1;
         std::filesystem::path config_path;
         bool config_path_explicit = false;
+        bool foreground_launch = false;
         RunMode run_mode = RunMode::kOneShot;
         bool run_mode_explicit = false;
         std::uint32_t write_channel = 0u;
@@ -282,6 +506,8 @@ int wmain(int argc, wchar_t** argv) {
             if (arg == L"--config") {
                 config_path = std::filesystem::path(require_value());
                 config_path_explicit = true;
+            } else if (arg == L"--run-foreground") {
+                foreground_launch = true;
             } else if (arg == L"--mode") {
                 run_mode = ParseRunMode(require_value());
                 run_mode_explicit = true;
@@ -381,6 +607,11 @@ int wmain(int argc, wchar_t** argv) {
         if (!run_mode_explicit && config.has_value() &&
             !config->default_mode.empty()) {
             run_mode = ParseRunMode(config->default_mode);
+        }
+
+        if (no_launch_args && !foreground_launch && config.has_value() &&
+            IsLongRunningMode(run_mode)) {
+            return LaunchDetachedLongRunningMode(run_mode, *config);
         }
 
         if (config.has_value() && !config->runtime_policy_path.empty()) {

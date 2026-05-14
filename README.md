@@ -103,8 +103,8 @@ cd .\release
 ```
 
 The packaged `control.json` sets `default_mode` to `control-loop`, so a plain
-launch starts normal fan control and writes runtime output under
-`release\runtime`.
+launch starts normal fan control in the background, returns the shell prompt,
+and writes runtime output under `release\runtime`.
 
 Direct one-shot snapshot to stdout:
 
@@ -124,14 +124,17 @@ Direct write-once:
 release\svg-mb-control.exe --mode write-once --config .\config\control.example.json --write-channel 4 --write-pct 60 --write-hold-ms 10000
 ```
 
-Direct control loop:
+Attached control loop for diagnostics:
 
 ```powershell
-release\svg-mb-control.exe
+release\svg-mb-control.exe --mode control-loop --config .\release\control.json
 ```
 
 When `--mode` is omitted, Control uses `default_mode` from the loaded config.
 If no config sets `default_mode`, Control falls back to `one-shot`.
+For long-running default modes, the no-arg launcher starts a background child
+process and exits; pass `--mode` explicitly when you want the current terminal
+to stay attached.
 
 Legacy bridge flags such as `--bridge-exe-path` are intentionally rejected in
 this branch.
