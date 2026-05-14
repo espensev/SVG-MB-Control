@@ -73,6 +73,10 @@ add_executable(svg_mb_control
 
 target_link_libraries(svg_mb_control PRIVATE svg_mb_sio::svg_mb_sio)
 
+if(WIN32)
+    target_link_libraries(svg_mb_control PRIVATE psapi winmm)
+endif()
+
 if(TARGET gpu_telemetry::gpu_telemetry)
     target_link_libraries(svg_mb_control PRIVATE gpu_telemetry::gpu_telemetry)
     target_compile_definitions(svg_mb_control PRIVATE SVG_MB_CONTROL_GPU_TELEMETRY_ENABLED=1)

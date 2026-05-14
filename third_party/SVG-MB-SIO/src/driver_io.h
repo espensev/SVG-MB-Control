@@ -20,6 +20,7 @@ enum class Status {
     no_device = -5,
     access_denied = -6,
     buffer_too_small = -7,
+    timeout = -8,
 };
 
 inline const char* status_string(Status status) {
@@ -38,6 +39,8 @@ inline const char* status_string(Status status) {
             return "access_denied";
         case Status::buffer_too_small:
             return "buffer_too_small";
+        case Status::timeout:
+            return "timeout";
         default:
             return "unknown";
     }

@@ -512,12 +512,25 @@ std::string BuildReadLoopCsvRow(const RuntimeSnapshot& snapshot,
 
 std::string BuildControlLoopCsvHeader() {
     std::ostringstream header;
-    header << BuildCommonCsvHeader() << ",loop_tick_count";
+    header << BuildCommonCsvHeader()
+           << ",loop_tick_count"
+           << ",loop_started_wall_clock"
+           << ",loop_finished_wall_clock"
+           << ",loop_work_duration_ms"
+           << ",loop_intended_interval_ms"
+           << ",loop_achieved_interval_ms"
+           << ",loop_slip_ms"
+           << ",loop_overrun"
+           << ",process_cpu_delta_ms"
+           << ",process_cpu_pct"
+           << ",process_working_set_bytes"
+           << ",process_private_bytes";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
         header << ",channel" << channel << "_observed_temp_c"
                << ",channel" << channel << "_setpoint_pct"
+               << ",channel" << channel << "_thermal_pressure_boost_pct"
                << ",channel" << channel << "_total_writes"
                << ",channel" << channel << "_write_active"
                << ",channel" << channel << "_baseline_captured";
@@ -528,9 +541,27 @@ std::string BuildControlLoopCsvHeader() {
 std::string BuildControlLoopCsvRow(
     const RuntimeSnapshot& snapshot,
     std::uint64_t tick_count,
+    const RuntimeControlLoopTimingState& timing,
     const std::vector<RuntimeControlChannelLogState>& channels) {
     std::ostringstream csv;
-    csv << BuildCommonCsvPrefix(snapshot, "control-loop") << ',' << tick_count;
+    csv << BuildCommonCsvPrefix(snapshot, "control-loop") << ',' << tick_count << ',';
+    AppendCsvString(csv, timing.loop_started_wall_clock);
+    csv << ',';
+    AppendCsvString(csv, timing.loop_finished_wall_clock);
+    csv << ',';
+    AppendCsvDouble(csv, timing.loop_work_duration_ms);
+    csv << ',' << timing.loop_intended_interval_ms << ',';
+    AppendCsvDouble(csv, timing.loop_achieved_interval_ms);
+    csv << ',';
+    AppendCsvDouble(csv, timing.loop_slip_ms);
+    csv << ',';
+    AppendCsvBool(csv, timing.loop_overrun);
+    csv << ',';
+    AppendCsvDouble(csv, timing.process_cpu_delta_ms);
+    csv << ',';
+    AppendCsvDouble(csv, timing.process_cpu_pct);
+    csv << ',' << timing.process_working_set_bytes
+        << ',' << timing.process_private_bytes;
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
@@ -543,6 +574,10 @@ std::string BuildControlLoopCsvRow(
         csv << ',';
         if (state != nullptr) {
             AppendCsvDouble(csv, state->setpoint_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->thermal_pressure_boost_pct);
         }
         csv << ',';
         if (state != nullptr) {

@@ -102,9 +102,8 @@ fields needed for cadence tuning.
 **Answer:** The current Control runtime is intentionally conservative:
 
 - `read-loop` defaults to `poll_ms = 500`.
-- `control-loop` defaults to `poll_tick_ms = 2000`.
-- channel write cooldowns default to `10000 ms`, with some channels at
-  `18000 ms`.
+- `control-loop` uses the characterized packaged `poll_tick_ms = 200`.
+- channel write cooldowns default to `10000 ms`.
 
 The more important limitation is architectural: both long-running loops perform
 their sampling, logging, JSON publication, and event writes first, then sleep
@@ -118,9 +117,10 @@ and file-I/O cost.
 
 **Evidence:**
 - `config/control.release.json:7-14` — current defaults are `poll_ms=500`,
-  `poll_tick_ms=2000`, and `write_cooldown_ms=10000`.
-- `config/control.release.json:85` and `config/control.release.json:119` —
-  channels 2 and 3 override `write_cooldown_ms=18000`.
+  `poll_tick_ms=200`, and `write_cooldown_ms=10000`.
+- `config/control.release.json` — the packaged live loop is limited to
+  channels `0,1,2,3,4,5`; lanes `2,3` were later reintroduced for the
+  higher-floor front-intake response.
 - `src/read_loop.cpp:244-308` — the loop samples, writes CSV, writes JSON, and
   updates status before waiting.
 - `src/read_loop.cpp:310-314` — `wait_for(poll_ms)` happens after the work.
@@ -139,8 +139,8 @@ and file-I/O cost.
   jitter, or effective frequency.
 
 **Implications:**
-- The current default rates are safe and intentionally slow, but the repo is not
-  yet architected to support aggressive high-rate claims.
+- The current default rates are safe and intentionally bounded, but the repo is
+  not yet architected to support aggressive high-rate claims.
 - If the project later aims for materially faster control-loop rates, it will
   need deadline-based scheduling or explicit timing instrumentation first.
 - Right now the runtime conflates several concerns on one cadence:
@@ -150,8 +150,9 @@ and file-I/O cost.
   - status publication,
   - CSV logging,
   - event logging.
-- That is acceptable at `500 ms` / `2000 ms`. It is not a strong foundation for
-  significantly higher rates without more instrumentation and separation.
+- The 2026-05-12 update added loop timing fields and cleared the packaged
+  `200 ms` control tick for lanes `0,1,2,3,4,5`. Faster rates or additional live
+  channels still need fresh measurement and likely more separation.
 
 ### Q4: What current tests validate the runtime, and what important gaps remain?
 

@@ -86,6 +86,7 @@ enum class MbSioStatus : std::int32_t {
     not_supported = -4,
     no_device = -5,
     access_denied = -6,
+    timeout = -7,
 };
 
 inline const char* mb_sio_status_string(MbSioStatus status) {
@@ -96,6 +97,7 @@ inline const char* mb_sio_status_string(MbSioStatus status) {
         case MbSioStatus::not_supported: return "not_supported";
         case MbSioStatus::no_device: return "no_device";
         case MbSioStatus::access_denied: return "access_denied";
+        case MbSioStatus::timeout: return "timeout";
         default: return "unknown";
     }
 }
@@ -146,7 +148,8 @@ public:
     MbSioStatus restore_saved_state(const MbDeviceDescriptor& dev,
                                     std::uint32_t channel,
                                     std::uint8_t duty_raw,
-                                    std::uint8_t mode_raw);
+                                    std::uint8_t mode_raw,
+                                    std::uint32_t timeout_ms);
 
     MbSioStatus read_raw_register(const MbDeviceDescriptor& dev,
                                   std::uint16_t reg,

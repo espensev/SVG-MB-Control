@@ -142,6 +142,8 @@ def _read_json(path: Path) -> dict | None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        return None
     except json.JSONDecodeError:
         return None
 
@@ -264,16 +266,19 @@ def _write_control_loop_config(
     runtime_home: Path,
     channel: int,
     runtime_policy_path: Path | None = None,
+    restore_timeout_ms: int = 5000,
     poll_tick_ms: int = 200,
     write_cooldown_ms: int = 500,
     deadband_pct: float = 3.0,
     control_hold_ms: int = 1000,
     curve: list[tuple[float, float]] | None = None,
+    cpu_override_curve: list[tuple[float, float]] | None = None,
     min_duty_pct: float = 40.0,
     temp_blend: str = "cpu_only",
     channel_write_cooldown_ms: int | None = None,
     channel_deadband_pct: float | None = None,
     channel_control_hold_ms: int | None = None,
+    extra_channel_fields: dict[str, object] | None = None,
 ) -> Path:
     if curve is None:
         curve = [(30.0, 40.0), (60.0, 55.0), (80.0, 80.0), (95.0, 100.0)]
@@ -284,19 +289,25 @@ def _write_control_loop_config(
         "min_duty_pct": min_duty_pct,
         "curve": [{"temp_c": t, "duty_pct": d} for (t, d) in curve],
     }
+    if cpu_override_curve is not None:
+        channel_cfg["cpu_override_curve"] = [
+            {"temp_c": t, "duty_pct": d} for (t, d) in cpu_override_curve
+        ]
     if channel_write_cooldown_ms is not None:
         channel_cfg["write_cooldown_ms"] = channel_write_cooldown_ms
     if channel_deadband_pct is not None:
         channel_cfg["deadband_pct"] = channel_deadband_pct
     if channel_control_hold_ms is not None:
         channel_cfg["control_hold_ms"] = channel_control_hold_ms
+    if extra_channel_fields is not None:
+        channel_cfg.update(extra_channel_fields)
 
     cfg: dict[str, object] = {
         "schema_version": 4,
         "runtime_home_path": runtime_home.as_posix(),
         "poll_ms": 100,
         "baseline_freshness_ceiling_ms": 10000,
-        "restore_timeout_ms": 5000,
+        "restore_timeout_ms": restore_timeout_ms,
         "control_loop": {
             "poll_tick_ms": poll_tick_ms,
             "write_cooldown_ms": write_cooldown_ms,
@@ -421,6 +432,151 @@ class SmokeTests(unittest.TestCase):
                 self.assertEqual(state["amd_sensors"][0]["temperature_c"], 74.0)
             finally:
                 _stop_and_wait(proc)
+
+
+class ConfigContractTests(unittest.TestCase):
+    def test_shipped_control_loop_configs_use_characterized_tick(self) -> None:
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            self.assertEqual(
+                payload["control_loop"]["poll_tick_ms"],
+                50,
+                msg=f"{rel_path} control-loop tick drifted",
+            )
+            self.assertEqual(
+                payload["control_loop"]["write_cooldown_ms"],
+                50,
+                msg=f"{rel_path} write cooldown drifted",
+            )
+            self.assertLessEqual(
+                payload["control_loop"]["deadband_pct"],
+                0.4,
+                msg=f"{rel_path} deadband should allow one-step writes",
+            )
+
+    def test_shipped_control_loop_configs_scope_to_live_airflow_lanes(self) -> None:
+        expected_channels = [0, 1, 2, 3, 4, 5]
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            channels = [
+                item["channel"]
+                for item in payload["control_loop"]["channels"]
+            ]
+            self.assertEqual(
+                channels,
+                expected_channels,
+                msg=f"{rel_path} channel rollout drifted",
+            )
+            self.assertEqual(
+                payload["control_loop"]["control_hold_ms"],
+                0,
+                msg=f"{rel_path} should hold control writes until shutdown",
+            )
+
+    def test_shipped_control_loop_configs_include_cpu_response_overlay(self) -> None:
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            for channel in payload["control_loop"]["channels"]:
+                overlay = channel.get("cpu_override_curve")
+                self.assertIsInstance(
+                    overlay,
+                    list,
+                    msg=f"{rel_path} channel {channel['channel']} missing CPU overlay",
+                )
+                self.assertGreaterEqual(
+                    len(overlay),
+                    2,
+                    msg=f"{rel_path} channel {channel['channel']} CPU overlay too small",
+                )
+
+    def test_shipped_control_loop_configs_include_smooth_decay_controls(self) -> None:
+        required = {
+            "demand_smoothing_rise_alpha",
+            "demand_smoothing_fall_alpha",
+            "decay_latch_above_pct",
+            "decay_latch_pct_per_min",
+        }
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            for channel in payload["control_loop"]["channels"]:
+                missing = sorted(required.difference(channel))
+                self.assertEqual(
+                    missing,
+                    [],
+                    msg=f"{rel_path} channel {channel['channel']} missing smoothing keys",
+                )
+
+    def test_shipped_radiator_lanes_include_thermal_pressure_boost(self) -> None:
+        required = {
+            "thermal_pressure_start_c",
+            "thermal_pressure_full_c",
+            "thermal_pressure_rise_pct_per_sec",
+            "thermal_pressure_fall_pct_per_sec",
+            "thermal_pressure_max_boost_pct",
+        }
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            by_channel = {
+                item["channel"]: item
+                for item in payload["control_loop"]["channels"]
+            }
+            for channel_id in (1, 4, 5):
+                channel = by_channel[channel_id]
+                missing = sorted(required.difference(channel))
+                self.assertEqual(
+                    missing,
+                    [],
+                    msg=f"{rel_path} channel {channel_id} missing pressure keys",
+                )
+                self.assertLessEqual(channel["thermal_pressure_start_c"], 82.5)
+                self.assertGreaterEqual(
+                    channel["thermal_pressure_max_boost_pct"], 20.0
+                )
+                self.assertLessEqual(channel["decay_latch_pct_per_min"], 180.0)
+                self.assertGreater(
+                    channel["thermal_pressure_rise_pct_per_sec"],
+                    channel["thermal_pressure_fall_pct_per_sec"],
+                )
+
+    def test_shipped_noctua_cpu_overlays_are_staggered(self) -> None:
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            by_channel = {
+                item["channel"]: item["cpu_override_curve"]
+                for item in payload["control_loop"]["channels"]
+            }
+            self.assertNotEqual(by_channel[1], by_channel[4])
+            self.assertNotEqual(by_channel[1], by_channel[5])
+            self.assertNotEqual(by_channel[4], by_channel[5])
+
+    def test_shipped_live_runtime_policy_blocks_channel_6(self) -> None:
+        payload = _read_json(REPO_ROOT / "config" / "runtime_policy_write_live.json")
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["control"]["blocked_channels"], [6])
 
 
 class ReadLoopTests(unittest.TestCase):
@@ -748,6 +904,41 @@ class WriteOnceTests(unittest.TestCase):
             self.assertIn("reconciliation failed", result.stderr)
             self.assertEqual(len(_read_pending_writes(runtime_home)), 1)
 
+    def test_reconcile_timeout_blocks_startup(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            _seed_pending_writes(
+                runtime_home,
+                [
+                    {
+                        "channel": 4,
+                        "baseline_duty_raw": 200,
+                        "baseline_mode_raw": 5,
+                        "target_pct": 60.0,
+                        "requested_hold_ms": 0,
+                        "started_iso": "2026-04-05T01:00:00",
+                        "child_pid": 0,
+                    }
+                ],
+            )
+            config_path = _write_write_once_config(
+                td,
+                runtime_home=runtime_home,
+                restore_timeout_ms=100,
+            )
+            result = _run_control(
+                "--config",
+                str(config_path),
+                env={
+                    **_sim_direct_env(channel=4, amd_temp_c=76.0),
+                    "SVG_MB_CONTROL_SIM_RESTORE_DELAY_MS": "500",
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("reconciliation failed", result.stderr)
+            self.assertEqual(len(_read_pending_writes(runtime_home)), 1)
+
     def test_write_once_ctrl_break_clears_pending_write(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
@@ -780,6 +971,39 @@ class WriteOnceTests(unittest.TestCase):
             self.assertEqual(code, 0, msg=stderr)
             self.assertEqual(_read_pending_writes(runtime_home), [])
 
+    def test_write_once_restore_timeout_fails_and_preserves_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_write_once_config(
+                td,
+                runtime_home=runtime_home,
+                restore_timeout_ms=100,
+            )
+            result = _run_control(
+                "--mode",
+                "write-once",
+                "--config",
+                str(config_path),
+                "--write-channel",
+                "0",
+                "--write-pct",
+                "50",
+                "--write-hold-ms",
+                "50",
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=76.0),
+                    "SVG_MB_CONTROL_SIM_RESTORE_DELAY_MS": "500",
+                },
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("timed out", result.stderr)
+            self.assertEqual(len(_read_pending_writes(runtime_home)), 1)
+            events = _read_runtime_events(runtime_home)
+            self.assertTrue(
+                any(item.get("event_type") == "write_once.restore_failed" for item in events)
+            )
+
 
 class ControlLoopTests(unittest.TestCase):
     @classmethod
@@ -796,9 +1020,9 @@ class ControlLoopTests(unittest.TestCase):
                 td,
                 runtime_home=runtime_home,
                 channel=0,
-                poll_tick_ms=200,
-                write_cooldown_ms=400,
-                deadband_pct=2.0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
                 control_hold_ms=800,
             )
             proc = _spawn_control(
@@ -810,8 +1034,8 @@ class ControlLoopTests(unittest.TestCase):
                     lambda: (_read_runtime_status(runtime_home) or {}).get(
                         "loop_tick_count", 0
                     )
-                    >= 3,
-                    timeout_s=5.0,
+                    >= 25,
+                    timeout_s=8.0,
                 )
                 self.assertTrue(observed)
                 status = _read_runtime_status(runtime_home)
@@ -824,6 +1048,47 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertTrue(status["event_log_path"])
                 self.assertTrue(Path(status["log_csv_path"]).is_file())
                 self.assertTrue((runtime_home / "logs" / "svg_mb_control_output.csv").is_file())
+                timing_fields = [
+                    "loop_started_wall_clock",
+                    "loop_finished_wall_clock",
+                    "loop_work_duration_ms",
+                    "loop_intended_interval_ms",
+                    "loop_achieved_interval_ms",
+                    "loop_slip_ms",
+                    "loop_overrun",
+                    "process_cpu_delta_ms",
+                    "process_cpu_pct",
+                    "process_working_set_bytes",
+                    "process_private_bytes",
+                ]
+                for field in timing_fields:
+                    self.assertIn(field, status)
+                self.assertEqual(status["loop_intended_interval_ms"], 50)
+                self.assertGreaterEqual(status["loop_work_duration_ms"], 0)
+                self.assertGreaterEqual(status["loop_achieved_interval_ms"], 0)
+                self.assertIsInstance(status["loop_overrun"], bool)
+                self.assertGreaterEqual(status["process_cpu_delta_ms"], 0)
+                self.assertGreaterEqual(status["process_cpu_pct"], 0)
+                self.assertGreater(status["process_working_set_bytes"], 0)
+                self.assertGreater(status["process_private_bytes"], 0)
+
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows, msg="control-loop CSV rows missing")
+                latest_row = rows[-1]
+                for field in timing_fields:
+                    self.assertIn(field, latest_row)
+                self.assertEqual(latest_row["loop_intended_interval_ms"], "50")
+                self.assertIn("channel0_thermal_pressure_boost_pct", latest_row)
+                self.assertNotEqual(latest_row["loop_work_duration_ms"], "")
+                self.assertNotEqual(latest_row["loop_achieved_interval_ms"], "")
+                self.assertIn(latest_row["loop_overrun"], ("true", "false"))
+                self.assertNotEqual(latest_row["process_cpu_delta_ms"], "")
+                self.assertNotEqual(latest_row["process_cpu_pct"], "")
+                self.assertNotEqual(latest_row["process_working_set_bytes"], "")
+                self.assertNotEqual(latest_row["process_private_bytes"], "")
                 event_observed = _wait_for(
                     lambda: any(
                         item.get("event_type") == "control_loop.write_applied"
@@ -865,6 +1130,90 @@ class ControlLoopTests(unittest.TestCase):
                 fan0 = next(fan for fan in state["fans"] if fan["channel"] == 0)
                 self.assertEqual(fan0["duty_raw"], 222)
                 self.assertEqual(fan0["mode_raw"], 7)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_cpu_override_can_drive_gpu_blend_channel(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                temp_blend="gpu_only",
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (90.0, 100.0)],
+                cpu_override_curve=[(75.0, 20.0), (85.0, 70.0)],
+                control_hold_ms=0,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=86.0),
+            )
+            try:
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0]["total_writes"] >= 1
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 69.0)
+                self.assertGreaterEqual(channel["total_writes"], 1)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_thermal_pressure_boost_accumulates_under_sustained_heat(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (100.0, 20.0)],
+                extra_channel_fields={
+                    "thermal_pressure_start_c": 80.0,
+                    "thermal_pressure_full_c": 90.0,
+                    "thermal_pressure_rise_pct_per_sec": 25.0,
+                    "thermal_pressure_fall_pct_per_sec": 2.0,
+                    "thermal_pressure_max_boost_pct": 30.0,
+                },
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=86.0),
+            )
+            try:
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0][
+                            "last_thermal_pressure_boost_pct"
+                        ]
+                        >= 5.0
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertGreaterEqual(
+                    channel["last_thermal_pressure_boost_pct"], 5.0
+                )
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 25.0)
+                self.assertGreaterEqual(channel["total_writes"], 2)
             finally:
                 _stop_and_wait(proc)
 
@@ -973,6 +1322,86 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(entry["requested_hold_ms"], 2222)
             finally:
                 _stop_and_wait(proc)
+
+    def test_control_loop_zero_hold_flows_to_pending_write(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=100,
+                write_cooldown_ms=100,
+                deadband_pct=2.0,
+                control_hold_ms=0,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0),
+            )
+            try:
+                entry = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_pending_writes(runtime_home)
+                            if item.get("channel") == 0
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(entry, msg="pending write entry was not created")
+                self.assertEqual(entry["requested_hold_ms"], 0)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_restore_timeout_aborts_and_preserves_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                restore_timeout_ms=100,
+                poll_tick_ms=100,
+                write_cooldown_ms=100,
+                deadband_pct=2.0,
+                control_hold_ms=150,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=75.0),
+                    "SVG_MB_CONTROL_SIM_RESTORE_DELAY_MS": "500",
+                },
+            )
+            code = None
+            stdout = ""
+            stderr = ""
+            try:
+                exited = _wait_for(
+                    lambda: proc.poll() is not None,
+                    timeout_s=5.0,
+                )
+                self.assertTrue(exited, msg="control-loop never exited after restore timeout")
+                stdout, stderr = proc.communicate(timeout=1.0)
+                code = proc.returncode
+            finally:
+                if proc.poll() is None:
+                    code, stdout, stderr = _stop_and_wait(proc)
+
+            self.assertNotEqual(code, 0, msg=f"{stdout}\n{stderr}")
+            self.assertEqual(len(_read_pending_writes(runtime_home)), 1)
+            status = _read_runtime_status(runtime_home)
+            self.assertIsNotNone(status)
+            self.assertEqual(status["status_detail"], "restore failed")
+            events = _read_runtime_events(runtime_home)
+            self.assertTrue(
+                any(item.get("event_type") == "control_loop.abort" for item in events)
+            )
 
 
 if __name__ == "__main__":

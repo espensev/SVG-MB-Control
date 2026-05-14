@@ -4,10 +4,13 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdlib>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace svg_mb_control {
 
@@ -91,6 +94,8 @@ FanWriteResult TranslateStatus(MbSioStatus status,
         case MbSioStatus::no_device:
         case MbSioStatus::access_denied:
             return MakeResult(FanWriteError::kUnavailable, detail);
+        case MbSioStatus::timeout:
+            return MakeResult(FanWriteError::kTimedOut, detail);
         default:
             if (operation == "restore_saved_state") {
                 return MakeResult(FanWriteError::kRestoreFailed, detail);
@@ -183,12 +188,28 @@ class SimulatedFanWriter final : public FanWriter {
 
     FanWriteResult RestoreSavedState(std::uint32_t channel,
                                      std::uint8_t duty_raw,
-                                     std::uint8_t mode_raw) override {
+                                     std::uint8_t mode_raw,
+                                     std::uint32_t timeout_ms) override {
         (void)channel;
         (void)duty_raw;
         (void)mode_raw;
         const std::string mode = GetEnvOrDefault(
             "SVG_MB_CONTROL_SIM_RESTORE_MODE", "success");
+        const std::uint32_t delay_ms = static_cast<std::uint32_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_RESTORE_DELAY_MS",
+                                       "0")));
+        if (delay_ms > 0u) {
+            const std::uint32_t bounded_delay_ms =
+                delay_ms > timeout_ms ? timeout_ms : delay_ms;
+            if (bounded_delay_ms > 0u) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(bounded_delay_ms));
+            }
+        }
+        if (delay_ms > timeout_ms) {
+            return MakeResult(FanWriteError::kTimedOut,
+                              "simulated direct restore timed out");
+        }
         if (mode == "fail") {
             return MakeResult(FanWriteError::kRestoreFailed,
                               "simulated direct restore failure");
@@ -286,7 +307,8 @@ class SioFanWriter final : public FanWriter {
 
     FanWriteResult RestoreSavedState(std::uint32_t channel,
                                      std::uint8_t duty_raw,
-                                     std::uint8_t mode_raw) override {
+                                     std::uint8_t mode_raw,
+                                     std::uint32_t timeout_ms) override {
         if (channel >= device_.sio.fan_count) {
             return MakeResult(
                 FanWriteError::kInvalidChannel,
@@ -294,7 +316,8 @@ class SioFanWriter final : public FanWriter {
                     std::to_string(channel) + ": channel out of range");
         }
         return TranslateStatus(
-            controller_.restore_saved_state(device_, channel, duty_raw, mode_raw),
+            controller_.restore_saved_state(
+                device_, channel, duty_raw, mode_raw, timeout_ms),
             channel, "restore_saved_state");
     }
 

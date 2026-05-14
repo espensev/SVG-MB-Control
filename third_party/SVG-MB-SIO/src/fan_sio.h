@@ -24,7 +24,9 @@ public:
     bool is_open() const;
 
     Status read_port(std::uint16_t port, std::uint8_t* out_value) const;
-    Status write_port(std::uint16_t port, std::uint8_t value) const;
+    Status write_port(std::uint16_t port,
+                      std::uint8_t value,
+                      DWORD timeout_ms = INFINITE) const;
     Status select_slot(std::uint32_t slot) const;
     Status find_bars() const;
     Status read_superio_byte(std::uint8_t reg, std::uint8_t* out_value) const;
@@ -40,7 +42,8 @@ private:
                       const std::int64_t* inputs,
                       std::size_t input_count,
                       std::int64_t* outputs,
-                      std::size_t output_count) const;
+                      std::size_t output_count,
+                      DWORD timeout_ms = INFINITE) const;
 
     HANDLE handle_ = nullptr;
     SioTransportKind kind_ = SioTransportKind::none;
@@ -81,6 +84,7 @@ public:
     Status open(std::string* warning_text);
     void close();
     bool is_open() const;
+    void set_restore_on_close(bool restore_on_close);
 
     Status read_state(std::uint32_t channel, SioFanState* out_state);
     Status set_duty_percent(std::uint32_t channel,
@@ -89,7 +93,8 @@ public:
     Status restore_auto(std::uint32_t channel);
     Status restore_saved_state(std::uint32_t channel,
                                std::uint8_t duty_raw,
-                               std::uint8_t mode_raw);
+                               std::uint8_t mode_raw,
+                               std::uint32_t timeout_ms);
     void restore_all();
 
     std::uint32_t fan_count() const;
@@ -116,6 +121,10 @@ private:
     Status detect_chip();
     Status read_byte_locked(std::uint16_t reg, std::uint8_t* out_value) const;
     Status write_byte_locked(std::uint16_t reg, std::uint8_t value) const;
+    Status write_byte_locked(std::uint16_t reg,
+                             std::uint8_t value,
+                             std::uint32_t timeout_ms,
+                             ULONGLONG timeout_start_tick) const;
     Status read_u16_be_locked(std::uint16_t reg, std::uint16_t* out_value) const;
     Status lock_mutex() const;
     void unlock_mutex() const;
@@ -126,6 +135,7 @@ private:
     std::uint8_t chip_revision_ = 0;
     std::uint16_t hwm_base_ = 0;
     std::uint16_t index_port_ = 0;
+    bool restore_on_close_ = true;
     std::uint8_t saved_modes_[kFanChannelCount] = {};
     std::uint8_t saved_duty_raw_[kFanChannelCount] = {};
     bool has_saved_[kFanChannelCount] = {};

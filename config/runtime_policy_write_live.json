@@ -5,6 +5,6 @@
   "control": {
     "writes_enabled": true,
     "restore_on_exit": true,
-    "blocked_channels": []
+    "blocked_channels": [6]
   }
 }

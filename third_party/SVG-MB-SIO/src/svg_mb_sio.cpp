@@ -16,6 +16,7 @@ MbSioStatus translate_status(mb::hw::Status status) {
         case mb::hw::Status::not_supported: return MbSioStatus::not_supported;
         case mb::hw::Status::no_device: return MbSioStatus::no_device;
         case mb::hw::Status::access_denied: return MbSioStatus::access_denied;
+        case mb::hw::Status::timeout: return MbSioStatus::timeout;
         default: return MbSioStatus::error;
     }
 }
@@ -62,6 +63,7 @@ bool MbSioController::init(const MbSioWritePolicy& policy, std::string& out_warn
     impl_->policy = policy;
     out_warning.clear();
 
+    impl_->sio.set_restore_on_close(policy.restore_on_exit);
     const auto status = impl_->sio.open(&out_warning);
     impl_->sio_open = (status == mb::hw::Status::ok);
     impl_->initialized = impl_->sio_open;
@@ -76,9 +78,6 @@ void MbSioController::shutdown() {
     }
 
     if (impl_->sio_open) {
-        if (impl_->policy.restore_on_exit) {
-            impl_->sio.restore_all();
-        }
         impl_->sio.close();
         impl_->sio_open = false;
     }
@@ -260,7 +259,8 @@ MbSioStatus MbSioController::restore_all_fans(const MbDeviceDescriptor& dev) {
 MbSioStatus MbSioController::restore_saved_state(const MbDeviceDescriptor& dev,
                                                  std::uint32_t channel,
                                                  std::uint8_t duty_raw,
-                                                 std::uint8_t mode_raw) {
+                                                 std::uint8_t mode_raw,
+                                                 std::uint32_t timeout_ms) {
     std::shared_lock lock(impl_->lifecycle_lock);
 
     if (!impl_->sio_open || !dev.sio_available) {
@@ -271,7 +271,9 @@ MbSioStatus MbSioController::restore_saved_state(const MbDeviceDescriptor& dev,
     }
 
     std::lock_guard write_lock(impl_->sio_write_lock);
-    return translate_status(impl_->sio.restore_saved_state(channel, duty_raw, mode_raw));
+    return translate_status(
+        impl_->sio.restore_saved_state(channel, duty_raw, mode_raw,
+                                       timeout_ms));
 }
 
 MbSioStatus MbSioController::read_raw_register(const MbDeviceDescriptor& dev,

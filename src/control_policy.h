@@ -21,8 +21,15 @@ enum class TempBlend {
     MaxCpuGpu,
 };
 
+enum class CurveShape {
+    Linear,
+    SmootherStep,
+};
+
 TempBlend ParseTempBlend(const std::string& text);
 std::string TempBlendToString(TempBlend blend);
+CurveShape ParseCurveShape(const std::string& text);
+std::string CurveShapeToString(CurveShape shape);
 
 // Per-cycle temperature readings fed to the policy. Missing sources are
 // flagged via the *_available bits.
@@ -46,5 +53,9 @@ double BlendTemps(const TempInputs& inputs, TempBlend mode);
 double LookupCurve(const std::vector<CurvePoint>& curve,
                    double temp_c,
                    double min_floor_pct);
+double LookupCurve(const std::vector<CurvePoint>& curve,
+                   double temp_c,
+                   double min_floor_pct,
+                   CurveShape shape);
 
 }  // namespace svg_mb_control

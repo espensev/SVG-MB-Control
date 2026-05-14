@@ -6,4 +6,5 @@
 /control.json
 /CMakeUserPresets.json
 /tests/__pycache__/
+/alresponse.CSV
 *.pyc

@@ -50,8 +50,10 @@ evidence behind this gate.
 The following work should not move forward until the required steps above are
 done:
 
-- faster `poll_ms` or `control_loop.poll_tick_ms`
-- more aggressive write cadence or cooldown tuning
+- faster `poll_ms` or `control_loop.poll_tick_ms` beyond the packaged `50 ms`
+  control tick
+- more aggressive write cadence or cooldown tuning beyond the packaged `50 ms`
+  write cooldown
 - mixed-input control tuning based on CPU/GPU blend timing
 - logging suppression meant to reduce per-tick output
 - controller strategy work that assumes the current rates are already known-good
@@ -64,6 +66,11 @@ This gate is cleared when:
 - fan-write response has been rechecked on the current machine
 - Control logs can show achieved cadence and loop timing quality
 - a measured recommendation exists for sensible poll and write behavior
+
+The packaged live profile now uses `control_loop.poll_tick_ms=50` and
+`write_cooldown_ms=50` to avoid multi-second fan-write staircases. The gate
+remains in force for faster sensor polling, channels beyond `0,1,2,3,4,5`, and
+any cadence below the current 50 ms control/write profile.
 
 Until then, this repo should treat characterization and timing instrumentation
 as the next required work, not optional cleanup.

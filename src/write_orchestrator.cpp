@@ -289,7 +289,8 @@ int RunWriteOnce(const ControlConfig& config,
         }
 
         const FanWriteResult restore_result = writer->RestoreSavedState(
-            request.channel, baseline.duty_raw, baseline.mode_raw);
+            request.channel, baseline.duty_raw, baseline.mode_raw,
+            config.restore_timeout_ms);
         if (!restore_result) {
             AppendRuntimeEvent(
                 runtime_home,
@@ -397,7 +398,8 @@ int ReconcilePendingWrites(const std::filesystem::path& runtime_home,
     bool any_failure = false;
     for (const auto& entry : entries) {
         const FanWriteResult restore_result = writer->RestoreSavedState(
-            entry.channel, entry.baseline_duty_raw, entry.baseline_mode_raw);
+            entry.channel, entry.baseline_duty_raw, entry.baseline_mode_raw,
+            restore_timeout_ms);
         if (!restore_result) {
             AppendRuntimeEvent(
                 runtime_home,

@@ -104,6 +104,17 @@ constexpr std::uint32_t kPawnIoLoadBinary = (41394u << 16) | (0x821u << 2);
 constexpr std::uint32_t kPawnIoExecuteFn = (41394u << 16) | (0x841u << 2);
 constexpr std::size_t kPawnIoFnNameLength = 32u;
 
+DWORD remaining_timeout_ms(ULONGLONG timeout_start_tick,
+                           DWORD timeout_ms);
+Status device_io_control_with_timeout(HANDLE handle,
+                                      DWORD control_code,
+                                      void* in_buffer,
+                                      DWORD in_size,
+                                      void* out_buffer,
+                                      DWORD out_size,
+                                      DWORD timeout_ms,
+                                      DWORD* out_bytes_returned);
+
 std::filesystem::path executable_directory() {
     std::array<char, MAX_PATH> buffer{};
     const DWORD length = GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -206,15 +217,14 @@ Status load_pawnio_binary(HANDLE handle, const char* bin_path) {
     CloseHandle(file_handle);
 
     DWORD bytes_returned = 0;
-    const BOOL ok = DeviceIoControl(handle,
-                                    kPawnIoLoadBinary,
-                                    buffer.data(),
-                                    bytes_read,
-                                    nullptr,
-                                    0,
-                                    &bytes_returned,
-                                    nullptr);
-    return ok ? Status::ok : status_from_win32_error(GetLastError());
+    return device_io_control_with_timeout(handle,
+                                          kPawnIoLoadBinary,
+                                          buffer.data(),
+                                          bytes_read,
+                                          nullptr,
+                                          0,
+                                          INFINITE,
+                                          &bytes_returned);
 }
 
 HANDLE open_or_create_isa_mutex() {
@@ -229,6 +239,85 @@ HANDLE open_or_create_isa_mutex() {
     }
 
     return CreateMutexW(nullptr, FALSE, kIsaMutexName);
+}
+
+DWORD remaining_timeout_ms(ULONGLONG timeout_start_tick,
+                           DWORD timeout_ms) {
+    if (timeout_ms == INFINITE) {
+        return INFINITE;
+    }
+
+    const ULONGLONG elapsed_ms = GetTickCount64() - timeout_start_tick;
+    if (elapsed_ms >= static_cast<ULONGLONG>(timeout_ms)) {
+        return 0u;
+    }
+
+    return static_cast<DWORD>(
+        static_cast<ULONGLONG>(timeout_ms) - elapsed_ms);
+}
+
+Status device_io_control_with_timeout(HANDLE handle,
+                                      DWORD control_code,
+                                      void* in_buffer,
+                                      DWORD in_size,
+                                      void* out_buffer,
+                                      DWORD out_size,
+                                      DWORD timeout_ms,
+                                      DWORD* out_bytes_returned) {
+    OVERLAPPED overlapped{};
+    overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (overlapped.hEvent == nullptr) {
+        return status_from_win32_error(GetLastError());
+    }
+
+    DWORD bytes_returned = 0u;
+    const BOOL ok = DeviceIoControl(handle,
+                                    control_code,
+                                    in_buffer,
+                                    in_size,
+                                    out_buffer,
+                                    out_size,
+                                    &bytes_returned,
+                                    &overlapped);
+    if (ok) {
+        CloseHandle(overlapped.hEvent);
+        if (out_bytes_returned != nullptr) {
+            *out_bytes_returned = bytes_returned;
+        }
+        return Status::ok;
+    }
+
+    const DWORD start_error = GetLastError();
+    if (start_error != ERROR_IO_PENDING) {
+        CloseHandle(overlapped.hEvent);
+        return status_from_win32_error(start_error);
+    }
+
+    const DWORD wait_result = WaitForSingleObject(overlapped.hEvent, timeout_ms);
+    if (wait_result == WAIT_TIMEOUT) {
+        CancelIoEx(handle, &overlapped);
+        WaitForSingleObject(overlapped.hEvent, 1000u);
+        CloseHandle(overlapped.hEvent);
+        return Status::timeout;
+    }
+    if (wait_result != WAIT_OBJECT_0) {
+        const DWORD wait_error = GetLastError();
+        CancelIoEx(handle, &overlapped);
+        CloseHandle(overlapped.hEvent);
+        return status_from_win32_error(wait_error);
+    }
+
+    if (!GetOverlappedResult(handle, &overlapped, &bytes_returned, FALSE)) {
+        const DWORD complete_error = GetLastError();
+        CloseHandle(overlapped.hEvent);
+        return status_from_win32_error(complete_error);
+    }
+
+    CloseHandle(overlapped.hEvent);
+    if (out_bytes_returned != nullptr) {
+        *out_bytes_returned = bytes_returned;
+    }
+    return Status::ok;
 }
 
 }  // namespace
@@ -272,7 +361,7 @@ Status SioPortTransport::open_pawnio_lpc(std::string* warning_text) {
                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 nullptr,
                                 OPEN_EXISTING,
-                                0,
+                                FILE_FLAG_OVERLAPPED,
                                 nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
         if (warning_text != nullptr) {
@@ -303,7 +392,8 @@ Status SioPortTransport::execute_fn(const char* fn_name,
                                     const std::int64_t* inputs,
                                     std::size_t input_count,
                                     std::int64_t* outputs,
-                                    std::size_t output_count) const {
+                                    std::size_t output_count,
+                                    DWORD timeout_ms) const {
     if (!is_open() || fn_name == nullptr || (output_count > 0u && outputs == nullptr) || input_count > 4u) {
         return Status::invalid_arg;
     }
@@ -321,16 +411,16 @@ Status SioPortTransport::execute_fn(const char* fn_name,
     const DWORD in_size = static_cast<DWORD>(kPawnIoFnNameLength + (input_count * sizeof(std::int64_t)));
     const DWORD out_size = static_cast<DWORD>(output_count * sizeof(std::int64_t));
     DWORD bytes_returned = 0;
-    const BOOL ok = DeviceIoControl(handle_,
-                                    kPawnIoExecuteFn,
-                                    in_buffer.data(),
-                                    in_size,
-                                    out_buffer.data(),
-                                    out_size,
-                                    &bytes_returned,
-                                    nullptr);
-    if (!ok) {
-        return status_from_win32_error(GetLastError());
+    const Status ioctl_status = device_io_control_with_timeout(handle_,
+                                                               kPawnIoExecuteFn,
+                                                               in_buffer.data(),
+                                                               in_size,
+                                                               out_buffer.data(),
+                                                               out_size,
+                                                               timeout_ms,
+                                                               &bytes_returned);
+    if (ioctl_status != Status::ok) {
+        return ioctl_status;
     }
     if (bytes_returned < out_size) {
         return Status::error;
@@ -418,7 +508,9 @@ Status SioPortTransport::read_port(std::uint16_t port, std::uint8_t* out_value) 
     return Status::not_supported;
 }
 
-Status SioPortTransport::write_port(std::uint16_t port, std::uint8_t value) const {
+Status SioPortTransport::write_port(std::uint16_t port,
+                                    std::uint8_t value,
+                                    DWORD timeout_ms) const {
     if (!is_open()) {
         return Status::invalid_arg;
     }
@@ -428,7 +520,8 @@ Status SioPortTransport::write_port(std::uint16_t port, std::uint8_t value) cons
             static_cast<std::int64_t>(port),
             static_cast<std::int64_t>(value),
         };
-        return execute_fn("ioctl_pio_outb", inputs.data(), inputs.size(), nullptr, 0u);
+        return execute_fn("ioctl_pio_outb", inputs.data(), inputs.size(),
+                          nullptr, 0u, timeout_ms);
     }
 
     return Status::not_supported;
@@ -510,7 +603,9 @@ Status Nct6701Controller::open(std::string* warning_text) {
 }
 
 void Nct6701Controller::close() {
-    restore_all();
+    if (restore_on_close_) {
+        restore_all();
+    }
     if (mutex_handle_ != nullptr) {
         CloseHandle(mutex_handle_);
         mutex_handle_ = nullptr;
@@ -527,6 +622,10 @@ void Nct6701Controller::close() {
 
 bool Nct6701Controller::is_open() const {
     return transport_.is_open() && hwm_base_ != 0u;
+}
+
+void Nct6701Controller::set_restore_on_close(bool restore_on_close) {
+    restore_on_close_ = restore_on_close;
 }
 
 Status Nct6701Controller::detect_chip() {
@@ -737,7 +836,8 @@ Status Nct6701Controller::restore_auto(std::uint32_t channel) {
 
 Status Nct6701Controller::restore_saved_state(std::uint32_t channel,
                                               std::uint8_t duty_raw,
-                                              std::uint8_t mode_raw) {
+                                              std::uint8_t mode_raw,
+                                              std::uint32_t timeout_ms) {
     if (!is_open() || channel >= kFanChannelCount) {
         return Status::invalid_arg;
     }
@@ -753,10 +853,13 @@ Status Nct6701Controller::restore_saved_state(std::uint32_t channel,
     const std::uint8_t effective_mode = (mode_raw == 0u)
                                             ? kNct6701AutoModeFallback
                                             : mode_raw;
+    const ULONGLONG timeout_start_tick = GetTickCount64();
 
-    Status status = write_byte_locked(kNct6701PwmWrite[channel], duty_raw);
+    Status status = write_byte_locked(kNct6701PwmWrite[channel], duty_raw,
+                                      timeout_ms, timeout_start_tick);
     if (status == Status::ok) {
-        status = write_byte_locked(kNct6701FanMode[channel], effective_mode);
+        status = write_byte_locked(kNct6701FanMode[channel], effective_mode,
+                                   timeout_ms, timeout_start_tick);
     }
     if (status == Status::ok) {
         has_saved_[channel] = false;
@@ -987,6 +1090,13 @@ Status Nct6701Controller::read_byte_locked(std::uint16_t reg, std::uint8_t* out_
 }
 
 Status Nct6701Controller::write_byte_locked(std::uint16_t reg, std::uint8_t value) const {
+    return write_byte_locked(reg, value, INFINITE, 0u);
+}
+
+Status Nct6701Controller::write_byte_locked(std::uint16_t reg,
+                                            std::uint8_t value,
+                                            std::uint32_t timeout_ms,
+                                            ULONGLONG timeout_start_tick) const {
     if (hwm_base_ == 0u) {
         return Status::invalid_arg;
     }
@@ -994,19 +1104,28 @@ Status Nct6701Controller::write_byte_locked(std::uint16_t reg, std::uint8_t valu
     const std::uint16_t addr_port = static_cast<std::uint16_t>(hwm_base_ + 5u);
     const std::uint16_t data_port = static_cast<std::uint16_t>(hwm_base_ + 6u);
 
-    Status status = transport_.write_port(addr_port, 0x4Eu);
+    const auto next_timeout_ms = [&]() -> DWORD {
+        return timeout_ms == INFINITE
+            ? INFINITE
+            : remaining_timeout_ms(timeout_start_tick, timeout_ms);
+    };
+
+    Status status = transport_.write_port(addr_port, 0x4Eu, next_timeout_ms());
     if (status != Status::ok) {
         return status;
     }
-    status = transport_.write_port(data_port, static_cast<std::uint8_t>(reg >> 8));
+    status = transport_.write_port(data_port, static_cast<std::uint8_t>(reg >> 8),
+                                   next_timeout_ms());
     if (status != Status::ok) {
         return status;
     }
-    status = transport_.write_port(addr_port, static_cast<std::uint8_t>(reg & 0xFFu));
+    status = transport_.write_port(addr_port,
+                                   static_cast<std::uint8_t>(reg & 0xFFu),
+                                   next_timeout_ms());
     if (status != Status::ok) {
         return status;
     }
-    return transport_.write_port(data_port, value);
+    return transport_.write_port(data_port, value, next_timeout_ms());
 }
 
 Status Nct6701Controller::read_u16_be_locked(std::uint16_t reg, std::uint16_t* out_value) const {

@@ -77,9 +77,23 @@ Each fan entry can include:
 - `status_detail`
 - `loop_tick_count`
 - `loop_last_evaluation`
+- `loop_started_wall_clock`
+- `loop_finished_wall_clock`
+- `loop_work_duration_ms`
+- `loop_intended_interval_ms`
+- `loop_achieved_interval_ms`
+- `loop_slip_ms`
+- `loop_overrun`
 - `log_csv_path`
 - `event_log_path`
 - `controlled_channels`
+
+Timing fields describe the most recently completed control-loop tick. The first
+tick has no previous tick-start sample, so `loop_achieved_interval_ms` and
+`loop_slip_ms` may be reported as `0` in `control_runtime.json`; CSV rows keep
+blank numeric cells when a value is unavailable. `loop_achieved_interval_ms` is
+start-to-start timing, while `loop_work_duration_ms` is the work done before the
+post-work sleep.
 
 Each controlled-channel entry includes:
 

@@ -14,6 +14,7 @@ enum class FanWriteError {
     kPolicyRefused,
     kUnavailable,
     kInvalidChannel,
+    kTimedOut,
     kWriteFailed,
     kRestoreFailed,
 };
@@ -67,7 +68,8 @@ class FanWriter {
                                      double duty_pct) = 0;
     virtual FanWriteResult RestoreSavedState(std::uint32_t channel,
                                              std::uint8_t duty_raw,
-                                             std::uint8_t mode_raw) = 0;
+                                             std::uint8_t mode_raw,
+                                             std::uint32_t timeout_ms) = 0;
     virtual std::string BackendLabel() const = 0;
 };
 

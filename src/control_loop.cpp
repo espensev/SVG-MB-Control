@@ -15,6 +15,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <mmsystem.h>
+#include <psapi.h>
 
 #include <algorithm>
 #include <array>
@@ -218,6 +220,31 @@ std::string ReadEntireFile(const std::filesystem::path& path) {
     return buffer.str();
 }
 
+void ParseCurveArray(const std::string& text,
+                     std::string_view key,
+                     std::size_t range_begin,
+                     std::size_t range_end,
+                     std::vector<CurvePoint>* curve) {
+    std::size_t curve_begin = 0u;
+    std::size_t curve_end = 0u;
+    if (!FindArrayRange(text, key, range_begin, range_end,
+                        &curve_begin, &curve_end)) {
+        return;
+    }
+
+    ForEachObjectInRange(text, curve_begin, curve_end,
+        [&](std::size_t p_open, std::size_t p_close) {
+            const double t = FindNumericInRange(text, "temp_c", p_open, p_close);
+            const double d = FindNumericInRange(text, "duty_pct", p_open, p_close);
+            if (std::isnan(t) || std::isnan(d)) return;
+            curve->push_back({t, d});
+        });
+    std::sort(curve->begin(), curve->end(),
+              [](const CurvePoint& a, const CurvePoint& b) {
+                  return a.temp_c < b.temp_c;
+              });
+}
+
 std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
     const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
     std::tm local{};
@@ -275,6 +302,128 @@ std::uint32_t EffectiveControlHoldMs(const ControlLoopConfig& loop,
         : loop.control_hold_ms;
 }
 
+double RateLimitSetpoint(double desired_pct,
+                         double last_pct,
+                         std::uint64_t elapsed_ms,
+                         double rise_rate_pct_per_min,
+                         double fall_rate_pct_per_min) {
+    if (std::isnan(last_pct)) {
+        return desired_pct;
+    }
+
+    const double delta = desired_pct - last_pct;
+    if (std::abs(delta) <= 0.0001) {
+        return desired_pct;
+    }
+
+    const double rate = delta > 0.0
+        ? rise_rate_pct_per_min
+        : fall_rate_pct_per_min;
+    if (std::isnan(rate) || rate <= 0.0) {
+        return desired_pct;
+    }
+
+    const double allowed = rate *
+        (static_cast<double>(elapsed_ms) / 60000.0);
+    if (std::abs(delta) <= allowed) {
+        return desired_pct;
+    }
+    return last_pct + (delta > 0.0 ? allowed : -allowed);
+}
+
+double ApplyDemandSmoothing(double raw_desired_pct,
+                            double last_smoothed_pct,
+                            std::uint64_t elapsed_ms,
+                            const ChannelControlConfig& config) {
+    if (std::isnan(last_smoothed_pct)) {
+        return raw_desired_pct;
+    }
+
+    const double delta = raw_desired_pct - last_smoothed_pct;
+    if (std::abs(delta) <= 0.0001) {
+        return raw_desired_pct;
+    }
+
+    if (delta > 0.0) {
+        if (std::isnan(config.demand_smoothing_rise_alpha)) {
+            return raw_desired_pct;
+        }
+        const double alpha =
+            std::clamp(config.demand_smoothing_rise_alpha, 0.0, 1.0);
+        return std::clamp(
+            last_smoothed_pct + alpha * delta,
+            0.0, 100.0);
+    }
+
+    double smoothed = raw_desired_pct;
+    if (!std::isnan(config.demand_smoothing_fall_alpha)) {
+        const double alpha =
+            std::clamp(config.demand_smoothing_fall_alpha, 0.0, 1.0);
+        smoothed = last_smoothed_pct + alpha * delta;
+    }
+
+    if (!std::isnan(config.decay_latch_pct_per_min) &&
+        config.decay_latch_pct_per_min > 0.0 &&
+        elapsed_ms > 0u) {
+        const bool latch_zone =
+            std::isnan(config.decay_latch_above_pct) ||
+            last_smoothed_pct >= config.decay_latch_above_pct ||
+            smoothed >= config.decay_latch_above_pct;
+        if (latch_zone) {
+            const double max_drop =
+                config.decay_latch_pct_per_min *
+                (static_cast<double>(elapsed_ms) / 60000.0);
+            smoothed = (std::max)(smoothed, last_smoothed_pct - max_drop);
+        }
+    }
+
+    return std::clamp(smoothed, 0.0, 100.0);
+}
+
+double UpdateThermalPressureBoost(double observed_temp_c,
+                                  double current_boost_pct,
+                                  std::uint64_t elapsed_ms,
+                                  const ChannelControlConfig& config) {
+    if (std::isnan(config.thermal_pressure_start_c) ||
+        std::isnan(config.thermal_pressure_full_c) ||
+        std::isnan(config.thermal_pressure_rise_pct_per_sec) ||
+        std::isnan(config.thermal_pressure_fall_pct_per_sec) ||
+        std::isnan(config.thermal_pressure_max_boost_pct) ||
+        config.thermal_pressure_rise_pct_per_sec <= 0.0 ||
+        config.thermal_pressure_fall_pct_per_sec < 0.0 ||
+        config.thermal_pressure_max_boost_pct <= 0.0) {
+        return 0.0;
+    }
+
+    double boost = std::isnan(current_boost_pct)
+        ? 0.0
+        : std::clamp(
+              current_boost_pct, 0.0, config.thermal_pressure_max_boost_pct);
+    if (elapsed_ms == 0u || std::isnan(observed_temp_c)) {
+        return boost;
+    }
+
+    const double dt_seconds = static_cast<double>(elapsed_ms) / 1000.0;
+    if (observed_temp_c >= config.thermal_pressure_start_c) {
+        double pressure_scale = 1.0;
+        if (config.thermal_pressure_full_c >
+            config.thermal_pressure_start_c) {
+            pressure_scale = std::clamp(
+                (observed_temp_c - config.thermal_pressure_start_c) /
+                    (config.thermal_pressure_full_c -
+                     config.thermal_pressure_start_c),
+                0.0, 1.0);
+        }
+        boost += config.thermal_pressure_rise_pct_per_sec *
+                 pressure_scale * dt_seconds;
+    } else {
+        boost -= config.thermal_pressure_fall_pct_per_sec * dt_seconds;
+    }
+
+    return std::clamp(
+        boost, 0.0, config.thermal_pressure_max_boost_pct);
+}
+
 }  // namespace
 
 // ------------------------ Config loader --------------------------------
@@ -306,7 +455,7 @@ ControlLoopConfig LoadControlLoopConfig(
         cfg.deadband_pct = deadband;
     }
     const double hold = FindNumericInRange(text, "control_hold_ms", loop_begin, loop_end);
-    if (!std::isnan(hold) && hold > 0.0) {
+    if (!std::isnan(hold) && hold >= 0.0) {
         cfg.control_hold_ms = static_cast<std::uint32_t>(hold);
     }
     const std::string cpu_label = FindStringInRange(text, "cpu_temp_label", loop_begin, loop_end);
@@ -341,6 +490,74 @@ ControlLoopConfig LoadControlLoopConfig(
             if (!std::isnan(hold) && hold > 0.0) {
                 channel.control_hold_ms = static_cast<std::uint32_t>(hold);
             }
+            const std::string shape = FindStringInRange(text, "curve_shape", obj_open, obj_close);
+            if (!shape.empty()) {
+                try {
+                    channel.curve_shape = ParseCurveShape(shape);
+                } catch (const std::exception&) {
+                    channel.curve_shape = CurveShape::Linear;
+                }
+            }
+            const double rise_rate = FindNumericInRange(
+                text, "rise_rate_pct_per_min", obj_open, obj_close);
+            if (!std::isnan(rise_rate)) {
+                channel.rise_rate_pct_per_min = rise_rate;
+            }
+            const double fall_rate = FindNumericInRange(
+                text, "fall_rate_pct_per_min", obj_open, obj_close);
+            if (!std::isnan(fall_rate)) {
+                channel.fall_rate_pct_per_min = fall_rate;
+            }
+            const double demand_rise_alpha = FindNumericInRange(
+                text, "demand_smoothing_rise_alpha", obj_open, obj_close);
+            if (!std::isnan(demand_rise_alpha)) {
+                channel.demand_smoothing_rise_alpha = demand_rise_alpha;
+            }
+            const double demand_fall_alpha = FindNumericInRange(
+                text, "demand_smoothing_fall_alpha", obj_open, obj_close);
+            if (!std::isnan(demand_fall_alpha)) {
+                channel.demand_smoothing_fall_alpha = demand_fall_alpha;
+            }
+            const double decay_latch_above = FindNumericInRange(
+                text, "decay_latch_above_pct", obj_open, obj_close);
+            if (!std::isnan(decay_latch_above)) {
+                channel.decay_latch_above_pct = decay_latch_above;
+            }
+            const double decay_latch_rate = FindNumericInRange(
+                text, "decay_latch_pct_per_min", obj_open, obj_close);
+            if (!std::isnan(decay_latch_rate)) {
+                channel.decay_latch_pct_per_min = decay_latch_rate;
+            }
+            const double thermal_pressure_start = FindNumericInRange(
+                text, "thermal_pressure_start_c", obj_open, obj_close);
+            if (!std::isnan(thermal_pressure_start)) {
+                channel.thermal_pressure_start_c = thermal_pressure_start;
+            }
+            const double thermal_pressure_full = FindNumericInRange(
+                text, "thermal_pressure_full_c", obj_open, obj_close);
+            if (!std::isnan(thermal_pressure_full)) {
+                channel.thermal_pressure_full_c = thermal_pressure_full;
+            }
+            const double thermal_pressure_rise = FindNumericInRange(
+                text, "thermal_pressure_rise_pct_per_sec",
+                obj_open, obj_close);
+            if (!std::isnan(thermal_pressure_rise)) {
+                channel.thermal_pressure_rise_pct_per_sec =
+                    thermal_pressure_rise;
+            }
+            const double thermal_pressure_fall = FindNumericInRange(
+                text, "thermal_pressure_fall_pct_per_sec",
+                obj_open, obj_close);
+            if (!std::isnan(thermal_pressure_fall)) {
+                channel.thermal_pressure_fall_pct_per_sec =
+                    thermal_pressure_fall;
+            }
+            const double thermal_pressure_max = FindNumericInRange(
+                text, "thermal_pressure_max_boost_pct", obj_open, obj_close);
+            if (!std::isnan(thermal_pressure_max)) {
+                channel.thermal_pressure_max_boost_pct =
+                    thermal_pressure_max;
+            }
             const std::string blend = FindStringInRange(text, "temp_blend", obj_open, obj_close);
             if (!blend.empty()) {
                 try {
@@ -349,22 +566,9 @@ ControlLoopConfig LoadControlLoopConfig(
                     channel.temp_blend = TempBlend::CpuOnly;
                 }
             }
-            std::size_t curve_begin = 0u;
-            std::size_t curve_end = 0u;
-            if (FindArrayRange(text, "curve", obj_open, obj_close,
-                               &curve_begin, &curve_end)) {
-                ForEachObjectInRange(text, curve_begin, curve_end,
-                    [&](std::size_t p_open, std::size_t p_close) {
-                        const double t = FindNumericInRange(text, "temp_c", p_open, p_close);
-                        const double d = FindNumericInRange(text, "duty_pct", p_open, p_close);
-                        if (std::isnan(t) || std::isnan(d)) return;
-                        channel.curve.push_back({t, d});
-                    });
-                std::sort(channel.curve.begin(), channel.curve.end(),
-                          [](const CurvePoint& a, const CurvePoint& b) {
-                              return a.temp_c < b.temp_c;
-                          });
-            }
+            ParseCurveArray(text, "curve", obj_open, obj_close, &channel.curve);
+            ParseCurveArray(text, "cpu_override_curve", obj_open, obj_close,
+                            &channel.cpu_override_curve);
             cfg.channels.push_back(std::move(channel));
         });
 
@@ -391,6 +595,11 @@ struct ChannelState {
     std::uint64_t total_writes = 0u;
     double last_observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double last_setpoint_pct = std::numeric_limits<double>::quiet_NaN();
+    double last_raw_demand_pct = std::numeric_limits<double>::quiet_NaN();
+    double smoothed_demand_pct = std::numeric_limits<double>::quiet_NaN();
+    double thermal_pressure_boost_pct = 0.0;
+    std::chrono::steady_clock::time_point last_evaluation_time =
+        std::chrono::steady_clock::time_point{};
 };
 
 struct ControlLoop::Impl {
@@ -423,12 +632,169 @@ ControlLoop::~ControlLoop() = default;
 
 namespace {
 
+double DurationMilliseconds(std::chrono::steady_clock::duration duration) {
+    return std::chrono::duration<double, std::milli>(duration).count();
+}
+
+struct ProcessResourceSample {
+    bool valid_cpu = false;
+    bool valid_memory = false;
+    std::uint64_t total_cpu_100ns = 0u;
+    std::uint64_t working_set_bytes = 0u;
+    std::uint64_t private_bytes = 0u;
+    std::chrono::steady_clock::time_point sampled_at =
+        std::chrono::steady_clock::time_point{};
+};
+
+class TimerResolutionScope {
+  public:
+    explicit TimerResolutionScope(UINT period_ms)
+        : period_ms_(period_ms),
+          active_(timeBeginPeriod(period_ms_) == TIMERR_NOERROR) {}
+
+    ~TimerResolutionScope() {
+        if (active_) {
+            timeEndPeriod(period_ms_);
+        }
+    }
+
+    TimerResolutionScope(const TimerResolutionScope&) = delete;
+    TimerResolutionScope& operator=(const TimerResolutionScope&) = delete;
+
+    bool active() const { return active_; }
+    UINT period_ms() const { return period_ms_; }
+
+  private:
+    UINT period_ms_ = 0u;
+    bool active_ = false;
+};
+
+std::uint64_t FileTimeToU64(const FILETIME& value) {
+    ULARGE_INTEGER out{};
+    out.LowPart = value.dwLowDateTime;
+    out.HighPart = value.dwHighDateTime;
+    return out.QuadPart;
+}
+
+std::uint32_t ActiveProcessorCount() {
+    const DWORD count = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    return count > 0u ? static_cast<std::uint32_t>(count) : 1u;
+}
+
+ProcessResourceSample SampleProcessResources() {
+    ProcessResourceSample sample;
+    sample.sampled_at = std::chrono::steady_clock::now();
+
+    FILETIME creation{};
+    FILETIME exit{};
+    FILETIME kernel{};
+    FILETIME user{};
+    if (GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) {
+        sample.valid_cpu = true;
+        sample.total_cpu_100ns = FileTimeToU64(kernel) + FileTimeToU64(user);
+    }
+
+    PROCESS_MEMORY_COUNTERS_EX counters{};
+    counters.cb = sizeof(counters);
+    if (GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+            sizeof(counters))) {
+        sample.valid_memory = true;
+        sample.working_set_bytes =
+            static_cast<std::uint64_t>(counters.WorkingSetSize);
+        sample.private_bytes =
+            static_cast<std::uint64_t>(counters.PrivateUsage);
+    }
+
+    return sample;
+}
+
+void UpdateTimingResources(RuntimeControlLoopTimingState* timing,
+                           const ProcessResourceSample& previous,
+                           const ProcessResourceSample& current,
+                           bool have_previous,
+                           std::uint32_t processor_count) {
+    if (timing == nullptr) {
+        return;
+    }
+
+    if (current.valid_memory) {
+        timing->process_working_set_bytes = current.working_set_bytes;
+        timing->process_private_bytes = current.private_bytes;
+    }
+
+    if (!have_previous || !previous.valid_cpu || !current.valid_cpu ||
+        current.total_cpu_100ns < previous.total_cpu_100ns) {
+        return;
+    }
+
+    const double elapsed_ms =
+        DurationMilliseconds(current.sampled_at - previous.sampled_at);
+    if (elapsed_ms <= 0.0) {
+        return;
+    }
+
+    const double cpu_delta_ms =
+        static_cast<double>(current.total_cpu_100ns -
+                            previous.total_cpu_100ns) /
+        10000.0;
+    timing->process_cpu_delta_ms = cpu_delta_ms;
+    timing->process_cpu_pct =
+        (cpu_delta_ms /
+         (elapsed_ms * static_cast<double>((std::max)(1u, processor_count)))) *
+        100.0;
+}
+
+double JsonNumberOrZero(double value) {
+    return std::isnan(value) ? 0.0 : value;
+}
+
+double GpuControlEnvelopeC(const RuntimeGpuSnapshot& gpu) {
+    double envelope = (std::max)(gpu.core_c, gpu.memjn_c);
+    if (gpu.hotspot_c > 0.0) {
+        envelope = (std::max)(envelope, gpu.hotspot_c);
+    }
+    return envelope;
+}
+
+constexpr std::uint32_t kAuthorityReassertCooldownMs = 2000u;
+constexpr double kAuthorityDutyTolerancePct = 3.0;
+
+bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
+                               double last_issued_pct,
+                               double tolerance_pct,
+                               std::string* detail) {
+    if (std::isnan(last_issued_pct)) {
+        return false;
+    }
+
+    const bool mode_drifted = fan.mode_raw != 0u;
+    const double duty_delta = std::abs(fan.duty_percent - last_issued_pct);
+    const bool duty_drifted = duty_delta > tolerance_pct;
+    if (!mode_drifted && !duty_drifted) {
+        return false;
+    }
+
+    if (detail != nullptr) {
+        std::ostringstream stream;
+        stream << "observed fan state drifted from last issued setpoint"
+               << " mode_raw=" << static_cast<unsigned int>(fan.mode_raw)
+               << " duty_pct=" << fan.duty_percent
+               << " last_issued_pct=" << last_issued_pct
+               << " tolerance_pct=" << tolerance_pct;
+        *detail = stream.str();
+    }
+    return true;
+}
+
 bool WriteLoopStatus(const std::filesystem::path& runtime_home,
                      const std::string& mode_label,
                      const std::string& status,
                      const std::string& status_detail,
                      std::uint64_t tick_count,
                      const std::string& last_evaluation_iso,
+                     const RuntimeControlLoopTimingState& timing,
                      const std::vector<ChannelState>& channels,
                      const std::string& log_csv_path,
                      const std::string& event_log_path) {
@@ -443,12 +809,34 @@ bool WriteLoopStatus(const std::filesystem::path& runtime_home,
         std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
         if (!stream.is_open()) return false;
         stream << "{\n"
-               << "  \"schema_version\": 2,\n"
+               << "  \"schema_version\": 3,\n"
                << "  \"mode\": \"" << JsonEscape(mode_label) << "\",\n"
                << "  \"status\": \"" << JsonEscape(status) << "\",\n"
                << "  \"status_detail\": \"" << JsonEscape(status_detail) << "\",\n"
                << "  \"loop_tick_count\": " << tick_count << ",\n"
                << "  \"loop_last_evaluation\": \"" << JsonEscape(last_evaluation_iso) << "\",\n"
+               << "  \"loop_started_wall_clock\": \""
+               << JsonEscape(timing.loop_started_wall_clock) << "\",\n"
+               << "  \"loop_finished_wall_clock\": \""
+               << JsonEscape(timing.loop_finished_wall_clock) << "\",\n"
+               << "  \"loop_work_duration_ms\": "
+               << JsonNumberOrZero(timing.loop_work_duration_ms) << ",\n"
+               << "  \"loop_intended_interval_ms\": "
+               << timing.loop_intended_interval_ms << ",\n"
+               << "  \"loop_achieved_interval_ms\": "
+               << JsonNumberOrZero(timing.loop_achieved_interval_ms) << ",\n"
+               << "  \"loop_slip_ms\": "
+               << JsonNumberOrZero(timing.loop_slip_ms) << ",\n"
+               << "  \"loop_overrun\": "
+               << (timing.loop_overrun ? "true" : "false") << ",\n"
+               << "  \"process_cpu_delta_ms\": "
+               << JsonNumberOrZero(timing.process_cpu_delta_ms) << ",\n"
+               << "  \"process_cpu_pct\": "
+               << JsonNumberOrZero(timing.process_cpu_pct) << ",\n"
+               << "  \"process_working_set_bytes\": "
+               << timing.process_working_set_bytes << ",\n"
+               << "  \"process_private_bytes\": "
+               << timing.process_private_bytes << ",\n"
                << "  \"log_csv_path\": \"" << JsonEscape(log_csv_path) << "\",\n"
                << "  \"event_log_path\": \"" << JsonEscape(event_log_path) << "\",\n"
                << "  \"controlled_channels\": [";
@@ -460,6 +848,12 @@ bool WriteLoopStatus(const std::filesystem::path& runtime_home,
                    << "      \"total_writes\": " << ch.total_writes << ",\n"
                    << "      \"last_setpoint_pct\": "
                    << (std::isnan(ch.last_setpoint_pct) ? 0.0 : ch.last_setpoint_pct) << ",\n"
+                   << "      \"last_raw_demand_pct\": "
+                   << (std::isnan(ch.last_raw_demand_pct) ? 0.0 : ch.last_raw_demand_pct) << ",\n"
+                   << "      \"last_smoothed_demand_pct\": "
+                   << (std::isnan(ch.smoothed_demand_pct) ? 0.0 : ch.smoothed_demand_pct) << ",\n"
+                   << "      \"last_thermal_pressure_boost_pct\": "
+                   << ch.thermal_pressure_boost_pct << ",\n"
                    << "      \"last_observed_temp_c\": "
                    << (std::isnan(ch.last_observed_temp_c) ? 0.0 : ch.last_observed_temp_c) << ",\n"
                    << "      \"baseline_captured\": "
@@ -488,6 +882,8 @@ std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
         state.channel = channel.config.channel;
         state.observed_temp_c = channel.last_observed_temp_c;
         state.setpoint_pct = channel.last_setpoint_pct;
+        state.thermal_pressure_boost_pct =
+            channel.thermal_pressure_boost_pct;
         state.total_writes = channel.total_writes;
         state.write_active = channel.write_active;
         state.baseline_captured = channel.baseline_captured;
@@ -509,6 +905,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     if (csv_logger.Open("control-loop", BuildControlLoopCsvHeader())) {
         log_csv_path = csv_logger.active_archive_path().string();
     }
+    RuntimeControlLoopTimingState last_timing;
+    last_timing.loop_intended_interval_ms = impl_->loop.poll_tick_ms;
 
     AmdReader amd_reader;
     GpuReader gpu_reader;
@@ -529,9 +927,11 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         WriteLoopStatus(impl_->runtime_home, "control-loop", "failed",
                         std::string("direct writer init failed: ") + error.what(),
                         0u, FormatLocalIso8601(std::chrono::system_clock::now()),
-                        impl_->channels, log_csv_path, event_log_path);
+                        last_timing, impl_->channels, log_csv_path, event_log_path);
         return 1;
     }
+
+    TimerResolutionScope timer_resolution(1u);
 
     std::uint64_t tick_count = 0u;
     {
@@ -547,11 +947,15 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                << " cooldown_ms=" << impl_->loop.write_cooldown_ms
                << " deadband_pct=" << impl_->loop.deadband_pct
                << " hold_ms=" << impl_->loop.control_hold_ms
+               << " timer_resolution_ms="
+               << (timer_resolution.active()
+                       ? std::to_string(timer_resolution.period_ms())
+                       : std::string("default"))
                << " channels=" << impl_->channels.size() << ")";
         WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
                         detail.str(), tick_count,
                         FormatLocalIso8601(std::chrono::system_clock::now()),
-                        impl_->channels, log_csv_path, event_log_path);
+                        last_timing, impl_->channels, log_csv_path, event_log_path);
     }
     AppendRuntimeEvent(
         impl_->runtime_home,
@@ -562,10 +966,32 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             .success = true,
         });
 
+    bool fatal_restore_timeout = false;
+    std::uint32_t fatal_restore_channel = 0u;
+    std::chrono::steady_clock::time_point previous_tick_start;
+    bool have_previous_tick_start = false;
+    const std::uint32_t processor_count = ActiveProcessorCount();
+    ProcessResourceSample resource_window_sample = SampleProcessResources();
+    bool have_resource_window_sample = resource_window_sample.valid_cpu ||
+        resource_window_sample.valid_memory;
+    double last_process_cpu_delta_ms =
+        std::numeric_limits<double>::quiet_NaN();
+    double last_process_cpu_pct = std::numeric_limits<double>::quiet_NaN();
+
     while (!stop_flag.load()) {
         ++tick_count;
-        const auto now_steady = std::chrono::steady_clock::now();
-        const auto eval_iso = FormatLocalIso8601(std::chrono::system_clock::now());
+        const auto tick_started_steady = std::chrono::steady_clock::now();
+        const auto tick_started_wall = std::chrono::system_clock::now();
+        double achieved_interval_ms =
+            std::numeric_limits<double>::quiet_NaN();
+        if (have_previous_tick_start) {
+            achieved_interval_ms =
+                DurationMilliseconds(tick_started_steady - previous_tick_start);
+        }
+        previous_tick_start = tick_started_steady;
+        have_previous_tick_start = true;
+        const auto now_steady = tick_started_steady;
+        const auto eval_iso = FormatLocalIso8601(tick_started_wall);
 
         RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
             amd_reader, gpu_reader, *fan_writer, impl_->runtime_policy);
@@ -597,10 +1023,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             }
         }
         if (runtime_snapshot.gpu.available) {
-            temp_inputs.gpu_c = (std::max)(runtime_snapshot.gpu.core_c,
-                                           runtime_snapshot.gpu.memjn_c);
+            temp_inputs.gpu_c = GpuControlEnvelopeC(runtime_snapshot.gpu);
             temp_inputs.gpu_available = true;
-            temp_inputs.gpu_label = "gpu_max";
+            temp_inputs.gpu_label = "gpu_envelope";
         }
 
         if (runtime_snapshot_available) {
@@ -642,7 +1067,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                 const FanWriteResult restore_result =
                     fan_writer->RestoreSavedState(channel.config.channel,
                                                   channel.baseline_duty_raw,
-                                                  channel.baseline_mode_raw);
+                                                  channel.baseline_mode_raw,
+                                                  impl_->base.restore_timeout_ms);
                 if (restore_result) {
                     AppendRuntimeEvent(
                         impl_->runtime_home,
@@ -675,28 +1101,104 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                             .tick_count = tick_count,
                             .success = false,
                         });
+                    if (restore_result.error == FanWriteError::kTimedOut) {
+                        fatal_restore_timeout = true;
+                        fatal_restore_channel = channel.config.channel;
+                        break;
+                    }
                 }
-            }
-
-            const double blended = BlendTemps(temp_inputs, channel.config.temp_blend);
-            channel.last_observed_temp_c = blended;
-            if (blended < -100.0) continue;  // no valid input
-
-            const double setpoint = LookupCurve(channel.config.curve, blended,
-                                                channel.config.min_duty_pct);
-            channel.last_setpoint_pct = setpoint;
-
-            if (!std::isnan(channel.last_issued_pct)) {
-                const double delta = std::abs(setpoint - channel.last_issued_pct);
-                if (delta < effective_deadband_pct) continue;
             }
 
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now_steady - channel.last_write_time).count();
+            const std::uint64_t elapsed_ms = elapsed > 0
+                ? static_cast<std::uint64_t>(elapsed)
+                : 0u;
+
+            const auto evaluation_elapsed =
+                channel.last_evaluation_time ==
+                        std::chrono::steady_clock::time_point{}
+                    ? static_cast<std::uint64_t>(impl_->loop.poll_tick_ms)
+                    : static_cast<std::uint64_t>(
+                          (std::max)(
+                              0ll,
+                              std::chrono::duration_cast<
+                                  std::chrono::milliseconds>(
+                                  now_steady - channel.last_evaluation_time)
+                                  .count()));
+            channel.last_evaluation_time = now_steady;
+
+            const double blended = BlendTemps(temp_inputs, channel.config.temp_blend);
+            const bool primary_available = blended >= -100.0;
+            double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
+            double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
+            if (primary_available) {
+                raw_desired_setpoint = LookupCurve(
+                    channel.config.curve, blended, channel.config.min_duty_pct,
+                    channel.config.curve_shape);
+                observed_temp_c = blended;
+            }
+            if (!channel.config.cpu_override_curve.empty() &&
+                temp_inputs.cpu_available) {
+                const double cpu_setpoint = LookupCurve(
+                    channel.config.cpu_override_curve, temp_inputs.cpu_c,
+                    channel.config.min_duty_pct, channel.config.curve_shape);
+                if (std::isnan(raw_desired_setpoint) ||
+                    cpu_setpoint > raw_desired_setpoint) {
+                    raw_desired_setpoint = cpu_setpoint;
+                    observed_temp_c = temp_inputs.cpu_c;
+                }
+            }
+            channel.last_observed_temp_c = observed_temp_c;
+            channel.last_raw_demand_pct = raw_desired_setpoint;
+            if (std::isnan(raw_desired_setpoint)) continue;  // no valid input
+
+            const double smoothed_base_setpoint = ApplyDemandSmoothing(
+                raw_desired_setpoint, channel.smoothed_demand_pct,
+                evaluation_elapsed, channel.config);
+            channel.smoothed_demand_pct = smoothed_base_setpoint;
+            channel.thermal_pressure_boost_pct = UpdateThermalPressureBoost(
+                observed_temp_c, channel.thermal_pressure_boost_pct,
+                evaluation_elapsed, channel.config);
+
+            const double desired_setpoint = std::clamp(
+                smoothed_base_setpoint + channel.thermal_pressure_boost_pct,
+                0.0, 100.0);
+
+            const double setpoint = RateLimitSetpoint(
+                desired_setpoint, channel.last_issued_pct, elapsed_ms,
+                channel.config.rise_rate_pct_per_min,
+                channel.config.fall_rate_pct_per_min);
+            channel.last_setpoint_pct = setpoint;
+
+            std::string authority_detail;
+            bool authority_reassert = false;
+            if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
+                    runtime_snapshot, channel.config.channel)) {
+                authority_reassert =
+                    effective_hold_ms == 0u &&
+                    FanNeedsAuthorityReassert(
+                        *fan, channel.last_issued_pct,
+                        (std::max)(kAuthorityDutyTolerancePct,
+                                   effective_deadband_pct),
+                        &authority_detail);
+            }
+
+            if (!std::isnan(channel.last_issued_pct)) {
+                const double delta = std::abs(setpoint - channel.last_issued_pct);
+                if (!authority_reassert && delta < effective_deadband_pct) {
+                    continue;
+                }
+            }
+
             if (std::isnan(channel.last_issued_pct)) {
                 // First write for this channel — allow immediately.
             } else if (static_cast<std::uint64_t>(elapsed) <
-                       static_cast<std::uint64_t>(effective_cooldown_ms)) {
+                       static_cast<std::uint64_t>(
+                           authority_reassert
+                               ? (std::min)(effective_cooldown_ms,
+                                            kAuthorityReassertCooldownMs)
+                               : effective_cooldown_ms)) {
                 continue;
             }
 
@@ -746,11 +1248,25 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         .detail = write_result.detail,
                         .channel = channel.config.channel,
                         .tick_count = tick_count,
-                        .observed_temp_c = blended,
+                        .observed_temp_c = observed_temp_c,
                         .setpoint_pct = setpoint,
                         .success = false,
                     });
                 continue;
+            }
+            if (authority_reassert) {
+                AppendRuntimeEvent(
+                    impl_->runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type = "control_loop.authority_reasserted",
+                        .detail = authority_detail,
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .observed_temp_c = observed_temp_c,
+                        .setpoint_pct = setpoint,
+                        .success = true,
+                    });
             }
             channel.write_active = true;
             channel.hold_deadline =
@@ -768,10 +1284,72 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     .detail = "applied control-loop setpoint",
                     .channel = channel.config.channel,
                     .tick_count = tick_count,
-                    .observed_temp_c = blended,
+                    .observed_temp_c = observed_temp_c,
                     .setpoint_pct = setpoint,
                     .success = true,
                 });
+        }
+
+        const auto tick_finished_steady = std::chrono::steady_clock::now();
+        const auto tick_finished_wall = std::chrono::system_clock::now();
+        const double work_duration_ms =
+            DurationMilliseconds(tick_finished_steady - tick_started_steady);
+        RuntimeControlLoopTimingState tick_timing;
+        tick_timing.loop_started_wall_clock = eval_iso;
+        tick_timing.loop_finished_wall_clock =
+            FormatLocalIso8601(tick_finished_wall);
+        tick_timing.loop_work_duration_ms = work_duration_ms;
+        tick_timing.loop_intended_interval_ms = impl_->loop.poll_tick_ms;
+        tick_timing.loop_achieved_interval_ms = achieved_interval_ms;
+        tick_timing.loop_slip_ms = std::isnan(achieved_interval_ms)
+            ? std::numeric_limits<double>::quiet_NaN()
+            : achieved_interval_ms -
+                  static_cast<double>(impl_->loop.poll_tick_ms);
+        tick_timing.loop_overrun =
+            work_duration_ms > static_cast<double>(impl_->loop.poll_tick_ms);
+        const ProcessResourceSample current_resource_sample =
+            SampleProcessResources();
+        if (current_resource_sample.valid_memory) {
+            tick_timing.process_working_set_bytes =
+                current_resource_sample.working_set_bytes;
+            tick_timing.process_private_bytes =
+                current_resource_sample.private_bytes;
+        }
+        const double resource_window_ms =
+            have_resource_window_sample
+                ? DurationMilliseconds(current_resource_sample.sampled_at -
+                                       resource_window_sample.sampled_at)
+                : 0.0;
+        if (resource_window_ms >= 1000.0) {
+            RuntimeControlLoopTimingState resource_timing;
+            UpdateTimingResources(&resource_timing,
+                                  resource_window_sample,
+                                  current_resource_sample,
+                                  have_resource_window_sample,
+                                  processor_count);
+            last_process_cpu_delta_ms = resource_timing.process_cpu_delta_ms;
+            last_process_cpu_pct = resource_timing.process_cpu_pct;
+            resource_window_sample = current_resource_sample;
+            have_resource_window_sample =
+                current_resource_sample.valid_cpu ||
+                current_resource_sample.valid_memory;
+        }
+        tick_timing.process_cpu_delta_ms = last_process_cpu_delta_ms;
+        tick_timing.process_cpu_pct = last_process_cpu_pct;
+        last_timing = tick_timing;
+
+        if (fatal_restore_timeout) {
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.abort",
+                    .detail = "restore timed out; aborting control-loop",
+                    .channel = fatal_restore_channel,
+                    .tick_count = tick_count,
+                    .success = false,
+                });
+            break;
         }
 
         if (csv_logger.is_open()) {
@@ -779,6 +1357,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                 BuildControlLoopCsvRow(
                     runtime_snapshot,
                     tick_count,
+                    last_timing,
                     BuildChannelLogStates(impl_->channels)));
         }
 
@@ -786,24 +1365,33 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             std::ostringstream td;
             td << "tick poll_tick_ms=" << impl_->loop.poll_tick_ms
                << " cooldown=" << impl_->loop.write_cooldown_ms
-               << " deadband=" << impl_->loop.deadband_pct;
+               << " deadband=" << impl_->loop.deadband_pct
+               << " timer_resolution_ms="
+               << (timer_resolution.active()
+                       ? std::to_string(timer_resolution.period_ms())
+                       : std::string("default"));
             WriteLoopStatus(impl_->runtime_home, "control-loop", "running",
-                            td.str(), tick_count, eval_iso, impl_->channels,
-                            log_csv_path, event_log_path);
+                            td.str(), tick_count, eval_iso, last_timing,
+                            impl_->channels, log_csv_path, event_log_path);
         }
 
-        std::unique_lock<std::mutex> lock(impl_->wake_mutex);
-        impl_->wake_cv.wait_for(
-            lock,
-            std::chrono::milliseconds(impl_->loop.poll_tick_ms),
-            [&stop_flag] { return stop_flag.load(); });
+        const auto next_tick_deadline =
+            tick_started_steady +
+            std::chrono::milliseconds(impl_->loop.poll_tick_ms);
+        const auto after_tick_steady = std::chrono::steady_clock::now();
+        if (after_tick_steady < next_tick_deadline) {
+            std::unique_lock<std::mutex> lock(impl_->wake_mutex);
+            impl_->wake_cv.wait_until(
+                lock, next_tick_deadline,
+                [&stop_flag] { return stop_flag.load(); });
+        }
     }
 
     // Shutdown: restore controlled channels back to their captured baseline.
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",
                     "stop requested", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
-                    impl_->channels, log_csv_path, event_log_path);
+                    last_timing, impl_->channels, log_csv_path, event_log_path);
     AppendRuntimeEvent(
         impl_->runtime_home,
         RuntimeLogEvent{
@@ -815,11 +1403,26 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         });
     bool restore_failure = false;
     for (auto& channel : impl_->channels) {
+        if (fatal_restore_timeout && channel.write_active) {
+            restore_failure = true;
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.shutdown_restore_skipped",
+                    .detail = "skipped shutdown restore after earlier restore timeout",
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .success = false,
+                });
+            continue;
+        }
         if (channel.write_active && channel.baseline_captured) {
             const FanWriteResult restore_result =
                 fan_writer->RestoreSavedState(channel.config.channel,
                                               channel.baseline_duty_raw,
-                                              channel.baseline_mode_raw);
+                                              channel.baseline_mode_raw,
+                                              impl_->base.restore_timeout_ms);
             if (!restore_result) {
                 restore_failure = true;
                 AppendRuntimeEvent(
@@ -856,7 +1459,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                     : "channels restored",
                     tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
-                    impl_->channels, log_csv_path, event_log_path);
+                    last_timing, impl_->channels, log_csv_path, event_log_path);
     AppendRuntimeEvent(
         impl_->runtime_home,
         RuntimeLogEvent{

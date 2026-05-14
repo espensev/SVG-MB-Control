@@ -916,9 +916,14 @@ try {
     }
 
     Write-Host "`n[5b/11] CMake build..." -ForegroundColor Yellow
-    Invoke-External -FilePath $cmakeExe -Arguments @(
-        '--build', '--preset', $PresetName, '--parallel'
-    ) -FailureMessage 'CMake build failed'
+    Push-Location -LiteralPath $RepoRoot
+    try {
+        Invoke-External -FilePath $cmakeExe -Arguments @(
+            '--build', '--preset', $PresetName, '--parallel'
+        ) -FailureMessage 'CMake build failed'
+    } finally {
+        Pop-Location
+    }
 
     Write-Host "`n[6/11] Packaging to dist/..." -ForegroundColor Yellow
     $builtMainExe = Join-Path $BuildDir $MainExeName

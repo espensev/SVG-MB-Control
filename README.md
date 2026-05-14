@@ -84,7 +84,7 @@ release\svg-mb-control.exe --mode read-loop --config .\config\control.example.js
 Direct write-once:
 
 ```powershell
-release\svg-mb-control.exe --mode write-once --config .\config\control.example.json --write-channel 3 --write-pct 60 --write-hold-ms 10000
+release\svg-mb-control.exe --mode write-once --config .\config\control.example.json --write-channel 4 --write-pct 60 --write-hold-ms 10000
 ```
 
 Direct control loop:
@@ -126,6 +126,21 @@ Field notes:
   `runtime\current_state.json` and mirrors the same payload to `snapshot_path`
   when configured.
 - `runtime_policy_path` is read locally by direct write and control flows.
+- The shipped live policy controls airflow lanes `0,1,2,3,4,5`.
+  Lanes `2,3` are included for the higher-floor front-intake response and use
+  one-step rate-limited fan commands.
+- The packaged control loop uses GPU envelope curves plus per-channel
+  `cpu_override_curve` overlays, commanding the higher duty so Cinebench plus
+  max CUDA load has a CPU response path without raising idle floors.
+- Response smoothing and bounded decay latching are applied before rate
+  limiting so the loop emits intermediate PWM steps without chasing small
+  high-temperature dips. The radiator Noctua lanes use staggered CPU overlay
+  points plus a slow thermal-pressure boost for sustained high heat.
+- The packaged live runtime policy keeps Channel `6` blocked.
+- The packaged control loop uses a fast-step `50 ms` tick and `50 ms` write
+  cooldown so normal movement can be written as small intermediate PWM steps.
+  Runtime status and CSV logs include process CPU and memory fields for watching
+  the cost of this profile.
 - `log_rotate_hours` controls CSV chunk rotation under `runtime\logs\archive\`.
 - `log_retain_days` controls archive pruning for rotated CSV chunks.
 - Legacy bridge-era config keys such as `bridge_exe_path`,

@@ -20,9 +20,24 @@ struct RuntimeControlChannelLogState {
     std::uint32_t channel = 0u;
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double setpoint_pct = std::numeric_limits<double>::quiet_NaN();
+    double thermal_pressure_boost_pct = 0.0;
     std::uint64_t total_writes = 0u;
     bool write_active = false;
     bool baseline_captured = false;
+};
+
+struct RuntimeControlLoopTimingState {
+    std::string loop_started_wall_clock;
+    std::string loop_finished_wall_clock;
+    double loop_work_duration_ms = std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t loop_intended_interval_ms = 0u;
+    double loop_achieved_interval_ms = std::numeric_limits<double>::quiet_NaN();
+    double loop_slip_ms = std::numeric_limits<double>::quiet_NaN();
+    bool loop_overrun = false;
+    double process_cpu_delta_ms = std::numeric_limits<double>::quiet_NaN();
+    double process_cpu_pct = std::numeric_limits<double>::quiet_NaN();
+    std::uint64_t process_working_set_bytes = 0u;
+    std::uint64_t process_private_bytes = 0u;
 };
 
 struct RuntimeReadLoopLogState {
@@ -117,6 +132,7 @@ std::string BuildControlLoopCsvHeader();
 std::string BuildControlLoopCsvRow(
     const RuntimeSnapshot& snapshot,
     std::uint64_t tick_count,
+    const RuntimeControlLoopTimingState& timing,
     const std::vector<RuntimeControlChannelLogState>& channels);
 
 bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,

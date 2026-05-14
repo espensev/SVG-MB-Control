@@ -21,6 +21,22 @@ std::string TempBlendToString(TempBlend blend) {
     return "cpu_only";
 }
 
+CurveShape ParseCurveShape(const std::string& text) {
+    if (text == "linear") return CurveShape::Linear;
+    if (text == "smootherstep" || text == "smooth") {
+        return CurveShape::SmootherStep;
+    }
+    throw std::runtime_error("Unknown curve shape: " + text);
+}
+
+std::string CurveShapeToString(CurveShape shape) {
+    switch (shape) {
+        case CurveShape::Linear: return "linear";
+        case CurveShape::SmootherStep: return "smootherstep";
+    }
+    return "linear";
+}
+
 double BlendTemps(const TempInputs& inputs, TempBlend mode) {
     constexpr double kAbsoluteZeroC = -273.15;
     const double cpu = inputs.cpu_available ? inputs.cpu_c : kAbsoluteZeroC;
@@ -36,6 +52,13 @@ double BlendTemps(const TempInputs& inputs, TempBlend mode) {
 double LookupCurve(const std::vector<CurvePoint>& curve,
                    double temp_c,
                    double min_floor_pct) {
+    return LookupCurve(curve, temp_c, min_floor_pct, CurveShape::Linear);
+}
+
+double LookupCurve(const std::vector<CurvePoint>& curve,
+                   double temp_c,
+                   double min_floor_pct,
+                   CurveShape shape) {
     if (curve.empty()) {
         return (std::max)(0.0, min_floor_pct);
     }
@@ -53,7 +76,10 @@ double LookupCurve(const std::vector<CurvePoint>& curve,
                 if (span <= 0.0) {
                     raw = hi.duty_pct;
                 } else {
-                    const double t = (temp_c - lo.temp_c) / span;
+                    double t = (temp_c - lo.temp_c) / span;
+                    if (shape == CurveShape::SmootherStep) {
+                        t = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                    }
                     raw = lo.duty_pct + t * (hi.duty_pct - lo.duty_pct);
                 }
                 break;
