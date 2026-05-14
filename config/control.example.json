@@ -61,15 +61,15 @@
           },
           {
             "temp_c": 62,
-            "duty_pct": 24
+            "duty_pct": 26
           },
           {
             "temp_c": 70,
-            "duty_pct": 32
+            "duty_pct": 36
           },
           {
             "temp_c": 80,
-            "duty_pct": 45
+            "duty_pct": 48
           },
           {
             "temp_c": 90,
@@ -130,11 +130,11 @@
           },
           {
             "temp_c": 68,
-            "duty_pct": 42
+            "duty_pct": 45
           },
           {
             "temp_c": 72,
-            "duty_pct": 55
+            "duty_pct": 58
           },
           {
             "temp_c": 80,
@@ -199,11 +199,11 @@
           },
           {
             "temp_c": 68,
-            "duty_pct": 62
+            "duty_pct": 64
           },
           {
             "temp_c": 72,
-            "duty_pct": 72
+            "duty_pct": 74
           },
           {
             "temp_c": 80,
@@ -268,11 +268,11 @@
           },
           {
             "temp_c": 68,
-            "duty_pct": 62
+            "duty_pct": 64
           },
           {
             "temp_c": 72,
-            "duty_pct": 72
+            "duty_pct": 74
           },
           {
             "temp_c": 80,
@@ -333,15 +333,15 @@
           },
           {
             "temp_c": 62,
-            "duty_pct": 26
+            "duty_pct": 28
           },
           {
             "temp_c": 70,
-            "duty_pct": 34
+            "duty_pct": 38
           },
           {
             "temp_c": 80,
-            "duty_pct": 48
+            "duty_pct": 52
           },
           {
             "temp_c": 90,
@@ -398,15 +398,15 @@
           },
           {
             "temp_c": 62,
-            "duty_pct": 24
+            "duty_pct": 26
           },
           {
             "temp_c": 70,
-            "duty_pct": 32
+            "duty_pct": 36
           },
           {
             "temp_c": 80,
-            "duty_pct": 45
+            "duty_pct": 49
           },
           {
             "temp_c": 90,

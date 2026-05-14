@@ -7,4 +7,5 @@
 /CMakeUserPresets.json
 /tests/__pycache__/
 /alresponse.CSV
+/hwlogparalell.CSV
 *.pyc
