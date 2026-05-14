@@ -76,6 +76,7 @@ if(WIN32)
 endif()
 
 add_executable(svg_mb_control
+    src/pch.cpp
     src/amd_reader.cpp
     src/channel_evaluator.cpp
     src/control_config.cpp
@@ -116,13 +117,17 @@ set_target_properties(svg_mb_control PROPERTIES OUTPUT_NAME "svg-mb-control")
 
 target_include_directories(svg_mb_control PRIVATE src)
 target_compile_features(svg_mb_control PRIVATE cxx_std_20)
+
+# Enable precompiled headers for faster builds
+target_precompile_headers(svg_mb_control PRIVATE src/pch.h)
+
 target_compile_definitions(svg_mb_control PRIVATE
     SVG_MB_CONTROL_VERSION="${PROJECT_VERSION}"
     SVG_MB_CONTROL_GIT_HASH="${SVG_MB_CONTROL_GIT_HASH}"
 )
 
 if(MSVC)
-    target_compile_options(svg_mb_control PRIVATE /W4 /permissive-)
+    target_compile_options(svg_mb_control PRIVATE /W4 /permissive- /MP)
 else()
     target_compile_options(svg_mb_control PRIVATE -Wall -Wextra -Wpedantic)
 endif()
