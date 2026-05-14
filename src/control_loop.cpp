@@ -8,6 +8,8 @@
 #include "runtime_logging.h"
 #include "runtime_snapshot.h"
 
+#include <nlohmann/json.hpp>
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -209,6 +211,147 @@ std::string FindStringInRange(const std::string& text, std::string_view key,
     return {};
 }
 
+// ---------- Configuration Validation ----------
+
+void ValidatePercentage(double value, const std::string& field_name,
+                       bool allow_nan = false) {
+    if (allow_nan && std::isnan(value)) {
+        return;
+    }
+    if (std::isnan(value)) {
+        throw std::runtime_error(field_name + " must not be NaN");
+    }
+    if (value < 0.0 || value > 100.0) {
+        throw std::runtime_error(field_name + " must be in [0, 100], got " +
+                                std::to_string(value));
+    }
+}
+
+void ValidatePositive(double value, const std::string& field_name,
+                     bool allow_nan = false) {
+    if (allow_nan && std::isnan(value)) {
+        return;
+    }
+    if (std::isnan(value)) {
+        throw std::runtime_error(field_name + " must not be NaN");
+    }
+    if (value < 0.0) {
+        throw std::runtime_error(field_name + " must be non-negative, got " +
+                                std::to_string(value));
+    }
+}
+
+void ValidateAlpha(double value, const std::string& field_name,
+                  bool allow_nan = true) {
+    if (allow_nan && std::isnan(value)) {
+        return;
+    }
+    if (std::isnan(value)) {
+        throw std::runtime_error(field_name + " must not be NaN");
+    }
+    if (value < 0.0 || value > 1.0) {
+        throw std::runtime_error(field_name + " must be in [0, 1], got " +
+                                std::to_string(value));
+    }
+}
+
+void ValidateCurve(const std::vector<CurvePoint>& curve,
+                  const std::string& curve_name) {
+    if (curve.empty()) {
+        return; // Empty curves are allowed
+    }
+    for (const auto& point : curve) {
+        if (std::isnan(point.temp_c)) {
+            throw std::runtime_error(curve_name + " has NaN temperature");
+        }
+        if (std::isnan(point.duty_pct)) {
+            throw std::runtime_error(curve_name + " has NaN duty percentage");
+        }
+        ValidatePercentage(point.duty_pct,
+                         curve_name + " duty_pct at " +
+                         std::to_string(point.temp_c) + "C");
+    }
+}
+
+void ValidateChannelConfig(const ChannelControlConfig& ch,
+                          std::uint32_t index) {
+    const std::string prefix = "Channel " + std::to_string(ch.channel) +
+                              " (index " + std::to_string(index) + ")";
+
+    ValidatePercentage(ch.min_duty_pct, prefix + " min_duty_pct");
+    ValidatePercentage(ch.deadband_pct, prefix + " deadband_pct", true);
+
+    ValidatePositive(ch.rise_rate_pct_per_min,
+                    prefix + " rise_rate_pct_per_min", true);
+    ValidatePositive(ch.fall_rate_pct_per_min,
+                    prefix + " fall_rate_pct_per_min", true);
+
+    ValidateAlpha(ch.demand_smoothing_rise_alpha,
+                 prefix + " demand_smoothing_rise_alpha");
+    ValidateAlpha(ch.demand_smoothing_fall_alpha,
+                 prefix + " demand_smoothing_fall_alpha");
+
+    ValidatePercentage(ch.decay_latch_above_pct,
+                      prefix + " decay_latch_above_pct", true);
+    ValidatePositive(ch.decay_latch_pct_per_min,
+                    prefix + " decay_latch_pct_per_min", true);
+
+    // Validate thermal pressure parameters
+    if (!std::isnan(ch.thermal_pressure_start_c) ||
+        !std::isnan(ch.thermal_pressure_full_c) ||
+        !std::isnan(ch.thermal_pressure_rise_pct_per_sec) ||
+        !std::isnan(ch.thermal_pressure_fall_pct_per_sec) ||
+        !std::isnan(ch.thermal_pressure_max_boost_pct)) {
+
+        // If any thermal pressure param is set, validate the complete set
+        if (std::isnan(ch.thermal_pressure_start_c) ||
+            std::isnan(ch.thermal_pressure_full_c)) {
+            throw std::runtime_error(
+                prefix + " thermal_pressure requires both start_c and full_c");
+        }
+
+        ValidatePositive(ch.thermal_pressure_rise_pct_per_sec,
+                        prefix + " thermal_pressure_rise_pct_per_sec", true);
+        ValidatePositive(ch.thermal_pressure_fall_pct_per_sec,
+                        prefix + " thermal_pressure_fall_pct_per_sec", true);
+        ValidatePercentage(ch.thermal_pressure_max_boost_pct,
+                          prefix + " thermal_pressure_max_boost_pct", true);
+
+        if (ch.thermal_pressure_full_c <= ch.thermal_pressure_start_c) {
+            throw std::runtime_error(
+                prefix + " thermal_pressure_full_c must be > start_c");
+        }
+    }
+
+    ValidateCurve(ch.curve, prefix + " curve");
+    ValidateCurve(ch.cpu_override_curve, prefix + " cpu_override_curve");
+}
+
+void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
+                              const std::filesystem::path& config_path) {
+    if (cfg.poll_tick_ms == 0u) {
+        throw std::runtime_error("poll_tick_ms must be > 0");
+    }
+    if (cfg.poll_tick_ms < 50u) {
+        // Warn but don't fail for very fast polling
+        std::fprintf(stderr,
+                    "Warning: poll_tick_ms=%u is very fast, may cause high CPU usage\n",
+                    cfg.poll_tick_ms);
+    }
+
+    ValidatePercentage(cfg.deadband_pct, "deadband_pct");
+
+    if (cfg.channels.empty()) {
+        throw std::runtime_error(
+            "control_loop config has empty channels array: " +
+            config_path.string());
+    }
+
+    for (std::size_t i = 0; i < cfg.channels.size(); ++i) {
+        ValidateChannelConfig(cfg.channels[i], static_cast<std::uint32_t>(i));
+    }
+}
+
 std::string ReadEntireFile(const std::filesystem::path& path) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream.is_open()) {
@@ -381,9 +524,9 @@ double ApplyDemandSmoothing(double raw_desired_pct,
 }
 
 double UpdateThermalPressureBoost(double observed_temp_c,
-                                  double current_boost_pct,
-                                  std::uint64_t elapsed_ms,
-                                  const ChannelControlConfig& config) {
+                                   double current_boost_pct,
+                                   std::uint64_t elapsed_ms,
+                                   const ChannelControlConfig& config) {
     if (std::isnan(config.thermal_pressure_start_c) ||
         std::isnan(config.thermal_pressure_full_c) ||
         std::isnan(config.thermal_pressure_rise_pct_per_sec) ||
@@ -408,14 +551,25 @@ double UpdateThermalPressureBoost(double observed_temp_c,
         double pressure_scale = 1.0;
         if (config.thermal_pressure_full_c >
             config.thermal_pressure_start_c) {
-            pressure_scale = std::clamp(
+            // Calculate normalized position in [0, 1]
+            double t = std::clamp(
                 (observed_temp_c - config.thermal_pressure_start_c) /
                     (config.thermal_pressure_full_c -
                      config.thermal_pressure_start_c),
                 0.0, 1.0);
+
+            // Apply smootherstep for smoother ramp (Horner's form for numerical stability)
+            pressure_scale = t * t * t * ((6.0 * t - 15.0) * t + 10.0);
         }
-        boost += config.thermal_pressure_rise_pct_per_sec *
-                 pressure_scale * dt_seconds;
+
+        // Anti-windup: only accumulate if below max OR temperature is falling
+        const bool below_max = boost < config.thermal_pressure_max_boost_pct;
+        const bool temp_falling = observed_temp_c < config.thermal_pressure_start_c;
+
+        if (below_max || temp_falling) {
+            boost += config.thermal_pressure_rise_pct_per_sec *
+                     pressure_scale * dt_seconds;
+        }
     } else {
         boost -= config.thermal_pressure_fall_pct_per_sec * dt_seconds;
     }
@@ -430,152 +584,180 @@ double UpdateThermalPressureBoost(double observed_temp_c,
 
 ControlLoopConfig LoadControlLoopConfig(
     const std::filesystem::path& config_path) {
-    const std::string text = ReadEntireFile(config_path);
 
-    std::size_t loop_begin = 0u;
-    std::size_t loop_end = 0u;
-    if (!FindObjectRange(text, "control_loop", 0u, text.size(),
-                         &loop_begin, &loop_end)) {
+    // Load and parse JSON using nlohmann/json library
+    std::ifstream config_file(config_path);
+    if (!config_file.is_open()) {
+        throw std::runtime_error("Could not open control config: " +
+                                config_path.string());
+    }
+
+    nlohmann::json root;
+    try {
+        config_file >> root;
+    } catch (const nlohmann::json::parse_error& e) {
+        throw std::runtime_error("JSON parse error in " + config_path.string() +
+                                ": " + e.what());
+    }
+
+    if (!root.contains("control_loop")) {
         throw std::runtime_error(
             "control config missing control_loop object: " + config_path.string());
     }
 
+    const auto& loop_json = root["control_loop"];
     ControlLoopConfig cfg;
 
-    const double poll_tick = FindNumericInRange(text, "poll_tick_ms", loop_begin, loop_end);
-    if (!std::isnan(poll_tick) && poll_tick > 0.0) {
-        cfg.poll_tick_ms = static_cast<std::uint32_t>(poll_tick);
-    }
-    const double cooldown = FindNumericInRange(text, "write_cooldown_ms", loop_begin, loop_end);
-    if (!std::isnan(cooldown)) {
-        cfg.write_cooldown_ms = static_cast<std::uint32_t>(cooldown);
-    }
-    const double deadband = FindNumericInRange(text, "deadband_pct", loop_begin, loop_end);
-    if (!std::isnan(deadband)) {
-        cfg.deadband_pct = deadband;
-    }
-    const double hold = FindNumericInRange(text, "control_hold_ms", loop_begin, loop_end);
-    if (!std::isnan(hold) && hold >= 0.0) {
-        cfg.control_hold_ms = static_cast<std::uint32_t>(hold);
-    }
-    const std::string cpu_label = FindStringInRange(text, "cpu_temp_label", loop_begin, loop_end);
-    if (!cpu_label.empty()) {
-        cfg.cpu_temp_label = cpu_label;
-    }
+    // Parse top-level control loop settings with defaults
+    cfg.poll_tick_ms = loop_json.value("poll_tick_ms", cfg.poll_tick_ms);
+    cfg.write_cooldown_ms = loop_json.value("write_cooldown_ms", cfg.write_cooldown_ms);
+    cfg.deadband_pct = loop_json.value("deadband_pct", cfg.deadband_pct);
+    cfg.control_hold_ms = loop_json.value("control_hold_ms", cfg.control_hold_ms);
+    cfg.cpu_temp_label = loop_json.value("cpu_temp_label", cfg.cpu_temp_label);
 
-    std::size_t ch_begin = 0u;
-    std::size_t ch_end = 0u;
-    if (!FindArrayRange(text, "channels", loop_begin, loop_end, &ch_begin, &ch_end)) {
+    // Parse channels array
+    if (!loop_json.contains("channels") || !loop_json["channels"].is_array()) {
         throw std::runtime_error(
             "control_loop config missing channels array: " + config_path.string());
     }
 
-    ForEachObjectInRange(text, ch_begin, ch_end,
-        [&](std::size_t obj_open, std::size_t obj_close) {
-            ChannelControlConfig channel;
-            const double ch_idx = FindNumericInRange(text, "channel", obj_open, obj_close);
-            if (std::isnan(ch_idx)) return;
-            channel.channel = static_cast<std::uint32_t>(ch_idx);
-            const double floor = FindNumericInRange(text, "min_duty_pct", obj_open, obj_close);
-            if (!std::isnan(floor)) channel.min_duty_pct = floor;
-            const double cooldown = FindNumericInRange(text, "write_cooldown_ms", obj_open, obj_close);
-            if (!std::isnan(cooldown) && cooldown > 0.0) {
-                channel.write_cooldown_ms = static_cast<std::uint32_t>(cooldown);
-            }
-            const double deadband = FindNumericInRange(text, "deadband_pct", obj_open, obj_close);
-            if (!std::isnan(deadband)) {
-                channel.deadband_pct = deadband;
-            }
-            const double hold = FindNumericInRange(text, "control_hold_ms", obj_open, obj_close);
-            if (!std::isnan(hold) && hold > 0.0) {
-                channel.control_hold_ms = static_cast<std::uint32_t>(hold);
-            }
-            const std::string shape = FindStringInRange(text, "curve_shape", obj_open, obj_close);
-            if (!shape.empty()) {
-                try {
-                    channel.curve_shape = ParseCurveShape(shape);
-                } catch (const std::exception&) {
-                    channel.curve_shape = CurveShape::Linear;
-                }
-            }
-            const double rise_rate = FindNumericInRange(
-                text, "rise_rate_pct_per_min", obj_open, obj_close);
-            if (!std::isnan(rise_rate)) {
-                channel.rise_rate_pct_per_min = rise_rate;
-            }
-            const double fall_rate = FindNumericInRange(
-                text, "fall_rate_pct_per_min", obj_open, obj_close);
-            if (!std::isnan(fall_rate)) {
-                channel.fall_rate_pct_per_min = fall_rate;
-            }
-            const double demand_rise_alpha = FindNumericInRange(
-                text, "demand_smoothing_rise_alpha", obj_open, obj_close);
-            if (!std::isnan(demand_rise_alpha)) {
-                channel.demand_smoothing_rise_alpha = demand_rise_alpha;
-            }
-            const double demand_fall_alpha = FindNumericInRange(
-                text, "demand_smoothing_fall_alpha", obj_open, obj_close);
-            if (!std::isnan(demand_fall_alpha)) {
-                channel.demand_smoothing_fall_alpha = demand_fall_alpha;
-            }
-            const double decay_latch_above = FindNumericInRange(
-                text, "decay_latch_above_pct", obj_open, obj_close);
-            if (!std::isnan(decay_latch_above)) {
-                channel.decay_latch_above_pct = decay_latch_above;
-            }
-            const double decay_latch_rate = FindNumericInRange(
-                text, "decay_latch_pct_per_min", obj_open, obj_close);
-            if (!std::isnan(decay_latch_rate)) {
-                channel.decay_latch_pct_per_min = decay_latch_rate;
-            }
-            const double thermal_pressure_start = FindNumericInRange(
-                text, "thermal_pressure_start_c", obj_open, obj_close);
-            if (!std::isnan(thermal_pressure_start)) {
-                channel.thermal_pressure_start_c = thermal_pressure_start;
-            }
-            const double thermal_pressure_full = FindNumericInRange(
-                text, "thermal_pressure_full_c", obj_open, obj_close);
-            if (!std::isnan(thermal_pressure_full)) {
-                channel.thermal_pressure_full_c = thermal_pressure_full;
-            }
-            const double thermal_pressure_rise = FindNumericInRange(
-                text, "thermal_pressure_rise_pct_per_sec",
-                obj_open, obj_close);
-            if (!std::isnan(thermal_pressure_rise)) {
-                channel.thermal_pressure_rise_pct_per_sec =
-                    thermal_pressure_rise;
-            }
-            const double thermal_pressure_fall = FindNumericInRange(
-                text, "thermal_pressure_fall_pct_per_sec",
-                obj_open, obj_close);
-            if (!std::isnan(thermal_pressure_fall)) {
-                channel.thermal_pressure_fall_pct_per_sec =
-                    thermal_pressure_fall;
-            }
-            const double thermal_pressure_max = FindNumericInRange(
-                text, "thermal_pressure_max_boost_pct", obj_open, obj_close);
-            if (!std::isnan(thermal_pressure_max)) {
-                channel.thermal_pressure_max_boost_pct =
-                    thermal_pressure_max;
-            }
-            const std::string blend = FindStringInRange(text, "temp_blend", obj_open, obj_close);
-            if (!blend.empty()) {
-                try {
-                    channel.temp_blend = ParseTempBlend(blend);
-                } catch (const std::exception&) {
-                    channel.temp_blend = TempBlend::CpuOnly;
-                }
-            }
-            ParseCurveArray(text, "curve", obj_open, obj_close, &channel.curve);
-            ParseCurveArray(text, "cpu_override_curve", obj_open, obj_close,
-                            &channel.cpu_override_curve);
-            cfg.channels.push_back(std::move(channel));
-        });
-
-    if (cfg.channels.empty()) {
+    const auto& channels_json = loop_json["channels"];
+    if (channels_json.empty()) {
         throw std::runtime_error(
             "control_loop config has empty channels array: " + config_path.string());
     }
+
+    for (const auto& ch_json : channels_json) {
+        if (!ch_json.contains("channel")) {
+            continue; // Skip channels without channel number
+        }
+
+        ChannelControlConfig channel;
+        channel.channel = ch_json["channel"].get<std::uint32_t>();
+
+        // Optional fields with defaults
+        channel.min_duty_pct = ch_json.value("min_duty_pct", channel.min_duty_pct);
+        channel.write_cooldown_ms = ch_json.value("write_cooldown_ms",
+                                                   channel.write_cooldown_ms);
+
+        if (ch_json.contains("deadband_pct")) {
+            channel.deadband_pct = ch_json["deadband_pct"].get<double>();
+        }
+
+        channel.control_hold_ms = ch_json.value("control_hold_ms",
+                                                channel.control_hold_ms);
+
+        // Parse curve shape
+        if (ch_json.contains("curve_shape")) {
+            try {
+                channel.curve_shape = ParseCurveShape(
+                    ch_json["curve_shape"].get<std::string>());
+            } catch (const std::exception&) {
+                channel.curve_shape = CurveShape::Linear;
+            }
+        }
+
+        // Parse rate limiting
+        if (ch_json.contains("rise_rate_pct_per_min")) {
+            channel.rise_rate_pct_per_min = ch_json["rise_rate_pct_per_min"].get<double>();
+        }
+        if (ch_json.contains("fall_rate_pct_per_min")) {
+            channel.fall_rate_pct_per_min = ch_json["fall_rate_pct_per_min"].get<double>();
+        }
+
+        // Parse demand smoothing
+        if (ch_json.contains("demand_smoothing_rise_alpha")) {
+            channel.demand_smoothing_rise_alpha =
+                ch_json["demand_smoothing_rise_alpha"].get<double>();
+        }
+        if (ch_json.contains("demand_smoothing_fall_alpha")) {
+            channel.demand_smoothing_fall_alpha =
+                ch_json["demand_smoothing_fall_alpha"].get<double>();
+        }
+
+        // Parse decay latch
+        if (ch_json.contains("decay_latch_above_pct")) {
+            channel.decay_latch_above_pct = ch_json["decay_latch_above_pct"].get<double>();
+        }
+        if (ch_json.contains("decay_latch_pct_per_min")) {
+            channel.decay_latch_pct_per_min =
+                ch_json["decay_latch_pct_per_min"].get<double>();
+        }
+
+        // Parse thermal pressure parameters
+        if (ch_json.contains("thermal_pressure_start_c")) {
+            channel.thermal_pressure_start_c =
+                ch_json["thermal_pressure_start_c"].get<double>();
+        }
+        if (ch_json.contains("thermal_pressure_full_c")) {
+            channel.thermal_pressure_full_c =
+                ch_json["thermal_pressure_full_c"].get<double>();
+        }
+        if (ch_json.contains("thermal_pressure_rise_pct_per_sec")) {
+            channel.thermal_pressure_rise_pct_per_sec =
+                ch_json["thermal_pressure_rise_pct_per_sec"].get<double>();
+        }
+        if (ch_json.contains("thermal_pressure_fall_pct_per_sec")) {
+            channel.thermal_pressure_fall_pct_per_sec =
+                ch_json["thermal_pressure_fall_pct_per_sec"].get<double>();
+        }
+        if (ch_json.contains("thermal_pressure_max_boost_pct")) {
+            channel.thermal_pressure_max_boost_pct =
+                ch_json["thermal_pressure_max_boost_pct"].get<double>();
+        }
+
+        // Parse temp blend
+        if (ch_json.contains("temp_blend")) {
+            try {
+                channel.temp_blend = ParseTempBlend(
+                    ch_json["temp_blend"].get<std::string>());
+            } catch (const std::exception&) {
+                channel.temp_blend = TempBlend::CpuOnly;
+            }
+        }
+
+        // Parse curves
+        if (ch_json.contains("curve") && ch_json["curve"].is_array()) {
+            for (const auto& point_json : ch_json["curve"]) {
+                if (point_json.contains("temp_c") && point_json.contains("duty_pct")) {
+                    CurvePoint point;
+                    point.temp_c = point_json["temp_c"].get<double>();
+                    point.duty_pct = point_json["duty_pct"].get<double>();
+                    channel.curve.push_back(point);
+                }
+            }
+            // Sort by temperature
+            std::sort(channel.curve.begin(), channel.curve.end(),
+                     [](const CurvePoint& a, const CurvePoint& b) {
+                         return a.temp_c < b.temp_c;
+                     });
+        }
+
+        // Parse CPU override curve
+        if (ch_json.contains("cpu_override_curve") &&
+            ch_json["cpu_override_curve"].is_array()) {
+            for (const auto& point_json : ch_json["cpu_override_curve"]) {
+                if (point_json.contains("temp_c") && point_json.contains("duty_pct")) {
+                    CurvePoint point;
+                    point.temp_c = point_json["temp_c"].get<double>();
+                    point.duty_pct = point_json["duty_pct"].get<double>();
+                    channel.cpu_override_curve.push_back(point);
+                }
+            }
+            // Sort by temperature
+            std::sort(channel.cpu_override_curve.begin(),
+                     channel.cpu_override_curve.end(),
+                     [](const CurvePoint& a, const CurvePoint& b) {
+                         return a.temp_c < b.temp_c;
+                     });
+        }
+
+        cfg.channels.push_back(std::move(channel));
+    }
+
+    // Validate the loaded configuration
+    ValidateControlLoopConfig(cfg, config_path);
+
     return cfg;
 }
 
@@ -600,6 +782,17 @@ struct ChannelState {
     double thermal_pressure_boost_pct = 0.0;
     std::chrono::steady_clock::time_point last_evaluation_time =
         std::chrono::steady_clock::time_point{};
+
+    // Circuit breaker for write failures
+    std::uint32_t consecutive_write_failures = 0u;
+    bool circuit_breaker_open = false;
+    static constexpr std::uint32_t kMaxConsecutiveFailures = 5u;
+
+    // Sensor failure detection
+    std::uint32_t consecutive_sensor_failures = 0u;
+    bool sensor_failed = false;
+    static constexpr std::uint32_t kMaxConsecutiveSensorFailures = 3u;
+    static constexpr double kSafeModeFanDuty = 100.0;  // Full speed on sensor failure
 };
 
 struct ControlLoop::Impl {
@@ -1086,9 +1279,18 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     try {
                         RemovePendingWrite(impl_->runtime_home,
                                            channel.config.channel);
-                    } catch (const std::exception&) {
-                        // Best-effort; stale sidecar can still be reconciled
-                        // on a future startup.
+                    } catch (const std::exception& e) {
+                        // Best-effort; log but don't fail
+                        AppendRuntimeEvent(
+                            impl_->runtime_home,
+                            RuntimeLogEvent{
+                                .mode = "control-loop",
+                                .event_type = "control_loop.sidecar_remove_warning",
+                                .detail = std::string("best-effort sidecar removal after restore failed: ") + e.what(),
+                                .channel = channel.config.channel,
+                                .tick_count = tick_count,
+                                .success = false,
+                            });
                     }
                 } else {
                     AppendRuntimeEvent(
@@ -1132,7 +1334,48 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             const bool primary_available = blended >= -100.0;
             double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
             double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
-            if (primary_available) {
+
+            // Sensor failure detection
+            if (!primary_available) {
+                ++channel.consecutive_sensor_failures;
+                if (channel.consecutive_sensor_failures >= ChannelState::kMaxConsecutiveSensorFailures) {
+                    if (!channel.sensor_failed) {
+                        channel.sensor_failed = true;
+                        AppendRuntimeEvent(
+                            impl_->runtime_home,
+                            RuntimeLogEvent{
+                                .mode = "control-loop",
+                                .event_type = "control_loop.sensor_failure_detected",
+                                .detail = "sensor failure detected, entering safe mode (100% duty)",
+                                .channel = channel.config.channel,
+                                .tick_count = tick_count,
+                                .success = false,
+                            });
+                    }
+                    // Safe mode: force full speed
+                    raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
+                    observed_temp_c = std::numeric_limits<double>::quiet_NaN();
+                }
+            } else {
+                // Sensor recovered
+                if (channel.consecutive_sensor_failures > 0 || channel.sensor_failed) {
+                    if (channel.sensor_failed) {
+                        AppendRuntimeEvent(
+                            impl_->runtime_home,
+                            RuntimeLogEvent{
+                                .mode = "control-loop",
+                                .event_type = "control_loop.sensor_recovered",
+                                .detail = "sensor recovered, resuming normal control",
+                                .channel = channel.config.channel,
+                                .tick_count = tick_count,
+                                .observed_temp_c = blended,
+                                .success = true,
+                            });
+                    }
+                    channel.consecutive_sensor_failures = 0u;
+                    channel.sensor_failed = false;
+                }
+
                 raw_desired_setpoint = LookupCurve(
                     channel.config.curve, blended, channel.config.min_duty_pct,
                     channel.config.curve_shape);
@@ -1214,6 +1457,11 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                 }
             }
 
+            // Skip write if circuit breaker is open
+            if (channel.circuit_breaker_open) {
+                continue;
+            }
+
             // Record sidecar entry.
             PendingWriteEntry entry;
             entry.channel = channel.config.channel;
@@ -1225,19 +1473,59 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             entry.child_pid = 0u;
             try {
                 UpsertPendingWrite(impl_->runtime_home, entry);
-            } catch (const std::exception&) {
+            } catch (const std::exception& e) {
+                AppendRuntimeEvent(
+                    impl_->runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type = "control_loop.sidecar_upsert_failed",
+                        .detail = std::string("failed to write sidecar entry before fan write: ") + e.what(),
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .success = false,
+                    });
                 continue;
             }
 
             const FanWriteResult write_result =
                 fan_writer->ApplyDuty(channel.config.channel, setpoint);
             if (!write_result) {
+                // Circuit breaker: track consecutive failures
+                ++channel.consecutive_write_failures;
+                if (channel.consecutive_write_failures >= ChannelState::kMaxConsecutiveFailures) {
+                    if (!channel.circuit_breaker_open) {
+                        channel.circuit_breaker_open = true;
+                        AppendRuntimeEvent(
+                            impl_->runtime_home,
+                            RuntimeLogEvent{
+                                .mode = "control-loop",
+                                .event_type = "control_loop.circuit_breaker_opened",
+                                .detail = "circuit breaker opened after repeated write failures",
+                                .channel = channel.config.channel,
+                                .tick_count = tick_count,
+                                .observed_temp_c = observed_temp_c,
+                                .setpoint_pct = setpoint,
+                                .success = false,
+                            });
+                    }
+                }
+
                 if (write_result.error == FanWriteError::kPolicyRefused) {
                     try {
                         RemovePendingWrite(impl_->runtime_home,
                                            channel.config.channel);
-                    } catch (const std::exception&) {
-                        // Best-effort.
+                    } catch (const std::exception& e) {
+                        // Best-effort; log but continue
+                        AppendRuntimeEvent(
+                            impl_->runtime_home,
+                            RuntimeLogEvent{
+                                .mode = "control-loop",
+                                .event_type = "control_loop.sidecar_remove_warning",
+                                .detail = std::string("best-effort sidecar removal after policy refusal failed: ") + e.what(),
+                                .channel = channel.config.channel,
+                                .tick_count = tick_count,
+                                .success = false,
+                            });
                     }
                 }
                 AppendRuntimeEvent(
@@ -1253,6 +1541,26 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         .success = false,
                     });
                 continue;
+            }
+
+            // Success: reset circuit breaker
+            if (channel.consecutive_write_failures > 0 || channel.circuit_breaker_open) {
+                if (channel.circuit_breaker_open) {
+                    AppendRuntimeEvent(
+                        impl_->runtime_home,
+                        RuntimeLogEvent{
+                            .mode = "control-loop",
+                            .event_type = "control_loop.circuit_breaker_closed",
+                            .detail = "circuit breaker closed after successful write",
+                            .channel = channel.config.channel,
+                            .tick_count = tick_count,
+                            .observed_temp_c = observed_temp_c,
+                            .setpoint_pct = setpoint,
+                            .success = true,
+                        });
+                }
+                channel.consecutive_write_failures = 0u;
+                channel.circuit_breaker_open = false;
             }
             if (authority_reassert) {
                 AppendRuntimeEvent(
@@ -1361,7 +1669,12 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     BuildChannelLogStates(impl_->channels)));
         }
 
-        {
+        // Rate-limit status file writes to reduce disk I/O
+        // Write every 10 ticks (e.g., every 2 seconds at 200ms tick)
+        constexpr std::uint32_t kStatusUpdateIntervalTicks = 10u;
+        const bool should_write_status = (tick_count % kStatusUpdateIntervalTicks) == 0u;
+
+        if (should_write_status) {
             std::ostringstream td;
             td << "tick poll_tick_ms=" << impl_->loop.poll_tick_ms
                << " cooldown=" << impl_->loop.write_cooldown_ms
@@ -1450,8 +1763,18 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         }
         try {
             RemovePendingWrite(impl_->runtime_home, channel.config.channel);
-        } catch (const std::exception&) {
+        } catch (const std::exception& e) {
             restore_failure = true;
+            AppendRuntimeEvent(
+                impl_->runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.shutdown_sidecar_remove_failed",
+                    .detail = std::string("sidecar removal during shutdown failed: ") + e.what(),
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .success = false,
+                });
         }
     }
     WriteLoopStatus(impl_->runtime_home, "control-loop", "shutdown",

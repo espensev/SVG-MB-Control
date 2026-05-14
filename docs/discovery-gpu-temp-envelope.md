@@ -1,5 +1,10 @@
 # Discovery - GPU Temp Envelope
 
+> Historical note, 2026-05-14: this discovery explains why the GPU envelope
+> became the primary airflow signal. The current packaged config also includes
+> per-channel `cpu_override_curve` overlays, so statements about GPU-only
+> channels ignoring CPU-only spikes are no longer the full live behavior.
+
 **Goal:** Check `D:\Development\Thermals\TempControl-Nvidia\NVG_SmoothControl` for how GPU temperatures are read and apply the relevant behavior before more `svg-mb-control` testing.
 **Date:** 2026-05-12
 **Status:** complete
@@ -92,7 +97,7 @@ GPU-only case channels need a slower or steeper ramp.
 | Running process continues old curve | Low | Medium | Config is read at startup; the 2026-05-12 restart loaded the GPU-only split. |
 | Release binary does not include hotspot promotion yet | Low | Low | The release build completed after the source change. |
 | GPU memory curve under-reacts to sustained load | Medium | Medium | Current settings are intentionally low/noise-first; evaluate under GPU load before raising floors. |
-| GPU-only channels ignore CPU-only benchmark spikes | Medium | Low | The current live response intentionally prioritizes GPU airflow over CPU-only benchmark spikes. |
+| GPU envelope without CPU overlay ignores CPU-only benchmark spikes | Medium | Low | Historical risk only; the current packaged config adds per-channel CPU overlays. |
 
 ### Open Questions
 

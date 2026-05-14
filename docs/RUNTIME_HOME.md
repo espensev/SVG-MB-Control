@@ -53,7 +53,7 @@ Each fan entry can include:
 
 ## control_runtime.json
 
-`read-loop` writes a poll/status view:
+`read-loop` writes a poll/status view with schema version `1`:
 
 - `status`
 - `status_detail`
@@ -69,7 +69,7 @@ Each fan entry can include:
 
 `restart_count` and `child_pid` remain `0` in the direct-only runtime.
 
-`control-loop` writes a control-status view:
+`control-loop` writes a control-status view with schema version `3`:
 
 - `schema_version`
 - `mode`
@@ -84,6 +84,10 @@ Each fan entry can include:
 - `loop_achieved_interval_ms`
 - `loop_slip_ms`
 - `loop_overrun`
+- `process_cpu_delta_ms`
+- `process_cpu_pct`
+- `process_working_set_bytes`
+- `process_private_bytes`
 - `log_csv_path`
 - `event_log_path`
 - `controlled_channels`
@@ -93,15 +97,22 @@ tick has no previous tick-start sample, so `loop_achieved_interval_ms` and
 `loop_slip_ms` may be reported as `0` in `control_runtime.json`; CSV rows keep
 blank numeric cells when a value is unavailable. `loop_achieved_interval_ms` is
 start-to-start timing, while `loop_work_duration_ms` is the work done before the
-post-work sleep.
+fixed-start scheduler wait.
 
 Each controlled-channel entry includes:
 
 - `channel`
 - `total_writes`
 - `last_setpoint_pct`
+- `last_raw_demand_pct`
+- `last_smoothed_demand_pct`
+- `last_thermal_pressure_boost_pct`
 - `last_observed_temp_c`
 - `baseline_captured`
+
+`control_runtime.json` is a status publication. In the current implementation,
+it is rate-limited and should not be treated as a per-tick log. Use the active
+CSV chunk for per-tick analysis.
 
 ## pending_writes.json
 
@@ -137,6 +148,18 @@ shared event log under `runtime\logs\`.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
 `log_retain_days` in the control config.
+
+Control-loop CSV rows include the common telemetry/fan columns plus:
+
+- loop tick and timing-quality fields
+- process CPU and memory fields
+- per-channel observed temperature, setpoint, thermal-pressure boost, write
+  count, active-write flag, and baseline flag
+
+The JSONL event stream uses schema `svg_mb_control.event.v1`. It is the source
+for discrete operational events such as startup, rotation, write attempts,
+restore results, policy refusals, sidecar warnings, sensor failure/recovery, and
+circuit-breaker transitions.
 
 ## Ownership Rules
 

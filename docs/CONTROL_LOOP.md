@@ -63,6 +63,10 @@ Optional channel overrides:
 - `thermal_pressure_max_boost_pct`: maximum extra duty added after demand
   smoothing and before the normal rate limiter
 
+Config loading validates basic ranges and required curve/channel structure. A
+bad control config should fail at startup instead of producing undefined fan
+behavior.
+
 ## Runtime Flow
 
 1. Resolve config, runtime home, and runtime policy.
@@ -79,11 +83,17 @@ Optional channel overrides:
    thermal-pressure boost before the normal rate limiter. This allows
    intermediate PWM steps while preventing repeated high-temperature up/down
    writes caused by small sensor swings.
-10. Skip writes blocked by deadband, cooldown, or runtime policy.
-11. Record a pending-write sidecar entry before each applied write.
-12. Append durable JSONL events for loop start, rotations, baseline capture,
-    writes, restores, and failures.
-13. Restore the captured baseline once the hold window expires or shutdown is requested. A `control_hold_ms` of `0` holds the control write until shutdown/restart instead of periodically restoring.
+10. Detect repeated missing primary temperature input for a channel and enter a
+    safe full-speed setpoint for that channel until the sensor recovers.
+11. Skip writes blocked by deadband, cooldown, runtime policy, or an open
+    per-channel circuit breaker.
+12. Record a pending-write sidecar entry before each applied write.
+13. Append durable JSONL events for loop start, rotations, baseline capture,
+    writes, restores, sensor failures, sidecar warnings, circuit-breaker
+    transitions, and failures.
+14. Restore the captured baseline once the hold window expires or shutdown is
+    requested. A `control_hold_ms` of `0` holds the control write until
+    shutdown/restart instead of periodically restoring.
 
 ## Outputs
 
@@ -98,7 +108,9 @@ Optional channel overrides:
 
 `control_runtime.json` includes loop-level counters, timing-quality fields, the
 active log paths, and per-channel totals plus last observed values. The
-control-loop CSV carries the same timing fields per row:
+status JSON is rate-limited, so it is a live status view rather than the
+per-tick data source. The control-loop CSV carries the same timing fields per
+row:
 
 - `loop_started_wall_clock`
 - `loop_finished_wall_clock`
@@ -126,6 +138,10 @@ Each controlled channel also publishes `last_thermal_pressure_boost_pct` in
 `control_runtime.json` and `channelN_thermal_pressure_boost_pct` in the
 control-loop CSV. That value is the slow leaky-integral term added on top of
 the base curve/EMA demand.
+
+The current status JSON also publishes `last_raw_demand_pct` and
+`last_smoothed_demand_pct` so a live reader can distinguish the curve/overlay
+demand from the smoothed demand and final rate-limited setpoint.
 
 ## Policy Behavior
 
@@ -159,6 +175,19 @@ the base curve/EMA demand.
 - Do not assume one identical curve shape or RPM target across the three
   radiator Noctua lanes. Rear-radiator, front-radiator, and center-radiator
   tuning are expected to diverge.
+
+## Failure Behavior
+
+- After repeated missing primary temperature input for a channel, the loop logs
+  `control_loop.sensor_failure_detected` and commands a safe full-speed setpoint
+  for that channel. It logs `control_loop.sensor_recovered` when valid input
+  returns.
+- After repeated write failures for a channel, the loop logs
+  `control_loop.circuit_breaker_opened` and stops trying that channel. The
+  current reset path is process restart or a future explicit breaker-reset
+  mechanism; do not assume automatic recovery from the open state.
+- Sidecar failures are logged to `svg_mb_control_events.jsonl`; the loop avoids
+  applying a write when it cannot record the pending-write sidecar first.
 
 ## Shutdown
 

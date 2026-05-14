@@ -19,6 +19,11 @@ Implemented here:
 
 Repo-local dependencies live under `third_party\` and `resources\`.
 
+Dependency hygiene: release builds should stay reproducible from repo-owned,
+pinned inputs. `nlohmann/json` is vendored as a single-header dependency under
+`third_party\nlohmann-json\`; the normal release configure path should not
+download it from the network.
+
 ## Repo Boundary
 
 - `SVG-MB-Control` owns process lifetime, config, policy, runtime state, and
@@ -191,6 +196,13 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 - `docs\READ_LOOP.md`
 - `docs\WRITE_ORCHESTRATION.md`
 - `docs\RUNTIME_HOME.md`
+- `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
+- `docs\LOGGING_IMPROVEMENT_PLAN.md`
+- `docs\response-evaluation-tuning-plan.md`
 
-Before more controller tuning or cadence changes are made here, complete the
-measurement and characterization gate described in `docs\MEASUREMENT_GATE.md`.
+Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
+`docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow. The
+old packaged `200 ms` gate has been superseded by the current measured `50 ms`
+control/write profile; faster cadence, new live channels, or broader controller
+strategy changes still require fresh measurement evidence before changing
+defaults.

@@ -37,6 +37,10 @@ std::string CurveShapeToString(CurveShape shape) {
     return "linear";
 }
 
+static double SmootherStep(double t) {
+    return t * t * t * ((6.0 * t - 15.0) * t + 10.0);
+}
+
 double BlendTemps(const TempInputs& inputs, TempBlend mode) {
     constexpr double kAbsoluteZeroC = -273.15;
     const double cpu = inputs.cpu_available ? inputs.cpu_c : kAbsoluteZeroC;
@@ -78,7 +82,7 @@ double LookupCurve(const std::vector<CurvePoint>& curve,
                 } else {
                     double t = (temp_c - lo.temp_c) / span;
                     if (shape == CurveShape::SmootherStep) {
-                        t = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+                        t = SmootherStep(t);
                     }
                     raw = lo.duty_pct + t * (hi.duty_pct - lo.duty_pct);
                 }

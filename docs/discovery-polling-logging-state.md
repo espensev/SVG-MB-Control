@@ -1,5 +1,12 @@
 # Discovery — Polling, Logging, and Runtime State
 
+> Historical note, 2026-05-14: this discovery captured the state before the
+> current measured `50 ms` control/write profile, fixed-start timing fields,
+> process resource fields, rate-limited status publication, and per-channel
+> thermal-pressure boost logging. Keep it as background context, but use
+> `docs\MEASUREMENT_GATE.md` and
+> `docs\RUNTIME_LOGGING_AND_EVALUATION.md` for current tuning decisions.
+
 **Goal:** Evaluate the current `SVG-MB-Control` runtime quality and layout, with
 special focus on logging, polling cadence, write cadence, and the measurement
 work still needed before raising runtime rates for mixed CPU/GPU/airflow fan

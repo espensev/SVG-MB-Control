@@ -6,7 +6,14 @@ Inputs used:
 
 - local raw capture `alresponse.CSV`, 3243 parsed samples from the
   2026-05-12 response run; the raw CSV is intentionally kept out of git.
-- Current `control-loop` CSV from `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_022043.csv`.
+- Earlier `control-loop` CSV from
+  `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_022043.csv`.
+- CPU-response CSV from
+  `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_023505.csv`.
+- High-heat steady response CSV from
+  `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_033423.csv`.
+- Lower-heat/idle recovery CSV from
+  `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_035931.csv`.
 - Current live config in `config\control.release.json` and `release\control.json`.
 
 Current live idle authority is good: Control holds channels `0-5` in manual mode
@@ -22,9 +29,11 @@ with setpoints `20,24,50,50,22,20`. Observed steady idle RPM is approximately:
 | 5 | radiator lane | 20% | 740 |
 | 6 | blocked / not controlled | ~90% | ~2984 |
 
-The current loop cadence is stable enough for response work: about `208.5 ms`
-average achieved interval, `237.4 ms` max observed in the short post-rebuild
-sample, and no overrun issue in the live idle sample.
+The old `208.5 ms` sample is historical. The current packaged response profile
+uses a `50 ms` fixed-start-period control loop and a `50 ms` write cooldown.
+The 2026-05-14 high-heat response run averaged `50.641 ms` achieved interval
+over 19,432 rows, and the later lower-heat run averaged `50.610 ms` achieved
+interval over 17,773 rows with no overrun rows.
 
 From `alresponse.CSV`:
 
@@ -52,6 +61,22 @@ From the completed 2026-05-14 CPU response sample
 - Channels `1,4,5` received nearly identical CPU setpoints even though their
   RPM response differs, so the Noctua lanes should be staggered rather than
   moved as one synchronized block.
+
+From the later 2026-05-14 steady response discovery
+`release\runtime\logs\archive\svg_mb_control_control-loop_20260514_033423.csv`:
+
+- CPU/Tctl max was `86.625 C`.
+- Channel `1` reached `71.40%` setpoint with `22.00%` max thermal-pressure
+  boost.
+- Channel `4` reached `68.00%` setpoint with `20.00%` max boost.
+- Channel `5` reached `65.86%` setpoint with `20.00%` max boost.
+- The remaining downward candidate steps were small: channel `1` had `60` drops
+  above `0.35%`, channel `4` had `52`, and channel `5` had none by that
+  criterion.
+
+The key implication is that the current controller is no longer missing steady
+radiator authority. Further changes should be small, channel-specific, and
+measured from comparable runs.
 
 ## Goals
 

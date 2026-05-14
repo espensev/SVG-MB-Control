@@ -7,6 +7,19 @@ project(svg_mb_control VERSION ${SVG_MB_CONTROL_VERSION} LANGUAGES CXX)
 
 set(SVG_MB_CONTROL_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 
+set(SVG_MB_CONTROL_NLOHMANN_JSON_INCLUDE_DIR
+    "${SVG_MB_CONTROL_THIRD_PARTY_DIR}/nlohmann-json/include")
+if(NOT EXISTS "${SVG_MB_CONTROL_NLOHMANN_JSON_INCLUDE_DIR}/nlohmann/json.hpp")
+    message(FATAL_ERROR
+            "Vendored nlohmann/json header not found at "
+            "${SVG_MB_CONTROL_NLOHMANN_JSON_INCLUDE_DIR}/nlohmann/json.hpp")
+endif()
+
+add_library(nlohmann_json INTERFACE)
+add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+target_include_directories(nlohmann_json INTERFACE
+    "${SVG_MB_CONTROL_NLOHMANN_JSON_INCLUDE_DIR}")
+
 # Always build against the vendored source trees in this repo.
 set(SVG_MB_SIO_SOURCE_DIR
     "${SVG_MB_CONTROL_THIRD_PARTY_DIR}/SVG-MB-SIO")
@@ -71,7 +84,10 @@ add_executable(svg_mb_control
     src/write_orchestrator.cpp
 )
 
-target_link_libraries(svg_mb_control PRIVATE svg_mb_sio::svg_mb_sio)
+target_link_libraries(svg_mb_control PRIVATE
+    svg_mb_sio::svg_mb_sio
+    nlohmann_json::nlohmann_json
+)
 
 if(WIN32)
     target_link_libraries(svg_mb_control PRIVATE psapi winmm)
