@@ -108,6 +108,10 @@ Each controlled-channel entry includes:
 - `last_smoothed_demand_pct`
 - `last_thermal_pressure_boost_pct`
 - `last_observed_temp_c`
+- `sensor_failed`
+- `consecutive_sensor_failures`
+- `circuit_breaker_open`
+- `consecutive_write_failures`
 - `baseline_captured`
 
 `control_runtime.json` is a status publication. In the current implementation,

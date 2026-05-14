@@ -1,9 +1,10 @@
 #include "runtime_logging.h"
 
+#include "json_io.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdio>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -145,34 +146,6 @@ std::string BuildAmdSensorSummary(const RuntimeSnapshot& snapshot) {
         summary.precision(old_precision);
     }
     return summary.str();
-}
-
-std::string JsonEscape(std::string_view text) {
-    std::string output;
-    output.reserve(text.size() + 8u);
-    for (const char ch : text) {
-        switch (ch) {
-            case '\\': output += "\\\\"; break;
-            case '"': output += "\\\""; break;
-            case '\b': output += "\\b"; break;
-            case '\f': output += "\\f"; break;
-            case '\n': output += "\\n"; break;
-            case '\r': output += "\\r"; break;
-            case '\t': output += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(ch) < 0x20u) {
-                    std::array<char, 8> buffer{};
-                    std::snprintf(buffer.data(), buffer.size(), "\\u%04x",
-                                  static_cast<unsigned int>(
-                                      static_cast<unsigned char>(ch)));
-                    output += buffer.data();
-                } else {
-                    output.push_back(ch);
-                }
-                break;
-        }
-    }
-    return output;
 }
 
 std::string BuildCommonCsvHeader() {
@@ -476,6 +449,17 @@ const std::filesystem::path& RuntimeCsvLogger::mirror_path() const {
     return mirror_path_;
 }
 
+void PutOptionalDouble(nlohmann::json& payload,
+                       std::string_view key,
+                       const std::optional<double>& value) {
+    if (!value.has_value()) {
+        return;
+    }
+    payload[std::string(key)] = std::isfinite(*value)
+        ? nlohmann::json(*value)
+        : nlohmann::json(nullptr);
+}
+
 std::string BuildReadLoopCsvHeader() {
     std::ostringstream header;
     header << BuildCommonCsvHeader()
@@ -613,78 +597,67 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
         ? FormatLocalIso8601(std::chrono::system_clock::now())
         : event.event_time_iso;
 
-    stream << "{"
-           << "\"schema\":\"svg_mb_control.event.v1\","
-           << "\"event_time\":\"" << JsonEscape(event_time) << "\","
-           << "\"mode\":\"" << JsonEscape(event.mode) << "\","
-           << "\"event_type\":\"" << JsonEscape(event.event_type) << "\","
-           << "\"detail\":\"" << JsonEscape(event.detail) << "\"";
+    nlohmann::json payload = {
+        {"schema", "svg_mb_control.event.v1"},
+        {"event_time", event_time},
+        {"mode", event.mode},
+        {"event_type", event.event_type},
+        {"detail", event.detail},
+    };
     if (event.channel.has_value()) {
-        stream << ",\"channel\":" << *event.channel;
+        payload["channel"] = *event.channel;
     }
     if (event.tick_count.has_value()) {
-        stream << ",\"tick_count\":" << *event.tick_count;
+        payload["tick_count"] = *event.tick_count;
     }
-    if (event.observed_temp_c.has_value()) {
-        stream << ",\"observed_temp_c\":" << *event.observed_temp_c;
-    }
-    if (event.setpoint_pct.has_value()) {
-        stream << ",\"setpoint_pct\":" << *event.setpoint_pct;
-    }
-    if (event.target_pct.has_value()) {
-        stream << ",\"target_pct\":" << *event.target_pct;
-    }
+    PutOptionalDouble(payload, "observed_temp_c", event.observed_temp_c);
+    PutOptionalDouble(payload, "setpoint_pct", event.setpoint_pct);
+    PutOptionalDouble(payload, "target_pct", event.target_pct);
     if (event.success.has_value()) {
-        stream << ",\"success\":" << (*event.success ? "true" : "false");
+        payload["success"] = *event.success;
     }
     if (!event.snapshot_time_iso.empty()) {
-        stream << ",\"snapshot_time\":\""
-               << JsonEscape(event.snapshot_time_iso) << "\"";
+        payload["snapshot_time"] = event.snapshot_time_iso;
     }
     if (!event.log_csv_path.empty()) {
-        stream << ",\"log_csv_path\":\""
-               << JsonEscape(event.log_csv_path) << "\"";
+        payload["log_csv_path"] = event.log_csv_path;
     }
     if (!event.event_log_path.empty()) {
-        stream << ",\"event_log_path\":\""
-               << JsonEscape(event.event_log_path) << "\"";
+        payload["event_log_path"] = event.event_log_path;
     }
     if (event.amd_sensor_count.has_value()) {
-        stream << ",\"amd_sensor_count\":" << *event.amd_sensor_count;
+        payload["amd_sensor_count"] = *event.amd_sensor_count;
     }
     if (event.fan_count.has_value()) {
-        stream << ",\"fan_count\":" << *event.fan_count;
+        payload["fan_count"] = *event.fan_count;
     }
     if (event.gpu_available.has_value()) {
-        stream << ",\"gpu_available\":"
-               << (*event.gpu_available ? "true" : "false");
+        payload["gpu_available"] = *event.gpu_available;
     }
     if (event.successful_polls.has_value()) {
-        stream << ",\"successful_polls\":" << *event.successful_polls;
+        payload["successful_polls"] = *event.successful_polls;
     }
     if (event.skipped_polls.has_value()) {
-        stream << ",\"skipped_polls\":" << *event.skipped_polls;
+        payload["skipped_polls"] = *event.skipped_polls;
     }
     if (event.stale.has_value()) {
-        stream << ",\"stale\":" << (*event.stale ? "true" : "false");
+        payload["stale"] = *event.stale;
     }
     if (event.telemetry_available.has_value()) {
-        stream << ",\"telemetry_available\":"
-               << (*event.telemetry_available ? "true" : "false");
+        payload["telemetry_available"] = *event.telemetry_available;
     }
     if (event.runtime_home_published.has_value()) {
-        stream << ",\"runtime_home_published\":"
-               << (*event.runtime_home_published ? "true" : "false");
+        payload["runtime_home_published"] = *event.runtime_home_published;
     }
     if (event.snapshot_mirror_configured.has_value()) {
-        stream << ",\"snapshot_mirror_configured\":"
-               << (*event.snapshot_mirror_configured ? "true" : "false");
+        payload["snapshot_mirror_configured"] =
+            *event.snapshot_mirror_configured;
     }
     if (event.snapshot_mirror_published.has_value()) {
-        stream << ",\"snapshot_mirror_published\":"
-               << (*event.snapshot_mirror_published ? "true" : "false");
+        payload["snapshot_mirror_published"] =
+            *event.snapshot_mirror_published;
     }
-    stream << "}\n";
+    stream << payload.dump() << '\n';
     stream.flush();
     return stream.good();
 }

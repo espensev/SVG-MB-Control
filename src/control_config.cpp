@@ -1,5 +1,7 @@
 #include "control_config.h"
 
+#include "json_io.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -9,10 +11,6 @@
 #include <windows.h>
 
 #include <array>
-#include <cctype>
-#include <fstream>
-#include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -20,143 +18,31 @@ namespace svg_mb_control {
 
 namespace {
 
-std::string ReadTextFile(const std::filesystem::path& path) {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream.is_open()) {
-        throw std::runtime_error("Could not open control config: " + path.string());
-    }
-
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    return buffer.str();
-}
-
-std::size_t SkipWhitespace(const std::string& text, std::size_t offset) {
-    while (offset < text.size() &&
-           std::isspace(static_cast<unsigned char>(text[offset])) != 0) {
-        ++offset;
-    }
-    return offset;
-}
-
-std::size_t FindKeyStart(const std::string& text, std::string_view key) {
-    const std::string token = "\"" + std::string(key) + "\"";
-    return text.find(token);
-}
-
-bool ContainsKey(const std::string& text, std::string_view key) {
-    return FindKeyStart(text, key) != std::string::npos;
-}
-
-std::size_t FindValueStart(const std::string& text, std::string_view key) {
-    const std::size_t key_start = FindKeyStart(text, key);
-    if (key_start == std::string::npos) {
-        return std::string::npos;
-    }
-
-    const std::size_t colon = text.find(':', key_start + key.size() + 2u);
-    if (colon == std::string::npos) {
-        throw std::runtime_error("Malformed control config near key: " + std::string(key));
-    }
-    return SkipWhitespace(text, colon + 1u);
-}
-
-std::string ParseJsonStringLiteral(const std::string& text,
-                                   std::size_t offset,
-                                   std::string_view key) {
-    if (offset >= text.size() || text[offset] != '"') {
-        throw std::runtime_error("Expected string value for key: " + std::string(key));
-    }
-
-    std::string output;
-    for (std::size_t index = offset + 1u; index < text.size(); ++index) {
-        const char ch = text[index];
-        if (ch == '\\') {
-            if (index + 1u >= text.size()) {
-                throw std::runtime_error("Invalid escape sequence in control config.");
-            }
-            const char escaped = text[++index];
-            switch (escaped) {
-                case '\\': output.push_back('\\'); break;
-                case '"': output.push_back('"'); break;
-                case '/': output.push_back('/'); break;
-                case 'b': output.push_back('\b'); break;
-                case 'f': output.push_back('\f'); break;
-                case 'n': output.push_back('\n'); break;
-                case 'r': output.push_back('\r'); break;
-                case 't': output.push_back('\t'); break;
-                default:
-                    throw std::runtime_error("Unsupported escape sequence in control config.");
-            }
-            continue;
+bool ContainsKeyRecursive(const nlohmann::json& value, std::string_view key) {
+    if (value.is_object()) {
+        if (value.contains(std::string(key))) {
+            return true;
         }
-        if (ch == '"') {
-            return output;
+        for (const auto& item : value.items()) {
+            if (ContainsKeyRecursive(item.value(), key)) {
+                return true;
+            }
         }
-        output.push_back(ch);
+        return false;
     }
-
-    throw std::runtime_error("Unterminated string value in control config.");
+    if (value.is_array()) {
+        for (const auto& item : value) {
+            if (ContainsKeyRecursive(item, key)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
-std::optional<std::string> ParseOptionalStringField(const std::string& text,
-                                                    std::string_view key) {
-    const std::size_t offset = FindValueStart(text, key);
-    if (offset == std::string::npos) {
-        return std::nullopt;
-    }
-    return ParseJsonStringLiteral(text, offset, key);
-}
-
-std::optional<std::uint32_t> ParseOptionalUIntField(const std::string& text,
-                                                    std::string_view key) {
-    const std::size_t offset = FindValueStart(text, key);
-    if (offset == std::string::npos) {
-        return std::nullopt;
-    }
-    if (offset >= text.size() || !std::isdigit(static_cast<unsigned char>(text[offset]))) {
-        throw std::runtime_error("Expected unsigned integer value for key: " + std::string(key));
-    }
-
-    std::size_t end = offset;
-    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])) != 0) {
-        ++end;
-    }
-
-    const std::string digits = text.substr(offset, end - offset);
-    const unsigned long value = std::stoul(digits);
-    return static_cast<std::uint32_t>(value);
-}
-
-std::optional<double> ParseOptionalDoubleField(const std::string& text,
-                                               std::string_view key) {
-    const std::size_t offset = FindValueStart(text, key);
-    if (offset == std::string::npos) {
-        return std::nullopt;
-    }
-    std::size_t end = offset;
-    if (end < text.size() && (text[end] == '-' || text[end] == '+')) {
-        ++end;
-    }
-    while (end < text.size() &&
-           (std::isdigit(static_cast<unsigned char>(text[end])) != 0 ||
-            text[end] == '.' || text[end] == 'e' || text[end] == 'E' ||
-            text[end] == '-' || text[end] == '+')) {
-        ++end;
-    }
-    const std::string token = text.substr(offset, end - offset);
-    if (token.empty()) {
-        throw std::runtime_error("Expected numeric value for key: " + std::string(key));
-    }
-    try {
-        return std::stod(token);
-    } catch (const std::exception&) {
-        throw std::runtime_error("Invalid numeric value for key: " + std::string(key));
-    }
-}
-
-std::filesystem::path ResolveConfigRelativePath(const std::filesystem::path& config_path,
-                                                const std::string& raw_value) {
+std::filesystem::path ResolveConfigRelativePath(
+    const std::filesystem::path& config_path,
+    const std::string& raw_value) {
     std::filesystem::path path(raw_value);
     if (path.empty()) {
         return {};
@@ -167,10 +53,10 @@ std::filesystem::path ResolveConfigRelativePath(const std::filesystem::path& con
     return std::filesystem::absolute(path).lexically_normal();
 }
 
-void RejectLegacyFieldIfPresent(const std::string& text,
+void RejectLegacyFieldIfPresent(const nlohmann::json& root,
                                 std::string_view key,
                                 std::string_view guidance) {
-    if (!ContainsKey(text, key)) {
+    if (!ContainsKeyRecursive(root, key)) {
         return;
     }
 
@@ -216,9 +102,9 @@ std::filesystem::path ResolveDefaultControlConfigPath() {
     const std::vector<std::filesystem::path> candidates = {
         current_exe_dir / "control.json",
         current_exe_dir / "config" / "control.json",
-        exe_parent / "control.json",           // repo root when exe is in release/ (one level deep)
+        exe_parent / "control.json",
         exe_parent / "config" / "control.json",
-        exe_grandparent / "control.json",      // repo root when exe is in build/x64-release/ (two levels)
+        exe_grandparent / "control.json",
         exe_grandparent / "config" / "control.json",
         std::filesystem::current_path() / "control.json",
         std::filesystem::current_path() / "config" / "control.json",
@@ -240,88 +126,87 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     const std::filesystem::path absolute_path =
         std::filesystem::absolute(path).lexically_normal();
     if (!std::filesystem::exists(absolute_path)) {
-        throw std::runtime_error("Control config not found: " + absolute_path.string());
+        throw std::runtime_error("Control config not found: " +
+                                 absolute_path.string());
     }
 
-    const std::string text = ReadTextFile(absolute_path);
+    const nlohmann::json root = ReadJsonFile(absolute_path, "control config");
     ControlConfig config;
     config.source_path = absolute_path;
 
     RejectLegacyFieldIfPresent(
-        text, "bridge_exe_path",
+        root, "bridge_exe_path",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "bench_exe_path",
+        root, "bench_exe_path",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "bridge_command",
+        root, "bridge_command",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "bench_runtime_policy_path",
+        root, "bench_runtime_policy_path",
         "Use runtime_policy_path instead.");
     RejectLegacyFieldIfPresent(
-        text, "logger_service_duration_ms",
+        root, "logger_service_duration_ms",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "snapshot_read_retry_count",
+        root, "snapshot_read_retry_count",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "snapshot_read_retry_backoff_ms",
+        root, "snapshot_read_retry_backoff_ms",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "child_restart_budget",
+        root, "child_restart_budget",
         "This branch runs direct-only. Remove the field from the config.");
     RejectLegacyFieldIfPresent(
-        text, "child_restart_backoff_ms",
+        root, "child_restart_backoff_ms",
         "This branch runs direct-only. Remove the field from the config.");
 
-    if (const auto schema_version = ParseOptionalUIntField(text, "schema_version")) {
-        config.schema_version = *schema_version;
+    config.schema_version = root.value("schema_version", config.schema_version);
+    config.default_mode = root.value("default_mode", config.default_mode);
+    config.poll_ms = root.value("poll_ms", config.poll_ms);
+    config.staleness_threshold_ms =
+        root.value("staleness_threshold_ms", config.staleness_threshold_ms);
+    config.log_rotate_hours =
+        root.value("log_rotate_hours", config.log_rotate_hours);
+    config.log_retain_days =
+        root.value("log_retain_days", config.log_retain_days);
+    config.baseline_freshness_ceiling_ms = root.value(
+        "baseline_freshness_ceiling_ms",
+        config.baseline_freshness_ceiling_ms);
+    config.restore_timeout_ms =
+        root.value("restore_timeout_ms", config.restore_timeout_ms);
+
+    if (const auto snapshot_path = root.find("snapshot_path");
+        snapshot_path != root.end()) {
+        config.snapshot_path = ResolveConfigRelativePath(
+            absolute_path, snapshot_path->get<std::string>());
     }
-    if (const auto default_mode = ParseOptionalStringField(text, "default_mode")) {
-        config.default_mode = *default_mode;
+    if (const auto runtime_home = root.find("runtime_home_path");
+        runtime_home != root.end()) {
+        config.runtime_home_path = ResolveConfigRelativePath(
+            absolute_path, runtime_home->get<std::string>());
     }
-    if (const auto snapshot_path = ParseOptionalStringField(text, "snapshot_path")) {
-        config.snapshot_path = ResolveConfigRelativePath(absolute_path, *snapshot_path);
-    }
-    if (const auto poll_ms = ParseOptionalUIntField(text, "poll_ms")) {
-        config.poll_ms = *poll_ms;
+    if (const auto policy = root.find("runtime_policy_path");
+        policy != root.end()) {
+        config.runtime_policy_path = ResolveConfigRelativePath(
+            absolute_path, policy->get<std::string>());
     }
 
-    if (const auto runtime_home = ParseOptionalStringField(text, "runtime_home_path")) {
-        config.runtime_home_path = ResolveConfigRelativePath(absolute_path, *runtime_home);
-    }
-    if (const auto staleness = ParseOptionalUIntField(text, "staleness_threshold_ms")) {
-        config.staleness_threshold_ms = *staleness;
-    }
-    if (const auto rotate_hours = ParseOptionalUIntField(text, "log_rotate_hours")) {
-        config.log_rotate_hours = *rotate_hours;
-    }
-    if (const auto retain_days = ParseOptionalUIntField(text, "log_retain_days")) {
-        config.log_retain_days = *retain_days;
-    }
-
-    if (const auto policy = ParseOptionalStringField(text, "runtime_policy_path")) {
-        config.runtime_policy_path = ResolveConfigRelativePath(absolute_path, *policy);
-    }
-
-    if (const auto write_channel = ParseOptionalUIntField(text, "write_channel")) {
-        config.write_channel = *write_channel;
+    if (const auto write_channel = root.find("write_channel");
+        write_channel != root.end()) {
+        config.write_channel = write_channel->get<std::uint32_t>();
         config.write_channel_set = true;
     }
-    if (const auto write_pct = ParseOptionalDoubleField(text, "write_target_pct")) {
-        config.write_target_pct = *write_pct;
+    if (const auto write_pct = root.find("write_target_pct");
+        write_pct != root.end()) {
+        config.write_target_pct = write_pct->get<double>();
         config.write_target_pct_set = true;
     }
-    if (const auto hold_ms = ParseOptionalUIntField(text, "write_hold_ms")) {
-        config.write_hold_ms = *hold_ms;
+    if (const auto hold_ms = root.find("write_hold_ms");
+        hold_ms != root.end()) {
+        config.write_hold_ms = hold_ms->get<std::uint32_t>();
         config.write_hold_ms_set = true;
-    }
-    if (const auto freshness = ParseOptionalUIntField(text, "baseline_freshness_ceiling_ms")) {
-        config.baseline_freshness_ceiling_ms = *freshness;
-    }
-    if (const auto restore_timeout = ParseOptionalUIntField(text, "restore_timeout_ms")) {
-        config.restore_timeout_ms = *restore_timeout;
     }
 
     return config;

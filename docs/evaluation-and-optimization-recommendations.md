@@ -2,7 +2,7 @@
 
 > Status, 2026-05-14: this was a generated review snapshot and is now partly
 > stale. Several recommendations below are already implemented in the current
-> dirty tree, including JSON-library config parsing, config validation,
+> tree, including JSON-library config parsing, config validation,
 > thermal-pressure anti-windup/smoother scaling, sensor failure handling,
 > circuit-breaker events, sidecar warning events, and rate-limited status
 > publication. Use `docs\RUNTIME_LOGGING_AND_EVALUATION.md` for the current
@@ -18,9 +18,78 @@
 
 The SVG-MB-Control codebase is **production-quality** with excellent architecture, robust error handling, and sound control theory implementation. However, there are opportunities for optimization in performance, numerical stability, code maintainability, and system design.
 
-**Overall Assessment:** ⭐⭐⭐⭐ (4/5)
-- **Strengths:** Clean architecture, comprehensive logging, crash recovery, proper RAII
-- **Weaknesses:** Custom JSON parser, long functions, file I/O in hot path, missing config validation
+**Overall Assessment:** strong, with the main remaining work now in
+maintainability and experiment tooling rather than urgent controller safety.
+
+- **Strengths:** direct runtime ownership, stable 50 ms control cadence,
+  comprehensive runtime logging, crash/restore sidecars, control-loop config
+  validation, sensor-failure safe mode, and write-failure circuit breakers
+- **Weaknesses:** `RunUntilStopped()` is still too large, config/build identity
+  is not yet written into CSV prologues, circuit-breaker reset is still restart
+  based, and deeper sensor-group timing is not present yet
+
+## Current Implementation Status
+
+Use this table before acting on the detailed recommendations below.
+
+| Original item | Status | Current recommendation |
+|---------------|--------|------------------------|
+| 1.1 Horner-form smootherstep | Done | Keep. `LookupCurve` delegates to `SmootherStep()` using `t * t * t * ((6.0 * t - 15.0) * t + 10.0)`. |
+| 1.2 Thermal-pressure anti-windup | Done | Keep. Boost is bounded, only accumulates below cap, and decays below threshold through the configured fall rate. |
+| 1.3 Relative epsilon for demand comparisons | Deferred | Not worth touching alone. The current absolute `0.0001` percentage-point check is far below write deadband and has no measured effect. |
+| 1.4 Smootherstep thermal-pressure scaling | Done | Keep. The slow boost now uses smootherstep scaling between start and full temperatures. |
+| 2.1 Replace invalid-temperature sentinel with NaN | Deferred | Low-value cleanup. `BlendTemps()` still uses `-273.15`; callers intentionally gate at `>= -100.0`. Convert only if touching the blend contract. |
+| 2.2 Epsilon for zero/negative curve span | Deferred | Low value. Config parsing sorts curves, and duplicate points are handled by the existing `span <= 0.0` path. Consider stricter duplicate-point validation instead. |
+| 2.3 Validate configuration ranges | Mostly done | `control_loop` validates percentages, alphas, non-empty primary curves, optional CPU overlay curves, rates, and thermal-pressure fields. Base config/runtime JSON helpers are still local and lighter-weight. |
+| 3.1 Replace custom JSON parser | Done for `control_loop` | `control_loop` uses vendored `nlohmann/json`, and the dead scanner helpers have been removed. Migrate other JSON readers only when a bug or schema change justifies it. |
+| 3.2 Extract channel update logic from `RunUntilStopped()` | Still useful | Best remaining code-quality refactor. Do it after tuning stabilizes, with behavior-preserving tests around write decisions and failure paths. |
+| 3.3 Make authority constants configurable | Deferred | Leave hardcoded until measured drift/reassert behavior proves a hardware-specific need. |
+| 3.4 Log silent exception catches | Mostly done | Control-loop sidecar warnings are now event-logged. Audit other best-effort catches opportunistically. |
+| 4.1 Rate-limit status file writes | Done | Keep. `control_runtime.json` is status-view cadence; CSV is the per-tick source. |
+| 4.2 Add `fmt` / string formatting library | Defer / likely skip | Not worth a new dependency while loop CPU is low. Prefer `std::format` only if formatting becomes a proven hot spot or readability issue. |
+| 4.3 Reserve more log-string space | Minor / opportunistic | Some reserves exist. This is not a standalone task; adjust when editing JSON/CSV escaping code. |
+| 4.4 Use RAII for AMD PCI mutex | Done | Keep. `amd_reader.cpp` now uses a scoped PCI mutex lock so acquired mutex ownership is released on every return path. |
+| 5.1 Adaptive tick skip/resync | Partly done | Fixed-start scheduling and overrun reporting exist. Skip-accounting is deferred because measured 50 ms runs are stable. |
+| 5.2 Circuit breaker for repeated write failures | Done with manual recovery | Repeated write failures open a per-channel breaker, log events, and publish live status fields. Add a reset command only if operators need live recovery without restart. |
+| 5.3 Metrics export | Defer | Do not add HTTP/Prometheus now. Use the local CSV/event analyzer plus run manifests first. |
+| 5.4 Temperature sensor failure detection | Done | Repeated missing primary input commands safe full-speed duty and logs failure/recovery events. |
+| 6.1 Unit tests for control algorithms | Partly covered | Hermetic smoke tests cover main behavior. Add pure C++/unit tests when extracting channel evaluation or policy helpers. |
+| 6.2 Property-based tests | Defer | Useful only after control math is factored into easily testable pure functions. |
+| 7.1 Inline control-parameter docs | Partly done in docs | Public docs explain the knobs. Inline comments can be added during a header cleanup pass. |
+| 7.2 Architecture diagram | Defer | Nice for onboarding, but lower value than analyzer/manifest and refactor work. |
+
+Current short list:
+
+1. Add config/build identity to the CSV prologue so a standalone capture can be
+   traced back to its exact binary and config.
+2. Refactor `RunUntilStopped()` after the analyzer/manifest path has produced a
+   behavior baseline, keeping channel write decisions and failure paths
+   unchanged.
+3. Add an explicit circuit-breaker reset command or operator workflow if live
+   recovery without process restart becomes necessary.
+4. Add per-sensor-group timing only if measured cadence evidence requires it.
+5. Add normalized event severity/error codes and compact decision records before
+   building dashboard or ingestion infrastructure.
+
+## RunUntilStopped Refactor Boundary
+
+Do not split `RunUntilStopped()` around the live controller while tuning is
+still moving unless the change is behavior-neutral and covered by analyzer
+output. The next safe extraction order is:
+
+1. Extract channel status/detail formatting and leave JSON fields unchanged.
+2. Extract primary temperature/sensor-failure evaluation into a pure helper.
+3. Extract demand calculation: curve lookup, CPU overlay, demand smoothing, and
+   thermal-pressure boost.
+4. Extract write gating: deadband, cooldown, policy, authority reassertion, and
+   circuit-breaker skip.
+5. Extract write side effects only after the earlier helpers have tests around
+   policy refusal, write failure, breaker opening, and restore timeout.
+
+Before and after each phase, run the smoke tests plus a short analyzer-backed
+simulated control run and compare setpoints, write counts, failure fields, and
+event counts. This keeps the refactor tied to normal control-theory blocks
+without re-inventing the controller.
 
 ---
 
@@ -732,72 +801,102 @@ graph TD
 
 ## Summary of Recommendations
 
-### Critical (Implement First) 🔴
-1. **Replace custom JSON parser** with nlohmann/json (safety, performance)
-2. **Add config validation** for ranges and constraints
-3. **Add unit tests** for control algorithms
-4. **Add sensor failure detection** with safe fallback
+### Done
 
-### High Value 🟡
-1. **Rate-limit status file writes** (10x less disk I/O)
-2. **Refactor RunUntilStopped** into smaller functions
-3. **Add anti-windup to thermal pressure boost**
-4. **Use fmt library** for string formatting
-5. **Add circuit breaker** for write failures
-6. **Add adaptive tick timing** with skip-and-resync
-7. **Make magic constants configurable**
+1. `control_loop` config parsing through vendored `nlohmann/json`
+2. `control_loop` config validation
+3. Horner-form smootherstep for curve interpolation
+4. Smoother thermal-pressure scaling and bounded accumulation
+5. Sensor-failure safe mode and recovery event logging
+6. Per-channel write-failure circuit breaker events
+7. Sidecar warning events for best-effort cleanup failures
+8. Rate-limited `control_runtime.json` status publication
+9. Dead control-loop JSON scanner cleanup
+10. Scoped AMD PCI mutex lock
+11. Live per-channel failure-state fields in `control_runtime.json`
+12. Control-owned CSV/event analyzer and manifest writer
 
-### Nice-to-Have 🟢
-1. **Use Horner's form** for smootherstep
-2. **Consistent NaN sentinels** instead of -273.15
-3. **Use epsilon for float comparisons**
-4. **Add logging to silent catches**
-5. **RAII for PCI mutex**
-6. **Metrics export** (Prometheus)
-7. **Add Doxygen comments**
-8. **Property-based testing**
+### Do Next
+
+1. **Add config/build identity to the CSV prologue.** The analyzer can hash
+   artifacts passed to it, but a standalone CSV should still carry enough
+   identity to trace the exact binary and config.
+2. **Refactor `RunUntilStopped()` after behavior stabilizes.** Extract channel
+   evaluation/write application with focused regression tests and
+   analyzer-backed before/after checks.
+3. **Add an explicit circuit-breaker reset path only if needed.** Current
+   recovery is process restart; do not add runtime controls until operations
+   need them.
+4. **Add per-sensor-group timing only if cadence diagnosis needs it.** Current
+   loop work duration and achieved interval are enough for the observed 50 ms
+   profile.
+5. **Normalize event severity/error codes before dashboard work.** Keep local
+   summaries and decision records as the next reporting layer.
+
+### Defer
+
+1. `fmt` dependency or broad string-formatting rewrite
+2. Prometheus/OpenMetrics server
+3. property-based tests
+4. authority constants in config
+5. adaptive tick skip/resync beyond current overrun reporting
+6. NaN sentinel/relative-epsilon cleanup unless touching the affected code
 
 ---
 
 ## Performance Impact Estimate
 
-| Optimization | CPU Savings | I/O Savings | Disk Savings |
-|-------------|-------------|-------------|--------------|
-| Replace JSON parser | ~5% | - | - |
-| Rate-limit status writes | ~1% | - | ~90% |
-| Use fmt library | ~2% | - | - |
-| Reserve log strings | <1% | - | - |
-| **Total** | **~8%** | **0%** | **~90%** |
+The original estimates were speculative and based on an older 200 ms profile.
+Current measured runs are more useful:
 
-*Based on typical control loop with 200ms tick, 4 channels*
+- the packaged control loop is running at `50 ms`,
+- process CPU has stayed well under 1% in local runs,
+- status publication is already rate-limited,
+- CSV remains the per-tick analysis surface.
+
+Do not add a formatting library or metrics server for presumed performance
+gain. Use measured loop work duration, achieved interval, overrun count, and
+process CPU fields from the CSV before doing any performance-motivated change.
 
 ---
 
 ## Migration Strategy
 
-### Phase 1: Safety & Correctness (Week 1-2)
-- Add config validation
-- Add sensor failure detection
-- Add unit tests for existing algorithms
-- Log silent exception catches
+### Completed Baseline
 
-### Phase 2: Performance (Week 3)
-- Replace JSON parser
-- Rate-limit status writes
-- Add fmt library
-- Optimize string allocations
+- Config validation
+- Control-loop JSON parser migration
+- 50 ms fixed-start control profile
+- Runtime CSV and event JSONL logging
+- Resource-use fields
+- Sensor-failure safe mode
+- Circuit-breaker events
+- Thermal-pressure boost visibility
 
-### Phase 3: Maintainability (Week 4)
-- Refactor RunUntilStopped
-- Extract channel evaluation logic
-- Add Doxygen comments
-- Create architecture diagram
+### Phase 1: Cleanup
 
-### Phase 4: Advanced Features (Week 5+)
-- Anti-windup for thermal pressure
-- Circuit breaker for failures
-- Adaptive tick timing
-- Metrics export
+- Done: delete unused control-loop JSON scanner helpers.
+- Done: add scoped RAII for AMD PCI mutex acquisition.
+- Audit remaining best-effort catches and either log them or document why they
+  stay silent.
+
+### Phase 2: Operations Visibility
+
+- Done: add live per-channel failure-state fields to `control_runtime.json`.
+- Done: add run manifests and a Control-owned CSV/event analyzer.
+- Add compact decision records for tuning changes.
+
+### Phase 3: Maintainability
+
+- Extract channel evaluation and write application from `RunUntilStopped()`.
+- Add pure policy/channel tests around the extracted functions.
+- Add inline comments where config fields are still unclear from the header.
+
+### Phase 4: Optional Integrations
+
+- Consider metrics export, architecture diagrams, property-based tests, or
+  configurable authority constants only after the local logging/analyzer path
+  proves a need.
 
 ---
 
@@ -810,6 +909,7 @@ The SVG-MB-Control codebase is **well-engineered and production-ready**. The con
 3. **Maintainability**: Refactoring, testing, documentation
 4. **Robustness**: Anti-windup, circuit breakers, adaptive timing
 
-Implementing the **Critical** and **High Value** items would yield significant benefits with moderate effort. The codebase is already very good - these recommendations make it excellent.
-
-**Final Rating:** ⭐⭐⭐⭐ → ⭐⭐⭐⭐⭐ (with recommendations implemented)
+The critical safety and timing items from this snapshot are now mostly done.
+The best return is no longer a broad optimization pass; it is config/build
+identity in captures, analyzer-backed tuning decisions, and a staged
+`RunUntilStopped()` refactor once behavior is stable.

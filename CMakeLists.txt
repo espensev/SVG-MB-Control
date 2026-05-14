@@ -69,12 +69,17 @@ endif()
 
 add_executable(svg_mb_control
     src/amd_reader.cpp
+    src/channel_evaluator.cpp
     src/control_config.cpp
     src/control_loop.cpp
     src/control_policy.cpp
+    src/control_runtime_context.cpp
+    src/control_scheduler.cpp
+    src/control_status_writer.cpp
     src/direct_runtime_snapshot.cpp
     src/fan_writer.cpp
     src/gpu_reader.cpp
+    src/json_io.cpp
     src/main.cpp
     src/pending_writes.cpp
     src/read_loop.cpp

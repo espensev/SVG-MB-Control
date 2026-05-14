@@ -179,6 +179,35 @@ HANDLE OpenOrCreatePciMutex() {
     return CreateMutexA(nullptr, FALSE, "Global\\Access_PCI");
 }
 
+class PciMutexLock {
+public:
+    explicit PciMutexLock(HANDLE handle) : handle_(handle) {
+        if (handle_ == nullptr) {
+            return;
+        }
+        const DWORD wait_result = WaitForSingleObject(handle_, kPciMutexTimeoutMs);
+        acquired_ = wait_result == WAIT_OBJECT_0 ||
+                    wait_result == WAIT_ABANDONED;
+    }
+
+    ~PciMutexLock() {
+        if (acquired_) {
+            ReleaseMutex(handle_);
+        }
+    }
+
+    PciMutexLock(const PciMutexLock&) = delete;
+    PciMutexLock& operator=(const PciMutexLock&) = delete;
+
+    bool acquired() const {
+        return acquired_;
+    }
+
+private:
+    HANDLE handle_ = nullptr;
+    bool acquired_ = false;
+};
+
 std::filesystem::path ResolvePawnIoBinaryPath() {
     const std::array<const char*, 2> env_names = {
         "SVG_MB_CONTROL_PAWNIO_BIN",
@@ -494,25 +523,15 @@ struct AmdReader::Impl {
             return Status::invalid_arg;
         }
 
-        DWORD wait_result = WAIT_OBJECT_0;
-        if (mutex_handle != nullptr) {
-            wait_result =
-                WaitForSingleObject(mutex_handle, kPciMutexTimeoutMs);
-            if (wait_result != WAIT_OBJECT_0 &&
-                wait_result != WAIT_ABANDONED) {
-                return Status::error;
-            }
+        PciMutexLock pci_lock(mutex_handle);
+        if (mutex_handle != nullptr && !pci_lock.acquired()) {
+            return Status::error;
         }
 
         const std::int64_t input = static_cast<std::int64_t>(smn_address);
         std::int64_t output = 0;
         const Status exec_status = ExecutePawnIo(
             handle, "ioctl_read_smn", &input, 1u, &output, 1u);
-
-        if (mutex_handle != nullptr &&
-            (wait_result == WAIT_OBJECT_0 || wait_result == WAIT_ABANDONED)) {
-            ReleaseMutex(mutex_handle);
-        }
 
         if (exec_status != Status::ok) {
             return exec_status;

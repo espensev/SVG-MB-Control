@@ -1,5 +1,5 @@
 # build-release.ps1 — CMake Release build, test, package, publish, and archive
-# Usage:  .\build-release.ps1 [-KeepBuildDir] [-SkipTests] [-Verbose] [-Help]
+# Usage:  .\build-release.ps1 [-KeepBuildDir] [-SkipTests] [-NoStopProcesses] [-Verbose] [-Help]
 
 [CmdletBinding()]
 param(
@@ -7,6 +7,7 @@ param(
     [ValidateSet('x64')]
     [string]$Architecture = 'x64',
     [switch]$SkipTests,
+    [switch]$NoStopProcesses,
     [Alias('h')][switch]$Help
 )
 
@@ -21,6 +22,8 @@ OPTIONS
     -Architecture   Target architecture preset (default: x64)
     -KeepBuildDir   Keep the build/ directory after completion (default: removed)
     -SkipTests      Skip python -m unittest discover tests -v
+    -NoStopProcesses
+                    Do not stop running svg-mb-control processes before build
     -Verbose        Show verbose/diagnostic output
     -Help, -h       Show this help message and exit
 
@@ -784,14 +787,18 @@ Write-Host "Release dir : $ReleaseRoot"
 Write-Host "Archive dir : $ArchiveDir"
 
 try {
-    Write-Host "`n[0/11] Stopping running processes..." -ForegroundColor Yellow
-    foreach ($processName in $ProcessNames) {
-        $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
-        if ($proc) {
-            $proc | Stop-Process -Force
-            Write-Host "Stopped: $processName" -ForegroundColor Green
-        } else {
-            Write-Host "No running process found for $processName."
+    if ($NoStopProcesses) {
+        Write-Host "`n[0/11] Skipping process stop (-NoStopProcesses)." -ForegroundColor Yellow
+    } else {
+        Write-Host "`n[0/11] Stopping running processes..." -ForegroundColor Yellow
+        foreach ($processName in $ProcessNames) {
+            $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
+            if ($proc) {
+                $proc | Stop-Process -Force
+                Write-Host "Stopped: $processName" -ForegroundColor Green
+            } else {
+                Write-Host "No running process found for $processName."
+            }
         }
     }
 

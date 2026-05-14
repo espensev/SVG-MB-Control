@@ -67,6 +67,9 @@ Config loading validates basic ranges and required curve/channel structure. A
 bad control config should fail at startup instead of producing undefined fan
 behavior.
 
+`smootherstep` uses the standard quintic blend `t^3 * (6t^2 - 15t + 10)`,
+evaluated in Horner form in the curve lookup path.
+
 ## Runtime Flow
 
 1. Resolve config, runtime home, and runtime policy.
@@ -142,6 +145,11 @@ the base curve/EMA demand.
 The current status JSON also publishes `last_raw_demand_pct` and
 `last_smoothed_demand_pct` so a live reader can distinguish the curve/overlay
 demand from the smoothed demand and final rate-limited setpoint.
+
+Per-channel failure state is also surfaced in `control_runtime.json`:
+`sensor_failed`, `consecutive_sensor_failures`, `circuit_breaker_open`, and
+`consecutive_write_failures`. The JSON remains rate-limited; use the event log
+for exact transition timing.
 
 ## Policy Behavior
 

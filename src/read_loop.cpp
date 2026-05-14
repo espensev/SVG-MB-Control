@@ -4,6 +4,7 @@
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
+#include "json_io.h"
 #include "runtime_logging.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
@@ -21,7 +22,6 @@
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
-#include <fstream>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -58,76 +58,22 @@ std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
     return std::string(buffer.data(), written);
 }
 
-std::string JsonEscape(const std::string& text) {
-    std::string output;
-    output.reserve(text.size() + 2u);
-    for (char ch : text) {
-        switch (ch) {
-            case '\\': output += "\\\\"; break;
-            case '"': output += "\\\""; break;
-            case '\b': output += "\\b"; break;
-            case '\f': output += "\\f"; break;
-            case '\n': output += "\\n"; break;
-            case '\r': output += "\\r"; break;
-            case '\t': output += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(ch) < 0x20u) {
-                    std::array<char, 8> escape{};
-                    std::snprintf(escape.data(), escape.size(), "\\u%04x",
-                                  static_cast<unsigned int>(
-                                      static_cast<unsigned char>(ch)));
-                    output += escape.data();
-                } else {
-                    output.push_back(ch);
-                }
-                break;
-        }
-    }
-    return output;
-}
-
 bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
                             const ReadLoop::Status& status) {
-    std::error_code ec;
-    std::filesystem::create_directories(runtime_home, ec);
-    if (ec) {
-        return false;
-    }
-
-    const std::filesystem::path target = runtime_home / "control_runtime.json";
-    const std::filesystem::path temp = runtime_home / "control_runtime.json.tmp";
-
-    {
-        std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
-        if (!stream.is_open()) {
-            return false;
-        }
-        stream << "{\n"
-               << "  \"schema_version\": 1,\n"
-               << "  \"status\": \"" << JsonEscape(status.status) << "\",\n"
-               << "  \"status_detail\": \"" << JsonEscape(status.status_detail) << "\",\n"
-               << "  \"last_refresh\": \"" << JsonEscape(status.last_refresh_iso) << "\",\n"
-               << "  \"snapshot_source\": \"" << JsonEscape(status.snapshot_source) << "\",\n"
-               << "  \"restart_count\": " << status.restart_count << ",\n"
-               << "  \"skipped_polls\": " << status.skipped_polls << ",\n"
-               << "  \"successful_polls\": " << status.successful_polls << ",\n"
-               << "  \"stale\": " << (status.stale ? "true" : "false") << ",\n"
-               << "  \"child_pid\": " << status.child_pid << ",\n"
-               << "  \"log_csv_path\": \"" << JsonEscape(status.log_csv_path) << "\",\n"
-               << "  \"event_log_path\": \"" << JsonEscape(status.event_log_path) << "\"\n"
-               << "}\n";
-        stream.flush();
-        if (stream.fail()) {
-            return false;
-        }
-    }
-
-    std::filesystem::rename(temp, target, ec);
-    if (ec) {
-        std::filesystem::remove(temp, ec);
-        return false;
-    }
-    return true;
+    nlohmann::json payload = MakeSchemaObject(1u);
+    payload["status"] = status.status;
+    payload["status_detail"] = status.status_detail;
+    payload["last_refresh"] = status.last_refresh_iso;
+    payload["snapshot_source"] = status.snapshot_source;
+    payload["restart_count"] = status.restart_count;
+    payload["skipped_polls"] = status.skipped_polls;
+    payload["successful_polls"] = status.successful_polls;
+    payload["stale"] = status.stale;
+    payload["child_pid"] = status.child_pid;
+    payload["log_csv_path"] = status.log_csv_path;
+    payload["event_log_path"] = status.event_log_path;
+    return TryWriteJsonFileAtomic(runtime_home / "control_runtime.json",
+                                  payload);
 }
 
 std::uint32_t ResolveStalenessThresholdMs(const ControlConfig& config) {

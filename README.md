@@ -32,6 +32,28 @@ download it from the network.
 - `third_party\nvapi-controller` contributes the vendored GPU telemetry slice.
 - Legacy bridge executables are not part of the runtime contract in this repo.
 
+## Long-Term Organization Target
+
+Keep this repo standalone, but split the source tree by responsibility as the
+controller stabilizes:
+
+```text
+src/
+  app/        main, CLI parsing, mode dispatch
+  control/    loop orchestration, channel evaluator, status model
+  runtime/    runtime store, CSV logger, event log, JSON IO
+  hardware/   AMD, GPU, SIO fan backends
+  platform/   Windows timer, process metrics, HANDLE wrappers
+  policy/     curves, blending, rate limits, demand smoothing
+```
+
+Add a `svg_mb_control_core` static library target and keep
+`svg-mb-control.exe` as a thin executable wrapper around it. That gives the
+controller a stable internal API and makes C++ unit tests possible without
+launching the full executable for every behavior check.
+
+See `docs\STRUCTURE_AND_STABILITY.md` for the longer plan.
+
 ## Build
 
 Preferred release build:
@@ -44,6 +66,14 @@ Useful options:
 
 - `-KeepBuildDir` keeps `build\` after a successful release build
 - `-SkipTests` skips `python -m unittest discover tests -v`
+- `-NoStopProcesses` skips the pre-build stop of running `svg-mb-control`
+  processes
+
+Local CI-equivalent validation that does not touch a live controller:
+
+```powershell
+.\scripts\Test-LocalCI.ps1 -KeepBuildDir
+```
 
 Manual CMake build:
 
@@ -198,6 +228,7 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 - `docs\RUNTIME_HOME.md`
 - `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
 - `docs\LOGGING_IMPROVEMENT_PLAN.md`
+- `docs\STRUCTURE_AND_STABILITY.md`
 - `docs\response-evaluation-tuning-plan.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and

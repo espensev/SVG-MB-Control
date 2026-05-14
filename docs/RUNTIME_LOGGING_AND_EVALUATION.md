@@ -65,12 +65,17 @@ This is a solid early-phase data substrate. The next improvement should be
 better experiment accounting and automated summarization, not a wholesale
 logging replacement.
 
-## Gaps
+## Tooling Now Available
 
-- There is no run manifest that records workload label, ambient notes, build
-  info, git commit, config hash, operator notes, or start/stop markers.
-- There is no repo-owned analyzer that turns CSV plus events into a repeatable
-  summary. Current analysis is still manual.
+- `scripts\analyze_control_run.py` can turn a control-loop CSV plus optional
+  event JSONL into a repeatable Markdown or JSON summary and an analysis
+  manifest with artifact hashes.
+- Manifest generation records profile, notes, run id, row/event counts, and
+  artifact paths plus SHA-256 values. It still relies on the operator to pass
+  config/build artifacts until the controller writes that identity directly.
+
+## Remaining Gaps
+
 - CSV chunk files have no closed/ready marker. A reader must treat the active
   archive path as mutable while Control is running.
 - The CSV has loop timing and process cost, but not per-sensor-group read
@@ -79,9 +84,10 @@ logging replacement.
   code taxonomy yet.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
-- Sensor-failure and circuit-breaker state is event-log visible but not exposed
-  as explicit per-channel status fields yet. Circuit-breaker reset also needs a
-  deliberate operator/runtime path if it should recover without process restart.
+- Sensor-failure and circuit-breaker state is exposed in
+  `control_runtime.json` as explicit per-channel fields and transition events.
+  Circuit-breaker reset still needs a deliberate operator/runtime path if it
+  should recover without process restart.
 - There is no standard decision record that links a config change to before/after
   metrics.
 
@@ -102,7 +108,21 @@ Use this loop for controller changes:
    - cooldown.
 4. Collect the active CSV archive, `control_runtime.json`,
    `current_state.json`, and `svg_mb_control_events.jsonl`.
-5. Summarize the run before tuning. Compute at least:
+5. Summarize the run before tuning. Use the repo analyzer as the default first
+   pass:
+   ```powershell
+   python scripts\analyze_control_run.py `
+     --csv release\runtime\logs\archive\svg_mb_control_control-loop_<timestamp>.csv `
+     --events release\runtime\logs\svg_mb_control_events.jsonl `
+     --status release\runtime\control_runtime.json `
+     --current-state release\runtime\current_state.json `
+     --config config\control.json `
+     --profile combined-load `
+     --notes "ambient and subjective noise notes" `
+     --out run-summary.md `
+     --manifest-out run-manifest.json
+   ```
+   The summary should cover at least:
    - CPU/Tctl p50, p90, p99, max,
    - GPU core and memory p50, p90, p99, max,
    - achieved interval p50, p95, max, and overrun count,
@@ -152,23 +172,15 @@ Tune that model from data first:
 
 ## Next Actions
 
-1. Add a small Control-owned analyzer that accepts a control-loop CSV and event
-   JSONL path, then emits a compact Markdown or JSON summary with the metrics
-   above.
-2. Add a run manifest beside each capture or summary. Minimum fields:
-   `run_id`, `profile`, `started_at`, `ended_at`, `config_path`,
-   `config_sha256`, `build_info_path`, `git_commit`, `notes`, and artifact
-   paths.
-3. Add config/build identity to the CSV prologue so a standalone CSV can be
+1. Add config/build identity to the CSV prologue so a standalone CSV can be
    traced back to the binary and config that produced it.
-4. Add per-sensor-group timing fields only if cadence diagnosis needs deeper
+2. Add per-sensor-group timing fields only if cadence diagnosis needs deeper
    evidence than current loop work duration provides.
-5. Add normalized event severity and error codes before building a dashboard or
+3. Add normalized event severity and error codes before building a dashboard or
    long-running ingestion service.
-6. Expose per-channel `sensor_failed`, `consecutive_sensor_failures`,
-   `circuit_breaker_open`, and `consecutive_write_failures` in
-   `control_runtime.json` if those states are meant to drive operations.
-7. Reuse ideas from the GPU programs where they fit: run manifests, segment
-   accounting, deadline/cadence summaries, and compact decision records. Do not
+4. Add an explicit circuit-breaker reset command or operator workflow if live
+   recovery without process restart becomes necessary.
+5. Reuse ideas from the GPU programs where they fit: segment accounting,
+   deadline/cadence summaries, and compact decision records. Do not
    import tray UI, service orchestration, or external metrics infrastructure
    until the Control schema stabilizes.
