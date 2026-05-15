@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 file(READ "${CMAKE_SOURCE_DIR}/VERSION" SVG_MB_CONTROL_VERSION_RAW)
 string(STRIP "${SVG_MB_CONTROL_VERSION_RAW}" SVG_MB_CONTROL_VERSION)
 
-project(svg_mb_control VERSION ${SVG_MB_CONTROL_VERSION} LANGUAGES CXX)
+project(svg_mb_control VERSION ${SVG_MB_CONTROL_VERSION} LANGUAGES C CXX)
 
 set(SVG_MB_CONTROL_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 
@@ -19,6 +19,25 @@ add_library(nlohmann_json INTERFACE)
 add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
 target_include_directories(nlohmann_json INTERFACE
     "${SVG_MB_CONTROL_NLOHMANN_JSON_INCLUDE_DIR}")
+
+set(SVG_MB_CONTROL_SQLITE3_DIR
+    "${SVG_MB_CONTROL_THIRD_PARTY_DIR}/sqlite3")
+if(NOT EXISTS "${SVG_MB_CONTROL_SQLITE3_DIR}/sqlite3.c"
+   OR NOT EXISTS "${SVG_MB_CONTROL_SQLITE3_DIR}/sqlite3.h")
+    message(FATAL_ERROR
+            "Vendored sqlite3 amalgamation not found at "
+            "${SVG_MB_CONTROL_SQLITE3_DIR}")
+endif()
+
+add_library(sqlite3_amalgamation STATIC
+    "${SVG_MB_CONTROL_SQLITE3_DIR}/sqlite3.c")
+add_library(sqlite3::sqlite3 ALIAS sqlite3_amalgamation)
+set_target_properties(sqlite3_amalgamation PROPERTIES LINKER_LANGUAGE C)
+target_include_directories(sqlite3_amalgamation PUBLIC
+    "${SVG_MB_CONTROL_SQLITE3_DIR}")
+if(MSVC)
+    target_compile_options(sqlite3_amalgamation PRIVATE /W0)
+endif()
 
 # Always build against the vendored source trees in this repo.
 set(SVG_MB_SIO_SOURCE_DIR
@@ -78,6 +97,10 @@ endif()
 add_executable(svg_mb_control
     src/pch.cpp
     src/amd_reader.cpp
+    src/analyze/analyze_csv.cpp
+    src/analyze/analyze_db.cpp
+    src/analyze/analyze_ingest.cpp
+    src/analyze/analyze_json_artifacts.cpp
     src/calibration.cpp
     src/channel_evaluator.cpp
     src/control_config.cpp
@@ -103,6 +126,7 @@ add_executable(svg_mb_control
 target_link_libraries(svg_mb_control PRIVATE
     svg_mb_sio::svg_mb_sio
     nlohmann_json::nlohmann_json
+    sqlite3::sqlite3
 )
 
 if(WIN32)

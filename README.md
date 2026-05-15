@@ -152,6 +152,34 @@ to stay attached.
 Legacy bridge flags such as `--bridge-exe-path` are intentionally rejected in
 this branch.
 
+## Analyze
+
+Ingest CSV archives, manifests, events.jsonl, and `plant_model.json` from a
+runtime home into a sqlite database for offline analysis:
+
+```powershell
+release\svg-mb-control.exe analyze ingest
+release\svg-mb-control.exe analyze ingest --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db
+release\svg-mb-control.exe analyze ingest --force --quiet
+```
+
+Behavior:
+
+- Default `--runtime-home` is resolved from the active config (the same
+  resolution as the control modes); default `--db` is
+  `<runtime-home>\svg_mb_control.db`.
+- The DB schema is bootstrapped on first use (schema version `1`). The schema
+  defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
+  `events`, `plant_model_captures`, `plant_model_channels`, and
+  `plant_model_steps`.
+- Runs are deduplicated by `(session_start, mode)` and by canonical
+  `manifest_path`, so re-running ingest is idempotent. The live manifest and
+  its rotated archive copy resolve to a single run row.
+- Plant model captures are deduplicated by canonical `capture_path`.
+- `--force` deletes existing matching rows before re-ingesting them.
+- `analyze ingest` is offline-only; it never writes to fans or alters runtime
+  policy.
+
 ## Config
 
 Canonical config files:

@@ -1,4 +1,5 @@
 #include "amd_reader.h"
+#include "analyze/analyze_ingest.h"
 #include "calibration.h"
 #include "control_config.h"
 #include "control_loop.h"
@@ -74,11 +75,113 @@ void PrintUsage() {
            << "[--calibrate-step-ms <ms>] [--calibrate-cooldown-ms <ms>] "
            << "[--calibrate-settle-window-ms <ms>] [--calibrate-abort-temp-c <c>] "
            << "[--calibrate-output <path>]\n"
+        << "  svg-mb-control analyze ingest [--runtime-home <path>] "
+           << "[--db <path>] [--force] [--quiet]\n"
         << "  svg-mb-control --diagnose-amd\n"
         << "  svg-mb-control --diagnose-gpu\n"
         << "  svg-mb-control --confirm-start\n"
         << "  svg-mb-control --help|-h\n"
         << "  svg-mb-control --version\n";
+}
+
+void PrintAnalyzeUsage() {
+    std::cout
+        << "Usage:\n"
+        << "  svg-mb-control analyze ingest [--runtime-home <path>] "
+           << "[--db <path>] [--force] [--quiet]\n"
+        << "    Reads CSV archives, manifests, events.jsonl and "
+           << "plant_model.json from the\n"
+        << "    runtime home and ingests them into a sqlite database. "
+           << "Default db path is\n"
+        << "    <runtime-home>/svg_mb_control.db. Idempotent on "
+           << "previously-seen artifacts\n"
+        << "    unless --force is passed.\n";
+}
+
+int RunAnalyzeCommand(int argc, wchar_t** argv) {
+    if (argc < 3) {
+        PrintAnalyzeUsage();
+        return 1;
+    }
+    const std::wstring verb = argv[2];
+    if (verb == L"--help" || verb == L"-h") {
+        PrintAnalyzeUsage();
+        return 0;
+    }
+    if (verb != L"ingest") {
+        std::cerr << "Error: unknown analyze subcommand. Try "
+                  << "'svg-mb-control analyze --help'.\n";
+        return 1;
+    }
+
+    svg_mb_control::analyze::IngestOptions options;
+    std::filesystem::path config_path;
+    bool config_path_explicit = false;
+
+    auto require_value = [&](int& index) -> const wchar_t* {
+        if (index + 1 >= argc) {
+            throw std::runtime_error("Missing value for option.");
+        }
+        ++index;
+        return argv[index];
+    };
+
+    for (int index = 3; index < argc; ++index) {
+        const std::wstring arg = argv[index];
+        if (arg == L"--runtime-home") {
+            options.runtime_home = std::filesystem::path(require_value(index));
+        } else if (arg == L"--db") {
+            options.db_path = std::filesystem::path(require_value(index));
+        } else if (arg == L"--config") {
+            config_path = std::filesystem::path(require_value(index));
+            config_path_explicit = true;
+        } else if (arg == L"--force") {
+            options.force = true;
+        } else if (arg == L"--quiet") {
+            options.quiet = true;
+        } else if (arg == L"--help" || arg == L"-h") {
+            PrintAnalyzeUsage();
+            return 0;
+        } else {
+            std::cerr << "Error: unknown analyze ingest option.\n";
+            PrintAnalyzeUsage();
+            return 1;
+        }
+    }
+
+    if (options.runtime_home.empty()) {
+        if (config_path.empty()) {
+            config_path = svg_mb_control::GetEnvironmentPath(
+                L"SVG_MB_CONTROL_CONFIG");
+        }
+        if (config_path.empty()) {
+            config_path = svg_mb_control::ResolveDefaultControlConfigPath();
+        }
+        std::optional<svg_mb_control::ControlConfig> config;
+        if (!config_path.empty()) {
+            const std::filesystem::path absolute_config_path =
+                std::filesystem::absolute(config_path).lexically_normal();
+            std::error_code ec;
+            if (std::filesystem::exists(absolute_config_path, ec)) {
+                try {
+                    config = svg_mb_control::LoadControlConfig(
+                        absolute_config_path);
+                } catch (const std::exception&) {
+                    config.reset();
+                }
+            } else if (config_path_explicit) {
+                std::cerr << "Error: control config not found: "
+                          << absolute_config_path.string() << '\n';
+                return 1;
+            }
+        }
+        options.runtime_home = config.has_value()
+            ? svg_mb_control::ResolveRuntimeHomePath(*config)
+            : svg_mb_control::ResolveRuntimeHomePath(
+                  svg_mb_control::ControlConfig{});
+    }
+
+    return svg_mb_control::analyze::RunAnalyzeIngest(options);
 }
 
 void PrintVersion() {
@@ -583,6 +686,9 @@ std::string SampleDirectSnapshotJson(
 
 int wmain(int argc, wchar_t** argv) {
     try {
+        if (argc >= 2 && std::wstring(argv[1]) == L"analyze") {
+            return RunAnalyzeCommand(argc, argv);
+        }
         const bool no_launch_args = argc == 1;
         std::filesystem::path config_path;
         bool config_path_explicit = false;
