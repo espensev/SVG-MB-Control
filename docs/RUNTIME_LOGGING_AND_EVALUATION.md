@@ -34,9 +34,12 @@ Control owns the runtime logging plane:
 
 - `current_state.json` is the current telemetry snapshot.
 - `control_runtime.json` is the current mode/status publication. For
-  `control-loop`, schema version `3` includes timing fields, process CPU and
-  memory fields, active log paths, and per-channel demand/setpoint state.
+  `control-loop`, schema version `4` includes the active worker PID, timing
+  fields, process CPU and memory fields, active log paths, and per-channel
+  demand/setpoint state.
 - `pending_writes.json` is the restore/recovery sidecar for active writes.
+- `stop.request.json` is the cooperative lifecycle request written by
+  `svg-mb-control --stop` and consumed by `read-loop` and `control-loop`.
 - `logs\svg_mb_control_output.csv` is the fixed-path live CSV mirror of the
   active chunk.
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv` is the retained CSV

@@ -15,11 +15,16 @@ Control owns these files:
 - `current_state.json`
 - `control_runtime.json`
 - `pending_writes.json`
+- `stop.request.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
 - `logs\svg_mb_control_manifest.json`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json`
+- `svg-mb-control.supervisor.stdout.log`
+- `svg-mb-control.supervisor.stderr.log`
+- `svg-mb-control.worker.stdout.log`
+- `svg-mb-control.worker.stderr.log`
 
 The JSON files remain the authoritative live state and recovery plane. The log
 files add history and operator traceability; they do not replace the JSON
@@ -58,6 +63,8 @@ Each fan entry can include:
 `read-loop` writes a poll/status view with schema version `1`:
 
 - `status`
+- `mode`
+- `process_id`
 - `status_detail`
 - `last_refresh`
 - `snapshot_source`
@@ -70,12 +77,15 @@ Each fan entry can include:
 - `log_manifest_path`
 - `event_log_path`
 
-`restart_count` and `child_pid` remain `0` in the direct-only runtime.
+`process_id` is the active worker PID. `svg-mb-control --status` uses it to
+distinguish an active loop from a stale status file. `restart_count` and
+`child_pid` remain `0` in the direct-only runtime.
 
-`control-loop` writes a control-status view with schema version `3`:
+`control-loop` writes a control-status view with schema version `4`:
 
 - `schema_version`
 - `mode`
+- `process_id`
 - `status`
 - `status_detail`
 - `loop_tick_count`
@@ -140,6 +150,23 @@ Each entry includes:
 `child_pid` is retained for schema continuity and is written as `0` by the
 current direct runtime.
 
+## stop.request.json
+
+Created by `svg-mb-control --stop` and consumed by `read-loop` and
+`control-loop`. A supervised or foreground loop checks this file and exits
+through its normal shutdown path. The file is cleared when a new long-running
+loop starts, so stale stop requests do not block the next launch.
+
+`svg-mb-control --restart` writes the same request, waits for the active worker
+to publish `status="shutdown"` or stop owning its `process_id`, and only then
+launches a new supervisor.
+
+Fields:
+
+- `schema_version`
+- `requested_at`
+- `reason`
+
 ## logs\
 
 `read-loop` and `control-loop` can publish historical CSV telemetry and a
@@ -162,6 +189,19 @@ shared event log under `runtime\logs\`.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
 `log_retain_days` in the control config.
+
+## Process logs
+
+Supervised launches write process stdout/stderr logs in the runtime root:
+
+- `svg-mb-control.supervisor.stdout.log`
+- `svg-mb-control.supervisor.stderr.log`
+- `svg-mb-control.worker.stdout.log`
+- `svg-mb-control.worker.stderr.log`
+
+The supervisor logs its own startup failures to the supervisor stderr log and
+the worker's attached-mode startup/runtime output to the worker logs. Structured
+runtime events remain in `logs\svg_mb_control_events.jsonl`.
 
 Control-loop CSV rows include the common telemetry/fan columns plus:
 

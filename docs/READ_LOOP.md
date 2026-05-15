@@ -47,13 +47,15 @@ that location.
    active log paths.
 8. Append durable JSONL events for loop start, rotations, sample failures, and
    shutdown.
-9. Sleep until the next poll or stop request.
+9. Sleep until the next poll, `RequestStop()`, or `stop.request.json`.
 
 ## Status File
 
 `control_runtime.json` for `read-loop` carries:
 
 - `status`
+- `mode`
+- `process_id`
 - `status_detail`
 - `last_refresh`
 - `snapshot_source`
@@ -63,10 +65,12 @@ that location.
 - `restart_count`
 - `child_pid`
 - `log_csv_path`
+- `log_manifest_path`
 - `event_log_path`
 
 `restart_count` and `child_pid` are retained for schema stability in the direct
-runtime and remain `0`.
+runtime and remain `0`. `process_id` is the active read-loop worker PID used by
+`svg-mb-control --status`.
 
 ## Failure Behavior
 
@@ -83,6 +87,7 @@ runtime and remain `0`.
 
 ## Shutdown
 
-`Ctrl+C`, `Ctrl+Break`, and normal process stop requests call `RequestStop()`.
-The loop finishes the current wait cycle, writes
+`Ctrl+C` and `Ctrl+Break` call `RequestStop()`. `svg-mb-control --stop` writes
+`stop.request.json` in the runtime home, which the loop checks during polling
+and wait periods. The loop finishes the current wait cycle, writes
 `status="shutdown"` / `status_detail="stop requested"`, and exits cleanly.

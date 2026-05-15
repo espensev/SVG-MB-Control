@@ -95,8 +95,9 @@ evaluated in Horner form in the curve lookup path.
     writes, restores, sensor failures, sidecar warnings, circuit-breaker
     transitions, and failures.
 14. Restore the captured baseline once the hold window expires or shutdown is
-    requested. A `control_hold_ms` of `0` holds the control write until
-    shutdown/restart instead of periodically restoring.
+    requested through the console handler or `stop.request.json`. A
+    `control_hold_ms` of `0` holds the control write until shutdown/restart
+    instead of periodically restoring.
 
 ## Outputs
 
@@ -110,10 +111,10 @@ evaluated in Horner form in the curve lookup path.
 - `runtime\logs\svg_mb_control_events.jsonl`
 
 `control_runtime.json` includes loop-level counters, timing-quality fields, the
-active log paths, and per-channel totals plus last observed values. The
-status JSON is rate-limited, so it is a live status view rather than the
-per-tick data source. The control-loop CSV carries the same timing fields per
-row:
+active worker `process_id`, active log paths, and per-channel totals plus last
+observed values. The status JSON is rate-limited, so it is a live status view
+rather than the per-tick data source. The control-loop CSV carries the same
+timing fields per row:
 
 - `loop_started_wall_clock`
 - `loop_finished_wall_clock`
@@ -155,6 +156,26 @@ Per-channel failure state is also surfaced in `control_runtime.json`:
 `sensor_failed`, `consecutive_sensor_failures`, `circuit_breaker_open`, and
 `consecutive_write_failures`. The JSON remains rate-limited; use the event log
 for exact transition timing.
+
+## Lifecycle Commands
+
+With the packaged `control.json`, a zero-argument launch or `--start` starts a
+hidden supervisor and returns the shell prompt. The supervisor launches the
+worker with `--run-foreground`, writes supervisor/worker stdout and stderr logs
+in the runtime home, and restarts the worker after an unexpected non-zero exit.
+Startup/config failures are reported immediately instead of entering a restart
+loop.
+
+Operator commands use the same runtime-home resolution as the active config:
+
+- `--status` reads `control_runtime.json` and checks `process_id`.
+- `--stop` writes `stop.request.json`; the worker exits through the normal
+  restore/shutdown path.
+- `--restart` performs the same cooperative stop and only launches a new
+  supervisor after the previous worker reports stopped.
+
+Passing `--mode control-loop --config <path>` keeps the loop attached to the
+current terminal and does not add supervisor restart behavior.
 
 ## Policy Behavior
 

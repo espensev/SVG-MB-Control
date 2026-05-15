@@ -6,7 +6,10 @@
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
+#include "json_io.h"
 #include "read_loop.h"
+#include "runtime_lifecycle.h"
+#include "runtime_logging.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 #include "write_orchestrator.h"
@@ -21,16 +24,21 @@
 
 #include <array>
 #include <atomic>
+#include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -69,6 +77,7 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
+        << "  svg-mb-control [--start|--status|--stop|--restart] [--config <path>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate>] [--config <path>] "
            << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
         << "  svg-mb-control --mode calibrate [--calibrate-channel <n>] "
@@ -307,47 +316,212 @@ std::string ReadTextFileTail(const std::filesystem::path& path,
     return content;
 }
 
-bool ConfirmDetachedLaunch(RunMode mode,
-                           const svg_mb_control::ControlConfig& config) {
-    const std::filesystem::path runtime_home =
-        svg_mb_control::ResolveRuntimeHomePath(config);
-    std::wstring message =
-        L"Start SVG-MB Control in the background?\n\nMode: ";
-    message += RunModeArgument(mode);
-    message += L"\n\nConfig:\n";
-    message += config.source_path.wstring();
-    message += L"\n\nRuntime:\n";
-    message += runtime_home.wstring();
-
-    const int result = MessageBoxW(nullptr,
-                                   message.c_str(),
-                                   L"SVG-MB Control",
-                                   MB_YESNO | MB_DEFBUTTON2 |
-                                       MB_ICONQUESTION | MB_SETFOREGROUND);
-    return result == IDYES;
+std::optional<nlohmann::json> TryReadJsonObject(
+    const std::filesystem::path& path,
+    std::string_view contract_name) {
+    try {
+        nlohmann::json payload = svg_mb_control::ReadJsonFile(
+            path, contract_name);
+        if (payload.is_object()) {
+            return payload;
+        }
+    } catch (const std::exception&) {
+    }
+    return std::nullopt;
 }
 
-int LaunchDetachedLongRunningMode(RunMode mode,
-                                  const svg_mb_control::ControlConfig& config) {
-    const std::filesystem::path exe_path = CurrentExecutablePath();
-    if (exe_path.empty()) {
-        throw std::runtime_error("Could not resolve current executable path.");
+std::string JsonStringOr(const nlohmann::json& value,
+                         std::string_view key,
+                         std::string_view fallback = {}) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_string()) {
+        return found->get<std::string>();
+    }
+    return std::string(fallback);
+}
+
+std::uint32_t JsonUInt32Or(const nlohmann::json& value,
+                           std::string_view key,
+                           std::uint32_t fallback = 0u) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_number_unsigned()) {
+        return found->get<std::uint32_t>();
+    }
+    if (found != value.end() && found->is_number_integer()) {
+        const auto raw = found->get<std::int64_t>();
+        if (raw > 0 && raw <= static_cast<std::int64_t>(UINT32_MAX)) {
+            return static_cast<std::uint32_t>(raw);
+        }
+    }
+    return fallback;
+}
+
+bool IsProcessActive(std::uint32_t pid) {
+    if (pid == 0u) {
+        return false;
+    }
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (process == nullptr) {
+        return false;
+    }
+    DWORD exit_code = 0u;
+    const bool active =
+        GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
+    CloseHandle(process);
+    return active;
+}
+
+std::filesystem::path RuntimeStatusPath(
+    const std::filesystem::path& runtime_home) {
+    return runtime_home / "control_runtime.json";
+}
+
+bool RuntimeStatusLooksActive(const nlohmann::json& status) {
+    const std::string state = JsonStringOr(status, "status");
+    if (state == "shutdown" || state == "failed" ||
+        state == "direct-read-failed") {
+        return false;
+    }
+    const std::uint32_t pid = JsonUInt32Or(status, "process_id");
+    return pid != 0u && IsProcessActive(pid);
+}
+
+bool PrintAlreadyRunningIfActive(RunMode mode,
+                                 const std::filesystem::path& runtime_home) {
+    const auto status = TryReadJsonObject(
+        RuntimeStatusPath(runtime_home), "runtime status");
+    if (!status.has_value() || !RuntimeStatusLooksActive(*status)) {
+        return false;
     }
 
-    const std::filesystem::path runtime_home =
-        svg_mb_control::ResolveRuntimeHomePath(config);
-    std::error_code ec;
-    std::filesystem::create_directories(runtime_home, ec);
-    if (ec) {
-        throw std::runtime_error("Could not create runtime home: " +
-                                 ec.message());
+    const std::uint32_t pid = JsonUInt32Or(*status, "process_id");
+    const std::string active_mode =
+        JsonStringOr(*status, "mode", RunModeLabel(mode));
+    std::cout << "svg-mb-control: " << active_mode
+              << " is already running\n"
+              << "  pid: " << pid << '\n'
+              << "  requested_mode: " << RunModeLabel(mode) << '\n'
+              << "  status: " << RuntimeStatusPath(runtime_home).string()
+              << '\n'
+              << "  runtime_home: " << runtime_home.string() << '\n';
+    return true;
+}
+
+int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
+    const std::filesystem::path status_path = RuntimeStatusPath(runtime_home);
+    const auto status = TryReadJsonObject(status_path, "runtime status");
+    if (!status.has_value()) {
+        std::cout << "svg-mb-control: not running\n"
+                  << "  runtime_home: " << runtime_home.string() << '\n'
+                  << "  status: " << status_path.string()
+                  << " (not found)\n";
+        return 0;
     }
 
-    const std::filesystem::path stdout_path =
-        runtime_home / "svg-mb-control.stdout.log";
-    const std::filesystem::path stderr_path =
-        runtime_home / "svg-mb-control.stderr.log";
+    const std::string mode = JsonStringOr(*status, "mode", "(unknown)");
+    const std::string state = JsonStringOr(*status, "status", "(unknown)");
+    const std::string detail = JsonStringOr(*status, "status_detail");
+    const std::string last_eval =
+        JsonStringOr(*status, "loop_last_evaluation",
+                     JsonStringOr(*status, "last_refresh"));
+    const std::uint32_t pid = JsonUInt32Or(*status, "process_id");
+    const bool active = RuntimeStatusLooksActive(*status);
 
+    std::cout << "svg-mb-control: "
+              << (active ? "running" : "not running") << '\n'
+              << "  mode: " << mode << '\n'
+              << "  status: " << state << '\n';
+    if (!detail.empty()) {
+        std::cout << "  detail: " << detail << '\n';
+    }
+    if (pid != 0u) {
+        std::cout << "  pid: " << pid
+                  << (active ? " (active)" : " (not active)") << '\n';
+    }
+    if (!last_eval.empty()) {
+        std::cout << "  last_update: " << last_eval << '\n';
+    }
+    std::cout << "  runtime_home: " << runtime_home.string() << '\n'
+              << "  status_file: " << status_path.string() << '\n';
+    const std::string log_csv = JsonStringOr(*status, "log_csv_path");
+    const std::string event_log = JsonStringOr(*status, "event_log_path");
+    if (!log_csv.empty()) {
+        std::cout << "  csv: " << log_csv << '\n';
+    }
+    if (!event_log.empty()) {
+        std::cout << "  events: " << event_log << '\n';
+    }
+    return 0;
+}
+
+bool WaitForRuntimeStop(const std::filesystem::path& runtime_home,
+                        std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto status = TryReadJsonObject(
+            RuntimeStatusPath(runtime_home), "runtime status");
+        if (!status.has_value() || !RuntimeStatusLooksActive(*status)) {
+            return true;
+        }
+        const std::string state = JsonStringOr(*status, "status");
+        if (state == "shutdown") {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return false;
+}
+
+int RequestStopAndWait(const std::filesystem::path& runtime_home,
+                       bool quiet = false) {
+    if (!svg_mb_control::RequestRuntimeStop(runtime_home)) {
+        std::cerr << "Error: could not write stop request under "
+                  << runtime_home.string() << '\n';
+        return 1;
+    }
+    if (!quiet) {
+        std::cout << "svg-mb-control: stop requested\n"
+                  << "  runtime_home: " << runtime_home.string() << '\n'
+                  << "  stop_request: "
+                  << svg_mb_control::RuntimeStopRequestPath(runtime_home).string()
+                  << '\n';
+    }
+    if (!WaitForRuntimeStop(runtime_home, std::chrono::seconds(15))) {
+        std::cerr << "Warning: controller did not report stopped within 15s.\n"
+                  << "  status: " << RuntimeStatusPath(runtime_home).string()
+                  << '\n';
+        return 2;
+    }
+    if (!quiet) {
+        std::cout << "svg-mb-control: stopped\n";
+    }
+    return 0;
+}
+
+std::wstring BuildManagedCommandLine(const std::filesystem::path& exe_path,
+                                     RunMode mode,
+                                     const std::filesystem::path& config_path,
+                                     bool supervisor) {
+    std::wstring command_line = QuoteCommandLineArg(exe_path.wstring());
+    command_line += supervisor ? L" --run-supervisor" : L" --run-foreground";
+    command_line += L" --mode ";
+    command_line += RunModeArgument(mode);
+    command_line += L" --config ";
+    command_line += QuoteCommandLineArg(config_path.wstring());
+    return command_line;
+}
+
+struct StartedProcess {
+    DWORD pid = 0u;
+    HANDLE process_handle = nullptr;
+};
+
+StartedProcess StartHiddenProcess(
+    const std::filesystem::path& exe_path,
+    const std::wstring& command_line,
+    const std::filesystem::path& working_directory,
+    const std::filesystem::path& stdout_path,
+    const std::filesystem::path& stderr_path) {
     HANDLE stdout_handle =
         OpenInheritedFile(stdout_path, FILE_APPEND_DATA, OPEN_ALWAYS);
     if (stdout_handle == INVALID_HANDLE_VALUE) {
@@ -366,12 +540,6 @@ int LaunchDetachedLongRunningMode(RunMode mode,
         CloseHandle(stderr_handle);
         throw std::runtime_error("Could not open launcher stdin handle.");
     }
-
-    std::wstring command_line = QuoteCommandLineArg(exe_path.wstring());
-    command_line += L" --run-foreground --mode ";
-    command_line += RunModeArgument(mode);
-    command_line += L" --config ";
-    command_line += QuoteCommandLineArg(config.source_path.wstring());
 
     STARTUPINFOW startup_info{};
     startup_info.cb = sizeof(startup_info);
@@ -419,14 +587,14 @@ int LaunchDetachedLongRunningMode(RunMode mode,
 
     PROCESS_INFORMATION process_info{};
     std::wstring mutable_command_line = command_line;
-    const std::filesystem::path working_directory = exe_path.parent_path();
     const BOOL created = CreateProcessW(
         exe_path.wstring().c_str(),
         mutable_command_line.data(),
         nullptr,
         nullptr,
         TRUE,
-        EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_PROCESS_GROUP |
+            CREATE_NO_WINDOW,
         nullptr,
         working_directory.wstring().c_str(),
         &startup_info_ex.StartupInfo,
@@ -441,21 +609,74 @@ int LaunchDetachedLongRunningMode(RunMode mode,
         throw std::runtime_error("Could not launch background controller.");
     }
 
-    const DWORD child_pid = process_info.dwProcessId;
     CloseHandle(process_info.hThread);
+    return StartedProcess{process_info.dwProcessId, process_info.hProcess};
+}
+
+bool ConfirmDetachedLaunch(RunMode mode,
+                           const svg_mb_control::ControlConfig& config) {
+    const std::filesystem::path runtime_home =
+        svg_mb_control::ResolveRuntimeHomePath(config);
+    std::wstring message =
+        L"Start SVG-MB Control in the background?\n\nMode: ";
+    message += RunModeArgument(mode);
+    message += L"\n\nConfig:\n";
+    message += config.source_path.wstring();
+    message += L"\n\nRuntime:\n";
+    message += runtime_home.wstring();
+
+    const int result = MessageBoxW(nullptr,
+                                   message.c_str(),
+                                   L"SVG-MB Control",
+                                   MB_YESNO | MB_DEFBUTTON2 |
+                                       MB_ICONQUESTION | MB_SETFOREGROUND);
+    return result == IDYES;
+}
+
+int LaunchDetachedLongRunningMode(RunMode mode,
+                                  const svg_mb_control::ControlConfig& config) {
+    const std::filesystem::path exe_path = CurrentExecutablePath();
+    if (exe_path.empty()) {
+        throw std::runtime_error("Could not resolve current executable path.");
+    }
+
+    const std::filesystem::path runtime_home =
+        svg_mb_control::ResolveRuntimeHomePath(config);
+    std::error_code ec;
+    std::filesystem::create_directories(runtime_home, ec);
+    if (ec) {
+        throw std::runtime_error("Could not create runtime home: " +
+                                 ec.message());
+    }
+    if (PrintAlreadyRunningIfActive(mode, runtime_home)) {
+        return 0;
+    }
+    svg_mb_control::ClearRuntimeStopRequest(runtime_home);
+
+    const std::filesystem::path stdout_path =
+        runtime_home / "svg-mb-control.supervisor.stdout.log";
+    const std::filesystem::path stderr_path =
+        runtime_home / "svg-mb-control.supervisor.stderr.log";
+    const std::filesystem::path working_directory = exe_path.parent_path();
+    StartedProcess supervisor = StartHiddenProcess(
+        exe_path,
+        BuildManagedCommandLine(exe_path, mode, config.source_path, true),
+        working_directory,
+        stdout_path,
+        stderr_path);
 
     constexpr DWORD kStartupCheckMs = 1500u;
     const DWORD startup_wait =
-        WaitForSingleObject(process_info.hProcess, kStartupCheckMs);
+        WaitForSingleObject(supervisor.process_handle, kStartupCheckMs);
     if (startup_wait == WAIT_OBJECT_0) {
         DWORD exit_code = 1u;
-        GetExitCodeProcess(process_info.hProcess, &exit_code);
-        CloseHandle(process_info.hProcess);
+        GetExitCodeProcess(supervisor.process_handle, &exit_code);
+        CloseHandle(supervisor.process_handle);
 
         std::cerr << "Error: "
                   << RunModeLabel(mode)
-                  << " background process exited during startup"
-                  << " (pid: " << child_pid
+                  << " background supervisor exited during startup"
+                  << " (pid: " << supervisor.pid
                   << ", exit_code: " << exit_code << ").\n"
                   << "  stderr: " << stderr_path.string() << '\n';
         const std::string stderr_tail =
@@ -467,18 +688,168 @@ int LaunchDetachedLongRunningMode(RunMode mode,
         }
         return exit_code == 0u ? 1 : static_cast<int>(exit_code);
     }
-    CloseHandle(process_info.hProcess);
+    CloseHandle(supervisor.process_handle);
 
     std::cout << "svg-mb-control: launched "
               << RunModeLabel(mode)
               << " in background\n"
-              << "  pid: " << child_pid << '\n'
+              << "  supervisor_pid: " << supervisor.pid << '\n'
               << "  config: " << config.source_path.string() << '\n'
               << "  runtime_home: " << runtime_home.string() << '\n'
               << "  status: " << (runtime_home / "control_runtime.json").string()
               << '\n'
-              << "  stdout: " << stdout_path.string() << '\n'
-              << "  stderr: " << stderr_path.string() << '\n';
+              << "  supervisor_stdout: " << stdout_path.string() << '\n'
+              << "  supervisor_stderr: " << stderr_path.string() << '\n'
+              << "  worker_stdout: "
+              << (runtime_home / "svg-mb-control.worker.stdout.log").string()
+              << '\n'
+              << "  worker_stderr: "
+              << (runtime_home / "svg-mb-control.worker.stderr.log").string()
+              << '\n';
+    return 0;
+}
+
+int RunSupervisedLongRunningMode(RunMode mode,
+                                 const svg_mb_control::ControlConfig& config) {
+    const std::filesystem::path exe_path = CurrentExecutablePath();
+    if (exe_path.empty()) {
+        throw std::runtime_error("Could not resolve current executable path.");
+    }
+    const std::filesystem::path runtime_home =
+        svg_mb_control::ResolveRuntimeHomePath(config);
+    std::error_code ec;
+    std::filesystem::create_directories(runtime_home, ec);
+    if (ec) {
+        throw std::runtime_error("Could not create runtime home: " +
+                                 ec.message());
+    }
+    svg_mb_control::ClearRuntimeStopRequest(runtime_home);
+
+    const std::filesystem::path working_directory = exe_path.parent_path();
+    const std::filesystem::path stdout_path =
+        runtime_home / "svg-mb-control.worker.stdout.log";
+    const std::filesystem::path stderr_path =
+        runtime_home / "svg-mb-control.worker.stderr.log";
+    std::uint32_t restart_count = 0u;
+
+    svg_mb_control::AppendRuntimeEvent(
+        runtime_home,
+        svg_mb_control::RuntimeLogEvent{
+            .mode = std::string(RunModeLabel(mode)),
+            .event_type = "supervisor.start",
+            .detail = "background supervisor started",
+            .success = true,
+        });
+
+    while (!svg_mb_control::RuntimeStopRequested(runtime_home)) {
+        StartedProcess worker = StartHiddenProcess(
+            exe_path,
+            BuildManagedCommandLine(exe_path, mode, config.source_path, false),
+            working_directory,
+            stdout_path,
+            stderr_path);
+        {
+            std::ostringstream detail;
+            detail << "worker started pid=" << worker.pid
+                   << " restart_count=" << restart_count;
+            svg_mb_control::AppendRuntimeEvent(
+                runtime_home,
+                svg_mb_control::RuntimeLogEvent{
+                    .mode = std::string(RunModeLabel(mode)),
+                    .event_type = "supervisor.worker_started",
+                    .detail = detail.str(),
+                    .success = true,
+                });
+        }
+
+        constexpr DWORD kWorkerStartupCheckMs = 1500u;
+        DWORD wait_result =
+            WaitForSingleObject(worker.process_handle, kWorkerStartupCheckMs);
+        const bool exited_during_startup = wait_result == WAIT_OBJECT_0;
+        DWORD exit_code = STILL_ACTIVE;
+        if (exited_during_startup) {
+            GetExitCodeProcess(worker.process_handle, &exit_code);
+        } else {
+            while (wait_result == WAIT_TIMEOUT) {
+                wait_result = WaitForSingleObject(worker.process_handle, 1000u);
+            }
+            GetExitCodeProcess(worker.process_handle, &exit_code);
+        }
+
+        const bool stop_requested =
+            svg_mb_control::RuntimeStopRequested(runtime_home);
+        {
+            std::ostringstream detail;
+            detail << "worker exited pid=" << worker.pid
+                   << " exit_code=" << exit_code
+                   << " stop_requested="
+                   << (stop_requested ? "true" : "false");
+            svg_mb_control::AppendRuntimeEvent(
+                runtime_home,
+                svg_mb_control::RuntimeLogEvent{
+                    .mode = std::string(RunModeLabel(mode)),
+                    .event_type = "supervisor.worker_exited",
+                    .detail = detail.str(),
+                    .success = exit_code == 0u,
+                });
+        }
+
+        if (restart_count == 0u && exited_during_startup &&
+            !stop_requested && exit_code != 0u) {
+            std::cerr << "Error: " << RunModeLabel(mode)
+                      << " worker exited during startup"
+                      << " (pid: " << worker.pid
+                      << ", exit_code: " << exit_code << ").\n"
+                      << "  stderr: " << stderr_path.string() << '\n';
+            const std::string stderr_tail =
+                ReadTextFileTail(stderr_path, 4096u);
+            if (!stderr_tail.empty()) {
+                std::cerr << "\n--- worker stderr tail ---\n"
+                          << stderr_tail
+                          << "\n--- end worker stderr tail ---\n";
+            }
+            CloseHandle(worker.process_handle);
+            return static_cast<int>(exit_code);
+        }
+
+        CloseHandle(worker.process_handle);
+
+        if (stop_requested || exit_code == 0u) {
+            break;
+        }
+
+        ++restart_count;
+        const std::uint32_t backoff_seconds =
+            (std::min)(60u, 1u << (std::min)(restart_count, 5u));
+        {
+            std::ostringstream detail;
+            detail << "restarting worker after " << backoff_seconds
+                   << "s; restart_count=" << restart_count;
+            svg_mb_control::AppendRuntimeEvent(
+                runtime_home,
+                svg_mb_control::RuntimeLogEvent{
+                    .mode = std::string(RunModeLabel(mode)),
+                    .event_type = "supervisor.worker_restart_scheduled",
+                    .detail = detail.str(),
+                    .success = false,
+                });
+        }
+        for (std::uint32_t elapsed = 0u;
+             elapsed < backoff_seconds &&
+             !svg_mb_control::RuntimeStopRequested(runtime_home);
+             ++elapsed) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    svg_mb_control::AppendRuntimeEvent(
+        runtime_home,
+        svg_mb_control::RuntimeLogEvent{
+            .mode = std::string(RunModeLabel(mode)),
+            .event_type = "supervisor.shutdown",
+            .detail = "background supervisor stopped",
+            .success = true,
+        });
     return 0;
 }
 
@@ -693,7 +1064,12 @@ int wmain(int argc, wchar_t** argv) {
         std::filesystem::path config_path;
         bool config_path_explicit = false;
         bool foreground_launch = false;
+        bool supervisor_launch = false;
         bool confirm_start = false;
+        bool start_requested = false;
+        bool status_requested = false;
+        bool stop_requested = false;
+        bool restart_requested = false;
         RunMode run_mode = RunMode::kOneShot;
         bool run_mode_explicit = false;
         std::uint32_t write_channel = 0u;
@@ -724,6 +1100,16 @@ int wmain(int argc, wchar_t** argv) {
                 config_path_explicit = true;
             } else if (arg == L"--run-foreground") {
                 foreground_launch = true;
+            } else if (arg == L"--run-supervisor") {
+                supervisor_launch = true;
+            } else if (arg == L"--start") {
+                start_requested = true;
+            } else if (arg == L"--status") {
+                status_requested = true;
+            } else if (arg == L"--stop") {
+                stop_requested = true;
+            } else if (arg == L"--restart") {
+                restart_requested = true;
             } else if (arg == L"--confirm-start") {
                 confirm_start = true;
             } else if (arg == L"--mode") {
@@ -845,14 +1231,53 @@ int wmain(int argc, wchar_t** argv) {
             run_mode = ParseRunMode(config->default_mode);
         }
 
+        const svg_mb_control::ControlConfig status_config =
+            config.has_value() ? *config : svg_mb_control::ControlConfig{};
+        const std::filesystem::path command_runtime_home =
+            svg_mb_control::ResolveRuntimeHomePath(status_config);
+
+        if (status_requested) {
+            return PrintRuntimeStatus(command_runtime_home);
+        }
+
+        if (stop_requested && !restart_requested) {
+            return RequestStopAndWait(command_runtime_home);
+        }
+
+        if (restart_requested) {
+            const int stop_result =
+                RequestStopAndWait(command_runtime_home, true);
+            if (stop_result != 0) {
+                return stop_result;
+            }
+            start_requested = true;
+        }
+
+        if (supervisor_launch) {
+            if (!config.has_value()) {
+                throw std::runtime_error(
+                    "--run-supervisor requires a control config.");
+            }
+            if (!IsLongRunningMode(run_mode)) {
+                throw std::runtime_error(
+                    "--run-supervisor requires read-loop or control-loop.");
+            }
+            return RunSupervisedLongRunningMode(run_mode, *config);
+        }
+
         if (!foreground_launch && config.has_value() &&
             IsLongRunningMode(run_mode) &&
-            (no_launch_args || confirm_start)) {
+            (no_launch_args || confirm_start || start_requested)) {
             if (confirm_start && !ConfirmDetachedLaunch(run_mode, *config)) {
                 std::cout << "svg-mb-control: start cancelled\n";
                 return 0;
             }
             return LaunchDetachedLongRunningMode(run_mode, *config);
+        }
+
+        if (start_requested || restart_requested) {
+            throw std::runtime_error(
+                "--start/--restart requires a control config whose mode is read-loop or control-loop.");
         }
 
         if (config.has_value() && !config->runtime_policy_path.empty()) {

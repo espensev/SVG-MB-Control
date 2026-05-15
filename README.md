@@ -103,8 +103,24 @@ cd .\release
 ```
 
 The packaged `control.json` sets `default_mode` to `control-loop`, so a plain
-launch starts normal fan control in the background, returns the shell prompt,
-and writes runtime output under `release\runtime`.
+launch starts normal fan control under a hidden supervisor, returns the shell
+prompt, and writes runtime output under `release\runtime`. The supervisor
+restarts the worker after an unexpected non-zero exit; config/startup failures
+are still reported immediately.
+
+Operator commands:
+
+```powershell
+cd .\release
+.\svg-mb-control.exe --start
+.\svg-mb-control.exe --status
+.\svg-mb-control.exe --stop
+.\svg-mb-control.exe --restart
+```
+
+`--stop` asks the running loop to shut down through `release\runtime`; it does
+not hard-kill the controller. The status command prints the active worker PID,
+mode, status detail, runtime home, and log paths.
 
 Start Menu shortcut:
 
@@ -113,11 +129,11 @@ cd .\release
 .\Install-SVG-MB-ControlShortcut.ps1
 ```
 
-The shortcut runs `svg-mb-control.exe --confirm-start`, shows a confirmation
-prompt before starting the background controller, and is created under the
-Windows Start Menu programs folder. Windows does not expose a reliable supported
-CLI for pinning shortcuts to Start; after installing the shortcut, open Start,
-find "SVG-MB Control", then right-click it and choose "Pin to Start".
+The shortcut runs `svg-mb-control.exe` with no special arguments and is created
+under the Windows Start Menu programs folder. Windows does not expose a reliable
+supported CLI for pinning shortcuts to Start; after installing the shortcut,
+open Start, find "SVG-MB Control", then right-click it and choose "Pin to
+Start".
 
 Direct one-shot snapshot to stdout:
 
@@ -145,9 +161,12 @@ release\svg-mb-control.exe --mode control-loop --config .\release\control.json
 
 When `--mode` is omitted, Control uses `default_mode` from the loaded config.
 If no config sets `default_mode`, Control falls back to `one-shot`.
-For long-running default modes, the no-arg launcher starts a background child
-process and exits; pass `--mode` explicitly when you want the current terminal
-to stay attached.
+For long-running default modes, the no-arg launcher starts a background
+supervisor and exits; pass `--mode` explicitly when you want the current
+terminal to stay attached without supervision. `--start` follows the same
+supervised launch path, `--stop` writes a cooperative stop request, and
+`--restart` stops first and only relaunches after the previous worker reports
+stopped.
 
 Legacy bridge flags such as `--bridge-exe-path` are intentionally rejected in
 this branch.
@@ -244,13 +263,19 @@ Control writes:
 - `current_state.json`
 - `control_runtime.json`
 - `pending_writes.json`
+- `stop.request.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
+- `svg-mb-control.supervisor.stdout.log`
+- `svg-mb-control.supervisor.stderr.log`
+- `svg-mb-control.worker.stdout.log`
+- `svg-mb-control.worker.stderr.log`
 
 `current_state.json`, `control_runtime.json`, and `pending_writes.json` remain
 the authoritative live state and recovery plane. `control_runtime.json` also
-publishes `log_csv_path` and `event_log_path` for the active mode.
+publishes the active worker `process_id`, `log_csv_path`, `log_manifest_path`,
+and `event_log_path` for the active mode.
 
 See `docs\RUNTIME_HOME.md` for field definitions.
 

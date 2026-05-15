@@ -2,6 +2,14 @@
 
 #include "json_io.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <cmath>
 
 namespace svg_mb_control {
@@ -46,8 +54,9 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::string& log_csv_path,
                             const std::string& log_manifest_path,
                             const std::string& event_log_path) {
-    nlohmann::json payload = MakeSchemaObject(3u);
+    nlohmann::json payload = MakeSchemaObject(4u);
     payload["mode"] = mode_label;
+    payload["process_id"] = GetCurrentProcessId();
     payload["status"] = status;
     payload["status_detail"] = status_detail;
     payload["loop_tick_count"] = tick_count;

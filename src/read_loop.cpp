@@ -6,6 +6,7 @@
 #include "gpu_reader.h"
 #include "json_io.h"
 #include "runtime_logging.h"
+#include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 
@@ -62,6 +63,8 @@ bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
                             const ReadLoop::Status& status) {
     nlohmann::json payload = MakeSchemaObject(1u);
     payload["status"] = status.status;
+    payload["mode"] = "read-loop";
+    payload["process_id"] = GetCurrentProcessId();
     payload["status_detail"] = status.status_detail;
     payload["last_refresh"] = status.last_refresh_iso;
     payload["snapshot_source"] = status.snapshot_source;
@@ -130,6 +133,7 @@ int ReadLoop::RunUntilStopped() {
 
     std::error_code ec;
     std::filesystem::create_directories(impl_->runtime_home, ec);
+    ClearRuntimeStopRequest(impl_->runtime_home);
 
     Status status;
     status.status = "running";
@@ -208,7 +212,8 @@ int ReadLoop::RunUntilStopped() {
     GpuReader gpu_reader;
     auto last_success_time = std::chrono::steady_clock::now();
 
-    while (!impl_->stop_requested.load()) {
+    while (!impl_->stop_requested.load() &&
+           !RuntimeStopRequested(impl_->runtime_home)) {
         try {
             RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
                 amd_reader, gpu_reader, *fan_writer, runtime_policy);
@@ -353,7 +358,10 @@ int ReadLoop::RunUntilStopped() {
         impl_->wake_cv.wait_for(
             lock,
             std::chrono::milliseconds(poll_ms),
-            [this] { return impl_->stop_requested.load(); });
+            [this] {
+                return impl_->stop_requested.load() ||
+                       RuntimeStopRequested(impl_->runtime_home);
+            });
     }
 
     publish_status("shutdown", "stop requested");

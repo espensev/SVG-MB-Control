@@ -90,7 +90,7 @@ New-Item -ItemType Directory -Path $shortcutDir -Force | Out-Null
 
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $exePath
-$shortcut.Arguments = '--confirm-start'
+$shortcut.Arguments = ''
 $shortcut.WorkingDirectory = $exeDir
 $shortcut.IconLocation = "$exePath,0"
 $shortcut.WindowStyle = 7

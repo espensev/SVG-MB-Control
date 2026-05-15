@@ -11,6 +11,7 @@
 #include "json_io.h"
 #include "pending_writes.h"
 #include "runtime_logging.h"
+#include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 
 #include <nlohmann/json.hpp>
@@ -368,6 +369,7 @@ ControlLoop::~ControlLoop() = default;
 
 int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     ControlRuntimeContext& context = impl_->context;
+    ClearRuntimeStopRequest(context.runtime_home);
     const std::string event_log_path =
         ResolveRuntimeEventLogPath(context.runtime_home).string();
     RuntimeCsvLogger csv_logger(
@@ -455,7 +457,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         std::numeric_limits<double>::quiet_NaN();
     double last_process_cpu_pct = std::numeric_limits<double>::quiet_NaN();
 
-    while (!stop_flag.load()) {
+    while (!stop_flag.load() &&
+           !RuntimeStopRequested(context.runtime_home)) {
         ++tick_count;
         const auto tick_started_steady = std::chrono::steady_clock::now();
         const auto tick_started_wall = std::chrono::system_clock::now();
