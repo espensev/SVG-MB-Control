@@ -2,9 +2,49 @@
 
 #include <fstream>
 #include <stdexcept>
+#include <string>
 #include <system_error>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace svg_mb_control {
+
+namespace {
+
+void ReplaceFileWithTemp(const std::filesystem::path& temp,
+                         const std::filesystem::path& target) {
+#ifdef _WIN32
+    if (!MoveFileExW(temp.wstring().c_str(),
+                     target.wstring().c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        const DWORD error = GetLastError();
+        std::error_code cleanup_ec;
+        std::filesystem::remove(temp, cleanup_ec);
+        throw std::runtime_error(
+            "Failed to replace JSON output file: Windows error " +
+            std::to_string(error));
+    }
+#else
+    std::error_code ec;
+    std::filesystem::rename(temp, target, ec);
+    if (ec) {
+        std::error_code cleanup_ec;
+        std::filesystem::remove(temp, cleanup_ec);
+        throw std::runtime_error("Failed to rename JSON temp file: " +
+                                 ec.message());
+    }
+#endif
+}
+
+}  // namespace
 
 nlohmann::json MakeSchemaObject(std::uint32_t schema_version) {
     nlohmann::json payload = nlohmann::json::object();
@@ -64,12 +104,7 @@ void WriteJsonFileAtomic(const std::filesystem::path& target_path,
         }
     }
 
-    std::filesystem::rename(temp, target_path, ec);
-    if (ec) {
-        std::filesystem::remove(temp, ec);
-        throw std::runtime_error("Failed to rename JSON temp file: " +
-                                 ec.message());
-    }
+    ReplaceFileWithTemp(temp, target_path);
 }
 
 bool TryWriteJsonFileAtomic(const std::filesystem::path& target_path,
