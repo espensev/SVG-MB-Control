@@ -1,4 +1,5 @@
 #include "amd_reader.h"
+#include "calibration.h"
 #include "control_config.h"
 #include "control_loop.h"
 #include "direct_runtime_snapshot.h"
@@ -20,7 +21,9 @@
 #include <array>
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -39,6 +42,7 @@ enum class RunMode {
     kReadLoop,
     kWriteOnce,
     kControlLoop,
+    kCalibrate,
 };
 
 svg_mb_control::ReadLoop* g_active_read_loop = nullptr;
@@ -64,10 +68,15 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop>] [--config <path>] "
+        << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate>] [--config <path>] "
            << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
+        << "  svg-mb-control --mode calibrate [--calibrate-channel <n>] "
+           << "[--calibrate-step-ms <ms>] [--calibrate-cooldown-ms <ms>] "
+           << "[--calibrate-settle-window-ms <ms>] [--calibrate-abort-temp-c <c>] "
+           << "[--calibrate-output <path>]\n"
         << "  svg-mb-control --diagnose-amd\n"
         << "  svg-mb-control --diagnose-gpu\n"
+        << "  svg-mb-control --confirm-start\n"
         << "  svg-mb-control --help|-h\n"
         << "  svg-mb-control --version\n";
 }
@@ -94,6 +103,8 @@ std::wstring RunModeArgument(RunMode mode) {
             return L"write-once";
         case RunMode::kControlLoop:
             return L"control-loop";
+        case RunMode::kCalibrate:
+            return L"calibrate";
     }
     throw std::runtime_error("Unknown run mode.");
 }
@@ -108,6 +119,8 @@ std::string_view RunModeLabel(RunMode mode) {
             return "write-once";
         case RunMode::kControlLoop:
             return "control-loop";
+        case RunMode::kCalibrate:
+            return "calibrate";
     }
     throw std::runtime_error("Unknown run mode.");
 }
@@ -166,6 +179,49 @@ HANDLE OpenInheritedFile(const std::filesystem::path& path,
                        creation_disposition,
                        FILE_ATTRIBUTE_NORMAL,
                        nullptr);
+}
+
+std::string ReadTextFileTail(const std::filesystem::path& path,
+                             std::uintmax_t max_bytes) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+        return {};
+    }
+
+    stream.seekg(0, std::ios::end);
+    const std::ifstream::pos_type end = stream.tellg();
+    if (end <= 0) {
+        return {};
+    }
+
+    const auto length = static_cast<std::uintmax_t>(end);
+    const auto start = length > max_bytes ? length - max_bytes : 0u;
+    stream.seekg(static_cast<std::streamoff>(start), std::ios::beg);
+
+    std::string content;
+    content.assign(std::istreambuf_iterator<char>(stream),
+                   std::istreambuf_iterator<char>());
+    return content;
+}
+
+bool ConfirmDetachedLaunch(RunMode mode,
+                           const svg_mb_control::ControlConfig& config) {
+    const std::filesystem::path runtime_home =
+        svg_mb_control::ResolveRuntimeHomePath(config);
+    std::wstring message =
+        L"Start SVG-MB Control in the background?\n\nMode: ";
+    message += RunModeArgument(mode);
+    message += L"\n\nConfig:\n";
+    message += config.source_path.wstring();
+    message += L"\n\nRuntime:\n";
+    message += runtime_home.wstring();
+
+    const int result = MessageBoxW(nullptr,
+                                   message.c_str(),
+                                   L"SVG-MB Control",
+                                   MB_YESNO | MB_DEFBUTTON2 |
+                                       MB_ICONQUESTION | MB_SETFOREGROUND);
+    return result == IDYES;
 }
 
 int LaunchDetachedLongRunningMode(RunMode mode,
@@ -284,6 +340,30 @@ int LaunchDetachedLongRunningMode(RunMode mode,
 
     const DWORD child_pid = process_info.dwProcessId;
     CloseHandle(process_info.hThread);
+
+    constexpr DWORD kStartupCheckMs = 1500u;
+    const DWORD startup_wait =
+        WaitForSingleObject(process_info.hProcess, kStartupCheckMs);
+    if (startup_wait == WAIT_OBJECT_0) {
+        DWORD exit_code = 1u;
+        GetExitCodeProcess(process_info.hProcess, &exit_code);
+        CloseHandle(process_info.hProcess);
+
+        std::cerr << "Error: "
+                  << RunModeLabel(mode)
+                  << " background process exited during startup"
+                  << " (pid: " << child_pid
+                  << ", exit_code: " << exit_code << ").\n"
+                  << "  stderr: " << stderr_path.string() << '\n';
+        const std::string stderr_tail =
+            ReadTextFileTail(stderr_path, 4096u);
+        if (!stderr_tail.empty()) {
+            std::cerr << "\n--- stderr tail ---\n"
+                      << stderr_tail
+                      << "\n--- end stderr tail ---\n";
+        }
+        return exit_code == 0u ? 1 : static_cast<int>(exit_code);
+    }
     CloseHandle(process_info.hProcess);
 
     std::cout << "svg-mb-control: launched "
@@ -417,6 +497,9 @@ RunMode ParseRunMode(const wchar_t* value) {
     if (raw == L"control-loop") {
         return RunMode::kControlLoop;
     }
+    if (raw == L"calibrate") {
+        return RunMode::kCalibrate;
+    }
     throw std::runtime_error("Invalid --mode value.");
 }
 
@@ -432,6 +515,9 @@ RunMode ParseRunMode(std::string_view value) {
     }
     if (value == "control-loop") {
         return RunMode::kControlLoop;
+    }
+    if (value == "calibrate") {
+        return RunMode::kCalibrate;
     }
     throw std::runtime_error("Invalid default_mode in control config.");
 }
@@ -462,6 +548,23 @@ std::uint32_t ParseWriteHoldMs(const wchar_t* value) {
     }
 }
 
+std::uint32_t ParseUInt32Arg(const wchar_t* value, const char* flag_name) {
+    try {
+        const unsigned long parsed = std::stoul(std::wstring(value));
+        return static_cast<std::uint32_t>(parsed);
+    } catch (const std::exception&) {
+        throw std::runtime_error(std::string("Invalid ") + flag_name + " value.");
+    }
+}
+
+double ParseDoubleArg(const wchar_t* value, const char* flag_name) {
+    try {
+        return std::stod(std::wstring(value));
+    } catch (const std::exception&) {
+        throw std::runtime_error(std::string("Invalid ") + flag_name + " value.");
+    }
+}
+
 std::string SampleDirectSnapshotJson(
     const svg_mb_control::ControlConfig* config) {
     const svg_mb_control::RuntimeWritePolicy runtime_policy =
@@ -484,6 +587,7 @@ int wmain(int argc, wchar_t** argv) {
         std::filesystem::path config_path;
         bool config_path_explicit = false;
         bool foreground_launch = false;
+        bool confirm_start = false;
         RunMode run_mode = RunMode::kOneShot;
         bool run_mode_explicit = false;
         std::uint32_t write_channel = 0u;
@@ -492,6 +596,12 @@ int wmain(int argc, wchar_t** argv) {
         bool write_pct_explicit = false;
         std::uint32_t write_hold_ms = 0u;
         bool write_hold_ms_explicit = false;
+        std::optional<std::uint32_t> calibrate_channel;
+        std::optional<std::uint32_t> calibrate_step_ms;
+        std::optional<std::uint32_t> calibrate_cooldown_ms;
+        std::optional<std::uint32_t> calibrate_settle_window_ms;
+        std::optional<double> calibrate_abort_temp_c;
+        std::filesystem::path calibrate_output_path;
 
         for (int index = 1; index < argc; ++index) {
             const std::wstring arg = argv[index];
@@ -508,6 +618,8 @@ int wmain(int argc, wchar_t** argv) {
                 config_path_explicit = true;
             } else if (arg == L"--run-foreground") {
                 foreground_launch = true;
+            } else if (arg == L"--confirm-start") {
+                confirm_start = true;
             } else if (arg == L"--mode") {
                 run_mode = ParseRunMode(require_value());
                 run_mode_explicit = true;
@@ -520,6 +632,24 @@ int wmain(int argc, wchar_t** argv) {
             } else if (arg == L"--write-hold-ms") {
                 write_hold_ms = ParseWriteHoldMs(require_value());
                 write_hold_ms_explicit = true;
+            } else if (arg == L"--calibrate-channel") {
+                calibrate_channel = ParseUInt32Arg(
+                    require_value(), "--calibrate-channel");
+            } else if (arg == L"--calibrate-step-ms") {
+                calibrate_step_ms = ParseUInt32Arg(
+                    require_value(), "--calibrate-step-ms");
+            } else if (arg == L"--calibrate-cooldown-ms") {
+                calibrate_cooldown_ms = ParseUInt32Arg(
+                    require_value(), "--calibrate-cooldown-ms");
+            } else if (arg == L"--calibrate-settle-window-ms") {
+                calibrate_settle_window_ms = ParseUInt32Arg(
+                    require_value(), "--calibrate-settle-window-ms");
+            } else if (arg == L"--calibrate-abort-temp-c") {
+                calibrate_abort_temp_c = ParseDoubleArg(
+                    require_value(), "--calibrate-abort-temp-c");
+            } else if (arg == L"--calibrate-output") {
+                calibrate_output_path =
+                    std::filesystem::path(require_value());
             } else if (arg == L"--help" || arg == L"-h") {
                 PrintUsage();
                 return 0;
@@ -609,8 +739,13 @@ int wmain(int argc, wchar_t** argv) {
             run_mode = ParseRunMode(config->default_mode);
         }
 
-        if (no_launch_args && !foreground_launch && config.has_value() &&
-            IsLongRunningMode(run_mode)) {
+        if (!foreground_launch && config.has_value() &&
+            IsLongRunningMode(run_mode) &&
+            (no_launch_args || confirm_start)) {
+            if (confirm_start && !ConfirmDetachedLaunch(run_mode, *config)) {
+                std::cout << "svg-mb-control: start cancelled\n";
+                return 0;
+            }
             return LaunchDetachedLongRunningMode(run_mode, *config);
         }
 
@@ -695,6 +830,43 @@ int wmain(int argc, wchar_t** argv) {
                 throw std::runtime_error("SetConsoleCtrlHandler failed.");
             }
             const int result = control_loop.RunUntilStopped(g_stop_signaled);
+            SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
+            return result;
+        }
+
+        if (run_mode == RunMode::kCalibrate) {
+            svg_mb_control::CalibrationOptions options =
+                svg_mb_control::DefaultCalibrationOptions();
+            if (calibrate_step_ms.has_value()) {
+                for (auto& step : options.sequence) {
+                    step.hold_ms = *calibrate_step_ms;
+                }
+            }
+            if (calibrate_cooldown_ms.has_value() &&
+                !options.sequence.empty()) {
+                options.sequence.back().hold_ms = *calibrate_cooldown_ms;
+            }
+            if (calibrate_settle_window_ms.has_value()) {
+                options.settle_window_ms = *calibrate_settle_window_ms;
+            }
+            if (calibrate_abort_temp_c.has_value()) {
+                options.abort_temp_ceiling_c = *calibrate_abort_temp_c;
+            }
+            if (calibrate_channel.has_value()) {
+                options.only_channel = *calibrate_channel;
+            }
+            if (!calibrate_output_path.empty()) {
+                options.output_path = calibrate_output_path;
+            }
+            if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE)) {
+                throw std::runtime_error("SetConsoleCtrlHandler failed.");
+            }
+            const svg_mb_control::ControlConfig effective_config =
+                config.has_value() ? *config
+                                   : svg_mb_control::ControlConfig{};
+            const int result = svg_mb_control::RunCalibration(
+                effective_config, reconcile_runtime_home, options,
+                g_stop_signaled);
             SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
             return result;
         }

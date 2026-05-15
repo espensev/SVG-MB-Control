@@ -132,3 +132,37 @@ class SmokeTests(unittest.TestCase):
                     capture_output=True,
                     text=True,
                 )
+
+    def test_zero_arg_staged_launch_reports_startup_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            staged_exe = td / "svg-mb-control.exe"
+            runtime_home = td / "runtime"
+            shutil.copy2(CONTROL_EXE, staged_exe)
+            _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                default_mode="read-loop",
+                poll_ms=100,
+            )
+            runtime_home.mkdir(parents=True, exist_ok=True)
+            (runtime_home / "pending_writes.json").write_text(
+                '{"schema_version":1,"entries":[]} trailing',
+                encoding="utf-8",
+            )
+
+            result = _run_control(
+                cwd=td,
+                exe=staged_exe,
+                env=_sim_direct_env(channel=1, amd_temp_c=74.0),
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "background process exited during startup",
+                result.stderr,
+            )
+            self.assertIn(
+                "pending writes reconciliation failed",
+                result.stderr,
+            )

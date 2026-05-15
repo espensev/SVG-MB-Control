@@ -78,6 +78,7 @@ endif()
 add_executable(svg_mb_control
     src/pch.cpp
     src/amd_reader.cpp
+    src/calibration.cpp
     src/channel_evaluator.cpp
     src/control_config.cpp
     src/control_loop.cpp

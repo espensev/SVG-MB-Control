@@ -106,6 +106,19 @@ The packaged `control.json` sets `default_mode` to `control-loop`, so a plain
 launch starts normal fan control in the background, returns the shell prompt,
 and writes runtime output under `release\runtime`.
 
+Start Menu shortcut:
+
+```powershell
+cd .\release
+.\Install-SVG-MB-ControlShortcut.ps1
+```
+
+The shortcut runs `svg-mb-control.exe --confirm-start`, shows a confirmation
+prompt before starting the background controller, and is created under the
+Windows Start Menu programs folder. Windows does not expose a reliable supported
+CLI for pinning shortcuts to Start; after installing the shortcut, open Start,
+find "SVG-MB Control", then right-click it and choose "Pin to Start".
+
 Direct one-shot snapshot to stdout:
 
 ```powershell
