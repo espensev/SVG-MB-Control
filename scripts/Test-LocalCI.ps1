@@ -14,8 +14,8 @@ $RepoRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'CMakeLists.txt'
 
 $buildScript = Join-Path $RepoRoot 'scripts\Build-Release.ps1'
 if ($KeepBuildDir) {
-    & $buildScript -NoStopProcesses -KeepBuildDir
+    & $buildScript -NoStopProcesses -NoPublish -KeepBuildDir
 } else {
-    & $buildScript -NoStopProcesses
+    & $buildScript -NoStopProcesses -NoPublish
 }
 exit $LASTEXITCODE

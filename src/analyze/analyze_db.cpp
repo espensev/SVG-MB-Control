@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     gpu_core_c REAL,
     gpu_memjn_c REAL,
     gpu_hotspot_c REAL,
+    gpu_envelope_c REAL,
     fan_count INTEGER,
     policy_writes_enabled_present INTEGER,
     policy_writes_enabled INTEGER,
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS tick_samples (
 
 CREATE INDEX IF NOT EXISTS idx_tick_samples_wall_clock
     ON tick_samples(run_id, wall_clock);
+CREATE INDEX IF NOT EXISTS idx_tick_samples_gpu_envelope
+    ON tick_samples(run_id, gpu_envelope_c);
 
 CREATE TABLE IF NOT EXISTS tick_fan_samples (
     run_id INTEGER NOT NULL,
@@ -426,6 +429,8 @@ std::int64_t Database::LastInsertRowId() const {
     return sqlite3_last_insert_rowid(db_);
 }
 
+void MigrateSchema(Database& db);
+
 void BootstrapSchema(Database& db) {
     Transaction txn(db.handle());
     db.Exec(kSchemaSql);
@@ -434,6 +439,7 @@ void BootstrapSchema(Database& db) {
         "ON CONFLICT(key) DO NOTHING");
     upsert.BindText(1, std::to_string(kSchemaVersion));
     upsert.Step();
+    MigrateSchema(db);
     txn.Commit();
 }
 
@@ -448,6 +454,67 @@ int GetSchemaVersion(Database& db) {
         return std::stoi(text);
     } catch (const std::exception&) {
         return 0;
+    }
+}
+
+bool ColumnExists(Database& db,
+                  std::string_view table_name,
+                  std::string_view column_name) {
+    std::string sql = "PRAGMA table_info(";
+    sql += std::string(table_name);
+    sql += ")";
+    Statement stmt = db.Prepare(sql);
+    while (stmt.Step()) {
+        if (stmt.ColumnText(1) == std::string(column_name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void SetSchemaVersion(Database& db, int version) {
+    Statement stmt = db.Prepare(
+        "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?1) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    stmt.BindText(1, std::to_string(version));
+    stmt.Step();
+}
+
+void BackfillGpuEnvelope(Database& db) {
+    db.Exec(R"sql(
+UPDATE tick_samples
+SET gpu_envelope_c =
+    CASE
+        WHEN gpu_core_c IS NULL
+             AND gpu_memjn_c IS NULL
+             AND (gpu_hotspot_c IS NULL OR gpu_hotspot_c <= 0.0)
+        THEN NULL
+        ELSE max(
+            coalesce(gpu_core_c, -1000000.0),
+            coalesce(gpu_memjn_c, -1000000.0),
+            CASE
+                WHEN gpu_hotspot_c IS NOT NULL AND gpu_hotspot_c > 0.0
+                THEN gpu_hotspot_c
+                ELSE -1000000.0
+            END)
+    END
+WHERE gpu_envelope_c IS NULL
+)sql");
+}
+
+void MigrateSchema(Database& db) {
+    int version = GetSchemaVersion(db);
+    if (version <= 2) {
+        if (!ColumnExists(db, "tick_samples", "gpu_envelope_c")) {
+            db.Exec("ALTER TABLE tick_samples ADD COLUMN gpu_envelope_c REAL");
+        }
+        BackfillGpuEnvelope(db);
+        db.Exec(
+            "CREATE INDEX IF NOT EXISTS idx_tick_samples_gpu_envelope "
+            "ON tick_samples(run_id, gpu_envelope_c)");
+        if (version < 2) {
+            SetSchemaVersion(db, 2);
+        }
     }
 }
 

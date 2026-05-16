@@ -16,6 +16,10 @@ namespace svg_mb_control {
 
 namespace {
 
+constexpr std::array<std::uint16_t, 7u> kNct6701FanCountRegisters = {
+    0x4B0u, 0x4B2u, 0x4B4u, 0x4B6u, 0x4B8u, 0x4BAu, 0x4CCu
+};
+
 std::string GetEnvOrDefault(const char* name, std::string_view fallback) {
     char* value = nullptr;
     std::size_t size = 0u;
@@ -63,6 +67,50 @@ FanScanResult MakeScanOk(std::vector<FanChannelState> fans) {
 
 FanScanResult MakeScanResult(FanWriteError error, std::string detail) {
     FanScanResult result;
+    result.error = error;
+    result.detail = std::move(detail);
+    return result;
+}
+
+FanTachEvidenceScanResult MakeFanTachEvidenceOk(
+    std::vector<FanTachEvidenceState> fans) {
+    FanTachEvidenceScanResult result;
+    result.fans = std::move(fans);
+    return result;
+}
+
+FanTachEvidenceScanResult MakeFanTachEvidenceResult(FanWriteError error,
+                                                    std::string detail) {
+    FanTachEvidenceScanResult result;
+    result.error = error;
+    result.detail = std::move(detail);
+    return result;
+}
+
+SioVoltageScanResult MakeVoltageScanOk(std::vector<SioVoltageState> voltages) {
+    SioVoltageScanResult result;
+    result.voltages = std::move(voltages);
+    return result;
+}
+
+SioVoltageScanResult MakeVoltageScanResult(FanWriteError error,
+                                           std::string detail) {
+    SioVoltageScanResult result;
+    result.error = error;
+    result.detail = std::move(detail);
+    return result;
+}
+
+SioTemperatureScanResult MakeTemperatureScanOk(
+    std::vector<SioTemperatureState> temperatures) {
+    SioTemperatureScanResult result;
+    result.temperatures = std::move(temperatures);
+    return result;
+}
+
+SioTemperatureScanResult MakeTemperatureScanResult(FanWriteError error,
+                                                   std::string detail) {
+    SioTemperatureScanResult result;
     result.error = error;
     result.detail = std::move(detail);
     return result;
@@ -135,6 +183,22 @@ class SimulatedFanWriter final : public FanWriter {
             std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_MODE_RAW",
                                        GetEnvOrDefault("SVG_MB_CONTROL_SIM_FAN_MODE_RAW",
                                                        "5"))));
+        state.tach_hi_raw = static_cast<std::uint8_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_TACH_HI_RAW",
+                                       GetEnvOrDefault("SVG_MB_CONTROL_SIM_FAN_TACH_HI_RAW",
+                                                       "4"))));
+        state.tach_lo_raw = static_cast<std::uint8_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_TACH_LO_RAW",
+                                       GetEnvOrDefault("SVG_MB_CONTROL_SIM_FAN_TACH_LO_RAW",
+                                                       "18"))));
+        state.tach_raw = static_cast<std::uint16_t>(
+            (static_cast<std::uint16_t>(state.tach_hi_raw) << 5u) |
+            (static_cast<std::uint16_t>(state.tach_lo_raw) & 0x1Fu));
+        state.tach_valid = GetEnvOrDefault(
+            "SVG_MB_CONTROL_SIM_READ_FAN_TACH_VALID", "true") != "false";
+        state.rpm = static_cast<std::uint16_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_RPM",
+                                       "1200")));
         state.duty_percent =
             static_cast<double>(state.duty_raw) * (100.0 / 255.0);
         state.label = "sim-channel-" + std::to_string(channel);
@@ -163,6 +227,101 @@ class SimulatedFanWriter final : public FanWriter {
             fans.push_back(read_result.state);
         }
         return MakeScanOk(std::move(fans));
+    }
+
+    FanTachEvidenceScanResult ReadFanTachEvidence() override {
+        const std::string mode = GetEnvOrDefault(
+            "SVG_MB_CONTROL_SIM_SIO_EVIDENCE_MODE", "success");
+        if (mode == "fail" || mode == "tach_fail") {
+            return MakeFanTachEvidenceResult(
+                FanWriteError::kUnavailable,
+                "simulated fan tach evidence failure");
+        }
+
+        const std::uint32_t channel = static_cast<std::uint32_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_CHANNEL",
+                                       GetEnvOrDefault("SVG_MB_CONTROL_SIM_FAN_CHANNEL",
+                                                       "0"))));
+        FanTachEvidenceState state;
+        state.channel = channel;
+        state.tach_hi_raw = static_cast<std::uint8_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_TACH_HI_RAW",
+                                       GetEnvOrDefault("SVG_MB_CONTROL_SIM_FAN_TACH_HI_RAW",
+                                                       "4"))));
+        state.tach_lo_raw = static_cast<std::uint8_t>(
+            std::stoul(GetEnvOrDefault("SVG_MB_CONTROL_SIM_READ_FAN_TACH_LO_RAW",
+                                       GetEnvOrDefault("SVG_MB_CONTROL_SIM_FAN_TACH_LO_RAW",
+                                                       "18"))));
+        return MakeFanTachEvidenceOk({state});
+    }
+
+    SioVoltageScanResult ReadVoltages() override {
+        const std::string mode = GetEnvOrDefault(
+            "SVG_MB_CONTROL_SIM_SIO_EVIDENCE_MODE", "success");
+        if (mode == "fail" || mode == "voltage_fail") {
+            return MakeVoltageScanResult(
+                FanWriteError::kUnavailable,
+                "simulated SIO voltage evidence failure");
+        }
+
+        const std::uint32_t count = static_cast<std::uint32_t>(
+            std::stoul(GetEnvOrDefault(
+                "SVG_MB_CONTROL_SIM_SIO_VOLTAGE_COUNT", "2")));
+        std::vector<SioVoltageState> voltages;
+        voltages.reserve(count);
+        for (std::uint32_t index = 0u; index < count; ++index) {
+            SioVoltageState state;
+            state.index = index;
+            const std::string prefix =
+                "SVG_MB_CONTROL_SIM_SIO_VOLTAGE" + std::to_string(index);
+            state.label = GetEnvOrDefault(
+                (prefix + "_LABEL").c_str(),
+                index == 0u ? "sim-vcore" : "sim-3v3");
+            state.raw = static_cast<std::uint8_t>(
+                std::stoul(GetEnvOrDefault(
+                    (prefix + "_RAW").c_str(),
+                    index == 0u ? "150" : "206")));
+            state.voltage_v = std::stod(GetEnvOrDefault(
+                (prefix + "_V").c_str(),
+                index == 0u ? "1.200" : "3.296"));
+            voltages.push_back(std::move(state));
+        }
+        return MakeVoltageScanOk(std::move(voltages));
+    }
+
+    SioTemperatureScanResult ReadSioTemperatures() override {
+        const std::string mode = GetEnvOrDefault(
+            "SVG_MB_CONTROL_SIM_SIO_EVIDENCE_MODE", "success");
+        if (mode == "fail" || mode == "temperature_fail") {
+            return MakeTemperatureScanResult(
+                FanWriteError::kUnavailable,
+                "simulated SIO temperature evidence failure");
+        }
+
+        const std::uint32_t count = static_cast<std::uint32_t>(
+            std::stoul(GetEnvOrDefault(
+                "SVG_MB_CONTROL_SIM_SIO_TEMPERATURE_COUNT", "1")));
+        std::vector<SioTemperatureState> temperatures;
+        temperatures.reserve(count);
+        for (std::uint32_t index = 0u; index < count; ++index) {
+            SioTemperatureState state;
+            state.index = index;
+            const std::string prefix =
+                "SVG_MB_CONTROL_SIM_SIO_TEMPERATURE" + std::to_string(index);
+            state.label = GetEnvOrDefault(
+                (prefix + "_LABEL").c_str(),
+                index == 0u ? "sim-sio-temp0" : "sim-sio-temp");
+            state.raw = static_cast<std::uint8_t>(
+                std::stoul(GetEnvOrDefault((prefix + "_RAW").c_str(), "61")));
+            state.half_raw = static_cast<std::uint8_t>(
+                std::stoul(GetEnvOrDefault((prefix + "_HALF_RAW").c_str(), "0")));
+            state.temperature_c = std::stod(GetEnvOrDefault(
+                (prefix + "_C").c_str(), "61.0"));
+            state.valid = GetEnvOrDefault(
+                (prefix + "_VALID").c_str(), "true") != "false";
+            temperatures.push_back(std::move(state));
+        }
+        return MakeTemperatureScanOk(std::move(temperatures));
     }
 
     FanWriteResult ApplyDuty(std::uint32_t channel,
@@ -290,6 +449,87 @@ class SioFanWriter final : public FanWriter {
             out.push_back(TranslateFan(fan));
         }
         return MakeScanOk(std::move(out));
+    }
+
+    FanTachEvidenceScanResult ReadFanTachEvidence() override {
+        std::vector<FanTachEvidenceState> out;
+        out.reserve(device_.sio.fan_count);
+        for (std::uint32_t channel = 0u;
+             channel < device_.sio.fan_count &&
+             channel < kNct6701FanCountRegisters.size();
+             ++channel) {
+            std::uint8_t hi_raw = 0u;
+            std::uint8_t lo_raw = 0u;
+            const std::uint16_t hi_reg = kNct6701FanCountRegisters[channel];
+            MbSioStatus status = controller_.read_raw_register(
+                device_, hi_reg, &hi_raw);
+            if (status == MbSioStatus::ok) {
+                status = controller_.read_raw_register(
+                    device_, static_cast<std::uint16_t>(hi_reg + 1u),
+                    &lo_raw);
+            }
+            if (status != MbSioStatus::ok) {
+                return MakeFanTachEvidenceResult(
+                    TranslateStatus(status, channel, "read_raw_register").error,
+                    "svg_mb_sio fan tach evidence failed for channel " +
+                        std::to_string(channel) + ": " +
+                        StatusString(status));
+            }
+            out.push_back(FanTachEvidenceState{
+                .channel = channel,
+                .tach_hi_raw = hi_raw,
+                .tach_lo_raw = lo_raw,
+            });
+        }
+        return MakeFanTachEvidenceOk(std::move(out));
+    }
+
+    SioVoltageScanResult ReadVoltages() override {
+        std::vector<MbVoltageSnapshot> voltages;
+        const MbSioStatus status = controller_.read_voltages(device_, voltages);
+        if (status != MbSioStatus::ok) {
+            return MakeVoltageScanResult(
+                TranslateStatus(status, 0u, "read_voltages").error,
+                "svg_mb_sio read_voltages failed: " + StatusString(status));
+        }
+
+        std::vector<SioVoltageState> out;
+        out.reserve(voltages.size());
+        for (const auto& voltage : voltages) {
+            SioVoltageState state;
+            state.index = voltage.index;
+            state.voltage_v = voltage.voltage_v;
+            state.raw = voltage.raw;
+            state.label = voltage.label;
+            out.push_back(std::move(state));
+        }
+        return MakeVoltageScanOk(std::move(out));
+    }
+
+    SioTemperatureScanResult ReadSioTemperatures() override {
+        std::vector<MbSioTemperatureSnapshot> temperatures;
+        const MbSioStatus status =
+            controller_.read_sio_temperatures(device_, temperatures);
+        if (status != MbSioStatus::ok) {
+            return MakeTemperatureScanResult(
+                TranslateStatus(status, 0u, "read_sio_temperatures").error,
+                "svg_mb_sio read_sio_temperatures failed: " +
+                    StatusString(status));
+        }
+
+        std::vector<SioTemperatureState> out;
+        out.reserve(temperatures.size());
+        for (const auto& temperature : temperatures) {
+            SioTemperatureState state;
+            state.index = temperature.index;
+            state.temperature_c = temperature.temperature_c;
+            state.raw = temperature.raw;
+            state.half_raw = temperature.half_raw;
+            state.valid = temperature.valid;
+            state.label = temperature.label;
+            out.push_back(std::move(state));
+        }
+        return MakeTemperatureScanOk(std::move(out));
     }
 
     FanWriteResult ApplyDuty(std::uint32_t channel,

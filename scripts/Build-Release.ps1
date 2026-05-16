@@ -1,5 +1,5 @@
 # build-release.ps1 — CMake Release build, test, package, publish, and archive
-# Usage:  .\build-release.ps1 [-KeepBuildDir] [-SkipTests] [-NoStopProcesses] [-Verbose] [-Help]
+# Usage:  .\build-release.ps1 [-KeepBuildDir] [-SkipTests] [-NoStopProcesses] [-NoPublish] [-Verbose] [-Help]
 
 [CmdletBinding()]
 param(
@@ -8,6 +8,7 @@ param(
     [string]$Architecture = 'x64',
     [switch]$SkipTests,
     [switch]$NoStopProcesses,
+    [switch]$NoPublish,
     [Alias('h')][switch]$Help
 )
 
@@ -24,6 +25,8 @@ OPTIONS
     -SkipTests      Skip python -m unittest discover tests -v
     -NoStopProcesses
                     Do not stop running svg-mb-control processes before build
+    -NoPublish      Build, package to dist/, and test, but do not update
+                    release/ or create a release archive
     -Verbose        Show verbose/diagnostic output
     -Help, -h       Show this help message and exit
 
@@ -42,6 +45,8 @@ OUTPUT
 NOTES
     VCPKG_ROOT must point to a vcpkg checkout. The script resolves the
     vcpkg toolchain plus cmake.exe and ninja.exe from there when needed.
+    Use -NoPublish with -NoStopProcesses for local validation while a packaged
+    controller is running from release/.
 "@
     return
 }
@@ -61,6 +66,8 @@ $DistExtras          = @(
     'Install-SVG-MB-ControlShortcut.ps1'
     'Install-SVG-MB-ControlScheduledTask.ps1'
     'docs'
+    'scripts\Start-EvalDashboard.ps1'
+    'tools\eval_dashboard'
     'config\control.example.json'
     'config\runtime_policy_write_live.json'
     'resources'
@@ -1021,51 +1028,56 @@ try {
         Write-Host "Hermetic test lane passed." -ForegroundColor Green
     }
 
-    Write-Host "`n[9/11] Publishing to release/..." -ForegroundColor Yellow
-    if (Test-Path -LiteralPath $ReleaseRoot) {
-        Get-ChildItem -LiteralPath $ReleaseRoot -Force | Where-Object {
-            -not ($_.PSIsContainer -and $_.Name -eq 'archive')
-        } | Remove-Item -Recurse -Force
+    if ($NoPublish) {
+        Write-Host "`n[9/11] Publishing skipped (-NoPublish)." -ForegroundColor DarkGray
+        Write-Host "`n[10/11] Release archive skipped (-NoPublish)." -ForegroundColor DarkGray
     } else {
-        New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
+        Write-Host "`n[9/11] Publishing to release/..." -ForegroundColor Yellow
+        if (Test-Path -LiteralPath $ReleaseRoot) {
+            Get-ChildItem -LiteralPath $ReleaseRoot -Force | Where-Object {
+                -not ($_.PSIsContainer -and $_.Name -eq 'archive')
+            } | Remove-Item -Recurse -Force
+        } else {
+            New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
+        }
+
+        Copy-Item -Path (Join-Path $DistDir '*') -Destination $ReleaseRoot -Recurse -Force
+        Write-Host "Copied dist/ contents to release/" -ForegroundColor Green
+
+        $buildInfoPath = New-BuildInfo `
+            -ArtifactRoot $ReleaseRoot `
+            -MainArtifactPath (Join-Path $ReleaseRoot $MainExeName) `
+            -ProjectName $ProjectName `
+            -Version $version `
+            -Architecture $Architecture `
+            -PresetName $PresetName `
+            -TestsRun $testsRun `
+            -TestsPassed $testsPassed `
+            -SourceCommit $sourceCommit
+        Write-Host 'Wrote: build-info.json' -ForegroundColor Green
+
+        Write-Host "`n[10/11] Creating release archive..." -ForegroundColor Yellow
+        $zipPath = New-ReleaseArchive `
+            -ReleaseDirPath $ReleaseRoot `
+            -ArchiveDirectory $ArchiveDir `
+            -ProjectName $ProjectName `
+            -ProjectRoot $RepoRoot `
+            -SourceGlobs $SourceGlobs
+
+        $zipSize = (Get-Item -LiteralPath $zipPath).Length
+        $buildInfoPath = Update-BuildInfoArchive -BuildInfoPath $buildInfoPath -ArchivePath $zipPath
+        $versionTablePath = Write-VersionTable `
+            -ReleaseDirPath $ReleaseRoot `
+            -ArchiveDirectory $ArchiveDir `
+            -ArchivePath $zipPath `
+            -Version $version `
+            -ProjectName $ProjectName
+        Sync-ReleaseMetadataIntoArchive -ArchivePath $zipPath -ReleaseDirPath $ReleaseRoot
+
+        Write-Host ("Archive: {0}" -f (Split-Path -Path $zipPath -Leaf)) -ForegroundColor Green
+        Write-Host ("Size   : {0:N0} bytes" -f $zipSize)
+        Write-Host ("Wrote  : {0}" -f (Split-Path -Path $versionTablePath -Leaf)) -ForegroundColor Green
     }
-
-    Copy-Item -Path (Join-Path $DistDir '*') -Destination $ReleaseRoot -Recurse -Force
-    Write-Host "Copied dist/ contents to release/" -ForegroundColor Green
-
-    $buildInfoPath = New-BuildInfo `
-        -ArtifactRoot $ReleaseRoot `
-        -MainArtifactPath (Join-Path $ReleaseRoot $MainExeName) `
-        -ProjectName $ProjectName `
-        -Version $version `
-        -Architecture $Architecture `
-        -PresetName $PresetName `
-        -TestsRun $testsRun `
-        -TestsPassed $testsPassed `
-        -SourceCommit $sourceCommit
-    Write-Host 'Wrote: build-info.json' -ForegroundColor Green
-
-    Write-Host "`n[10/11] Creating release archive..." -ForegroundColor Yellow
-    $zipPath = New-ReleaseArchive `
-        -ReleaseDirPath $ReleaseRoot `
-        -ArchiveDirectory $ArchiveDir `
-        -ProjectName $ProjectName `
-        -ProjectRoot $RepoRoot `
-        -SourceGlobs $SourceGlobs
-
-    $zipSize = (Get-Item -LiteralPath $zipPath).Length
-    $buildInfoPath = Update-BuildInfoArchive -BuildInfoPath $buildInfoPath -ArchivePath $zipPath
-    $versionTablePath = Write-VersionTable `
-        -ReleaseDirPath $ReleaseRoot `
-        -ArchiveDirectory $ArchiveDir `
-        -ArchivePath $zipPath `
-        -Version $version `
-        -ProjectName $ProjectName
-    Sync-ReleaseMetadataIntoArchive -ArchivePath $zipPath -ReleaseDirPath $ReleaseRoot
-
-    Write-Host ("Archive: {0}" -f (Split-Path -Path $zipPath -Leaf)) -ForegroundColor Green
-    Write-Host ("Size   : {0:N0} bytes" -f $zipSize)
-    Write-Host ("Wrote  : {0}" -f (Split-Path -Path $versionTablePath -Leaf)) -ForegroundColor Green
 
     $buildSucceeded = $true
 }
@@ -1105,5 +1117,9 @@ if ($testsRun) {
 } else {
     Write-Host "Tests       : skipped"
 }
-Write-Host ("Archive     : {0} ({1:N0} bytes)" -f (Split-Path -Path $zipPath -Leaf), $zipSize)
+if ($zipPath) {
+    Write-Host ("Archive     : {0} ({1:N0} bytes)" -f (Split-Path -Path $zipPath -Leaf), $zipSize)
+} else {
+    Write-Host "Archive     : skipped"
+}
 Write-Host ("Build completed in {0:mm\:ss\.fff}" -f $elapsed)

@@ -17,6 +17,8 @@ struct RuntimeFanSnapshot {
     std::string label;
     std::uint16_t rpm = 0u;
     std::uint16_t tach_raw = 0u;
+    std::uint8_t tach_hi_raw = 0u;
+    std::uint8_t tach_lo_raw = 0u;
     std::uint8_t duty_raw = 0u;
     std::uint8_t mode_raw = 0u;
     double duty_percent = 0.0;

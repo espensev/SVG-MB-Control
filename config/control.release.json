@@ -7,6 +7,7 @@
   "poll_ms": 500,
   "log_rotate_hours": 4,
   "log_retain_days": 7,
+  "evidence_gpu_sample_mode": "full",
   "baseline_freshness_ceiling_ms": 10000,
   "restore_timeout_ms": 10000,
   "control_loop": {

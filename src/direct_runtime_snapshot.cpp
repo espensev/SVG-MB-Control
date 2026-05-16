@@ -1,6 +1,7 @@
 #include "direct_runtime_snapshot.h"
 
 #include "amd_reader.h"
+#include "control_scheduler.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
 
@@ -60,18 +61,6 @@ long GetLongEnvOrDefault(const char* name, long fallback) {
     }
 }
 
-std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
-    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
-    std::tm local{};
-    if (localtime_s(&local, &tt) != 0) {
-        return {};
-    }
-    std::array<char, 32> buffer{};
-    const std::size_t written = std::strftime(buffer.data(), buffer.size(),
-                                              "%Y-%m-%dT%H:%M:%S", &local);
-    return written > 0u ? std::string(buffer.data(), written) : std::string();
-}
-
 void MergeAmdTelemetry(RuntimeSnapshot& snapshot,
                        const AmdSnapshot& amd_snapshot) {
     if (!amd_snapshot.available || amd_snapshot.samples.empty()) {
@@ -118,6 +107,8 @@ void MergeFanTelemetry(RuntimeSnapshot& snapshot,
         fan.label = fan_state.label;
         fan.rpm = fan_state.rpm;
         fan.tach_raw = fan_state.tach_raw;
+        fan.tach_hi_raw = fan_state.tach_hi_raw;
+        fan.tach_lo_raw = fan_state.tach_lo_raw;
         fan.duty_raw = fan_state.duty_raw;
         fan.mode_raw = fan_state.mode_raw;
         fan.duty_percent = fan_state.duty_percent;

@@ -2,8 +2,10 @@
 
 #include "json_io.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <system_error>
+#include <utility>
 
 namespace svg_mb_control {
 
@@ -105,6 +107,65 @@ void RemovePendingWrite(const std::filesystem::path& runtime_home,
         return;
     }
     WritePendingWrites(runtime_home, remaining);
+}
+
+PendingWritesStore::PendingWritesStore(std::filesystem::path runtime_home)
+    : runtime_home_(std::move(runtime_home)) {}
+
+void PendingWritesStore::Load() {
+    entries_ = ReadPendingWrites(runtime_home_);
+    loaded_ = true;
+    dirty_ = false;
+}
+
+void PendingWritesStore::Upsert(const PendingWriteEntry& entry) {
+    if (!loaded_) {
+        Load();
+    }
+    bool replaced = false;
+    for (auto& existing : entries_) {
+        if (existing.channel == entry.channel) {
+            existing = entry;
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        entries_.push_back(entry);
+    }
+    // Upsert MUST persist synchronously: the control loop relies on the
+    // sidecar reflecting any in-flight fan write before ApplyDuty runs so
+    // that a crash mid-write leaves a record from which recovery can
+    // restore the captured baseline.
+    Persist();
+}
+
+void PendingWritesStore::QueueRemove(std::uint32_t channel) {
+    if (!loaded_) {
+        Load();
+    }
+    const auto before = entries_.size();
+    entries_.erase(
+        std::remove_if(entries_.begin(), entries_.end(),
+                       [channel](const PendingWriteEntry& entry) {
+                           return entry.channel == channel;
+                       }),
+        entries_.end());
+    if (entries_.size() != before) {
+        dirty_ = true;
+    }
+}
+
+void PendingWritesStore::Flush() {
+    if (!dirty_) {
+        return;
+    }
+    Persist();
+}
+
+void PendingWritesStore::Persist() {
+    WritePendingWrites(runtime_home_, entries_);
+    dirty_ = false;
 }
 
 }  // namespace svg_mb_control

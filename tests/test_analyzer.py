@@ -54,6 +54,8 @@ class AnalyzerToolTests(unittest.TestCase):
                     str(manifest_path),
                     "--profile",
                     "smoke",
+                    "--gpu-load-threshold-c",
+                    "66",
                 ],
                 cwd=REPO_ROOT,
                 capture_output=True,
@@ -63,6 +65,9 @@ class AnalyzerToolTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
             summary = summary_path.read_text(encoding="utf-8")
             self.assertIn("SVG-MB-Control Run Summary", summary)
+            self.assertIn("gpu_envelope_c", summary)
+            self.assertIn("GPU envelope peak: 67.00 C", summary)
+            self.assertIn("rows above/equal: 2", summary)
             self.assertIn("control_loop.write_applied", summary)
             self.assertIn("control_loop.circuit_breaker_opened", summary)
 
@@ -71,3 +76,40 @@ class AnalyzerToolTests(unittest.TestCase):
             self.assertEqual(manifest["row_count"], 3)
             self.assertEqual(manifest["event_count"], 2)
             self.assertTrue(manifest["artifacts"]["csv"]["sha256"])
+
+            json_path = td / "summary.json"
+            result_json = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "analyze_control_run.py"),
+                    "--csv",
+                    str(csv_path),
+                    "--format",
+                    "json",
+                    "--out",
+                    str(json_path),
+                    "--gpu-load-threshold-c",
+                    "66",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                result_json.returncode,
+                0,
+                msg=f"{result_json.stdout}\n{result_json.stderr}",
+            )
+            summary_json = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                summary_json["temperatures"]["gpu_envelope_c"]["max"],
+                67.0,
+            )
+            self.assertEqual(summary_json["gpu_response"]["peak"]["row_number"], 2)
+            self.assertEqual(summary_json["gpu_response"]["above_threshold_rows"], 2)
+            self.assertEqual(
+                summary_json["gpu_response"]["channels"]["0"][
+                    "setpoint_at_peak_pct"
+                ],
+                55.0,
+            )

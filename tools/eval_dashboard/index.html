@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SVG-MB Control Eval</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>SVG-MB Control Eval</h1>
+      <p id="runSubtitle">Load a control-loop CSV to inspect response over time.</p>
+    </div>
+    <div class="status-pill" id="loadStatus">No run loaded</div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="toolbar">
+        <label class="file-control">
+          <span>Control CSV</span>
+          <input id="csvFile" type="file" accept=".csv,text/csv">
+        </label>
+        <label class="file-control">
+          <span>Analyzer JSON</span>
+          <input id="summaryFile" type="file" accept=".json,application/json">
+        </label>
+        <label class="file-control">
+          <span>Events JSONL</span>
+          <input id="eventsFile" type="file" accept=".jsonl,.log,text/plain">
+        </label>
+        <label class="field-control">
+          <span>GPU threshold C</span>
+          <input id="gpuThreshold" type="number" min="0" max="130" step="0.5" value="70">
+        </label>
+        <label class="file-control wide">
+          <span>History summaries</span>
+          <input id="historyFiles" type="file" accept=".json,application/json" multiple>
+        </label>
+      </div>
+    </section>
+
+    <section class="metric-grid" id="overviewMetrics"></section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>Temperature Response</h2>
+        <div class="section-note" id="temperatureNote">CSV required</div>
+      </div>
+      <canvas id="temperatureChart" class="chart" height="320"></canvas>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>Channel Response</h2>
+        <div class="section-note" id="channelNote">CSV required</div>
+      </div>
+      <canvas id="channelChart" class="chart" height="280"></canvas>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th>Setpoint p50</th>
+              <th>Setpoint p90</th>
+              <th>Setpoint max</th>
+              <th>At GPU peak</th>
+              <th>Boost max</th>
+              <th>Writes</th>
+              <th>Writes/min</th>
+            </tr>
+          </thead>
+          <tbody id="channelRows">
+            <tr><td colspan="8">No channel data loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel two-column">
+      <div>
+        <div class="section-heading">
+          <h2>Events</h2>
+          <div class="section-note" id="eventNote">Optional JSONL</div>
+        </div>
+        <div id="eventSummary" class="event-summary">No events loaded.</div>
+      </div>
+      <div>
+        <div class="section-heading">
+          <h2>History</h2>
+          <div class="section-note" id="historyNote">Analyzer JSON summaries</div>
+        </div>
+        <div class="table-wrap compact">
+          <table>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Rows</th>
+                <th>Duration</th>
+                <th>CPU p90/max</th>
+                <th>GPU p90/max</th>
+                <th>GPU threshold</th>
+              </tr>
+            </thead>
+            <tbody id="historyRows">
+              <tr><td colspan="6">No history summaries loaded.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

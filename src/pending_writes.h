@@ -40,4 +40,40 @@ void RemovePendingWrite(const std::filesystem::path& runtime_home,
 std::filesystem::path PendingWritesSidecarPath(
     const std::filesystem::path& runtime_home);
 
+// In-memory cache for the pending-writes sidecar. Avoids re-reading and
+// re-parsing the JSON file on every Upsert/Remove call. Upsert still
+// persists synchronously so the crash-recovery contract (sidecar reflects
+// any in-flight fan write before ApplyDuty runs) is preserved. Remove is
+// queued; callers must invoke Flush() at a safe point (e.g. end of tick).
+//
+// Not thread-safe: intended for single-threaded use inside the control loop.
+class PendingWritesStore {
+ public:
+    explicit PendingWritesStore(std::filesystem::path runtime_home);
+
+    // Loads existing sidecar contents from disk into the in-memory cache.
+    // Throws on parse failure; missing file is treated as empty.
+    void Load();
+
+    // Inserts or replaces the entry for entry.channel and persists the
+    // sidecar to disk synchronously. Throws on filesystem failure.
+    void Upsert(const PendingWriteEntry& entry);
+
+    // Marks the entry for the given channel as removed. Does not touch
+    // disk until Flush() is called.
+    void QueueRemove(std::uint32_t channel);
+
+    // Persists any queued removals to disk if the in-memory state has
+    // changed since the last write. No-op if there is nothing to flush.
+    void Flush();
+
+ private:
+    void Persist();
+
+    std::filesystem::path runtime_home_;
+    std::vector<PendingWriteEntry> entries_;
+    bool loaded_ = false;
+    bool dirty_ = false;
+};
+
 }  // namespace svg_mb_control

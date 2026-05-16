@@ -89,6 +89,26 @@ bool HasColumn(const CsvHeader& header, const std::string& name) {
     return header.column_index.find(name) != header.column_index.end();
 }
 
+std::optional<double> GpuEnvelopeC(std::optional<double> core_c,
+                                   std::optional<double> memjn_c,
+                                   std::optional<double> hotspot_c) {
+    std::optional<double> envelope;
+    const auto consider = [&envelope](std::optional<double> value) {
+        if (!value.has_value()) {
+            return;
+        }
+        if (!envelope.has_value() || *value > *envelope) {
+            envelope = value;
+        }
+    };
+    consider(core_c);
+    consider(memjn_c);
+    if (hotspot_c.has_value() && *hotspot_c > 0.0) {
+        consider(hotspot_c);
+    }
+    return envelope;
+}
+
 }  // namespace
 
 std::vector<std::string> ParseCsvLine(const std::string& line) {
@@ -179,6 +199,11 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
     row.gpu_core_c = AsDouble(GetField(fields, header, "gpu_core_c"));
     row.gpu_memjn_c = AsDouble(GetField(fields, header, "gpu_memjn_c"));
     row.gpu_hotspot_c = AsDouble(GetField(fields, header, "gpu_hotspot_c"));
+    row.gpu_envelope_c = AsDouble(GetField(fields, header, "gpu_envelope_c"));
+    if (!row.gpu_envelope_c.has_value()) {
+        row.gpu_envelope_c = GpuEnvelopeC(
+            row.gpu_core_c, row.gpu_memjn_c, row.gpu_hotspot_c);
+    }
     row.fan_count = AsInt(GetField(fields, header, "fan_count"));
     row.policy_writes_enabled_present = AsInt(
         GetField(fields, header, "policy_writes_enabled_present"));

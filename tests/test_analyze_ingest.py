@@ -302,7 +302,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "1")
+            self.assertEqual(schema[0], "2")
 
             run = _query_one(
                 db_path,
@@ -327,6 +327,13 @@ class AnalyzeIngestTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM tick_fan_samples WHERE fan_index=0",
             )[0]
             self.assertEqual(fan_count, 3)
+
+            gpu_envelope = _query_one(
+                db_path,
+                "SELECT gpu_envelope_c FROM tick_samples "
+                "WHERE tick_count=1",
+            )[0]
+            self.assertEqual(gpu_envelope, 55.0)
 
             channel_count = _query_one(
                 db_path,

@@ -131,13 +131,16 @@ Use this loop for controller changes:
      --current-state release\runtime\current_state.json `
      --config config\control.json `
      --profile combined-load `
+     --gpu-load-threshold-c 70 `
      --notes "ambient and subjective noise notes" `
      --out run-summary.md `
      --manifest-out run-manifest.json
    ```
    The summary should cover at least:
    - CPU/Tctl p50, p90, p99, max,
-   - GPU core and memory p50, p90, p99, max,
+   - GPU core, memory, hotspot, and derived GPU envelope p50, p90, p99, max,
+   - GPU envelope peak timing, optional threshold time, and channel setpoints
+     at the GPU peak,
    - achieved interval p50, p95, max, and overrun count,
    - loop work duration p50, p95, max,
    - process CPU and memory ranges,

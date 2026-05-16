@@ -191,7 +191,7 @@ void InsertTickRows(Database& db,
         "run_id, tick_count, wall_clock, mode, snapshot_time, snapshot_age_ms,"
         "amd_sensor_count, amd_sensor_summary, cpu_tctl_c, cpu_max_c,"
         "gpu_available, gpu_name, gpu_last_warning,"
-        "gpu_core_c, gpu_memjn_c, gpu_hotspot_c,"
+        "gpu_core_c, gpu_memjn_c, gpu_hotspot_c, gpu_envelope_c,"
         "fan_count, policy_writes_enabled_present, policy_writes_enabled,"
         "loop_started_wall_clock, loop_finished_wall_clock,"
         "loop_work_duration_ms, loop_intended_interval_ms,"
@@ -199,7 +199,7 @@ void InsertTickRows(Database& db,
         "process_cpu_delta_ms, process_cpu_pct,"
         "process_working_set_bytes, process_private_bytes"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,"
-        "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)");
+        "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)");
 
     Statement fan = db.Prepare(
         "INSERT INTO tick_fan_samples("
@@ -232,20 +232,21 @@ void InsertTickRows(Database& db,
         tick.BindOptionalDouble(14, row.gpu_core_c);
         tick.BindOptionalDouble(15, row.gpu_memjn_c);
         tick.BindOptionalDouble(16, row.gpu_hotspot_c);
-        tick.BindOptionalInt(17, row.fan_count);
-        tick.BindOptionalInt(18, row.policy_writes_enabled_present);
-        tick.BindOptionalInt(19, row.policy_writes_enabled);
-        tick.BindOptionalText(20, row.loop_started_wall_clock);
-        tick.BindOptionalText(21, row.loop_finished_wall_clock);
-        tick.BindOptionalDouble(22, row.loop_work_duration_ms);
-        tick.BindOptionalInt(23, row.loop_intended_interval_ms);
-        tick.BindOptionalDouble(24, row.loop_achieved_interval_ms);
-        tick.BindOptionalDouble(25, row.loop_slip_ms);
-        tick.BindOptionalInt(26, row.loop_overrun);
-        tick.BindOptionalDouble(27, row.process_cpu_delta_ms);
-        tick.BindOptionalDouble(28, row.process_cpu_pct);
-        tick.BindOptionalInt(29, row.process_working_set_bytes);
-        tick.BindOptionalInt(30, row.process_private_bytes);
+        tick.BindOptionalDouble(17, row.gpu_envelope_c);
+        tick.BindOptionalInt(18, row.fan_count);
+        tick.BindOptionalInt(19, row.policy_writes_enabled_present);
+        tick.BindOptionalInt(20, row.policy_writes_enabled);
+        tick.BindOptionalText(21, row.loop_started_wall_clock);
+        tick.BindOptionalText(22, row.loop_finished_wall_clock);
+        tick.BindOptionalDouble(23, row.loop_work_duration_ms);
+        tick.BindOptionalInt(24, row.loop_intended_interval_ms);
+        tick.BindOptionalDouble(25, row.loop_achieved_interval_ms);
+        tick.BindOptionalDouble(26, row.loop_slip_ms);
+        tick.BindOptionalInt(27, row.loop_overrun);
+        tick.BindOptionalDouble(28, row.process_cpu_delta_ms);
+        tick.BindOptionalDouble(29, row.process_cpu_pct);
+        tick.BindOptionalInt(30, row.process_working_set_bytes);
+        tick.BindOptionalInt(31, row.process_private_bytes);
         tick.Step();
         tick.Reset();
 

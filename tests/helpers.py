@@ -169,6 +169,10 @@ def _read_pending_writes(runtime_home: Path) -> list[dict]:
 
 def _read_runtime_events(runtime_home: Path) -> list[dict]:
     path = runtime_home / "logs" / "svg_mb_control_events.jsonl"
+    return _read_jsonl(path)
+
+
+def _read_jsonl(path: Path) -> list[dict]:
     if not path.is_file():
         return []
     events: list[dict] = []
@@ -226,6 +230,7 @@ def _write_read_loop_config(
     default_mode: str | None = None,
     poll_ms: int = 100,
     staleness_threshold_ms: int | None = None,
+    evidence_gpu_sample_mode: str | None = None,
 ) -> Path:
     cfg: dict[str, object] = {
         "schema_version": 4,
@@ -240,6 +245,8 @@ def _write_read_loop_config(
         cfg["snapshot_path"] = snapshot_path.as_posix()
     if staleness_threshold_ms is not None:
         cfg["staleness_threshold_ms"] = staleness_threshold_ms
+    if evidence_gpu_sample_mode is not None:
+        cfg["evidence_gpu_sample_mode"] = evidence_gpu_sample_mode
     return _write_json(td / "control.json", cfg)
 
 

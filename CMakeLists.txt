@@ -105,17 +105,23 @@ add_executable(svg_mb_control
     src/channel_evaluator.cpp
     src/control_config.cpp
     src/control_loop.cpp
+    src/control_loop_config.cpp
     src/control_policy.cpp
     src/control_runtime_context.cpp
     src/control_scheduler.cpp
     src/control_status_writer.cpp
+    src/control_supervisor.cpp
+    src/csv_util.cpp
     src/direct_runtime_snapshot.cpp
+    src/evidence_log.cpp
     src/fan_writer.cpp
+    src/gpu_evidence_csv.cpp
     src/gpu_reader.cpp
     src/json_io.cpp
     src/main.cpp
     src/pending_writes.cpp
     src/read_loop.cpp
+    src/runtime_artifacts.cpp
     src/runtime_logging.cpp
     src/runtime_lifecycle.cpp
     src/runtime_snapshot.cpp

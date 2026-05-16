@@ -32,6 +32,8 @@ struct FanChannelState {
     std::uint32_t channel = 0u;
     std::uint16_t rpm = 0u;
     std::uint16_t tach_raw = 0u;
+    std::uint8_t tach_hi_raw = 0u;
+    std::uint8_t tach_lo_raw = 0u;
     std::uint8_t duty_raw = 0u;
     std::uint8_t mode_raw = 0u;
     double duty_percent = 0.0;
@@ -58,12 +60,64 @@ struct FanScanResult {
     explicit operator bool() const { return ok(); }
 };
 
+struct FanTachEvidenceState {
+    std::uint32_t channel = 0u;
+    std::uint8_t tach_hi_raw = 0u;
+    std::uint8_t tach_lo_raw = 0u;
+};
+
+struct FanTachEvidenceScanResult {
+    FanWriteError error = FanWriteError::kNone;
+    std::string detail;
+    std::vector<FanTachEvidenceState> fans;
+
+    bool ok() const { return error == FanWriteError::kNone; }
+    explicit operator bool() const { return ok(); }
+};
+
+struct SioVoltageState {
+    std::uint32_t index = 0u;
+    double voltage_v = 0.0;
+    std::uint8_t raw = 0u;
+    std::string label;
+};
+
+struct SioVoltageScanResult {
+    FanWriteError error = FanWriteError::kNone;
+    std::string detail;
+    std::vector<SioVoltageState> voltages;
+
+    bool ok() const { return error == FanWriteError::kNone; }
+    explicit operator bool() const { return ok(); }
+};
+
+struct SioTemperatureState {
+    std::uint32_t index = 0u;
+    double temperature_c = 0.0;
+    std::uint8_t raw = 0u;
+    std::uint8_t half_raw = 0u;
+    bool valid = false;
+    std::string label;
+};
+
+struct SioTemperatureScanResult {
+    FanWriteError error = FanWriteError::kNone;
+    std::string detail;
+    std::vector<SioTemperatureState> temperatures;
+
+    bool ok() const { return error == FanWriteError::kNone; }
+    explicit operator bool() const { return ok(); }
+};
+
 class FanWriter {
   public:
     virtual ~FanWriter() = default;
 
     virtual FanReadResult ReadChannelState(std::uint32_t channel) = 0;
     virtual FanScanResult ReadAllChannels() = 0;
+    virtual FanTachEvidenceScanResult ReadFanTachEvidence() = 0;
+    virtual SioVoltageScanResult ReadVoltages() = 0;
+    virtual SioTemperatureScanResult ReadSioTemperatures() = 0;
     virtual FanWriteResult ApplyDuty(std::uint32_t channel,
                                      double duty_pct) = 0;
     virtual FanWriteResult RestoreSavedState(std::uint32_t channel,

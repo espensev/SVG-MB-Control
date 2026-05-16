@@ -13,7 +13,8 @@ Implemented here:
 - direct AMD CPU telemetry
 - optional direct NVIDIA telemetry through the vendored `gpu_telemetry` slice
 - direct fan reads, writes, and restore through vendored `SVG-MB-SIO`
-- direct `one-shot`, `read-loop`, `write-once`, and `control-loop`
+- direct `one-shot`, `read-loop`, `write-once`, `control-loop`, and
+  foreground `evidence-log`
 - product-owned runtime files under `runtime\`
 - hermetic smoke coverage through simulation environment hooks
 
@@ -68,6 +69,8 @@ Useful options:
 - `-SkipTests` skips `python -m unittest discover tests -v`
 - `-NoStopProcesses` skips the pre-build stop of running `svg-mb-control`
   processes
+- `-NoPublish` builds and tests without updating `release\` or creating an
+  archive
 
 Local CI-equivalent validation that does not touch a live controller:
 
@@ -181,6 +184,17 @@ Attached control loop for diagnostics:
 release\svg-mb-control.exe --mode control-loop --config .\release\control.json
 ```
 
+Foreground evidence logger:
+
+```powershell
+release\svg-mb-control.exe --mode evidence-log --config .\release\control.json
+```
+
+`evidence-log` writes separate CSV, event, and manifest latest files under the
+same runtime home. It samples wider SIO and GPU evidence outside the controller
+hot path; `evidence_gpu_sample_mode` accepts `thermal-fast`, `fast`, `medium`,
+`slow`, `rare`, or `full`.
+
 When `--mode` is omitted, Control uses `default_mode` from the loaded config.
 If no config sets `default_mode`, Control falls back to `one-shot`.
 For long-running default modes, the no-arg launcher starts a background
@@ -209,10 +223,11 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `1`). The schema
+- The DB schema is bootstrapped on first use (schema version `2`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
-  `plant_model_steps`.
+  `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
+  control envelope used by response analysis.
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.
@@ -220,6 +235,17 @@ Behavior:
 - `--force` deletes existing matching rows before re-ingesting them.
 - `analyze ingest` is offline-only; it never writes to fans or alters runtime
   policy.
+
+Local eval dashboard:
+
+```powershell
+.\scripts\Start-EvalDashboard.ps1 -Open
+```
+
+This serves `tools\eval_dashboard` at `http://127.0.0.1:8765/`. The dashboard
+loads selected control-loop CSVs, analyzer JSON summaries, and optional events
+JSONL files in the browser so current and historical runs can be inspected
+without adding a controller API or background service.
 
 ## Config
 
@@ -238,6 +264,7 @@ Common fields:
 - `poll_ms`
 - `log_rotate_hours`
 - `log_retain_days`
+- `evidence_gpu_sample_mode`
 - `baseline_freshness_ceiling_ms`
 - `restore_timeout_ms`
 - `control_loop`
@@ -265,6 +292,9 @@ Field notes:
   the cost of this profile.
 - `log_rotate_hours` controls CSV chunk rotation under `runtime\logs\archive\`.
 - `log_retain_days` controls archive pruning for rotated CSV chunks.
+- `evidence_gpu_sample_mode` controls the GPU tier used only by foreground
+  `evidence-log`; normal read/control loops keep using the thermal-fast GPU
+  sample.
 - Legacy bridge-era config keys such as `bridge_exe_path`,
   `bench_runtime_policy_path`, `logger_service_duration_ms`, and the old child
   restart / snapshot retry fields are rejected during config load.
@@ -289,6 +319,9 @@ Control writes:
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
+- `logs\svg_mb_control_evidence.csv`
+- `logs\svg_mb_control_evidence_events.jsonl`
+- `logs\svg_mb_control_evidence_manifest.json`
 - `svg-mb-control.supervisor.stdout.log`
 - `svg-mb-control.supervisor.stderr.log`
 - `svg-mb-control.worker.stdout.log`

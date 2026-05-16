@@ -395,6 +395,45 @@ class ControlLoopTests(unittest.TestCase):
             finally:
                 _stop_and_wait(proc)
 
+    def test_control_loop_policy_refusal_flushes_pending_write(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=5000,
+                deadband_pct=0.1,
+                control_hold_ms=800,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=75.0),
+                    "SVG_MB_CONTROL_SIM_WRITE_MODE": "policy_refused",
+                },
+            )
+            try:
+                refused_and_flushed = _wait_for(
+                    lambda: (
+                        not _read_pending_writes(runtime_home)
+                        and any(
+                            item.get("event_type") == "control_loop.write_failed"
+                            and item.get("success") is False
+                            for item in _read_runtime_events(runtime_home)
+                        )
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(
+                    refused_and_flushed,
+                    msg="policy-refused pending write entry was not flushed",
+                )
+            finally:
+                _stop_and_wait(proc)
+
     def test_control_loop_restore_timeout_aborts_and_preserves_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

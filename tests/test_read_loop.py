@@ -159,6 +159,9 @@ class ReadLoopTests(unittest.TestCase):
                 manifest["row_count"],
                 final_status["successful_polls"],
             )
+            self.assertIsNotNone(manifest["session_stop"])
+            self.assertEqual(manifest["rows_written"], manifest["row_count"])
+            self.assertEqual(manifest["total_rows"], manifest["row_count"])
             self.assertTrue(Path(manifest["artifacts"]["csv_archive"]["path"]).is_file())
             self.assertTrue(Path(manifest["artifacts"]["csv_latest"]["path"]).is_file())
             self.assertEqual(
@@ -166,6 +169,8 @@ class ReadLoopTests(unittest.TestCase):
                 str(runtime_home / "logs" / "svg_mb_control_manifest.json"),
             )
             events = _read_runtime_events(runtime_home)
+            self.assertEqual(manifest["event_count"], len(events))
+            self.assertEqual(manifest["events_written"], len(events))
             shutdown_events = [
                 item
                 for item in events

@@ -53,6 +53,7 @@ struct ParsedTickRow {
     std::optional<double> gpu_core_c;
     std::optional<double> gpu_memjn_c;
     std::optional<double> gpu_hotspot_c;
+    std::optional<double> gpu_envelope_c;
     std::optional<std::int64_t> fan_count;
     std::optional<std::int64_t> policy_writes_enabled_present;
     std::optional<std::int64_t> policy_writes_enabled;

@@ -1,10 +1,12 @@
 #include "read_loop.h"
 
 #include "amd_reader.h"
+#include "control_scheduler.h"
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
 #include "json_io.h"
+#include "runtime_artifacts.h"
 #include "runtime_logging.h"
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
@@ -42,21 +44,6 @@ std::filesystem::path CurrentExecutableDirectory() {
     }
     return std::filesystem::path(buffer.data(),
                                  buffer.data() + length).parent_path();
-}
-
-std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
-    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
-    std::tm local{};
-    if (localtime_s(&local, &tt) != 0) {
-        return {};
-    }
-    std::array<char, 32> buffer{};
-    const std::size_t written = std::strftime(buffer.data(), buffer.size(),
-                                              "%Y-%m-%dT%H:%M:%S", &local);
-    if (written == 0u) {
-        return {};
-    }
-    return std::string(buffer.data(), written);
 }
 
 bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,

@@ -108,6 +108,17 @@ def parse_bool(value: str | None) -> bool:
     return (value or "").strip().lower() == "true"
 
 
+def maybe_bool(value: str | None) -> bool | None:
+    if value is None or value == "":
+        return None
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return None
+
+
 def read_events(path: Path | None) -> tuple[list[dict[str, Any]], dict[str, int]]:
     if path is None or not path.is_file():
         return [], {}
@@ -168,6 +179,75 @@ def estimate_duration_seconds(rows: list[dict[str, str]]) -> float | None:
     return None
 
 
+def gpu_envelope_c(core_c: float | None,
+                   memjn_c: float | None,
+                   hotspot_c: float | None) -> float | None:
+    values = [value for value in (core_c, memjn_c) if value is not None]
+    if hotspot_c is not None and hotspot_c > 0.0:
+        values.append(hotspot_c)
+    if not values:
+        return None
+    return max(values)
+
+
+def gpu_envelope_for_row(row: dict[str, str]) -> float | None:
+    explicit = maybe_float(row.get("gpu_envelope_c"))
+    if explicit is not None:
+        return explicit
+    return gpu_envelope_c(
+        maybe_float(row.get("gpu_core_c")),
+        maybe_float(row.get("gpu_memjn_c")),
+        maybe_float(row.get("gpu_hotspot_c")),
+    )
+
+
+def gpu_envelope_column(rows: list[dict[str, str]]) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        envelope = gpu_envelope_for_row(row)
+        if envelope is not None:
+            values.append(envelope)
+    return values
+
+
+def row_interval_seconds(row: dict[str, str]) -> float | None:
+    interval_ms = maybe_float(row.get("loop_achieved_interval_ms"))
+    if interval_ms is None or interval_ms < 0.0:
+        return None
+    return interval_ms / 1000.0
+
+
+def parse_row_wall_time(row: dict[str, str]) -> dt.datetime | None:
+    value = row.get("loop_started_wall_clock") or row.get("wall_clock")
+    if not value:
+        return None
+    try:
+        return dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def elapsed_seconds_by_row(rows: list[dict[str, str]]) -> list[float | None]:
+    intervals = [row_interval_seconds(row) for row in rows]
+    if any(interval is not None for interval in intervals):
+        elapsed: list[float | None] = []
+        current = 0.0
+        for interval in intervals:
+            elapsed.append(current)
+            if interval is not None:
+                current += interval
+        return elapsed
+
+    wall_times = [parse_row_wall_time(row) for row in rows]
+    base = next((value for value in wall_times if value is not None), None)
+    if base is None:
+        return [None for _ in rows]
+    return [
+        (value - base).total_seconds() if value is not None else None
+        for value in wall_times
+    ]
+
+
 def summarize_channels(
     rows: list[dict[str, str]],
     channels: list[int],
@@ -221,6 +301,90 @@ def summarize_channels(
     return summaries
 
 
+def summarize_gpu_response(
+    rows: list[dict[str, str]],
+    channels: list[int],
+    threshold_c: float | None,
+) -> dict[str, Any]:
+    envelope_rows = [
+        (index, envelope)
+        for index, row in enumerate(rows)
+        if (envelope := gpu_envelope_for_row(row)) is not None
+    ]
+    envelope_values = [envelope for _, envelope in envelope_rows]
+    elapsed = elapsed_seconds_by_row(rows)
+
+    peak: dict[str, Any] | None = None
+    peak_index: int | None = None
+    if envelope_rows:
+        peak_index, peak_value = max(envelope_rows, key=lambda item: item[1])
+        peak = {
+            "row_index": peak_index,
+            "row_number": peak_index + 1,
+            "elapsed_seconds": elapsed[peak_index],
+            "value_c": peak_value,
+        }
+
+    above_threshold_indices: list[int] = []
+    above_threshold_seconds: float | None = None
+    time_to_threshold_seconds: float | None = None
+    if threshold_c is not None:
+        above_threshold_indices = [
+            index for index, envelope in envelope_rows if envelope >= threshold_c
+        ]
+        above_threshold_seconds = sum(
+            row_interval_seconds(rows[index]) or 0.0
+            for index in above_threshold_indices
+        )
+        if above_threshold_indices:
+            time_to_threshold_seconds = elapsed[above_threshold_indices[0]]
+
+    channel_response: dict[str, dict[str, Any]] = {}
+    if peak_index is not None:
+        peak_row = rows[peak_index]
+        threshold_set = set(above_threshold_indices)
+        for channel in channels:
+            prefix = f"channel{channel}_"
+            load_setpoints = [
+                maybe_float(rows[index].get(prefix + "setpoint_pct"))
+                for index in above_threshold_indices
+                if maybe_float(rows[index].get(prefix + "setpoint_pct")) is not None
+            ]
+            channel_response[str(channel)] = {
+                "setpoint_at_peak_pct": maybe_float(
+                    peak_row.get(prefix + "setpoint_pct")
+                ),
+                "boost_at_peak_pct": maybe_float(
+                    peak_row.get(prefix + "thermal_pressure_boost_pct")
+                ),
+                "total_writes_at_peak": maybe_int(
+                    peak_row.get(prefix + "total_writes")
+                ),
+                "write_active_at_peak": maybe_bool(
+                    peak_row.get(prefix + "write_active")
+                ),
+                "load_row_count": sum(
+                    1
+                    for index in threshold_set
+                    if maybe_float(rows[index].get(prefix + "setpoint_pct"))
+                    is not None
+                ),
+                "setpoint_during_load": stats(load_setpoints),
+            }
+
+    return {
+        "envelope_c": stats(envelope_values),
+        "threshold_c": threshold_c,
+        "above_threshold_rows": (
+            len(above_threshold_indices) if threshold_c is not None else None
+        ),
+        "above_threshold_seconds": above_threshold_seconds,
+        "time_to_threshold_seconds": time_to_threshold_seconds,
+        "peak": peak,
+        "channels": channel_response,
+    }
+
+
 def summarize(rows: list[dict[str, str]], events_path: Path | None, args) -> dict[str, Any]:
     events, event_counts = read_events(events_path)
     fieldnames = list(rows[0].keys()) if rows else []
@@ -241,7 +405,11 @@ def summarize(rows: list[dict[str, str]], events_path: Path | None, args) -> dic
             "gpu_core_c": stats(numeric_column(rows, "gpu_core_c")),
             "gpu_memjn_c": stats(numeric_column(rows, "gpu_memjn_c")),
             "gpu_hotspot_c": stats(numeric_column(rows, "gpu_hotspot_c")),
+            "gpu_envelope_c": stats(gpu_envelope_column(rows)),
         },
+        "gpu_response": summarize_gpu_response(
+            rows, channels, args.gpu_load_threshold_c
+        ),
         "timing": {
             "loop_achieved_interval_ms": stats(
                 numeric_column(rows, "loop_achieved_interval_ms")
@@ -308,6 +476,48 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ])
     lines.extend(markdown_table(["Temperature", "p50", "p90", "p99", "max"], temp_rows))
     lines.append("")
+
+    gpu_response = summary["gpu_response"]
+    peak = gpu_response.get("peak")
+    if peak:
+        lines.append(
+            "- GPU envelope peak: "
+            f"{fmt(peak['value_c'])} C at row {peak['row_number']} "
+            f"({fmt(peak['elapsed_seconds'])} s)"
+        )
+        if gpu_response.get("threshold_c") is not None:
+            lines.append(
+                "- GPU load threshold: "
+                f"{fmt(gpu_response['threshold_c'])} C, "
+                f"rows above/equal: {gpu_response['above_threshold_rows']}, "
+                f"time above/equal: "
+                f"{fmt(gpu_response['above_threshold_seconds'])} s, "
+                f"first crossing: "
+                f"{fmt(gpu_response['time_to_threshold_seconds'])} s"
+            )
+        gpu_channel_rows: list[list[str]] = []
+        for channel, data in gpu_response["channels"].items():
+            gpu_channel_rows.append([
+                channel,
+                fmt(data["setpoint_at_peak_pct"]),
+                fmt(data["boost_at_peak_pct"]),
+                fmt(data["total_writes_at_peak"], 0),
+                fmt(data["setpoint_during_load"]["p90"]),
+                fmt(data["setpoint_during_load"]["max"]),
+            ])
+        if gpu_channel_rows:
+            lines.extend(markdown_table(
+                [
+                    "Channel",
+                    "set at GPU peak",
+                    "boost at peak",
+                    "writes at peak",
+                    "load set p90",
+                    "load set max",
+                ],
+                gpu_channel_rows,
+            ))
+        lines.append("")
 
     timing = summary["timing"]
     timing_rows = [
@@ -444,6 +654,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=float,
         default=0.35,
         help="Minimum downward setpoint step counted as a drop.",
+    )
+    parser.add_argument(
+        "--gpu-load-threshold-c",
+        type=float,
+        default=None,
+        help=(
+            "Optional GPU envelope threshold used to mark load rows in the "
+            "GPU response section."
+        ),
     )
     parser.add_argument(
         "--format",
