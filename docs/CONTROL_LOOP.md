@@ -166,6 +166,13 @@ in the runtime home, and restarts the worker after an unexpected non-zero exit.
 Startup/config failures are reported immediately instead of entering a restart
 loop.
 
+The normal Windows install path is
+`Install-SVG-MB-ControlScheduledTask.ps1`. It registers an at-logon scheduled
+task named `SVG-MB Control` for the current user, runs it elevated, and starts
+the controller immediately. The task action invokes `svg-mb-control.exe --start`
+with the packaged `control.json`, so logon startup uses the same supervised
+launch path as a manual operator start.
+
 Operator commands use the same runtime-home resolution as the active config:
 
 - `--status` reads `control_runtime.json` and checks `process_id`.

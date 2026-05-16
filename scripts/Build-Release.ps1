@@ -59,6 +59,7 @@ $DistExtras          = @(
     'README.md'
     'CLAUDE.md'
     'Install-SVG-MB-ControlShortcut.ps1'
+    'Install-SVG-MB-ControlScheduledTask.ps1'
     'docs'
     'config\control.example.json'
     'config\runtime_policy_write_live.json'

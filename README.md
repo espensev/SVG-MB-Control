@@ -87,6 +87,7 @@ Release-script outputs:
 - `release\svg-mb-control.exe`
 - `release\control.json`
 - `release\runtime_policy_write_live.json`
+- `release\Install-SVG-MB-ControlScheduledTask.ps1`
 - `release\resources\pawnio\AMDFamily17.bin`
 - `release\resources\pawnio\LpcIO.bin`
 - `release\build-info.json`
@@ -121,6 +122,27 @@ cd .\release
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,
 mode, status detail, runtime home, and log paths.
+
+Recommended Windows install:
+
+```powershell
+cd .\release
+.\Install-SVG-MB-ControlScheduledTask.ps1
+```
+
+This registers an at-logon scheduled task named `SVG-MB Control` for the current
+user, runs it elevated, and starts the controller immediately. The task action
+uses `svg-mb-control.exe --start --config <release\control.json>`, so logon
+startup follows the same supervised launch path as the manual start command.
+
+Task manager commands:
+
+```powershell
+.\Install-SVG-MB-ControlScheduledTask.ps1 -Status
+.\Install-SVG-MB-ControlScheduledTask.ps1 -Stop
+.\Install-SVG-MB-ControlScheduledTask.ps1 -Restart
+.\Install-SVG-MB-ControlScheduledTask.ps1 -Remove
+```
 
 Start Menu shortcut:
 
