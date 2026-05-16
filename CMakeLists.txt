@@ -100,6 +100,7 @@ add_executable(svg_mb_control
     src/analyze/analyze_csv.cpp
     src/analyze/analyze_db.cpp
     src/analyze/analyze_ingest.cpp
+    src/analyze/analyze_ingest_db.cpp
     src/analyze/analyze_json_artifacts.cpp
     src/calibration.cpp
     src/channel_evaluator.cpp
@@ -126,6 +127,8 @@ add_executable(svg_mb_control
     src/runtime_lifecycle.cpp
     src/runtime_snapshot.cpp
     src/runtime_write_policy.cpp
+    src/simulated_fan_writer.cpp
+    src/sio_fan_writer.cpp
     src/write_orchestrator.cpp
     ${SVG_MB_CONTROL_RESOURCE_SOURCES}
 )
