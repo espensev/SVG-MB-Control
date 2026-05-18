@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import sqlite3
+import time
 
 from tests.helpers import *
 
@@ -276,6 +278,34 @@ def _run_ingest(
     )
 
 
+def _run_prune(
+    runtime_home: Path,
+    db_path: Path,
+    *extra: str,
+) -> subprocess.CompletedProcess[str]:
+    return _run_control(
+        "analyze",
+        "prune",
+        "--runtime-home",
+        str(runtime_home),
+        "--db",
+        str(db_path),
+        *extra,
+    )
+
+
+def _age_archive_bundle(runtime_home: Path, days: int = 3) -> tuple[Path, Path]:
+    archive = runtime_home / "logs" / "archive"
+    csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
+    manifest_path = (
+        archive / "svg_mb_control_control-loop_20260515_033000.manifest.json"
+    )
+    old_time = time.time() - (days * 24 * 60 * 60)
+    os.utime(csv_path, (old_time, old_time))
+    os.utime(manifest_path, (old_time, old_time))
+    return csv_path, manifest_path
+
+
 class AnalyzeIngestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -443,3 +473,101 @@ class AnalyzeIngestTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("runtime_home is not a directory", result.stderr)
+
+    def test_prune_dry_run_keeps_old_ingested_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+            csv_path, manifest_path = _age_archive_bundle(runtime_home)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "1",
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue(csv_path.exists())
+            self.assertTrue(manifest_path.exists())
+            self.assertIn("dry_run=true", result.stdout)
+            self.assertIn("candidates=1", result.stdout)
+            self.assertIn("deleted=0", result.stdout)
+
+    def test_prune_apply_deletes_old_ingested_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+            csv_path, manifest_path = _age_archive_bundle(runtime_home)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "1",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertFalse(csv_path.exists())
+            self.assertFalse(manifest_path.exists())
+            self.assertIn("dry_run=false", result.stdout)
+            self.assertIn("candidates=1", result.stdout)
+            self.assertIn("deleted=1", result.stdout)
+
+    def test_prune_apply_skips_when_not_ingested(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            csv_path, manifest_path = _age_archive_bundle(runtime_home)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "1",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue(csv_path.exists())
+            self.assertTrue(manifest_path.exists())
+            self.assertIn("candidates=0", result.stdout)
+            self.assertIn("skipped_not_ingested=1", result.stdout)
+
+    def test_prune_apply_skips_running_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            session_start = "2026-05-15T03:30:00"
+            runtime_home = _build_fixture(td, session_start=session_start)
+            archive = runtime_home / "logs" / "archive"
+            csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
+            manifest_path = (
+                archive
+                / "svg_mb_control_control-loop_20260515_033000.manifest.json"
+            )
+            _write_fixture_manifest(
+                manifest_path,
+                session_start=session_start,
+                csv_path=csv_path,
+                status="running",
+            )
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+            _age_archive_bundle(runtime_home)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "1",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue(csv_path.exists())
+            self.assertTrue(manifest_path.exists())
+            self.assertIn("candidates=0", result.stdout)
+            self.assertIn("skipped_running=1", result.stdout)

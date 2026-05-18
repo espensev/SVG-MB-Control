@@ -266,7 +266,12 @@ shared event log under `runtime\logs\`.
   is surfaced in `control_runtime.json` as `event_log_path`.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
-`log_retain_days` in the control config.
+`log_retain_days` in the control config. Runtime pruning removes old archive
+CSV chunks together with their matching archive manifest sidecar.
+
+For offline cleanup, use `svg-mb-control analyze prune`. It defaults to
+dry-run, requires `--apply` for deletion, and only deletes old archive bundles
+that have already been ingested into the SQLite analysis database.
 
 ## Process logs
 

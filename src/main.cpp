@@ -1,5 +1,6 @@
 #include "amd_reader.h"
 #include "analyze/analyze_ingest.h"
+#include "analyze/analyze_prune.h"
 #include "calibration.h"
 #include "control_config.h"
 #include "control_loop.h"
@@ -96,6 +97,8 @@ void PrintUsage() {
            << "[--calibrate-output <path>]\n"
         << "  svg-mb-control analyze ingest [--runtime-home <path>] "
            << "[--db <path>] [--force] [--quiet]\n"
+        << "  svg-mb-control analyze prune [--runtime-home <path>] "
+           << "[--db <path>] [--retain-days <days>] [--dry-run|--apply] [--quiet]\n"
         << "  svg-mb-control --diagnose-amd\n"
         << "  svg-mb-control --diagnose-gpu\n"
         << "  svg-mb-control --confirm-start\n"
@@ -115,6 +118,67 @@ void PrintAnalyzeUsage() {
         << "    <runtime-home>/svg_mb_control.db. Idempotent on "
            << "previously-seen artifacts\n"
         << "    unless --force is passed.\n";
+    std::cout
+        << "  svg-mb-control analyze prune [--runtime-home <path>] "
+           << "[--db <path>] [--retain-days <days>] [--dry-run|--apply] [--quiet]\n"
+        << "    Finds old archive CSV/manifest bundles. Dry-run is the default; "
+           << "--apply is\n"
+        << "    required before files are deleted. Deletion is gated on the run "
+           << "already\n"
+        << "    being present in the sqlite ingest database.\n";
+}
+
+bool ResolveAnalyzeRuntimeHome(
+    std::filesystem::path& runtime_home,
+    std::filesystem::path config_path,
+    bool config_path_explicit,
+    std::optional<svg_mb_control::ControlConfig>& resolved_config) {
+    if (config_path.empty()) {
+        config_path = svg_mb_control::GetEnvironmentPath(
+            L"SVG_MB_CONTROL_CONFIG");
+    }
+    if (config_path.empty()) {
+        config_path = svg_mb_control::ResolveDefaultControlConfigPath();
+    }
+
+    if (!config_path.empty()) {
+        const std::filesystem::path absolute_config_path =
+            std::filesystem::absolute(config_path).lexically_normal();
+        std::error_code ec;
+        if (std::filesystem::exists(absolute_config_path, ec)) {
+            try {
+                resolved_config = svg_mb_control::LoadControlConfig(
+                    absolute_config_path);
+            } catch (const std::exception&) {
+                resolved_config.reset();
+            }
+        } else if (config_path_explicit) {
+            std::cerr << "Error: control config not found: "
+                      << absolute_config_path.string() << '\n';
+            return false;
+        }
+    }
+
+    if (runtime_home.empty()) {
+        runtime_home = resolved_config.has_value()
+            ? svg_mb_control::ResolveRuntimeHomePath(*resolved_config)
+            : svg_mb_control::ResolveRuntimeHomePath(
+                  svg_mb_control::ControlConfig{});
+    }
+    return true;
+}
+
+bool ParseUint32Option(const wchar_t* text, std::uint32_t& out) {
+    try {
+        const unsigned long parsed = std::stoul(std::wstring(text));
+        if (parsed > UINT32_MAX) {
+            return false;
+        }
+        out = static_cast<std::uint32_t>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
 }
 
 int RunAnalyzeCommand(int argc, wchar_t** argv) {
@@ -127,15 +191,17 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
         PrintAnalyzeUsage();
         return 0;
     }
-    if (verb != L"ingest") {
+    if (verb != L"ingest" && verb != L"prune") {
         std::cerr << "Error: unknown analyze subcommand. Try "
                   << "'svg-mb-control analyze --help'.\n";
         return 1;
     }
 
     svg_mb_control::analyze::IngestOptions options;
+    svg_mb_control::analyze::PruneOptions prune_options;
     std::filesystem::path config_path;
     bool config_path_explicit = false;
+    bool retain_days_explicit = false;
 
     auto require_value = [&](int& index) -> const wchar_t* {
         if (index + 1 >= argc) {
@@ -149,15 +215,50 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
         const std::wstring arg = argv[index];
         if (arg == L"--runtime-home") {
             options.runtime_home = std::filesystem::path(require_value(index));
+            prune_options.runtime_home = options.runtime_home;
         } else if (arg == L"--db") {
             options.db_path = std::filesystem::path(require_value(index));
+            prune_options.db_path = options.db_path;
         } else if (arg == L"--config") {
             config_path = std::filesystem::path(require_value(index));
             config_path_explicit = true;
         } else if (arg == L"--force") {
+            if (verb != L"ingest") {
+                std::cerr << "Error: --force is only valid for analyze ingest.\n";
+                PrintAnalyzeUsage();
+                return 1;
+            }
             options.force = true;
+        } else if (arg == L"--retain-days") {
+            if (verb != L"prune") {
+                std::cerr << "Error: --retain-days is only valid for analyze prune.\n";
+                PrintAnalyzeUsage();
+                return 1;
+            }
+            std::uint32_t retain_days = 0u;
+            if (!ParseUint32Option(require_value(index), retain_days)) {
+                std::cerr << "Error: invalid --retain-days value.\n";
+                return 1;
+            }
+            prune_options.retain_days = retain_days;
+            retain_days_explicit = true;
+        } else if (arg == L"--apply") {
+            if (verb != L"prune") {
+                std::cerr << "Error: --apply is only valid for analyze prune.\n";
+                PrintAnalyzeUsage();
+                return 1;
+            }
+            prune_options.apply = true;
+        } else if (arg == L"--dry-run") {
+            if (verb != L"prune") {
+                std::cerr << "Error: --dry-run is only valid for analyze prune.\n";
+                PrintAnalyzeUsage();
+                return 1;
+            }
+            prune_options.apply = false;
         } else if (arg == L"--quiet") {
             options.quiet = true;
+            prune_options.quiet = true;
         } else if (arg == L"--help" || arg == L"-h") {
             PrintAnalyzeUsage();
             return 0;
@@ -168,36 +269,21 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
         }
     }
 
-    if (options.runtime_home.empty()) {
-        if (config_path.empty()) {
-            config_path = svg_mb_control::GetEnvironmentPath(
-                L"SVG_MB_CONTROL_CONFIG");
+    std::optional<svg_mb_control::ControlConfig> config;
+    std::filesystem::path runtime_home =
+        verb == L"prune" ? prune_options.runtime_home : options.runtime_home;
+    if (!ResolveAnalyzeRuntimeHome(runtime_home, config_path,
+                                   config_path_explicit, config)) {
+        return 1;
+    }
+    options.runtime_home = runtime_home;
+    prune_options.runtime_home = runtime_home;
+
+    if (verb == L"prune") {
+        if (!retain_days_explicit && config.has_value()) {
+            prune_options.retain_days = config->log_retain_days;
         }
-        if (config_path.empty()) {
-            config_path = svg_mb_control::ResolveDefaultControlConfigPath();
-        }
-        std::optional<svg_mb_control::ControlConfig> config;
-        if (!config_path.empty()) {
-            const std::filesystem::path absolute_config_path =
-                std::filesystem::absolute(config_path).lexically_normal();
-            std::error_code ec;
-            if (std::filesystem::exists(absolute_config_path, ec)) {
-                try {
-                    config = svg_mb_control::LoadControlConfig(
-                        absolute_config_path);
-                } catch (const std::exception&) {
-                    config.reset();
-                }
-            } else if (config_path_explicit) {
-                std::cerr << "Error: control config not found: "
-                          << absolute_config_path.string() << '\n';
-                return 1;
-            }
-        }
-        options.runtime_home = config.has_value()
-            ? svg_mb_control::ResolveRuntimeHomePath(*config)
-            : svg_mb_control::ResolveRuntimeHomePath(
-                  svg_mb_control::ControlConfig{});
+        return svg_mb_control::analyze::RunAnalyzePrune(prune_options);
     }
 
     return svg_mb_control::analyze::RunAnalyzeIngest(options);

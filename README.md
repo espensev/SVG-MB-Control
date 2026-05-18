@@ -241,6 +241,8 @@ runtime home into a sqlite database for offline analysis:
 release\svg-mb-control.exe analyze ingest
 release\svg-mb-control.exe analyze ingest --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db
 release\svg-mb-control.exe analyze ingest --force --quiet
+release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --dry-run
+release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --retain-days 14 --apply
 ```
 
 Behavior:
@@ -248,7 +250,7 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `2`). The schema
+- The DB schema is bootstrapped on first use (schema version `3`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
@@ -260,6 +262,13 @@ Behavior:
 - `--force` deletes existing matching rows before re-ingesting them.
 - `analyze ingest` is offline-only; it never writes to fans or alters runtime
   policy.
+- `analyze prune` scans archive CSV/manifest bundles, defaults to dry-run, and
+  requires `--apply` before deleting files. It only deletes a bundle after the
+  run is present in the SQLite ingest DB and the archive is older than
+  `--retain-days`; running manifests are always skipped.
+- Runtime retention also removes the matching archive manifest when it prunes an
+  old archive CSV chunk. The global event JSONL and plant-model captures are
+  intentionally not pruned by this first-pass cleanup.
 
 Local eval dashboard:
 

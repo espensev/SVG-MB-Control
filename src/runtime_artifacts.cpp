@@ -335,8 +335,17 @@ void RuntimeCsvLogger::PruneOldArchives() {
             continue;
         }
         if (mtime < cutoff) {
+            std::filesystem::path manifest_path = entry.path();
+            manifest_path.replace_extension(".manifest.json");
             std::filesystem::remove(entry.path(), ec);
-            ec.clear();
+            if (ec) {
+                ec.clear();
+                continue;
+            }
+            if (manifest_path != active_manifest_path_) {
+                std::filesystem::remove(manifest_path, ec);
+                ec.clear();
+            }
         }
     }
 }
