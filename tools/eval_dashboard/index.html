@@ -8,11 +8,16 @@
 </head>
 <body>
   <header class="app-header">
-    <div>
+    <div class="head-main">
       <h1>SVG-MB Control Eval</h1>
       <p id="runSubtitle">Load a control-loop CSV to inspect response over time.</p>
     </div>
-    <div class="status-pill" id="loadStatus">No run loaded</div>
+    <div class="head-actions">
+      <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light / dark">
+        <span id="themeIcon">&#9789;</span><span id="themeLabel">Dark</span>
+      </button>
+      <div class="status-pill" id="loadStatus">No run loaded</div>
+    </div>
   </header>
 
   <main>
@@ -31,10 +36,22 @@
           <input id="eventsFile" type="file" accept=".jsonl,.log,text/plain">
         </label>
         <label class="field-control">
-          <span>GPU threshold C</span>
+          <span>CPU watch C</span>
+          <input id="cpuThreshold" type="number" min="0" max="130" step="0.5" value="65">
+        </label>
+        <label class="field-control">
+          <span>GPU limit C</span>
           <input id="gpuThreshold" type="number" min="0" max="130" step="0.5" value="70">
         </label>
-        <label class="file-control wide">
+        <label class="field-control">
+          <span>Focus channel</span>
+          <select id="focusChannel"><option value="">auto</option></select>
+        </label>
+        <label class="file-control">
+          <span>Compare CSVs</span>
+          <input id="compareFiles" type="file" accept=".csv,text/csv" multiple>
+        </label>
+        <label class="file-control">
           <span>History summaries</span>
           <input id="historyFiles" type="file" accept=".json,application/json" multiple>
         </label>
@@ -78,6 +95,131 @@
       </div>
     </section>
 
+    <section class="panel">
+      <div class="section-heading">
+        <h2>Control Quality</h2>
+        <div class="section-note" id="qualityNote">Per-channel response metrics</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th title="Cross-correlation lag from instantaneous curve demand (feedforward) to delivered setpoint. The controller's self-inflicted latency from smoothing + slew.">Ctrl lag</th>
+              <th title="Cross-correlation lag from delivered setpoint to actual fan RPM. The actuator's own first-order dead time.">Fan lag</th>
+              <th title="RMS of (setpoint - feedforward): how far the dynamic layer pulls the command off the static curve.">Track RMS</th>
+              <th title="Total variation of setpoint per minute: L1 control effort, a proxy for acoustic modulation.">Effort</th>
+              <th title="Setpoint direction reversals per minute: fan-bearing wear and audible pumping.">Rev/min</th>
+              <th title="Enclosed area of the temp-vs-setpoint trajectory loop: energy/acoustic cost of lag + decay-latch.">Hyst area</th>
+              <th title="Dominant oscillation period of the setpoint from the Welch PSD peak. 'none' = no clear limit cycle.">Dom period</th>
+              <th title="Fraction of run with thermal-pressure boost engaged.">Boost</th>
+            </tr>
+          </thead>
+          <tbody id="qualityRows">
+            <tr><td colspan="9" class="empty">No channel data loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel two-column wide-left">
+      <div>
+        <div class="section-heading">
+          <h2>Phase Portrait</h2>
+          <div class="section-note" id="phaseNote">No channel yet</div>
+        </div>
+        <canvas id="phaseChart" class="chart square"></canvas>
+      </div>
+      <div>
+        <div class="section-heading">
+          <h2>Reference vs Delivered</h2>
+          <div class="section-note" id="decompNote">feedforward / boost / dynamic</div>
+        </div>
+        <canvas id="decompChart" class="chart" height="320"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>Disturbance-Step Response</h2>
+        <div class="section-note" id="stepNote">Load-step transients, time-zeroed</div>
+      </div>
+      <canvas id="stepChart" class="chart" height="300"></canvas>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Step</th>
+              <th>At</th>
+              <th title="Magnitude of the feedforward (curve-demand) jump that triggered the transient.">Demand &#916;</th>
+              <th title="Time from the demand step until the delivered setpoint starts moving.">Dead time</th>
+              <th title="Time for setpoint to traverse 10%-90% of the step.">Rise 10-90</th>
+              <th title="Peak observed-temperature excursion during the transient window.">Temp peak</th>
+              <th title="Time for observed temperature to settle within a +/-1C band of its post-step level.">Settle</th>
+              <th title="Residual (feedforward - setpoint) at the end of the window: steady-state tracking offset.">Resid</th>
+            </tr>
+          </thead>
+          <tbody id="stepRows">
+            <tr><td colspan="8" class="empty">No steps detected.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel two-column even">
+      <div>
+        <div class="section-heading">
+          <h2>Oscillation Spectrum</h2>
+          <div class="section-note" id="psdNote">Limit-cycle / hunting detector</div>
+        </div>
+        <canvas id="psdChart" class="chart tall"></canvas>
+        <div class="legend-inline">
+          <span><i style="background:var(--c-blue)"></i>setpoint PSD</span>
+          <span><i style="background:var(--c-amber)"></i>dominant period</span>
+          <span>Welch-averaged, detrended, Hann-windowed</span>
+        </div>
+      </div>
+      <div>
+        <div class="section-heading">
+          <h2>Spectrogram</h2>
+          <div class="section-note" id="spectroNote">Setpoint STFT over the session</div>
+        </div>
+        <canvas id="spectroChart" class="chart tall"></canvas>
+        <div class="legend-inline">
+          <span>X time &rarr;</span>
+          <span>Y oscillation period</span>
+          <span>bright = strong periodic energy (a horizontal streak = a sustained limit cycle)</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>Tuning Trade-off (Pareto)</h2>
+        <div class="section-note" id="paretoNote">Load "Compare CSVs" to plot runs</div>
+      </div>
+      <div class="two-column wide-left">
+        <canvas id="paretoChart" class="chart square"></canvas>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th title="Sum of per-channel setpoint total-variation per minute: aggregate acoustic / control effort. Lower is quieter.">Effort/min</th>
+                <th title="Degree-seconds of GPU envelope above the temp limit: integrated thermal risk. Lower is safer.">Exceed degC&middot;s</th>
+                <th title="Peak GPU envelope temperature in the run.">GPU peak</th>
+                <th title="Mean setpoint-to-fan-RPM cross-correlation lag across channels.">Fan lag</th>
+                <th title="On the non-dominated frontier (no other run is better on both effort and exceedance).">Frontier</th>
+              </tr>
+            </thead>
+            <tbody id="paretoRows">
+              <tr><td colspan="6" class="empty">Load one or more CSVs via "Compare CSVs".</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section class="panel two-column">
       <div>
         <div class="section-heading">
@@ -100,7 +242,7 @@
                 <th>Duration</th>
                 <th>CPU p90/max</th>
                 <th>GPU p90/max</th>
-                <th>GPU threshold</th>
+                <th>GPU over limit</th>
               </tr>
             </thead>
             <tbody id="historyRows">
@@ -111,6 +253,8 @@
       </div>
     </section>
   </main>
+
+  <div id="cursorTip" class="cursor-tip"></div>
 
   <script src="dashboard.js"></script>
 </body>

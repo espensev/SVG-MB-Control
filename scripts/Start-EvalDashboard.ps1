@@ -15,7 +15,9 @@ USAGE
 
 The dashboard is static. It reads selected CSV, JSON, and JSONL files in the
 browser and does not expose a controller API. The server binds to localhost by
-default and serves only tools\eval_dashboard.
+default and serves the repo root so the dashboard can auto-load the packaged
+runtime logs under release\runtime. Large live CSVs are exposed through a
+bounded tail endpoint so the browser does not parse an entire long-running log.
 "@
     return
 }
@@ -27,6 +29,10 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $DashboardRoot = Join-Path $RepoRoot 'tools\eval_dashboard'
 if (-not (Test-Path -LiteralPath (Join-Path $DashboardRoot 'index.html'))) {
     throw "Dashboard files not found under $DashboardRoot"
+}
+$DashboardServer = Join-Path $DashboardRoot 'server.py'
+if (-not (Test-Path -LiteralPath $DashboardServer)) {
+    throw "Dashboard server not found at $DashboardServer"
 }
 
 function Resolve-Python {
@@ -40,14 +46,14 @@ function Resolve-Python {
         return $py.Source
     }
 
-    throw "Python was not found on PATH. Install Python or run a static HTTP server rooted at $DashboardRoot."
+    throw "Python was not found on PATH. Install Python or run a static HTTP server rooted at $RepoRoot."
 }
 
 $pythonExe = Resolve-Python
-$url = "http://$HostName`:$Port/"
+$url = "http://$HostName`:$Port/tools/eval_dashboard/"
 
 Write-Host "SVG-MB-Control eval dashboard: $url"
-Write-Host "Serving: $DashboardRoot"
+Write-Host "Serving repo root: $RepoRoot"
 Write-Host "Press Ctrl+C to stop."
 
 if ($Open) {
@@ -55,9 +61,9 @@ if ($Open) {
 }
 
 if ([System.IO.Path]::GetFileNameWithoutExtension($pythonExe) -ieq 'py') {
-    & $pythonExe -3 -m http.server $Port --bind $HostName --directory $DashboardRoot
+    & $pythonExe -3 $DashboardServer --repo-root $RepoRoot --host $HostName --port $Port
 } else {
-    & $pythonExe -m http.server $Port --bind $HostName --directory $DashboardRoot
+    & $pythonExe $DashboardServer --repo-root $RepoRoot --host $HostName --port $Port
 }
 
 exit $LASTEXITCODE
