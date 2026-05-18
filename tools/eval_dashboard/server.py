@@ -3,9 +3,52 @@ from __future__ import annotations
 
 import argparse
 import http.server
+import json
 import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+
+HEALTH_FILES = ("control_health.json", "control_supervisor.json", "control_runtime.json")
+
+
+def build_health_payload(repo_root: Path) -> dict:
+    """Aggregate the runtime health sidecars into one tolerant view.
+
+    Missing or unreadable files become ``null`` sections; the health state
+    itself is sourced from control_health.json (written by the C++ --health
+    evaluator) so the dashboard never re-derives health logic.
+    """
+    base = repo_root / "release" / "runtime"
+
+    def load(name: str) -> object:
+        try:
+            return json.loads((base / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    health = load("control_health.json")
+    supervisor = load("control_supervisor.json")
+    runtime = load("control_runtime.json")
+    runtime_view = None
+    if isinstance(runtime, dict):
+        runtime_view = {
+            key: runtime.get(key)
+            for key in (
+                "mode",
+                "status",
+                "status_detail",
+                "process_id",
+                "loop_last_evaluation",
+                "last_successful_restore_time",
+            )
+        }
+    return {
+        "available": health is not None or runtime is not None,
+        "health": health,
+        "supervisor": supervisor,
+        "runtime": runtime_view,
+    }
 
 
 DEFAULT_TAIL_BYTES = 8 * 1024 * 1024
@@ -103,6 +146,11 @@ class EvalDashboardHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_not_found(f"live CSV not found: {path}")
                 return
             self.send_bytes(read_csv_tail(path, tail_bytes), "text/csv; charset=utf-8")
+            return
+
+        if parsed.path == "/api/health.json":
+            payload = json.dumps(build_health_payload(self.repo_root)).encode("utf-8")
+            self.send_bytes(payload, "application/json; charset=utf-8")
             return
 
         if parsed.path == "/api/events-tail.jsonl":

@@ -153,6 +153,51 @@ h2 {
   border-color: color-mix(in srgb, var(--good) 45%, var(--line));
 }
 
+.health-pill.health-ok {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 50%, var(--line));
+  background: color-mix(in srgb, var(--good) 10%, var(--panel-2));
+}
+
+.health-pill.health-warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel-2));
+}
+
+.health-pill.health-bad {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 55%, var(--line));
+  background: color-mix(in srgb, var(--bad) 12%, var(--panel-2));
+}
+
+.health-pill.health-muted {
+  color: var(--muted);
+}
+
+.health-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 10px;
+}
+
+.health-item {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.health-item b {
+  color: var(--text);
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.health-empty {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .theme-toggle {
   display: inline-flex;
   align-items: center;

@@ -215,5 +215,36 @@ if (D.state.rows.length) {
     `effort=${b.effortPerMin && b.effortPerMin.toFixed(1)} exceed=${b.exceed && b.exceed.toFixed(0)} fanLag=${b.fanLag}`);
 }
 
+console.log("\n[4] Runtime health summary");
+
+ok("summarizeHealth(null) -> unknown/muted",
+  (() => { const s = D.summarizeHealth(null); return s.state === "unknown" && s.cls === "muted"; })(),
+  JSON.stringify(D.summarizeHealth(null)));
+
+ok("summarizeHealth({available:false}) -> unknown",
+  D.summarizeHealth({ available: false }).state === "unknown");
+
+const healthy = D.summarizeHealth({
+  available: true,
+  health: { last_health_state: "healthy", last_health_reason: "fresh", last_health_time: "2026-05-18T15:00:00" },
+  supervisor: { supervisor_pid: 111, worker_restart_count: 0, last_worker_exit_code: 0, last_worker_exit_time: "2026-05-18T14:59:00" },
+  runtime: { mode: "control-loop", process_id: 222, last_successful_restore_time: "2026-05-18T14:58:00" },
+});
+ok("healthy -> ok class + reason passthrough",
+  healthy.state === "healthy" && healthy.cls === "ok" && healthy.reason === "fresh",
+  JSON.stringify(healthy));
+ok("healthy detail carries mode/pids and exit code 0",
+  healthy.detail.some((d) => d.k === "mode" && d.v === "control-loop")
+  && healthy.detail.some((d) => d.k === "supervisor pid" && d.v === "111")
+  && healthy.detail.some((d) => d.k === "last worker exit" && d.v.startsWith("0")),
+  JSON.stringify(healthy.detail));
+
+ok("degraded -> warn", D.summarizeHealth({ available: true, health: { last_health_state: "degraded" } }).cls === "warn");
+ok("stale -> warn", D.summarizeHealth({ available: true, health: { last_health_state: "stale" } }).cls === "warn");
+ok("stopped -> muted", D.summarizeHealth({ available: true, health: { last_health_state: "stopped" } }).cls === "muted");
+ok("failed -> bad", D.summarizeHealth({ available: true, health: { last_health_state: "failed" } }).cls === "bad");
+ok("unknown state string -> muted, label preserved",
+  (() => { const s = D.summarizeHealth({ available: true, health: { last_health_state: "weird" } }); return s.cls === "muted" && s.label === "weird"; })());
+
 console.log(`\n${failed === 0 ? "ALL GREEN" : "FAILURES"}: ${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

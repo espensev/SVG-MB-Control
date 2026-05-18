@@ -21,6 +21,17 @@
   </header>
 
   <main>
+    <section class="panel health-panel">
+      <div class="section-heading">
+        <h2>Runtime Health</h2>
+        <div class="status-pill health-pill health-muted" id="healthState">unknown</div>
+      </div>
+      <div class="health-detail" id="healthDetail">
+        <span class="health-empty">Open through Start-EvalDashboard.ps1 for live health.</span>
+      </div>
+      <div class="section-note" id="healthReason"></div>
+    </section>
+
     <section class="panel">
       <div class="toolbar">
         <label class="file-control">

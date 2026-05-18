@@ -10,6 +10,8 @@ const ISSUE_EVENTS = new Set([
 ]);
 const LIVE_CSV_URL = "/api/live-tail.csv?bytes=8000000";
 const LIVE_EVENTS_URL = "/api/events-tail.jsonl?bytes=2000000";
+const LIVE_HEALTH_URL = "/api/health.json";
+const HEALTH_POLL_MS = 5000;
 
 const state = {
   rows: [],
@@ -2594,6 +2596,107 @@ function applyTheme(theme) {
   }
 }
 
+/* ---- Runtime health (pure summary + render + poll) ---------------------- */
+
+const HEALTH_CLASS = {
+  healthy: "ok",
+  degraded: "warn",
+  stale: "warn",
+  stopped: "muted",
+  failed: "bad",
+};
+
+function summarizeHealth(payload) {
+  if (!payload || payload.available === false) {
+    return {
+      state: "unknown",
+      label: "unknown",
+      cls: "muted",
+      reason: "no runtime health files found",
+      detail: [],
+    };
+  }
+  const h = payload.health && typeof payload.health === "object" ? payload.health : {};
+  const sup =
+    payload.supervisor && typeof payload.supervisor === "object" ? payload.supervisor : {};
+  const rt = payload.runtime && typeof payload.runtime === "object" ? payload.runtime : {};
+
+  const rawState =
+    typeof h.last_health_state === "string" && h.last_health_state
+      ? h.last_health_state
+      : "unknown";
+  const detail = [];
+  const push = (k, v) => {
+    if (v !== null && v !== undefined && String(v) !== "") {
+      detail.push({ k, v: String(v) });
+    }
+  };
+  push("mode", rt.mode);
+  push("worker pid", rt.process_id);
+  push("supervisor pid", sup.supervisor_pid);
+  if (Number.isFinite(sup.worker_restart_count)) {
+    push("restarts", sup.worker_restart_count);
+  }
+  if (sup.last_worker_exit_code !== null && sup.last_worker_exit_code !== undefined) {
+    const at = sup.last_worker_exit_time ? ` @ ${sup.last_worker_exit_time}` : "";
+    push("last worker exit", `${sup.last_worker_exit_code}${at}`);
+  }
+  push("last restore", rt.last_successful_restore_time);
+  push("checked", h.last_health_time);
+
+  return {
+    state: rawState,
+    label: rawState,
+    cls: HEALTH_CLASS[rawState] || "muted",
+    reason: typeof h.last_health_reason === "string" ? h.last_health_reason : "",
+    detail,
+  };
+}
+
+function renderHealth(summary) {
+  if (!els || !els.healthState) {
+    return;
+  }
+  els.healthState.textContent = summary.label;
+  els.healthState.className = `status-pill health-pill health-${summary.cls}`;
+  els.healthReason.textContent = summary.reason || "";
+  if (!summary.detail.length) {
+    els.healthDetail.innerHTML =
+      '<span class="health-empty">No runtime health data.</span>';
+    return;
+  }
+  els.healthDetail.innerHTML = summary.detail
+    .map(
+      (d) =>
+        `<span class="health-item"><b>${escapeHtml(d.k)}</b> ${escapeHtml(d.v)}</span>`,
+    )
+    .join("");
+}
+
+async function loadHealth() {
+  if (
+    !window.location ||
+    (window.location.protocol !== "http:" && window.location.protocol !== "https:")
+  ) {
+    renderHealth(
+      summarizeHealth({ available: false }),
+    );
+    return;
+  }
+  try {
+    const text = await fetchTextIfOk(LIVE_HEALTH_URL);
+    renderHealth(summarizeHealth(JSON.parse(text)));
+  } catch {
+    renderHealth({
+      state: "unknown",
+      label: "unavailable",
+      cls: "muted",
+      reason: "health endpoint unreachable",
+      detail: [],
+    });
+  }
+}
+
 async function loadLiveRun() {
   if (!window.location || window.location.protocol !== "http:" && window.location.protocol !== "https:") {
     els.loadStatus.textContent = "Pick a CSV";
@@ -2645,6 +2748,9 @@ if (typeof document !== "undefined") {
     themeIcon: document.getElementById("themeIcon"),
     runSubtitle: document.getElementById("runSubtitle"),
     loadStatus: document.getElementById("loadStatus"),
+    healthState: document.getElementById("healthState"),
+    healthDetail: document.getElementById("healthDetail"),
+    healthReason: document.getElementById("healthReason"),
     overviewMetrics: document.getElementById("overviewMetrics"),
     temperatureNote: document.getElementById("temperatureNote"),
     channelNote: document.getElementById("channelNote"),
@@ -2760,6 +2866,8 @@ if (typeof document !== "undefined") {
 
   render();
   loadLiveRun();
+  loadHealth();
+  setInterval(loadHealth, HEALTH_POLL_MS);
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -2791,6 +2899,7 @@ if (typeof module !== "undefined" && module.exports) {
     paretoFrontier,
     computeModel,
     buildModel,
+    summarizeHealth,
     state,
   };
 }
