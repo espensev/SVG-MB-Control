@@ -30,6 +30,9 @@ struct ParsedChannelSample {
     std::optional<double> observed_temp_c;
     std::optional<double> setpoint_pct;
     std::optional<double> thermal_pressure_boost_pct;
+    std::optional<double> cpu_low_soak_boost_pct;
+    std::optional<std::string> response_source;
+    std::optional<std::string> write_reason;
     std::optional<std::int64_t> total_writes;
     std::optional<std::int64_t> write_active;
     std::optional<std::int64_t> baseline_captured;

@@ -269,6 +269,12 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
             GetField(fields, header, prefix + "setpoint_pct"));
         ch.thermal_pressure_boost_pct = AsDouble(
             GetField(fields, header, prefix + "thermal_pressure_boost_pct"));
+        ch.cpu_low_soak_boost_pct = AsDouble(
+            GetField(fields, header, prefix + "cpu_low_soak_boost_pct"));
+        ch.response_source = AsText(
+            GetField(fields, header, prefix + "response_source"));
+        ch.write_reason = AsText(
+            GetField(fields, header, prefix + "write_reason"));
         ch.total_writes = AsInt(
             GetField(fields, header, prefix + "total_writes"));
         ch.write_active = AsInt(

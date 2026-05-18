@@ -26,11 +26,13 @@ CSV_HEADER_PARTS = [
     "process_working_set_bytes,process_private_bytes,",
     # 2 channels
     "channel0_observed_temp_c,channel0_setpoint_pct,"
-    "channel0_thermal_pressure_boost_pct,channel0_total_writes,"
+    "channel0_thermal_pressure_boost_pct,channel0_cpu_low_soak_boost_pct,"
+    "channel0_response_source,channel0_write_reason,channel0_total_writes,"
     "channel0_write_active,channel0_baseline_captured,"
     "channel0_feedforward_pct,channel0_correction_pct,",
     "channel1_observed_temp_c,channel1_setpoint_pct,"
-    "channel1_thermal_pressure_boost_pct,channel1_total_writes,"
+    "channel1_thermal_pressure_boost_pct,channel1_cpu_low_soak_boost_pct,"
+    "channel1_response_source,channel1_write_reason,channel1_total_writes,"
     "channel1_write_active,channel1_baseline_captured,"
     "channel1_feedforward_pct,channel1_correction_pct",
 ]
@@ -62,9 +64,13 @@ def _write_fixture_csv(path: Path, session_start: str, ticks: int = 3) -> None:
             "10.0", "50", "50.0", "0.0", "false",
             "0.0", "0.0", "33000000", "20000000",
             # channel0
-            "60.000", "30.000", "0.000", str(tick), "true", "true", "30.000", "0.000",
+            "60.000", "30.000", "0.000", "0.250",
+            "primary_curve+cpu_low_soak", "first_write" if tick == 1 else "none",
+            str(tick), "true", "true", "30.000", "0.000",
             # channel1
-            "60.000", "32.000", "0.000", str(tick), "true", "true", "32.000", "0.000",
+            "60.000", "32.000", "0.000", "0.000",
+            "primary_curve", "first_write" if tick == 1 else "none",
+            str(tick), "true", "true", "32.000", "0.000",
         ]
         lines.append(",".join(cells))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -302,7 +308,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "2")
+            self.assertEqual(schema[0], "3")
 
             run = _query_one(
                 db_path,
@@ -340,6 +346,15 @@ class AnalyzeIngestTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM tick_channel_samples WHERE channel=1",
             )[0]
             self.assertEqual(channel_count, 3)
+
+            attribution = _query_one(
+                db_path,
+                "SELECT cpu_low_soak_boost_pct, response_source, write_reason "
+                "FROM tick_channel_samples WHERE channel=0 AND tick_count=1",
+            )
+            self.assertEqual(attribution[0], 0.25)
+            self.assertEqual(attribution[1], "primary_curve+cpu_low_soak")
+            self.assertEqual(attribution[2], "first_write")
 
             fan_label = _query_one(
                 db_path,

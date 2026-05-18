@@ -104,6 +104,9 @@ CREATE TABLE IF NOT EXISTS tick_channel_samples (
     observed_temp_c REAL,
     setpoint_pct REAL,
     thermal_pressure_boost_pct REAL,
+    cpu_low_soak_boost_pct REAL,
+    response_source TEXT,
+    write_reason TEXT,
     total_writes INTEGER,
     write_active INTEGER,
     baseline_captured INTEGER,
@@ -514,6 +517,27 @@ void MigrateSchema(Database& db) {
             "ON tick_samples(run_id, gpu_envelope_c)");
         if (version < 2) {
             SetSchemaVersion(db, 2);
+        }
+    }
+    if (version <= 3) {
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "cpu_low_soak_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN cpu_low_soak_boost_pct REAL");
+        }
+        if (!ColumnExists(db, "tick_channel_samples", "response_source")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN response_source TEXT");
+        }
+        if (!ColumnExists(db, "tick_channel_samples", "write_reason")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN write_reason TEXT");
+        }
+        if (version < 3) {
+            SetSchemaVersion(db, 3);
         }
     }
 }
