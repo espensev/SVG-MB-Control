@@ -273,6 +273,12 @@ For offline cleanup, use `svg-mb-control analyze prune`. It defaults to
 dry-run, requires `--apply` for deletion, and only deletes old archive bundles
 that have already been ingested into the SQLite analysis database.
 
+For offline evaluation, use `svg-mb-control analyze report` to summarize one
+ingested run: idle/load/cooldown `p50`/`p90`/`max` for CPU Tctl and GPU
+memory/envelope, per-channel setpoint/duty/RPM and write reversals, response
+delay after the first load-threshold crossing, and authority/write/restore
+failure counts. It is read-only and does not touch the runtime home.
+
 ## Process logs
 
 Supervised launches write process stdout/stderr logs in the runtime root:

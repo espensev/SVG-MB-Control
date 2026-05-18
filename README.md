@@ -243,6 +243,8 @@ release\svg-mb-control.exe analyze ingest --runtime-home .\release\runtime --db 
 release\svg-mb-control.exe analyze ingest --force --quiet
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --dry-run
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --retain-days 14 --apply
+release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --idle-seconds 300
+release\svg-mb-control.exe analyze report --run 7 --load-threshold-c 70 --json
 ```
 
 Behavior:
@@ -269,6 +271,18 @@ Behavior:
 - Runtime retention also removes the matching archive manifest when it prunes an
   old archive CSV chunk. The global event JSONL and plant-model captures are
   intentionally not pruned by this first-pass cleanup.
+- `analyze report` summarizes one ingested run (the most recent run unless
+  `--run <id>` or `--session <ts>` is given). It reports idle/load/cooldown
+  `p50`/`p90`/`max` for `cpu_tctl_c` and `gpu_memjn_c`/`gpu_envelope_c`,
+  per-channel `setpoint_pct`/`duty_pct`/`rpm` plus max boosts, write count and
+  up/down setpoint reversals, the response delay from the first
+  `--load-threshold-c` crossing (default `75` C) to the first controlled-channel
+  setpoint increase above its idle baseline, and authority/write/restore failure
+  counts. The idle band is the ticks whose elapsed time is below
+  `--idle-seconds` (default `300`, matching the evaluation passes); percentiles
+  use nearest-rank on sorted ascending values where `p100` is the maximum.
+  `--json` emits the same metrics as a JSON object. `analyze report` is
+  read-only; it never writes to fans, the runtime, or the database.
 
 Local eval dashboard:
 

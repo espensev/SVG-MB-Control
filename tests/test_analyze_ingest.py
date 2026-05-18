@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import os
 import sqlite3
 import time
@@ -571,3 +572,222 @@ class AnalyzeIngestTests(unittest.TestCase):
             self.assertTrue(manifest_path.exists())
             self.assertIn("candidates=0", result.stdout)
             self.assertIn("skipped_running=1", result.stdout)
+
+
+def _ts(base_iso: str, secs: int) -> str:
+    base = datetime.datetime.fromisoformat(base_iso)
+    moment = base + datetime.timedelta(seconds=secs)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def _ramp_plan(tick_index: int) -> tuple[float, float, float]:
+    """Returns (cpu_tctl_c, ch0_setpoint, ch1_setpoint) for a 0-based tick.
+
+    Ticks 0-9 are idle (cool), 10-24 are under load (hot, with a setpoint
+    step at tick 12), and 25-29 are cooldown.
+    """
+    if tick_index < 10:
+        return 50.0, 20.0, 24.0
+    if tick_index < 25:
+        if tick_index < 12:
+            return 80.0, 20.0, 24.0
+        return 80.0, 40.0, 45.0
+    return 55.0, 30.0, 30.0
+
+
+def _write_ramp_csv(path: Path, session_start: str, ticks: int = 30) -> None:
+    lines = [
+        "# schema=svg_mb_control.log.v1",
+        "# mode=control-loop",
+        f"# session_start={session_start}",
+        CSV_HEADER,
+    ]
+    for i in range(ticks):
+        tick = i + 1
+        wall = _ts(session_start, i)
+        cpu, ch0, ch1 = _ramp_plan(i)
+        first = "first_write" if tick == 1 else "none"
+        cells = [
+            wall, "control-loop", wall, "100",
+            "1", f'"Tctl/Tdie={cpu:.3f}"', f"{cpu:.3f}", f"{cpu:.3f}",
+            "true", '"NVIDIA Test GPU"', "",
+            "45.000", "55.000", "0.000",
+            "2", "true", "true",
+            # fan0 -> channel 0 (duty tracks setpoint)
+            "true", '"Channel0"', "1500", "873", "true",
+            "112", f"{ch0:.2f}", "0", "false", "true", "false", "true",
+            # fan1 -> channel 1
+            "true", '"Channel1"', "1300", "1043", "true",
+            "166", f"{ch1:.2f}", "0", "false", "true", "false", "true",
+            # loop
+            str(tick), wall, wall,
+            "10.0", "50", "50.0", "0.0", "false",
+            "0.0", "0.0", "33000000", "20000000",
+            # channel0 (total_writes cell carries the cumulative count)
+            f"{cpu:.3f}", f"{ch0:.3f}", "0.000", "0.000",
+            "primary_curve", first, str(tick), "true", "true",
+            f"{ch0:.3f}", "0.000",
+            # channel1
+            f"{cpu:.3f}", f"{ch1:.3f}", "0.000", "0.000",
+            "primary_curve", first, str(tick), "true", "true",
+            f"{ch1:.3f}", "0.000",
+        ]
+        lines.append(",".join(cells))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _write_ramp_events(path: Path, session_start: str) -> None:
+    events = [
+        {
+            "schema": "svg_mb_control.event.v1",
+            "event_time": session_start,
+            "event_type": "control_loop.start",
+            "mode": "control-loop",
+            "success": True,
+            "detail": "control-loop started",
+        },
+        {
+            "schema": "svg_mb_control.event.v1",
+            "event_time": _ts(session_start, 11),
+            "event_type": "control_loop.authority_reasserted",
+            "mode": "control-loop",
+            "channel": 0,
+            "tick_count": 12,
+            "success": True,
+            "detail": "reasserted manual authority",
+        },
+        {
+            "schema": "svg_mb_control.event.v1",
+            "event_time": _ts(session_start, 29),
+            "event_type": "control_loop.shutdown",
+            "mode": "control-loop",
+            "success": True,
+        },
+    ]
+    path.write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _build_report_fixture(
+    td: Path, session_start: str = "2026-05-15T03:30:00"
+) -> Path:
+    runtime_home = td / "runtime"
+    logs = runtime_home / "logs"
+    archive = logs / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
+    manifest_path = (
+        archive / "svg_mb_control_control-loop_20260515_033000.manifest.json"
+    )
+    _write_ramp_csv(csv_path, session_start)
+    _write_fixture_manifest(
+        manifest_path,
+        session_start=session_start,
+        csv_path=csv_path,
+        row_count=30,
+        event_count=3,
+    )
+    _write_ramp_events(logs / "svg_mb_control_events.jsonl", session_start)
+    return runtime_home
+
+
+def _run_report(
+    runtime_home: Path,
+    db_path: Path,
+    *extra: str,
+) -> subprocess.CompletedProcess[str]:
+    return _run_control(
+        "analyze",
+        "report",
+        "--runtime-home",
+        str(runtime_home),
+        "--db",
+        str(db_path),
+        *extra,
+    )
+
+
+class AnalyzeReportTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest("Windows-only repo")
+        _ensure_release_build()
+
+    def test_report_text_summarises_bands_and_response(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_report_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "10"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            out = result.stdout
+            self.assertIn("analyze report: run_id=", out)
+            self.assertIn(
+                "band sample counts: idle=10 load=15 cooldown=5", out
+            )
+            self.assertIn("[idle] cpu_tctl_c p50=50.000", out)
+            self.assertIn("[load] cpu_tctl_c p50=80.000 p90=80.000", out)
+            self.assertIn("[cooldown] cpu_tctl_c p50=55.000", out)
+            self.assertIn("response_delay_s=2.000", out)
+            self.assertIn("authority_reasserted=1", out)
+            self.assertIn("ch0 setpoint_pct", out)
+            self.assertIn("ch1 setpoint_pct", out)
+
+    def test_report_json_emits_structured_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_report_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "10", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            self.assertEqual(obj["bands"]["idle"]["n"], 10)
+            self.assertEqual(obj["bands"]["load"]["n"], 15)
+            self.assertEqual(obj["bands"]["cooldown"]["n"], 5)
+            self.assertEqual(obj["bands"]["load"]["cpu_tctl_c"]["max"], 80.0)
+            self.assertEqual(obj["bands"]["idle"]["cpu_tctl_c"]["p50"], 50.0)
+            self.assertEqual(obj["response"]["load_onset_tick"], 11)
+            self.assertEqual(obj["response"]["response_delay_s"], 2.0)
+            self.assertEqual(obj["robustness"]["authority_reasserted"], 1)
+            self.assertEqual(obj["robustness"]["write_failures"], 0)
+            channels = {c["channel"]: c for c in obj["channels"]}
+            self.assertEqual(set(channels), {0, 1})
+            self.assertGreaterEqual(channels[0]["reversals"], 1)
+            self.assertEqual(channels[0]["mode_leave_ticks"], 0)
+            self.assertEqual(channels[0]["writes"], 29)
+
+    def test_report_run_selection_and_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_report_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            session = "2026-05-15T03:30:00"
+            ok = _run_report(
+                runtime_home, db_path, "--session", session,
+                "--idle-seconds", "10",
+            )
+            self.assertEqual(ok.returncode, 0, msg=ok.stderr)
+            self.assertIn("session_start=" + session, ok.stdout)
+
+            missing_run = _run_report(
+                runtime_home, db_path, "--run", "9999"
+            )
+            self.assertEqual(missing_run.returncode, 1)
+            self.assertIn("no matching run", missing_run.stderr)
+
+            absent_db = _run_report(runtime_home, td / "absent.db")
+            self.assertEqual(absent_db.returncode, 1)
+            self.assertIn("does not exist", absent_db.stderr)

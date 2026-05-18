@@ -103,6 +103,7 @@ add_executable(svg_mb_control
     src/analyze/analyze_ingest_db.cpp
     src/analyze/analyze_json_artifacts.cpp
     src/analyze/analyze_prune.cpp
+    src/analyze/analyze_report.cpp
     src/calibration.cpp
     src/channel_evaluator.cpp
     src/control_config.cpp
