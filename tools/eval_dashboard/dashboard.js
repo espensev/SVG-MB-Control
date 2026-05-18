@@ -24,6 +24,12 @@ const state = {
   focusChannel: "",
   live: {
     on: false,
+    autoRefresh: true,
+    loadedOnce: false,
+    loading: false,
+    generation: 0,
+    csvSignature: null,
+    eventsSignature: null,
     baseUrl: "../../release/runtime",
     intervalS: 2,
     cap: 2400,
@@ -2606,14 +2612,131 @@ const HEALTH_CLASS = {
   failed: "bad",
 };
 
+function formatAgeSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds)) {
+    return "";
+  }
+  if (seconds < 2) {
+    return "now";
+  }
+  if (seconds < 60) {
+    return `${Math.round(seconds)} s old`;
+  }
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} min old`;
+  }
+  if (seconds < 86400) {
+    return `${Math.round(seconds / 3600)} h old`;
+  }
+  return `${Math.round(seconds / 86400)} d old`;
+}
+
+function formatSizeBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "";
+  }
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function describeHealthFile(meta) {
+  if (!meta || typeof meta !== "object" || meta.exists !== true) {
+    return "missing";
+  }
+  const parts = [];
+  const age = formatAgeSeconds(meta.age_seconds);
+  const size = formatSizeBytes(meta.size_bytes);
+  if (age) {
+    parts.push(age);
+  }
+  if (size) {
+    parts.push(size);
+  }
+  return parts.length ? parts.join(", ") : "present";
+}
+
+function liveFileSignature(meta) {
+  if (!meta || typeof meta !== "object" || meta.exists !== true) {
+    return "";
+  }
+  return `${meta.modified_time || ""}|${meta.size_bytes ?? ""}`;
+}
+
+function liveMetadataSignature(payload) {
+  const files = payload && payload.files && typeof payload.files === "object"
+    ? payload.files
+    : {};
+  return {
+    csv: liveFileSignature(files.live_csv),
+    events: liveFileSignature(files.events),
+  };
+}
+
+function commitLiveMetadataSignature(signature) {
+  if (!signature || !signature.csv) {
+    return;
+  }
+  state.live.csvSignature = signature.csv;
+  state.live.eventsSignature = signature.events || "";
+}
+
+function liveMetadataChanged(signature) {
+  if (!signature || !signature.csv || !state.live.autoRefresh || state.live.loading) {
+    return false;
+  }
+  if (!state.live.csvSignature && !state.live.eventsSignature) {
+    return !state.live.loadedOnce;
+  }
+  return (
+    signature.csv !== state.live.csvSignature ||
+    (signature.events || "") !== (state.live.eventsSignature || "")
+  );
+}
+
+function disableLiveAutoRefresh() {
+  state.live.autoRefresh = false;
+  state.live.on = false;
+  state.live.loading = false;
+  state.live.generation += 1;
+  state.live.csvSignature = null;
+  state.live.eventsSignature = null;
+}
+
+function healthMetadataDetail(payload) {
+  const detail = [];
+  const push = (k, v) => {
+    if (v !== null && v !== undefined && String(v) !== "") {
+      detail.push({ k, v: String(v) });
+    }
+  };
+  if (!payload || typeof payload !== "object") {
+    return detail;
+  }
+  push("runtime home", payload.runtime_home);
+  const files = payload.files && typeof payload.files === "object" ? payload.files : {};
+  push("health file", describeHealthFile(files.control_health));
+  push("runtime file", describeHealthFile(files.control_runtime));
+  push("live CSV", describeHealthFile(files.live_csv));
+  push("events", describeHealthFile(files.events));
+  return detail;
+}
+
 function summarizeHealth(payload) {
+  const detail = healthMetadataDetail(payload);
   if (!payload || payload.available === false) {
     return {
       state: "unknown",
       label: "unknown",
       cls: "muted",
       reason: "no runtime health files found",
-      detail: [],
+      detail,
     };
   }
   const h = payload.health && typeof payload.health === "object" ? payload.health : {};
@@ -2625,13 +2748,13 @@ function summarizeHealth(payload) {
     typeof h.last_health_state === "string" && h.last_health_state
       ? h.last_health_state
       : "unknown";
-  const detail = [];
   const push = (k, v) => {
     if (v !== null && v !== undefined && String(v) !== "") {
       detail.push({ k, v: String(v) });
     }
   };
   push("mode", rt.mode);
+  push("runtime", rt.status_detail || rt.status);
   push("worker pid", rt.process_id);
   push("supervisor pid", sup.supervisor_pid);
   if (Number.isFinite(sup.worker_restart_count)) {
@@ -2642,13 +2765,15 @@ function summarizeHealth(payload) {
     push("last worker exit", `${sup.last_worker_exit_code}${at}`);
   }
   push("last restore", rt.last_successful_restore_time);
+  push("loop checked", rt.loop_last_evaluation);
   push("checked", h.last_health_time);
+  const reason = typeof h.last_health_reason === "string" ? h.last_health_reason : "";
 
   return {
     state: rawState,
     label: rawState,
     cls: HEALTH_CLASS[rawState] || "muted",
-    reason: typeof h.last_health_reason === "string" ? h.last_health_reason : "",
+    reason: reason || (payload.health ? "" : "runtime sidecar found; no persisted health check"),
     detail,
   };
 }
@@ -2685,7 +2810,9 @@ async function loadHealth() {
   }
   try {
     const text = await fetchTextIfOk(LIVE_HEALTH_URL);
-    renderHealth(summarizeHealth(JSON.parse(text)));
+    const payload = JSON.parse(text);
+    renderHealth(summarizeHealth(payload));
+    maybeRefreshLiveRun(payload);
   } catch {
     renderHealth({
       state: "unknown",
@@ -2697,23 +2824,58 @@ async function loadHealth() {
   }
 }
 
-async function loadLiveRun() {
+function maybeRefreshLiveRun(payload) {
+  const signature = liveMetadataSignature(payload);
+  if (!signature.csv || !state.live.autoRefresh) {
+    return;
+  }
+  if (!state.live.csvSignature && !state.live.eventsSignature && state.live.loadedOnce) {
+    commitLiveMetadataSignature(signature);
+    return;
+  }
+  if (liveMetadataChanged(signature)) {
+    loadLiveRun({
+      preserveOnError: state.live.loadedOnce,
+      signature,
+      silent: state.live.loadedOnce,
+    });
+  }
+}
+
+async function loadLiveRun(options = {}) {
   if (!window.location || window.location.protocol !== "http:" && window.location.protocol !== "https:") {
     els.loadStatus.textContent = "Pick a CSV";
     els.runSubtitle.textContent = "Open through Start-EvalDashboard.ps1 for live auto-load.";
     return;
   }
 
-  els.loadStatus.textContent = "Loading live";
-  els.runSubtitle.textContent = "Loading recent live CSV rows...";
+  if (state.live.loading) {
+    return;
+  }
+
+  const silent = options.silent === true;
+  const preserveOnError = options.preserveOnError === true;
+  const generation = state.live.generation;
+  state.live.loading = true;
+  if (!silent) {
+    els.loadStatus.textContent = "Loading live";
+    els.runSubtitle.textContent = "Loading recent live CSV rows...";
+  }
   try {
     const csvText = await fetchTextIfOk(LIVE_CSV_URL);
     const rows = parseCsv(csvText);
     if (!rows.length) {
       throw new Error("CSV has no rows yet");
     }
+    if (generation !== state.live.generation || !state.live.autoRefresh) {
+      return;
+    }
     state.rows = rows;
     state.csvName = "live tail: release/runtime/logs/svg_mb_control_output.csv";
+    state.live.on = true;
+    state.live.loadedOnce = true;
+    state.live.lastErr = "";
+    commitLiveMetadataSignature(options.signature);
 
     try {
       state.events = parseJsonl(await fetchTextIfOk(LIVE_EVENTS_URL));
@@ -2723,11 +2885,22 @@ async function loadLiveRun() {
 
     render();
   } catch (error) {
-    state.rows = [];
+    if (generation !== state.live.generation || !state.live.autoRefresh) {
+      return;
+    }
     const message = error && error.message ? error.message : String(error);
-    els.loadStatus.textContent = "Pick a CSV";
-    els.runSubtitle.textContent = `Live CSV unavailable: ${message}. Choose Control CSV manually.`;
-    render();
+    state.live.lastErr = message;
+    if (!preserveOnError) {
+      state.rows = [];
+      state.live.on = false;
+      els.loadStatus.textContent = "Pick a CSV";
+      els.runSubtitle.textContent = `Live CSV unavailable: ${message}. Choose Control CSV manually.`;
+      render();
+    }
+  } finally {
+    if (generation === state.live.generation) {
+      state.live.loading = false;
+    }
   }
 }
 
@@ -2793,6 +2966,7 @@ if (typeof document !== "undefined") {
     if (!file) {
       return;
     }
+    disableLiveAutoRefresh();
     state.rows = parseCsv(await readFile(file));
     state.csvName = file.name;
     render();
@@ -2813,6 +2987,7 @@ if (typeof document !== "undefined") {
     if (!file) {
       return;
     }
+    disableLiveAutoRefresh();
     state.events = parseJsonl(await readFile(file));
     render();
   });
@@ -2900,6 +3075,9 @@ if (typeof module !== "undefined" && module.exports) {
     computeModel,
     buildModel,
     summarizeHealth,
+    formatAgeSeconds,
+    liveMetadataSignature,
+    liveMetadataChanged,
     state,
   };
 }

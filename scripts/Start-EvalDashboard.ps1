@@ -2,6 +2,7 @@
 param(
     [int]$Port = 8765,
     [string]$HostName = '127.0.0.1',
+    [string]$RuntimeHome = '',
     [switch]$Open,
     [Alias('h')][switch]$Help
 )
@@ -11,13 +12,14 @@ if ($Help) {
 Start-EvalDashboard.ps1 - Serve the local SVG-MB-Control eval dashboard.
 
 USAGE
-    .\scripts\Start-EvalDashboard.ps1 [-Port 8765] [-HostName 127.0.0.1] [-Open]
+    .\scripts\Start-EvalDashboard.ps1 [-Port 8765] [-HostName 127.0.0.1] [-RuntimeHome .\release\runtime] [-Open]
 
 The dashboard is static. It reads selected CSV, JSON, and JSONL files in the
 browser and does not expose a controller API. The server binds to localhost by
-default and serves the repo root so the dashboard can auto-load the packaged
-runtime logs under release\runtime. Large live CSVs are exposed through a
-bounded tail endpoint so the browser does not parse an entire long-running log.
+default and serves the repo root. By default it auto-loads packaged runtime
+logs under release\runtime; -RuntimeHome points the API endpoints at another
+runtime directory. Large live CSVs are exposed through a bounded tail endpoint
+so the browser does not parse an entire long-running log.
 "@
     return
 }
@@ -50,10 +52,18 @@ function Resolve-Python {
 }
 
 $pythonExe = Resolve-Python
+$ResolvedRuntimeHome = $RuntimeHome
+if ([string]::IsNullOrWhiteSpace($ResolvedRuntimeHome)) {
+    $ResolvedRuntimeHome = Join-Path $RepoRoot 'release\runtime'
+} elseif (-not [System.IO.Path]::IsPathRooted($ResolvedRuntimeHome)) {
+    $ResolvedRuntimeHome = Join-Path $RepoRoot $ResolvedRuntimeHome
+}
+$ResolvedRuntimeHome = [System.IO.Path]::GetFullPath($ResolvedRuntimeHome)
 $url = "http://$HostName`:$Port/tools/eval_dashboard/"
 
 Write-Host "SVG-MB-Control eval dashboard: $url"
 Write-Host "Serving repo root: $RepoRoot"
+Write-Host "Reading runtime home: $ResolvedRuntimeHome"
 Write-Host "Press Ctrl+C to stop."
 
 if ($Open) {
@@ -61,9 +71,9 @@ if ($Open) {
 }
 
 if ([System.IO.Path]::GetFileNameWithoutExtension($pythonExe) -ieq 'py') {
-    & $pythonExe -3 $DashboardServer --repo-root $RepoRoot --host $HostName --port $Port
+    & $pythonExe -3 $DashboardServer --repo-root $RepoRoot --runtime-home $ResolvedRuntimeHome --host $HostName --port $Port
 } else {
-    & $pythonExe $DashboardServer --repo-root $RepoRoot --host $HostName --port $Port
+    & $pythonExe $DashboardServer --repo-root $RepoRoot --runtime-home $ResolvedRuntimeHome --host $HostName --port $Port
 }
 
 exit $LASTEXITCODE

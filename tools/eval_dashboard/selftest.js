@@ -246,5 +246,32 @@ ok("failed -> bad", D.summarizeHealth({ available: true, health: { last_health_s
 ok("unknown state string -> muted, label preserved",
   (() => { const s = D.summarizeHealth({ available: true, health: { last_health_state: "weird" } }); return s.cls === "muted" && s.label === "weird"; })());
 
+console.log("\n[5] Live metadata refresh gating");
+
+const liveSig = D.liveMetadataSignature({
+  files: {
+    live_csv: { exists: true, modified_time: "2026-05-18T15:00:00", size_bytes: 100 },
+    events: { exists: true, modified_time: "2026-05-18T15:00:01", size_bytes: 20 },
+  },
+});
+ok("liveMetadataSignature keys changed files by time/size",
+  liveSig.csv === "2026-05-18T15:00:00|100" && liveSig.events === "2026-05-18T15:00:01|20",
+  JSON.stringify(liveSig));
+
+D.state.live.autoRefresh = true;
+D.state.live.loading = false;
+D.state.live.loadedOnce = false;
+D.state.live.csvSignature = null;
+D.state.live.eventsSignature = null;
+ok("first available live metadata requests initial refresh",
+  D.liveMetadataChanged(liveSig) === true);
+D.state.live.loadedOnce = true;
+D.state.live.csvSignature = liveSig.csv;
+D.state.live.eventsSignature = liveSig.events;
+ok("unchanged live metadata does not refresh",
+  D.liveMetadataChanged(liveSig) === false);
+ok("changed live CSV metadata refreshes",
+  D.liveMetadataChanged({ ...liveSig, csv: "2026-05-18T15:00:05|120" }) === true);
+
 console.log(`\n${failed === 0 ? "ALL GREEN" : "FAILURES"}: ${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

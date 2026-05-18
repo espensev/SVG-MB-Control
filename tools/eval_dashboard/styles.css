@@ -185,6 +185,7 @@ h2 {
 .health-item {
   font-size: 13px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .health-item b {

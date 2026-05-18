@@ -41,6 +41,9 @@ class EvalDashboardTests(unittest.TestCase):
         self.assertIn("Runtime Health", html)
         self.assertIn("function summarizeHealth", js)
         self.assertIn("function loadHealth", js)
+        self.assertIn("function liveMetadataSignature", js)
+        self.assertIn("function maybeRefreshLiveRun", js)
+        self.assertIn("disableLiveAutoRefresh", js)
         self.assertIn("/api/health.json", js)
         self.assertIn(".health-pill", css)
 
@@ -49,6 +52,12 @@ class EvalDashboardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td_str:
             base = Path(td_str) / "release" / "runtime"
             base.mkdir(parents=True, exist_ok=True)
+            logs = base / "logs"
+            logs.mkdir(parents=True, exist_ok=True)
+            (logs / "svg_mb_control_output.csv").write_text(
+                "wall_clock,loop_tick_count\n2026-05-18T15:00:01,1\n",
+                encoding="utf-8",
+            )
             _write_json(
                 base / "control_health.json",
                 {
@@ -82,6 +91,8 @@ class EvalDashboardTests(unittest.TestCase):
             payload = server.build_health_payload(Path(td_str))
 
             self.assertTrue(payload["available"])
+            self.assertEqual(Path(payload["runtime_home"]), base.resolve())
+            self.assertTrue(payload["runtime_home_exists"])
             self.assertEqual(payload["health"]["last_health_state"], "healthy")
             self.assertEqual(payload["supervisor"]["worker_restart_count"], 2)
             self.assertEqual(payload["runtime"]["mode"], "control-loop")
@@ -90,15 +101,47 @@ class EvalDashboardTests(unittest.TestCase):
                 "2026-05-18T14:58:00",
             )
             self.assertNotIn("schema_version", payload["runtime"])
+            self.assertTrue(payload["files"]["control_health"]["exists"])
+            self.assertTrue(payload["files"]["live_csv"]["exists"])
+            self.assertGreater(payload["files"]["live_csv"]["size_bytes"], 0)
+            self.assertIsNotNone(payload["files"]["live_csv"]["modified_time"])
+            self.assertIsNotNone(payload["files"]["live_csv"]["age_seconds"])
+            self.assertFalse(payload["files"]["events"]["exists"])
 
     def test_build_health_payload_tolerates_missing_files(self) -> None:
         server = _load_dashboard_server()
         with tempfile.TemporaryDirectory() as td_str:
             payload = server.build_health_payload(Path(td_str))
             self.assertFalse(payload["available"])
+            self.assertFalse(payload["runtime_home_exists"])
             self.assertIsNone(payload["health"])
             self.assertIsNone(payload["supervisor"])
             self.assertIsNone(payload["runtime"])
+            self.assertFalse(payload["files"]["control_runtime"]["exists"])
+            self.assertFalse(payload["files"]["live_csv"]["exists"])
+
+    def test_build_health_payload_uses_custom_runtime_home(self) -> None:
+        server = _load_dashboard_server()
+        with tempfile.TemporaryDirectory() as td_str:
+            repo_root = Path(td_str)
+            base = repo_root / "custom-runtime"
+            base.mkdir(parents=True, exist_ok=True)
+            _write_json(
+                base / "control_runtime.json",
+                {
+                    "schema_version": 4,
+                    "mode": "control-loop",
+                    "status": "running",
+                    "process_id": 333,
+                },
+            )
+
+            payload = server.build_health_payload(repo_root, Path("custom-runtime"))
+
+            self.assertTrue(payload["available"])
+            self.assertEqual(Path(payload["runtime_home"]), base.resolve())
+            self.assertEqual(payload["runtime"]["process_id"], 333)
+            self.assertTrue(payload["files"]["control_runtime"]["exists"])
 
     def test_dashboard_server_help(self) -> None:
         result = subprocess.run(
@@ -119,3 +162,4 @@ class EvalDashboardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
         self.assertIn("Serve the local SVG-MB-Control eval dashboard", result.stdout)
         self.assertIn("serves the repo root", result.stdout)
+        self.assertIn("RuntimeHome", result.stdout)

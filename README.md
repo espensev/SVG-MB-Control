@@ -284,7 +284,12 @@ logs do not freeze the browser. It can also load selected control-loop CSVs,
 analyzer JSON summaries, and optional events JSONL files in the browser. The
 first response watch line is CPU/Tctl at `65 C` by default, separate from the
 GPU envelope limit, so below-70 C steady-state response is visible instead of
-hidden behind a high thermal ceiling.
+hidden behind a high thermal ceiling. Use `-RuntimeHome <path>` when inspecting
+a run outside `release\runtime`; the health endpoint uses the same runtime home
+and reports file freshness for the health, status, live CSV, and event sidecars.
+While served over HTTP, the dashboard uses that freshness metadata to refresh
+the live CSV/events view only when the files change; choosing a manual CSV or
+events file disables live auto-refresh for that page session.
 
 ## Config
 
