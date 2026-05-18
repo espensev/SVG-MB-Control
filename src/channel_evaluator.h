@@ -32,6 +32,7 @@ struct ChannelEvaluation {
     bool has_setpoint = false;
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double setpoint_pct = std::numeric_limits<double>::quiet_NaN();
+    std::string response_source = "unavailable";
     bool authority_reassert = false;
     std::string authority_detail;
     ChannelSensorEvent sensor_event = ChannelSensorEvent::None;

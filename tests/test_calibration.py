@@ -95,3 +95,67 @@ class CalibrationTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("no writable channels", result.stderr)
+
+    def test_calibrate_accepts_custom_duty_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            runtime_home.mkdir(parents=True, exist_ok=True)
+            config_path = _write_write_once_config(
+                td,
+                runtime_home=runtime_home,
+                baseline_freshness_ceiling_ms=10000,
+                restore_timeout_ms=5000,
+            )
+            output_path = runtime_home / "plant_model.json"
+            result = _run_control(
+                "--mode",
+                "calibrate",
+                "--config",
+                str(config_path),
+                "--calibrate-channel",
+                "0",
+                "--calibrate-sequence",
+                "22:200,24:300,26:200",
+                "--calibrate-settle-window-ms",
+                "100",
+                "--calibrate-output",
+                str(output_path),
+                env=_sim_direct_env(channel=0, amd_temp_c=60.0),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+            payload = _read_json(output_path)
+            sequence = payload["options"]["sequence"]
+            self.assertEqual(
+                sequence,
+                [
+                    {"duty_pct": 22.0, "hold_ms": 200},
+                    {"duty_pct": 24.0, "hold_ms": 300},
+                    {"duty_pct": 26.0, "hold_ms": 200},
+                ],
+            )
+            steps = payload["channels"][0]["steps"]
+            self.assertEqual([step["duty_pct_target"] for step in steps], [22.0, 24.0, 26.0])
+
+    def test_calibrate_rejects_bad_custom_duty_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            runtime_home.mkdir(parents=True, exist_ok=True)
+            config_path = _write_write_once_config(
+                td,
+                runtime_home=runtime_home,
+            )
+            result = _run_control(
+                "--mode",
+                "calibrate",
+                "--config",
+                str(config_path),
+                "--calibrate-channel",
+                "0",
+                "--calibrate-sequence",
+                "52,54",
+                env=_sim_direct_env(channel=0, amd_temp_c=60.0),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid --calibrate-sequence", result.stderr)

@@ -140,6 +140,49 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
         }
     }
 
+    if (!std::isnan(ch.cpu_low_soak_start_c) ||
+        !std::isnan(ch.cpu_low_soak_full_c) ||
+        !std::isnan(ch.cpu_low_soak_release_c) ||
+        !std::isnan(ch.cpu_low_soak_rise_pct_per_min) ||
+        !std::isnan(ch.cpu_low_soak_fall_pct_per_min) ||
+        !std::isnan(ch.cpu_low_soak_max_boost_pct)) {
+        if (std::isnan(ch.cpu_low_soak_start_c) ||
+            std::isnan(ch.cpu_low_soak_full_c) ||
+            std::isnan(ch.cpu_low_soak_release_c) ||
+            std::isnan(ch.cpu_low_soak_rise_pct_per_min) ||
+            std::isnan(ch.cpu_low_soak_fall_pct_per_min) ||
+            std::isnan(ch.cpu_low_soak_max_boost_pct)) {
+            throw std::runtime_error(
+                prefix + " cpu_low_soak requires the complete field set");
+        }
+
+        ValidatePositive(ch.cpu_low_soak_start_c,
+                        prefix + " cpu_low_soak_start_c");
+        ValidatePositive(ch.cpu_low_soak_full_c,
+                        prefix + " cpu_low_soak_full_c");
+        ValidatePositive(ch.cpu_low_soak_release_c,
+                        prefix + " cpu_low_soak_release_c");
+        ValidatePositive(ch.cpu_low_soak_rise_pct_per_min,
+                        prefix + " cpu_low_soak_rise_pct_per_min");
+        ValidatePositive(ch.cpu_low_soak_fall_pct_per_min,
+                        prefix + " cpu_low_soak_fall_pct_per_min");
+        ValidatePercentage(ch.cpu_low_soak_max_boost_pct,
+                          prefix + " cpu_low_soak_max_boost_pct");
+
+        if (ch.cpu_low_soak_full_c <= ch.cpu_low_soak_start_c) {
+            throw std::runtime_error(
+                prefix + " cpu_low_soak_full_c must be > start_c");
+        }
+        if (ch.cpu_low_soak_release_c > ch.cpu_low_soak_start_c) {
+            throw std::runtime_error(
+                prefix + " cpu_low_soak_release_c must be <= start_c");
+        }
+        if (ch.cpu_low_soak_max_boost_pct > 10.0) {
+            throw std::runtime_error(
+                prefix + " cpu_low_soak_max_boost_pct must be <= 10");
+        }
+    }
+
     ValidateCurve(ch.curve, prefix + " curve");
     ValidateCurve(ch.cpu_override_curve, prefix + " cpu_override_curve", true);
 }
@@ -281,6 +324,31 @@ ControlLoopConfig LoadControlLoopConfig(
         if (ch_json.contains("thermal_pressure_max_boost_pct")) {
             channel.thermal_pressure_max_boost_pct =
                 ch_json["thermal_pressure_max_boost_pct"].get<double>();
+        }
+
+        if (ch_json.contains("cpu_low_soak_start_c")) {
+            channel.cpu_low_soak_start_c =
+                ch_json["cpu_low_soak_start_c"].get<double>();
+        }
+        if (ch_json.contains("cpu_low_soak_full_c")) {
+            channel.cpu_low_soak_full_c =
+                ch_json["cpu_low_soak_full_c"].get<double>();
+        }
+        if (ch_json.contains("cpu_low_soak_release_c")) {
+            channel.cpu_low_soak_release_c =
+                ch_json["cpu_low_soak_release_c"].get<double>();
+        }
+        if (ch_json.contains("cpu_low_soak_rise_pct_per_min")) {
+            channel.cpu_low_soak_rise_pct_per_min =
+                ch_json["cpu_low_soak_rise_pct_per_min"].get<double>();
+        }
+        if (ch_json.contains("cpu_low_soak_fall_pct_per_min")) {
+            channel.cpu_low_soak_fall_pct_per_min =
+                ch_json["cpu_low_soak_fall_pct_per_min"].get<double>();
+        }
+        if (ch_json.contains("cpu_low_soak_max_boost_pct")) {
+            channel.cpu_low_soak_max_boost_pct =
+                ch_json["cpu_low_soak_max_boost_pct"].get<double>();
         }
 
         // Parse temp blend

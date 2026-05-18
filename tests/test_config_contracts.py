@@ -140,6 +140,49 @@ class ConfigContractTests(unittest.TestCase):
                     channel["thermal_pressure_fall_pct_per_sec"],
                 )
 
+    def test_shipped_radiator_lanes_include_cpu_low_soak(self) -> None:
+        required = {
+            "cpu_low_soak_start_c",
+            "cpu_low_soak_full_c",
+            "cpu_low_soak_release_c",
+            "cpu_low_soak_rise_pct_per_min",
+            "cpu_low_soak_fall_pct_per_min",
+            "cpu_low_soak_max_boost_pct",
+        }
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            by_channel = {
+                item["channel"]: item
+                for item in payload["control_loop"]["channels"]
+            }
+            self.assertEqual(
+                sorted(
+                    channel_id
+                    for channel_id, channel in by_channel.items()
+                    if "cpu_low_soak_start_c" in channel
+                ),
+                [1, 4, 5],
+            )
+            for channel_id in (1, 4, 5):
+                channel = by_channel[channel_id]
+                missing = sorted(required.difference(channel))
+                self.assertEqual(
+                    missing,
+                    [],
+                    msg=f"{rel_path} channel {channel_id} missing CPU low soak keys",
+                )
+                self.assertEqual(channel["cpu_low_soak_start_c"], 62.0)
+                self.assertEqual(channel["cpu_low_soak_full_c"], 71.0)
+                self.assertLessEqual(
+                    channel["cpu_low_soak_release_c"],
+                    channel["cpu_low_soak_start_c"],
+                )
+                self.assertLessEqual(channel["cpu_low_soak_max_boost_pct"], 2.5)
+
     def test_shipped_noctua_cpu_overlays_are_staggered(self) -> None:
         for rel_path in (
             Path("config") / "control.example.json",

@@ -98,6 +98,12 @@
         "thermal_pressure_rise_pct_per_sec": 3.2,
         "thermal_pressure_fall_pct_per_sec": 0.5,
         "thermal_pressure_max_boost_pct": 22.0,
+        "cpu_low_soak_start_c": 62.0,
+        "cpu_low_soak_full_c": 71.0,
+        "cpu_low_soak_release_c": 60.5,
+        "cpu_low_soak_rise_pct_per_min": 1.2,
+        "cpu_low_soak_fall_pct_per_min": 0.5,
+        "cpu_low_soak_max_boost_pct": 2.5,
         "cpu_override_curve": [
           {
             "temp_c": 75,
@@ -305,6 +311,12 @@
         "thermal_pressure_rise_pct_per_sec": 3.0,
         "thermal_pressure_fall_pct_per_sec": 0.5,
         "thermal_pressure_max_boost_pct": 20.0,
+        "cpu_low_soak_start_c": 62.0,
+        "cpu_low_soak_full_c": 71.0,
+        "cpu_low_soak_release_c": 60.5,
+        "cpu_low_soak_rise_pct_per_min": 1.2,
+        "cpu_low_soak_fall_pct_per_min": 0.5,
+        "cpu_low_soak_max_boost_pct": 2.0,
         "cpu_override_curve": [
           {
             "temp_c": 75,
@@ -370,6 +382,12 @@
         "thermal_pressure_rise_pct_per_sec": 3.0,
         "thermal_pressure_fall_pct_per_sec": 0.5,
         "thermal_pressure_max_boost_pct": 20.0,
+        "cpu_low_soak_start_c": 62.0,
+        "cpu_low_soak_full_c": 71.0,
+        "cpu_low_soak_release_c": 60.5,
+        "cpu_low_soak_rise_pct_per_min": 1.2,
+        "cpu_low_soak_fall_pct_per_min": 0.5,
+        "cpu_low_soak_max_boost_pct": 2.0,
         "cpu_override_curve": [
           {
             "temp_c": 75,

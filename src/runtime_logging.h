@@ -20,6 +20,9 @@ struct RuntimeControlChannelLogState {
     double setpoint_pct = std::numeric_limits<double>::quiet_NaN();
     double feedforward_pct = std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_boost_pct = 0.0;
+    double cpu_low_soak_boost_pct = 0.0;
+    std::string response_source;
+    std::string write_reason;
     std::uint64_t total_writes = 0u;
     bool write_active = false;
     bool baseline_captured = false;

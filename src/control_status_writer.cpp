@@ -30,6 +30,9 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
          JsonNumberOrZero(channel.smoothed_demand_pct)},
         {"last_thermal_pressure_boost_pct",
          channel.thermal_pressure_boost_pct},
+        {"last_cpu_low_soak_boost_pct", channel.cpu_low_soak_boost_pct},
+        {"last_response_source", channel.last_response_source},
+        {"last_write_reason", channel.last_write_reason},
         {"last_observed_temp_c", JsonNumberOrZero(channel.last_observed_temp_c)},
         {"sensor_failed", channel.sensor_failed},
         {"consecutive_sensor_failures",
@@ -102,6 +105,9 @@ std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
         state.feedforward_pct = channel.last_raw_demand_pct;
         state.thermal_pressure_boost_pct =
             channel.thermal_pressure_boost_pct;
+        state.cpu_low_soak_boost_pct = channel.cpu_low_soak_boost_pct;
+        state.response_source = channel.last_response_source;
+        state.write_reason = channel.last_write_reason;
         state.total_writes = channel.total_writes;
         state.write_active = channel.write_active;
         state.baseline_captured = channel.baseline_captured;

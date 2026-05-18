@@ -11,6 +11,7 @@
 #include "json_io.h"
 #include "read_loop.h"
 #include "runtime_artifacts.h"
+#include "runtime_health.h"
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
@@ -50,6 +51,7 @@ using svg_mb_control::ConfirmDetachedLaunch;
 using svg_mb_control::IsLongRunningMode;
 using svg_mb_control::LaunchDetachedLongRunningMode;
 using svg_mb_control::ParseRunMode;
+using svg_mb_control::PrintRuntimeHealth;
 using svg_mb_control::PrintRuntimeStatus;
 using svg_mb_control::RequestStopAndWait;
 using svg_mb_control::RunMode;
@@ -83,11 +85,12 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--start|--status|--stop|--restart] [--config <path>]\n"
+        << "  svg-mb-control [--start|--status|--health|--stop|--restart] [--json] [--config <path>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate|evidence-log>] [--config <path>] "
            << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
         << "  svg-mb-control --mode calibrate [--calibrate-channel <n>] "
            << "[--calibrate-step-ms <ms>] [--calibrate-cooldown-ms <ms>] "
+           << "[--calibrate-sequence <pct:ms[,pct:ms...]>] "
            << "[--calibrate-settle-window-ms <ms>] [--calibrate-abort-temp-c <c>] "
            << "[--calibrate-output <path>]\n"
         << "  svg-mb-control analyze ingest [--runtime-home <path>] "
@@ -279,8 +282,18 @@ void PrintControlLoopStartup(
                   << "C +" << channel.thermal_pressure_max_boost_pct
                   << "% @ " << channel.thermal_pressure_rise_pct_per_sec
                   << "%/s -" << channel.thermal_pressure_fall_pct_per_sec
-                  << "%/s"
-                  << " curve=";
+                  << "%/s";
+        if (channel.cpu_low_soak_max_boost_pct > 0.0) {
+            std::cout << " cpu_low_soak="
+                      << channel.cpu_low_soak_start_c
+                      << '-' << channel.cpu_low_soak_full_c
+                      << "C release<=" << channel.cpu_low_soak_release_c
+                      << "C +" << channel.cpu_low_soak_max_boost_pct
+                      << "% @ " << channel.cpu_low_soak_rise_pct_per_min
+                      << "%/min -" << channel.cpu_low_soak_fall_pct_per_min
+                      << "%/min";
+        }
+        std::cout << " curve=";
         for (std::size_t index = 0; index < channel.curve.size(); ++index) {
             if (index > 0) {
                 std::cout << ',';
@@ -364,6 +377,60 @@ double ParseDoubleArg(const wchar_t* value, const char* flag_name) {
     }
 }
 
+std::vector<svg_mb_control::CalibrationStepSpec> ParseCalibrationSequence(
+    const wchar_t* value) {
+    const std::wstring input(value);
+    if (input.empty()) {
+        throw std::runtime_error("--calibrate-sequence cannot be empty.");
+    }
+
+    std::vector<svg_mb_control::CalibrationStepSpec> sequence;
+    std::size_t offset = 0u;
+    while (offset < input.size()) {
+        const std::size_t comma = input.find(L',', offset);
+        const std::size_t end =
+            comma == std::wstring::npos ? input.size() : comma;
+        const std::wstring token = input.substr(offset, end - offset);
+        const std::size_t colon = token.find(L':');
+        if (token.empty() || colon == std::wstring::npos ||
+            colon == 0u || colon + 1u >= token.size()) {
+            throw std::runtime_error(
+                "Invalid --calibrate-sequence entry; expected duty_pct:hold_ms.");
+        }
+
+        double duty_pct = 0.0;
+        std::uint32_t hold_ms = 0u;
+        try {
+            duty_pct = std::stod(token.substr(0u, colon));
+            const unsigned long parsed_hold =
+                std::stoul(token.substr(colon + 1u));
+            hold_ms = static_cast<std::uint32_t>(parsed_hold);
+        } catch (const std::exception&) {
+            throw std::runtime_error(
+                "Invalid --calibrate-sequence entry; expected duty_pct:hold_ms.");
+        }
+        if (duty_pct < 0.0 || duty_pct > 100.0) {
+            throw std::runtime_error(
+                "--calibrate-sequence duty_pct must be in [0, 100].");
+        }
+        if (hold_ms == 0u) {
+            throw std::runtime_error(
+                "--calibrate-sequence hold_ms must be greater than zero.");
+        }
+        sequence.push_back({duty_pct, hold_ms});
+
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        offset = comma + 1u;
+    }
+
+    if (sequence.empty()) {
+        throw std::runtime_error("--calibrate-sequence cannot be empty.");
+    }
+    return sequence;
+}
+
 std::string SampleDirectSnapshotJson(
     const svg_mb_control::ControlConfig* config) {
     const svg_mb_control::RuntimeWritePolicy runtime_policy =
@@ -393,6 +460,8 @@ int wmain(int argc, wchar_t** argv) {
         bool confirm_start = false;
         bool start_requested = false;
         bool status_requested = false;
+        bool health_requested = false;
+        bool json_output_requested = false;
         bool stop_requested = false;
         bool restart_requested = false;
         RunMode run_mode = RunMode::kOneShot;
@@ -406,6 +475,8 @@ int wmain(int argc, wchar_t** argv) {
         std::optional<std::uint32_t> calibrate_channel;
         std::optional<std::uint32_t> calibrate_step_ms;
         std::optional<std::uint32_t> calibrate_cooldown_ms;
+        std::optional<std::vector<svg_mb_control::CalibrationStepSpec>>
+            calibrate_sequence;
         std::optional<std::uint32_t> calibrate_settle_window_ms;
         std::optional<double> calibrate_abort_temp_c;
         std::filesystem::path calibrate_output_path;
@@ -431,6 +502,10 @@ int wmain(int argc, wchar_t** argv) {
                 start_requested = true;
             } else if (arg == L"--status") {
                 status_requested = true;
+            } else if (arg == L"--health") {
+                health_requested = true;
+            } else if (arg == L"--json") {
+                json_output_requested = true;
             } else if (arg == L"--stop") {
                 stop_requested = true;
             } else if (arg == L"--restart") {
@@ -458,6 +533,8 @@ int wmain(int argc, wchar_t** argv) {
             } else if (arg == L"--calibrate-cooldown-ms") {
                 calibrate_cooldown_ms = ParseUInt32Arg(
                     require_value(), "--calibrate-cooldown-ms");
+            } else if (arg == L"--calibrate-sequence") {
+                calibrate_sequence = ParseCalibrationSequence(require_value());
             } else if (arg == L"--calibrate-settle-window-ms") {
                 calibrate_settle_window_ms = ParseUInt32Arg(
                     require_value(), "--calibrate-settle-window-ms");
@@ -560,6 +637,20 @@ int wmain(int argc, wchar_t** argv) {
             config.has_value() ? *config : svg_mb_control::ControlConfig{};
         const std::filesystem::path command_runtime_home =
             svg_mb_control::ResolveRuntimeHomePath(status_config);
+        const std::uint32_t health_stale_after_ms =
+            status_config.staleness_threshold_ms > 0u
+                ? status_config.staleness_threshold_ms
+                : 10000u;
+
+        if (json_output_requested && !status_requested && !health_requested) {
+            throw std::runtime_error("--json requires --status or --health.");
+        }
+
+        if (health_requested || (status_requested && json_output_requested)) {
+            return PrintRuntimeHealth(command_runtime_home,
+                                      json_output_requested,
+                                      health_stale_after_ms);
+        }
 
         if (status_requested) {
             return PrintRuntimeStatus(command_runtime_home);
@@ -691,8 +782,18 @@ int wmain(int argc, wchar_t** argv) {
         }
 
         if (run_mode == RunMode::kCalibrate) {
+            if (calibrate_sequence.has_value() &&
+                (calibrate_step_ms.has_value() ||
+                 calibrate_cooldown_ms.has_value())) {
+                throw std::runtime_error(
+                    "--calibrate-sequence cannot be combined with "
+                    "--calibrate-step-ms or --calibrate-cooldown-ms.");
+            }
             svg_mb_control::CalibrationOptions options =
                 svg_mb_control::DefaultCalibrationOptions();
+            if (calibrate_sequence.has_value()) {
+                options.sequence = *calibrate_sequence;
+            }
             if (calibrate_step_ms.has_value()) {
                 for (auto& step : options.sequence) {
                     step.hold_ms = *calibrate_step_ms;

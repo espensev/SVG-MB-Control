@@ -45,6 +45,8 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(channel_status["consecutive_sensor_failures"], 0)
                 self.assertFalse(channel_status["circuit_breaker_open"])
                 self.assertEqual(channel_status["consecutive_write_failures"], 0)
+                self.assertEqual(channel_status["last_response_source"], "primary_curve")
+                self.assertIn("last_write_reason", channel_status)
                 self.assertTrue(status["log_csv_path"])
                 self.assertTrue(status["log_manifest_path"])
                 self.assertTrue(status["event_log_path"])
@@ -85,8 +87,12 @@ class ControlLoopTests(unittest.TestCase):
                     self.assertIn(field, latest_row)
                 self.assertEqual(latest_row["loop_intended_interval_ms"], "50")
                 self.assertIn("channel0_thermal_pressure_boost_pct", latest_row)
+                self.assertIn("channel0_response_source", latest_row)
+                self.assertIn("channel0_write_reason", latest_row)
                 self.assertIn("channel0_feedforward_pct", latest_row)
                 self.assertIn("channel0_correction_pct", latest_row)
+                self.assertEqual(latest_row["channel0_response_source"], "primary_curve")
+                self.assertNotEqual(latest_row["channel0_write_reason"], "")
                 self.assertNotEqual(latest_row["channel0_feedforward_pct"], "")
                 self.assertNotEqual(latest_row["channel0_correction_pct"], "")
                 self.assertNotEqual(latest_row["loop_work_duration_ms"], "")
@@ -172,6 +178,7 @@ class ControlLoopTests(unittest.TestCase):
                 channel = status["controlled_channels"][0]
                 self.assertGreaterEqual(channel["last_setpoint_pct"], 69.0)
                 self.assertGreaterEqual(channel["total_writes"], 1)
+                self.assertEqual(channel["last_response_source"], "cpu_override")
             finally:
                 _stop_and_wait(proc)
 
@@ -219,8 +226,108 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertGreaterEqual(
                     channel["last_thermal_pressure_boost_pct"], 5.0
                 )
+                self.assertIn("thermal_pressure", channel["last_response_source"])
                 self.assertGreaterEqual(channel["last_setpoint_pct"], 25.0)
                 self.assertGreaterEqual(channel["total_writes"], 2)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_cpu_low_soak_accumulates_under_sustained_mid_cpu(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (100.0, 20.0)],
+                extra_channel_fields={
+                    "cpu_low_soak_start_c": 62.0,
+                    "cpu_low_soak_full_c": 66.0,
+                    "cpu_low_soak_release_c": 60.0,
+                    "cpu_low_soak_rise_pct_per_min": 120.0,
+                    "cpu_low_soak_fall_pct_per_min": 60.0,
+                    "cpu_low_soak_max_boost_pct": 5.0,
+                },
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=66.0),
+            )
+            try:
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0][
+                            "last_cpu_low_soak_boost_pct"
+                        ]
+                        >= 2.0
+                        else None
+                    ),
+                    timeout_s=6.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertIn("cpu_low_soak", channel["last_response_source"])
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 22.0)
+                self.assertGreaterEqual(channel["total_writes"], 2)
+
+                rows = _read_runtime_csv_rows(Path(status["log_csv_path"]))
+                self.assertTrue(rows)
+                latest_row = rows[-1]
+                self.assertIn("channel0_cpu_low_soak_boost_pct", latest_row)
+                self.assertIn("cpu_low_soak", latest_row["channel0_response_source"])
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_cpu_low_soak_stays_zero_below_release(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (100.0, 20.0)],
+                extra_channel_fields={
+                    "cpu_low_soak_start_c": 62.0,
+                    "cpu_low_soak_full_c": 66.0,
+                    "cpu_low_soak_release_c": 60.0,
+                    "cpu_low_soak_rise_pct_per_min": 120.0,
+                    "cpu_low_soak_fall_pct_per_min": 60.0,
+                    "cpu_low_soak_max_boost_pct": 5.0,
+                },
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=59.0),
+            )
+            try:
+                observed = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status.get("loop_tick_count", 0) >= 25
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(observed)
+                channel = observed["controlled_channels"][0]
+                self.assertEqual(channel["last_cpu_low_soak_boost_pct"], 0.0)
+                self.assertEqual(channel["last_response_source"], "primary_curve")
+                self.assertEqual(channel["last_setpoint_pct"], 20.0)
             finally:
                 _stop_and_wait(proc)
 

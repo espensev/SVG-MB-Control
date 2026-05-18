@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace svg_mb_control {
@@ -29,6 +30,9 @@ struct ChannelState {
     double last_raw_demand_pct = std::numeric_limits<double>::quiet_NaN();
     double smoothed_demand_pct = std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_boost_pct = 0.0;
+    double cpu_low_soak_boost_pct = 0.0;
+    std::string last_response_source = "unavailable";
+    std::string last_write_reason = "none";
     std::chrono::steady_clock::time_point last_evaluation_time =
         std::chrono::steady_clock::time_point{};
 

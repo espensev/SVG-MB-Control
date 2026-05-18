@@ -41,6 +41,18 @@ struct ChannelControlConfig {
         std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_max_boost_pct =
         std::numeric_limits<double>::quiet_NaN();
+    double cpu_low_soak_start_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_low_soak_full_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_low_soak_release_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_low_soak_rise_pct_per_min =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_low_soak_fall_pct_per_min =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_low_soak_max_boost_pct =
+        std::numeric_limits<double>::quiet_NaN();
     std::vector<CurvePoint> curve;
     std::vector<CurvePoint> cpu_override_curve;
 };

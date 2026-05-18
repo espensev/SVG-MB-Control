@@ -410,6 +410,9 @@ std::string BuildControlLoopCsvHeader() {
         header << ",channel" << channel << "_observed_temp_c"
                << ",channel" << channel << "_setpoint_pct"
                << ",channel" << channel << "_thermal_pressure_boost_pct"
+               << ",channel" << channel << "_cpu_low_soak_boost_pct"
+               << ",channel" << channel << "_response_source"
+               << ",channel" << channel << "_write_reason"
                << ",channel" << channel << "_total_writes"
                << ",channel" << channel << "_write_active"
                << ",channel" << channel << "_baseline_captured"
@@ -459,6 +462,18 @@ std::string BuildControlLoopCsvRow(
         csv << ',';
         if (state != nullptr) {
             AppendCsvDouble(csv, state->thermal_pressure_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->cpu_low_soak_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvString(csv, state->response_source);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvString(csv, state->write_reason);
         }
         csv << ',';
         if (state != nullptr) {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <utility>
 
 namespace svg_mb_control {
 
@@ -153,6 +154,53 @@ double UpdateThermalPressureBoost(double observed_temp_c,
     return std::clamp(boost, 0.0, config.thermal_pressure_max_boost_pct);
 }
 
+double UpdateCpuLowSoakBoost(double cpu_temp_c,
+                             bool cpu_available,
+                             double current_boost_pct,
+                             std::uint64_t elapsed_ms,
+                             const ChannelControlConfig& config) {
+    if (std::isnan(config.cpu_low_soak_start_c) ||
+        std::isnan(config.cpu_low_soak_full_c) ||
+        std::isnan(config.cpu_low_soak_release_c) ||
+        std::isnan(config.cpu_low_soak_rise_pct_per_min) ||
+        std::isnan(config.cpu_low_soak_fall_pct_per_min) ||
+        std::isnan(config.cpu_low_soak_max_boost_pct) ||
+        config.cpu_low_soak_rise_pct_per_min <= 0.0 ||
+        config.cpu_low_soak_fall_pct_per_min < 0.0 ||
+        config.cpu_low_soak_max_boost_pct <= 0.0) {
+        return 0.0;
+    }
+
+    double boost = std::isnan(current_boost_pct)
+        ? 0.0
+        : std::clamp(
+              current_boost_pct, 0.0, config.cpu_low_soak_max_boost_pct);
+    if (elapsed_ms == 0u) {
+        return boost;
+    }
+
+    const double dt_minutes = static_cast<double>(elapsed_ms) / 60000.0;
+    if (cpu_available && !std::isnan(cpu_temp_c)) {
+        if (cpu_temp_c >= config.cpu_low_soak_start_c) {
+            const double t = std::clamp(
+                (cpu_temp_c - config.cpu_low_soak_start_c) /
+                    (config.cpu_low_soak_full_c -
+                     config.cpu_low_soak_start_c),
+                0.0, 1.0);
+            const double soak_scale =
+                t * t * t * ((6.0 * t - 15.0) * t + 10.0);
+            boost += config.cpu_low_soak_rise_pct_per_min *
+                     soak_scale * dt_minutes;
+        } else if (cpu_temp_c <= config.cpu_low_soak_release_c) {
+            boost -= config.cpu_low_soak_fall_pct_per_min * dt_minutes;
+        }
+    } else {
+        boost -= config.cpu_low_soak_fall_pct_per_min * dt_minutes;
+    }
+
+    return std::clamp(boost, 0.0, config.cpu_low_soak_max_boost_pct);
+}
+
 bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
                                double last_issued_pct,
                                double tolerance_pct,
@@ -178,6 +226,15 @@ bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
         *detail = stream.str();
     }
     return true;
+}
+
+std::string AddResponseModifier(std::string source, const char* modifier) {
+    if (source.empty() || source == "unavailable") {
+        return modifier;
+    }
+    source += '+';
+    source += modifier;
+    return source;
 }
 
 }  // namespace
@@ -228,11 +285,13 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     ChannelEvaluation evaluation;
     evaluation.timing = BuildChannelTimingConfig(loop, channel, now);
     channel.last_evaluation_time = now;
+    channel.last_write_reason = "none";
 
     const double blended = BlendTemps(temp_inputs, channel.config.temp_blend);
     const bool primary_available = blended >= -100.0;
     double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
+    std::string response_source = "unavailable";
 
     if (!primary_available) {
         ++channel.consecutive_sensor_failures;
@@ -244,6 +303,7 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
                     ChannelSensorEvent::FailureDetected;
             }
             raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
+            response_source = "sensor_safe_mode";
         }
     } else {
         if (channel.consecutive_sensor_failures > 0u ||
@@ -260,6 +320,7 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
             channel.config.curve, blended, channel.config.min_duty_pct,
             channel.config.curve_shape);
         observed_temp_c = blended;
+        response_source = "primary_curve";
     }
 
     if (!channel.config.cpu_override_curve.empty() &&
@@ -271,13 +332,16 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
             cpu_setpoint > raw_desired_setpoint) {
             raw_desired_setpoint = cpu_setpoint;
             observed_temp_c = temp_inputs.cpu_c;
+            response_source = "cpu_override";
         }
     }
 
     channel.last_observed_temp_c = observed_temp_c;
     channel.last_raw_demand_pct = raw_desired_setpoint;
     evaluation.observed_temp_c = observed_temp_c;
+    evaluation.response_source = response_source;
     if (std::isnan(raw_desired_setpoint)) {
+        channel.last_response_source = response_source;
         return evaluation;
     }
 
@@ -288,9 +352,24 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     channel.thermal_pressure_boost_pct = UpdateThermalPressureBoost(
         observed_temp_c, channel.thermal_pressure_boost_pct,
         evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
+    channel.cpu_low_soak_boost_pct = UpdateCpuLowSoakBoost(
+        temp_inputs.cpu_c, temp_inputs.cpu_available,
+        channel.cpu_low_soak_boost_pct,
+        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
+    if (channel.thermal_pressure_boost_pct > 0.0005) {
+        response_source =
+            AddResponseModifier(std::move(response_source), "thermal_pressure");
+    }
+    if (channel.cpu_low_soak_boost_pct > 0.0005) {
+        response_source =
+            AddResponseModifier(std::move(response_source), "cpu_low_soak");
+    }
+    channel.last_response_source = response_source;
+    evaluation.response_source = response_source;
 
     const double desired_setpoint = std::clamp(
-        smoothed_base_setpoint + channel.thermal_pressure_boost_pct,
+        smoothed_base_setpoint + channel.thermal_pressure_boost_pct +
+            channel.cpu_low_soak_boost_pct,
         0.0, 100.0);
     const double setpoint = RateLimitSetpoint(
         desired_setpoint, channel.last_issued_pct,

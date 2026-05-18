@@ -62,6 +62,15 @@ Optional channel overrides:
   temperature falls below `thermal_pressure_start_c`
 - `thermal_pressure_max_boost_pct`: maximum extra duty added after demand
   smoothing and before the normal rate limiter
+- `cpu_low_soak_start_c`: optional low/medium CPU sustained-heat threshold
+- `cpu_low_soak_full_c`: CPU temperature where the low-soak term accumulates at
+  its full configured rise rate
+- `cpu_low_soak_release_c`: CPU temperature at or below which the low-soak term
+  decays
+- `cpu_low_soak_rise_pct_per_min`: low-soak accumulation rate while CPU remains
+  in the configured band
+- `cpu_low_soak_fall_pct_per_min`: low-soak decay rate
+- `cpu_low_soak_max_boost_pct`: maximum extra duty from low/medium CPU soak
 
 Config loading validates basic ranges and required curve/channel structure. A
 bad control config should fail at startup instead of producing undefined fan
@@ -83,7 +92,8 @@ evaluated in Horner form in the curve lookup path.
 8. If `cpu_override_curve` is present and CPU telemetry is available,
    interpolate it against CPU/Tctl and use the higher duty.
 9. Smooth the raw demand and apply bounded decay, then add any configured
-   thermal-pressure boost before the normal rate limiter. This allows
+   thermal-pressure boost and CPU low-soak boost before the normal rate limiter.
+   This allows
    intermediate PWM steps while preventing repeated high-temperature up/down
    writes caused by small sensor swings.
 10. Detect repeated missing primary temperature input for a channel and enter a
@@ -138,15 +148,23 @@ the control-loop CSV so fast polling/write profiles can be watched for resource
 cost. CPU percent is a rolling roughly one-second process average; memory fields
 are sampled on each loop row.
 
-Each controlled channel also publishes `last_thermal_pressure_boost_pct` in
-`control_runtime.json` and `channelN_thermal_pressure_boost_pct` in the
-control-loop CSV. That value is the slow leaky-integral term added on top of
-the base curve/EMA demand.
+Each controlled channel also publishes `last_thermal_pressure_boost_pct` and
+`last_cpu_low_soak_boost_pct` in `control_runtime.json`, with matching
+`channelN_thermal_pressure_boost_pct` and `channelN_cpu_low_soak_boost_pct`
+columns in the control-loop CSV. These values are slow leaky-integral terms
+added on top of the base curve/EMA demand.
 
 The control-loop CSV also includes `channelN_feedforward_pct` and
 `channelN_correction_pct`. Feedforward is the raw curve/overlay demand before
 the control loop applies smoothing, thermal pressure, and rate limits;
 correction is the final setpoint minus that feedforward term.
+
+Response attribution is emitted as `last_response_source` in
+`control_runtime.json` and `channelN_response_source` in the CSV. Current
+sources are `primary_curve`, `cpu_override`, `sensor_safe_mode`, and optional
+modifiers such as `+thermal_pressure`. CSV rows also include
+`channelN_write_reason`, which is `first_write`, `setpoint_delta`,
+`authority_reassert`, `write_failed`, or `none` for ticks without a write.
 
 The current status JSON also publishes `last_raw_demand_pct` and
 `last_smoothed_demand_pct` so a live reader can distinguish the curve/overlay
@@ -176,10 +194,18 @@ launch path as a manual operator start.
 Operator commands use the same runtime-home resolution as the active config:
 
 - `--status` reads `control_runtime.json` and checks `process_id`.
+- `--status --json` or `--health --json` emits the machine-readable health
+  contract with exit codes `0=healthy`, `1=degraded`, `2=stale/stopped`, and
+  `3=failed`.
 - `--stop` writes `stop.request.json`; the worker exits through the normal
   restore/shutdown path.
 - `--restart` performs the same cooperative stop and only launches a new
   supervisor after the previous worker reports stopped.
+
+`Install-SVG-MB-ControlWatchdogScheduledTask.ps1` adds a separate watchdog task
+that checks health at logon and every minute. It restarts only `stale` or
+`stopped` states; `degraded` is visible but not restarted, and `failed` is left
+for operator review.
 
 Passing `--mode control-loop --config <path>` keeps the loop attached to the
 current terminal and does not add supervisor restart behavior.
@@ -212,6 +238,10 @@ current terminal and does not add supervisor restart behavior.
 - The same radiator lanes also carry a slow thermal-pressure boost. Sustained
   high heat can add duty even when the instantaneous curve/EMA would otherwise
   hover too low or drop during small temperature dips.
+- Lanes `1,4,5` also carry a small CPU low/mid soak term. It starts around
+  `62 C`, fills around `71 C`, and is capped at `2-2.5%` so common CPU work can
+  earn a slow airflow nudge without turning the high-temperature CPU override
+  into an always-on low-band curve.
 - Channel `6` remains explicitly blocked in the shipped live runtime policy.
 - Do not assume one identical curve shape or RPM target across the three
   radiator Noctua lanes. Rear-radiator, front-radiator, and center-radiator

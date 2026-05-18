@@ -118,13 +118,16 @@ Operator commands:
 cd .\release
 .\svg-mb-control.exe --start
 .\svg-mb-control.exe --status
+.\svg-mb-control.exe --health --json
 .\svg-mb-control.exe --stop
 .\svg-mb-control.exe --restart
 ```
 
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,
-mode, status detail, runtime home, and log paths.
+mode, status detail, runtime home, and log paths. `--health --json` returns a
+machine-readable health state: `healthy`, `degraded`, `stale`, `stopped`, or
+`failed`.
 
 Recommended Windows install:
 
@@ -137,6 +140,17 @@ This registers an at-logon scheduled task named `SVG-MB Control` for the current
 user, runs it elevated, and starts the controller immediately. The task action
 uses `svg-mb-control.exe --start --config <release\control.json>`, so logon
 startup follows the same supervised launch path as the manual start command.
+
+Optional watchdog install:
+
+```powershell
+cd .\release
+.\Install-SVG-MB-ControlWatchdogScheduledTask.ps1
+```
+
+The watchdog runs `svg-mb-control.exe --health --json` at logon and every minute.
+It does nothing for `healthy` or `degraded`, restarts the controller for
+`stale` or `stopped`, and leaves `failed` untouched for operator review.
 
 Task manager commands:
 
@@ -177,6 +191,17 @@ Direct write-once:
 ```powershell
 release\svg-mb-control.exe --mode write-once --config .\config\control.example.json --write-channel 4 --write-pct 60 --write-hold-ms 10000
 ```
+
+Focused fan response calibration:
+
+```powershell
+release\svg-mb-control.exe --mode calibrate --config .\release\control.json --calibrate-channel 2 --calibrate-sequence 52:45000,54:45000,56:45000 --calibrate-settle-window-ms 15000
+```
+
+`--calibrate-sequence` takes comma-separated `duty_pct:hold_ms` steps and
+samples inside the same process that owns the temporary write. This avoids
+separate status/read commands reconciling the pending-write sidecar during a
+hold window.
 
 Attached control loop for diagnostics:
 
@@ -242,10 +267,15 @@ Local eval dashboard:
 .\scripts\Start-EvalDashboard.ps1 -Open
 ```
 
-This serves `tools\eval_dashboard` at `http://127.0.0.1:8765/`. The dashboard
-loads selected control-loop CSVs, analyzer JSON summaries, and optional events
-JSONL files in the browser so current and historical runs can be inspected
-without adding a controller API or background service.
+This serves the repo root and opens
+`http://127.0.0.1:8765/tools/eval_dashboard/`. The dashboard auto-loads the
+recent tail of the packaged live CSV mirror from
+`release\runtime\logs\svg_mb_control_output.csv` when available, so long-running
+logs do not freeze the browser. It can also load selected control-loop CSVs,
+analyzer JSON summaries, and optional events JSONL files in the browser. The
+first response watch line is CPU/Tctl at `65 C` by default, separate from the
+GPU envelope limit, so below-70 C steady-state response is visible instead of
+hidden behind a high thermal ceiling.
 
 ## Config
 
@@ -285,6 +315,12 @@ Field notes:
   limiting so the loop emits intermediate PWM steps without chasing small
   high-temperature dips. The radiator Noctua lanes use staggered CPU overlay
   points plus a slow thermal-pressure boost for sustained high heat.
+- Runtime status and CSV rows include per-channel response attribution so traces
+  can distinguish primary curve demand, CPU override, thermal pressure, first
+  writes, setpoint deltas, and authority reasserts.
+- Channels `1`, `4`, and `5` also include a small CPU low/mid soak lane. It
+  starts at `62 C`, fills by `71 C`, and is capped at `2-2.5%` to give sustained
+  common CPU work a slow airflow nudge without lowering the fast CPU override.
 - The packaged live runtime policy keeps Channel `6` blocked.
 - The packaged control loop uses a fast-step `50 ms` tick and `50 ms` write
   cooldown so normal movement can be written as small intermediate PWM steps.

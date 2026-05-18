@@ -350,6 +350,12 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
 
             const double observed_temp_c = evaluation.observed_temp_c;
             const double setpoint = evaluation.setpoint_pct;
+            const bool first_write = std::isnan(channel.last_issued_pct);
+            const std::string write_reason =
+                first_write ? std::string("first_write")
+                            : (evaluation.authority_reassert
+                                   ? std::string("authority_reassert")
+                                   : std::string("setpoint_delta"));
 
             if (!std::isnan(channel.last_issued_pct)) {
                 const double delta = std::abs(setpoint - channel.last_issued_pct);
@@ -359,7 +365,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                 }
             }
 
-            if (std::isnan(channel.last_issued_pct)) {
+            if (first_write) {
                 // First write for this channel — allow immediately.
             } else if (evaluation.timing.elapsed_since_last_write_ms <
                        WriteCooldownForAuthorityReassert(
@@ -413,6 +419,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             const FanWriteResult write_result =
                 fan_writer->ApplyDuty(channel.config.channel, setpoint);
             if (!write_result) {
+                channel.last_write_reason = "write_failed";
                 // Circuit breaker: track consecutive failures
                 ++channel.consecutive_write_failures;
                 if (channel.consecutive_write_failures >= ChannelState::kMaxConsecutiveFailures) {
@@ -507,12 +514,15 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             channel.last_issued_pct = setpoint;
             channel.last_write_time = now_steady;
             ++channel.total_writes;
+            channel.last_write_reason = write_reason;
             AppendRuntimeEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
                     .mode = "control-loop",
                     .event_type = "control_loop.write_applied",
-                    .detail = "applied control-loop setpoint",
+                    .detail = "applied control-loop setpoint source=" +
+                              evaluation.response_source +
+                              " write_reason=" + write_reason,
                     .channel = channel.config.channel,
                     .tick_count = tick_count,
                     .observed_temp_c = observed_temp_c,
