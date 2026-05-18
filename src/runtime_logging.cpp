@@ -411,6 +411,10 @@ std::string BuildControlLoopCsvHeader() {
                << ",channel" << channel << "_setpoint_pct"
                << ",channel" << channel << "_thermal_pressure_boost_pct"
                << ",channel" << channel << "_cpu_low_soak_boost_pct"
+               << ",channel" << channel << "_low_band_stage_boost_pct"
+               << ",channel" << channel << "_low_band_debt"
+               << ",channel" << channel << "_low_band_signal"
+               << ",channel" << channel << "_low_band_stage_active"
                << ",channel" << channel << "_response_source"
                << ",channel" << channel << "_write_reason"
                << ",channel" << channel << "_total_writes"
@@ -466,6 +470,22 @@ std::string BuildControlLoopCsvRow(
         csv << ',';
         if (state != nullptr) {
             AppendCsvDouble(csv, state->cpu_low_soak_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->low_band_stage_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->low_band_debt);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->low_band_signal);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvBool(csv, state->low_band_stage_active);
         }
         csv << ',';
         if (state != nullptr) {

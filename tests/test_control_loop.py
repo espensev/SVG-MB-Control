@@ -113,6 +113,49 @@ class ControlLoopTests(unittest.TestCase):
             finally:
                 _stop_and_wait(proc)
 
+    def test_control_loop_limits_first_write_from_observed_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=250,
+                write_cooldown_ms=250,
+                deadband_pct=0.25,
+                control_hold_ms=0,
+                curve=[(30.0, 20.0), (60.0, 80.0), (95.0, 100.0)],
+                min_duty_pct=20.0,
+                extra_channel_fields={
+                    "rise_rate_pct_per_min": 90.0,
+                    "fall_rate_pct_per_min": 45.0,
+                    "max_setpoint_step_pct": 0.5,
+                },
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0, duty_raw=51),
+            )
+            try:
+                write_event = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type") == "control_loop.write_applied"
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(write_event)
+                self.assertEqual(write_event["channel"], 0)
+                self.assertGreater(write_event["setpoint_pct"], 20.0)
+                self.assertLessEqual(write_event["setpoint_pct"], 20.55)
+            finally:
+                _stop_and_wait(proc)
+
     def test_control_loop_current_state_prefers_direct_fan_telemetry(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
@@ -328,6 +371,90 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(channel["last_cpu_low_soak_boost_pct"], 0.0)
                 self.assertEqual(channel["last_response_source"], "primary_curve")
                 self.assertEqual(channel["last_setpoint_pct"], 20.0)
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_low_band_stage_accumulates_smooth_trim_and_evidence(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (100.0, 20.0)],
+                extra_loop_fields={
+                    "low_band": {
+                        "enabled": True,
+                        "cpu_start_c": 62.0,
+                        "cpu_full_c": 66.0,
+                        "cpu_release_c": 60.0,
+                        "gpu_start_c": 68.0,
+                        "gpu_full_c": 76.0,
+                        "gpu_release_c": 64.0,
+                        "rise_per_min": 180.0,
+                        "fall_per_min": 60.0,
+                        "stage_rise_pct_per_min": 120.0,
+                        "stage_fall_pct_per_min": 120.0,
+                        "stage_spacing_ms": 100,
+                        "evidence_write_interval_ms": 200,
+                    },
+                },
+                extra_channel_fields={
+                    "low_band_stage": 1,
+                    "low_band_debt_threshold": 0.05,
+                    "low_band_hold_ms": 100,
+                    "low_band_max_boost_pct": 3.0,
+                },
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=66.0),
+            )
+            try:
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0][
+                            "last_low_band_stage_boost_pct"
+                        ]
+                        >= 0.5
+                        else None
+                    ),
+                    timeout_s=6.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertIn("low_band_stage", channel["last_response_source"])
+                self.assertTrue(channel["low_band_stage_active"])
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 20.5)
+                self.assertGreaterEqual(channel["low_band_activation_count"], 1)
+
+                rows = _read_runtime_csv_rows(Path(status["log_csv_path"]))
+                self.assertTrue(rows)
+                latest_row = rows[-1]
+                self.assertIn("channel0_low_band_stage_boost_pct", latest_row)
+                self.assertIn("channel0_low_band_debt", latest_row)
+                self.assertIn("channel0_low_band_stage_active", latest_row)
+
+                evidence = _wait_for(
+                    lambda: _read_json(runtime_home / "low_band_evidence.json"),
+                    timeout_s=3.0,
+                )
+                self.assertIsNotNone(evidence)
+                self.assertTrue(evidence["enabled"])
+                self.assertGreater(evidence["debt"], 0.0)
+                self.assertGreaterEqual(
+                    evidence["channels"][0]["activation_count"], 1
+                )
             finally:
                 _stop_and_wait(proc)
 

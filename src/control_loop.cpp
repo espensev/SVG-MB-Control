@@ -8,12 +8,14 @@
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
+#include "json_io.h"
 #include "pending_writes.h"
 #include "runtime_artifacts.h"
 #include "runtime_logging.h"
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -28,6 +30,297 @@ namespace svg_mb_control {
 // Configuration parsing/validation (LoadControlLoopConfig and its validators)
 // lives in control_loop_config.cpp. This translation unit is the steady-state
 // control loop engine only.
+
+namespace {
+
+double SmoothStep(double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    return t * t * t * ((6.0 * t - 15.0) * t + 10.0);
+}
+
+double SmoothScale(double value, double start, double full) {
+    if (std::isnan(value) || full <= start) {
+        return 0.0;
+    }
+    return SmoothStep((value - start) / (full - start));
+}
+
+double MoveTowardRateLimited(double current,
+                             double target,
+                             double dt_minutes,
+                             double rise_per_min,
+                             double fall_per_min) {
+    current = std::isnan(current) ? 0.0 : current;
+    const double delta = target - current;
+    if (std::abs(delta) <= 0.0001 || dt_minutes <= 0.0) {
+        return target;
+    }
+
+    const double rate = delta > 0.0 ? rise_per_min : fall_per_min;
+    if (std::isnan(rate) || rate <= 0.0) {
+        return target;
+    }
+
+    const double allowed = rate * dt_minutes;
+    if (std::abs(delta) <= allowed) {
+        return target;
+    }
+    return current + (delta > 0.0 ? allowed : -allowed);
+}
+
+bool LowBandChannelConfigured(const ChannelState& channel) {
+    return channel.config.low_band_stage > 0u &&
+        !std::isnan(channel.config.low_band_debt_threshold) &&
+        !std::isnan(channel.config.low_band_max_boost_pct) &&
+        channel.config.low_band_max_boost_pct > 0.0;
+}
+
+double MeanOrNan(double sum, std::uint64_t count) {
+    return count > 0u
+        ? sum / static_cast<double>(count)
+        : std::numeric_limits<double>::quiet_NaN();
+}
+
+nlohmann::json NanToNull(double value) {
+    return std::isfinite(value) ? nlohmann::json(value) : nlohmann::json(nullptr);
+}
+
+void UpdateLowBandState(ControlRuntimeContext& context,
+                        const TempInputs& temp_inputs,
+                        const RuntimeSnapshot& runtime_snapshot,
+                        std::uint64_t elapsed_ms,
+                        std::chrono::steady_clock::time_point now,
+                        std::uint64_t tick_count) {
+    LowBandRuntimeState& state = context.low_band;
+    const LowBandControlConfig& cfg = context.loop.low_band;
+    state.enabled = cfg.enabled;
+    if (!cfg.enabled) {
+        return;
+    }
+
+    if (elapsed_ms == 0u) {
+        elapsed_ms = context.loop.poll_tick_ms;
+    }
+    const double dt_minutes = static_cast<double>(elapsed_ms) / 60000.0;
+    const double dt_seconds = static_cast<double>(elapsed_ms) / 1000.0;
+
+    const double cpu_scale = temp_inputs.cpu_available
+        ? SmoothScale(temp_inputs.cpu_c, cfg.cpu_start_c, cfg.cpu_full_c)
+        : 0.0;
+    const double gpu_scale = temp_inputs.gpu_available
+        ? SmoothScale(temp_inputs.gpu_c, cfg.gpu_start_c, cfg.gpu_full_c)
+        : 0.0;
+    const double signal = std::clamp(
+        (std::max)(cfg.cpu_weight * cpu_scale, cfg.gpu_weight * gpu_scale),
+        0.0, 1.0);
+
+    const bool cpu_released =
+        !temp_inputs.cpu_available || temp_inputs.cpu_c <= cfg.cpu_release_c;
+    const bool gpu_released =
+        !temp_inputs.gpu_available || temp_inputs.gpu_c <= cfg.gpu_release_c;
+
+    if (signal > 0.0001) {
+        state.debt += cfg.rise_per_min * signal * dt_minutes;
+    } else if (cpu_released && gpu_released) {
+        state.debt -= cfg.fall_per_min * dt_minutes;
+    }
+    state.debt = std::clamp(state.debt, 0.0, 1.0);
+    state.signal = signal;
+    state.cpu_scale = cpu_scale;
+    state.gpu_scale = gpu_scale;
+    ++state.sample_count;
+    if (state.debt > 0.0001) {
+        ++state.active_sample_count;
+    }
+    state.max_debt = (std::max)(state.max_debt, state.debt);
+    if (temp_inputs.cpu_available) {
+        state.max_cpu_c = std::isnan(state.max_cpu_c)
+            ? temp_inputs.cpu_c
+            : (std::max)(state.max_cpu_c, temp_inputs.cpu_c);
+    }
+    if (temp_inputs.gpu_available) {
+        state.max_gpu_c = std::isnan(state.max_gpu_c)
+            ? temp_inputs.gpu_c
+            : (std::max)(state.max_gpu_c, temp_inputs.gpu_c);
+    }
+
+    const auto stage_spacing =
+        std::chrono::milliseconds(cfg.stage_spacing_ms);
+
+    for (auto& channel : context.channels) {
+        channel.low_band_debt_snapshot = state.debt;
+        channel.low_band_signal_snapshot = signal;
+        channel.low_band_cpu_scale_snapshot = cpu_scale;
+        channel.low_band_gpu_scale_snapshot = gpu_scale;
+        ++channel.low_band_sample_count;
+
+        const bool configured = LowBandChannelConfigured(channel);
+        double target_boost_pct = 0.0;
+        if (configured) {
+            const double threshold = channel.config.low_band_debt_threshold;
+            if (state.debt >= threshold) {
+                channel.low_band_eligible_ms += elapsed_ms;
+            } else {
+                channel.low_band_eligible_ms = 0u;
+                if (state.debt <= threshold * 0.75) {
+                    channel.low_band_stage_active = false;
+                }
+            }
+
+            const bool spacing_ok =
+                !state.have_last_stage_activation ||
+                (now - state.last_stage_activation_time) >= stage_spacing;
+            if (!channel.low_band_stage_active &&
+                channel.low_band_eligible_ms >=
+                    channel.config.low_band_hold_ms &&
+                spacing_ok) {
+                channel.low_band_stage_active = true;
+                ++channel.low_band_activation_count;
+                state.have_last_stage_activation = true;
+                state.last_stage_activation_time = now;
+                std::ostringstream detail;
+                detail << "low-band stage activated stage="
+                       << channel.config.low_band_stage
+                       << " debt=" << state.debt
+                       << " threshold=" << threshold
+                       << " cap_pct="
+                       << channel.config.low_band_max_boost_pct;
+                AppendRuntimeEvent(
+                    context.runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type = "control_loop.low_band_stage_activated",
+                        .detail = detail.str(),
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .success = true,
+                    });
+            }
+
+            if (channel.low_band_stage_active) {
+                const double scale =
+                    SmoothScale(state.debt, threshold, 1.0);
+                target_boost_pct =
+                    channel.config.low_band_max_boost_pct * scale;
+            }
+        } else {
+            channel.low_band_stage_active = false;
+            channel.low_band_eligible_ms = 0u;
+        }
+
+        channel.low_band_stage_boost_pct = std::clamp(
+            MoveTowardRateLimited(
+                channel.low_band_stage_boost_pct,
+                target_boost_pct,
+                dt_minutes,
+                cfg.stage_rise_pct_per_min,
+                cfg.stage_fall_pct_per_min),
+            0.0,
+            configured ? channel.config.low_band_max_boost_pct : 0.0);
+
+        if (channel.low_band_stage_boost_pct > 0.0005) {
+            ++channel.low_band_active_sample_count;
+            channel.low_band_boost_area_pct_s +=
+                channel.low_band_stage_boost_pct * dt_seconds;
+            channel.low_band_max_boost_pct = (std::max)(
+                channel.low_band_max_boost_pct,
+                channel.low_band_stage_boost_pct);
+        }
+
+        if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
+                runtime_snapshot, channel.config.channel)) {
+            if (fan->tach_valid) {
+                if (channel.low_band_stage_boost_pct > 0.0005) {
+                    channel.low_band_boosted_rpm_sum +=
+                        static_cast<double>(fan->rpm);
+                    ++channel.low_band_boosted_rpm_count;
+                } else {
+                    channel.low_band_unboosted_rpm_sum +=
+                        static_cast<double>(fan->rpm);
+                    ++channel.low_band_unboosted_rpm_count;
+                }
+            }
+        }
+    }
+}
+
+void WriteLowBandEvidenceFile(const ControlRuntimeContext& context,
+                              std::uint64_t tick_count) {
+    const LowBandRuntimeState& state = context.low_band;
+    const LowBandControlConfig& cfg = context.loop.low_band;
+    nlohmann::json payload;
+    payload["schema"] = "svg_mb_control.low_band_evidence.v1";
+    payload["schema_version"] = 1;
+    payload["captured_local"] =
+        FormatRuntimeLocalIso8601(std::chrono::system_clock::now());
+    payload["tick_count"] = tick_count;
+    payload["enabled"] = cfg.enabled;
+    payload["debt"] = state.debt;
+    payload["signal"] = state.signal;
+    payload["cpu_scale"] = state.cpu_scale;
+    payload["gpu_scale"] = state.gpu_scale;
+    payload["sample_count"] = state.sample_count;
+    payload["active_sample_count"] = state.active_sample_count;
+    payload["max_debt"] = state.max_debt;
+    payload["max_cpu_c"] = NanToNull(state.max_cpu_c);
+    payload["max_gpu_c"] = NanToNull(state.max_gpu_c);
+    payload["config"] = {
+        {"cpu_start_c", cfg.cpu_start_c},
+        {"cpu_full_c", cfg.cpu_full_c},
+        {"cpu_release_c", cfg.cpu_release_c},
+        {"gpu_start_c", cfg.gpu_start_c},
+        {"gpu_full_c", cfg.gpu_full_c},
+        {"gpu_release_c", cfg.gpu_release_c},
+        {"cpu_weight", cfg.cpu_weight},
+        {"gpu_weight", cfg.gpu_weight},
+        {"rise_per_min", cfg.rise_per_min},
+        {"fall_per_min", cfg.fall_per_min},
+        {"stage_rise_pct_per_min", cfg.stage_rise_pct_per_min},
+        {"stage_fall_pct_per_min", cfg.stage_fall_pct_per_min},
+        {"stage_spacing_ms", cfg.stage_spacing_ms},
+        {"evidence_write_interval_ms", cfg.evidence_write_interval_ms},
+    };
+
+    payload["channels"] = nlohmann::json::array();
+    for (const auto& channel : context.channels) {
+        const double baseline_rpm = MeanOrNan(
+            channel.low_band_unboosted_rpm_sum,
+            channel.low_band_unboosted_rpm_count);
+        const double boosted_rpm = MeanOrNan(
+            channel.low_band_boosted_rpm_sum,
+            channel.low_band_boosted_rpm_count);
+        nlohmann::json channel_json = {
+            {"channel", channel.config.channel},
+            {"configured", LowBandChannelConfigured(channel)},
+            {"stage", channel.config.low_band_stage},
+            {"debt_threshold", NanToNull(channel.config.low_band_debt_threshold)},
+            {"hold_ms", channel.config.low_band_hold_ms},
+            {"max_boost_pct_config",
+             NanToNull(channel.config.low_band_max_boost_pct)},
+            {"stage_active", channel.low_band_stage_active},
+            {"eligible_ms", channel.low_band_eligible_ms},
+            {"activation_count", channel.low_band_activation_count},
+            {"current_boost_pct", channel.low_band_stage_boost_pct},
+            {"max_observed_boost_pct", channel.low_band_max_boost_pct},
+            {"sample_count", channel.low_band_sample_count},
+            {"active_sample_count", channel.low_band_active_sample_count},
+            {"boost_area_pct_s", channel.low_band_boost_area_pct_s},
+            {"rpm_unboosted_mean", NanToNull(baseline_rpm)},
+            {"rpm_boosted_mean", NanToNull(boosted_rpm)},
+            {"rpm_delta_mean", NanToNull(
+                 std::isnan(baseline_rpm) || std::isnan(boosted_rpm)
+                     ? std::numeric_limits<double>::quiet_NaN()
+                     : boosted_rpm - baseline_rpm)},
+            {"total_writes", channel.total_writes},
+        };
+        payload["channels"].push_back(std::move(channel_json));
+    }
+
+    TryWriteJsonFileAtomic(context.runtime_home / "low_band_evidence.json",
+                           payload);
+}
+
+}  // namespace
 
 // ------------------------ ControlLoop Impl -----------------------------
 
@@ -141,6 +434,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     std::chrono::steady_clock::time_point last_snapshot_write_time;
     bool have_last_snapshot_write_time = false;
     constexpr std::chrono::milliseconds kSnapshotWriteMinInterval{1000};
+    std::chrono::steady_clock::time_point last_low_band_evidence_write_time;
+    bool have_last_low_band_evidence_write_time = false;
 
     // In-memory pending-writes cache. Upserts still persist synchronously
     // (crash-recovery contract); removals are batched and flushed at the
@@ -222,6 +517,15 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             temp_inputs.gpu_label = "gpu_envelope";
         }
 
+        std::uint64_t low_band_elapsed_ms = context.loop.poll_tick_ms;
+        if (std::isfinite(achieved_interval_ms) &&
+            achieved_interval_ms > 0.0) {
+            low_band_elapsed_ms =
+                static_cast<std::uint64_t>(achieved_interval_ms + 0.5);
+        }
+        UpdateLowBandState(context, temp_inputs, runtime_snapshot,
+                           low_band_elapsed_ms, now_steady, tick_count);
+
         if (runtime_snapshot_available) {
             const bool snapshot_write_due =
                 !have_last_snapshot_write_time ||
@@ -246,6 +550,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     channel.baseline_duty_raw = fan->duty_raw;
                     channel.baseline_mode_raw = fan->mode_raw;
                     channel.baseline_captured = true;
+                    channel.last_issued_pct = fan->duty_percent;
+                    channel.last_setpoint_pct = fan->duty_percent;
                     AppendRuntimeEvent(
                         context.runtime_home,
                         RuntimeLogEvent{
@@ -623,6 +929,20 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     BuildChannelLogStates(context.channels)));
         }
 
+        if (context.loop.low_band.enabled) {
+            const auto evidence_interval = std::chrono::milliseconds(
+                context.loop.low_band.evidence_write_interval_ms);
+            const bool evidence_due =
+                !have_last_low_band_evidence_write_time ||
+                (tick_finished_steady - last_low_band_evidence_write_time) >=
+                    evidence_interval;
+            if (evidence_due) {
+                WriteLowBandEvidenceFile(context, tick_count);
+                last_low_band_evidence_write_time = tick_finished_steady;
+                have_last_low_band_evidence_write_time = true;
+            }
+        }
+
         // Rate-limit status file writes to reduce disk I/O. CSV remains per tick.
         // Write every 10 ticks (500 ms with the shipped 50 ms cadence).
         constexpr std::uint32_t kStatusUpdateIntervalTicks = 10u;
@@ -736,6 +1056,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     last_timing, context.channels, log_csv_path,
                     log_manifest_path, event_log_path,
                     last_successful_restore_iso);
+    if (context.loop.low_band.enabled) {
+        WriteLowBandEvidenceFile(context, tick_count);
+    }
     AppendRuntimeEvent(
         context.runtime_home,
         RuntimeLogEvent{

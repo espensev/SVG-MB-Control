@@ -21,6 +21,10 @@ struct RuntimeControlChannelLogState {
     double feedforward_pct = std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_boost_pct = 0.0;
     double cpu_low_soak_boost_pct = 0.0;
+    double low_band_stage_boost_pct = 0.0;
+    double low_band_debt = 0.0;
+    double low_band_signal = 0.0;
+    bool low_band_stage_active = false;
     std::string response_source;
     std::string write_reason;
     std::uint64_t total_writes = 0u;

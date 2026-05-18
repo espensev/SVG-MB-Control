@@ -293,6 +293,7 @@ def _write_control_loop_config(
     channel_write_cooldown_ms: int | None = None,
     channel_deadband_pct: float | None = None,
     channel_control_hold_ms: int | None = None,
+    extra_loop_fields: dict[str, object] | None = None,
     extra_channel_fields: dict[str, object] | None = None,
 ) -> Path:
     if curve is None:
@@ -332,6 +333,8 @@ def _write_control_loop_config(
             "channels": [channel_cfg],
         },
     }
+    if extra_loop_fields is not None:
+        cfg["control_loop"].update(extra_loop_fields)
     if runtime_policy_path is not None:
         cfg["runtime_policy_path"] = runtime_policy_path.as_posix()
     return _write_json(td / "control.json", cfg)

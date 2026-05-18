@@ -102,6 +102,8 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
                     prefix + " rise_rate_pct_per_min", true);
     ValidatePositive(ch.fall_rate_pct_per_min,
                     prefix + " fall_rate_pct_per_min", true);
+    ValidatePercentage(ch.max_setpoint_step_pct,
+                      prefix + " max_setpoint_step_pct", true);
 
     ValidateAlpha(ch.demand_smoothing_rise_alpha,
                  prefix + " demand_smoothing_rise_alpha");
@@ -183,8 +185,79 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
         }
     }
 
+    if (ch.low_band_stage > 0u ||
+        !std::isnan(ch.low_band_debt_threshold) ||
+        !std::isnan(ch.low_band_max_boost_pct) ||
+        ch.low_band_hold_ms > 0u) {
+        if (ch.low_band_stage == 0u) {
+            throw std::runtime_error(
+                prefix + " low_band_stage must be > 0 when low-band fields are set");
+        }
+        ValidatePercentage(ch.low_band_debt_threshold,
+                          prefix + " low_band_debt_threshold");
+        ValidatePercentage(ch.low_band_max_boost_pct,
+                          prefix + " low_band_max_boost_pct");
+        if (ch.low_band_debt_threshold <= 0.0 ||
+            ch.low_band_debt_threshold >= 1.0) {
+            throw std::runtime_error(
+                prefix + " low_band_debt_threshold must be in (0, 1)");
+        }
+        if (ch.low_band_max_boost_pct > 10.0) {
+            throw std::runtime_error(
+                prefix + " low_band_max_boost_pct must be <= 10");
+        }
+    }
+
     ValidateCurve(ch.curve, prefix + " curve");
     ValidateCurve(ch.cpu_override_curve, prefix + " cpu_override_curve", true);
+}
+
+void ValidateLowBandConfig(const LowBandControlConfig& cfg) {
+    if (!cfg.enabled) {
+        return;
+    }
+
+    ValidatePositive(cfg.cpu_start_c, "low_band.cpu_start_c");
+    ValidatePositive(cfg.cpu_full_c, "low_band.cpu_full_c");
+    ValidatePositive(cfg.cpu_release_c, "low_band.cpu_release_c");
+    ValidatePositive(cfg.gpu_start_c, "low_band.gpu_start_c");
+    ValidatePositive(cfg.gpu_full_c, "low_band.gpu_full_c");
+    ValidatePositive(cfg.gpu_release_c, "low_band.gpu_release_c");
+    ValidatePositive(cfg.cpu_weight, "low_band.cpu_weight");
+    ValidatePositive(cfg.gpu_weight, "low_band.gpu_weight");
+    ValidatePositive(cfg.rise_per_min, "low_band.rise_per_min");
+    ValidatePositive(cfg.fall_per_min, "low_band.fall_per_min");
+    ValidatePositive(cfg.stage_rise_pct_per_min,
+                    "low_band.stage_rise_pct_per_min");
+    ValidatePositive(cfg.stage_fall_pct_per_min,
+                    "low_band.stage_fall_pct_per_min");
+
+    if (cfg.cpu_full_c <= cfg.cpu_start_c) {
+        throw std::runtime_error("low_band.cpu_full_c must be > cpu_start_c");
+    }
+    if (cfg.gpu_full_c <= cfg.gpu_start_c) {
+        throw std::runtime_error("low_band.gpu_full_c must be > gpu_start_c");
+    }
+    if (cfg.cpu_release_c > cfg.cpu_start_c) {
+        throw std::runtime_error("low_band.cpu_release_c must be <= cpu_start_c");
+    }
+    if (cfg.gpu_release_c > cfg.gpu_start_c) {
+        throw std::runtime_error("low_band.gpu_release_c must be <= gpu_start_c");
+    }
+    if (cfg.rise_per_min <= 0.0) {
+        throw std::runtime_error("low_band.rise_per_min must be > 0");
+    }
+    if (cfg.stage_rise_pct_per_min <= 0.0) {
+        throw std::runtime_error(
+            "low_band.stage_rise_pct_per_min must be > 0");
+    }
+    if (cfg.stage_spacing_ms == 0u) {
+        throw std::runtime_error("low_band.stage_spacing_ms must be > 0");
+    }
+    if (cfg.evidence_write_interval_ms == 0u) {
+        throw std::runtime_error(
+            "low_band.evidence_write_interval_ms must be > 0");
+    }
 }
 
 void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
@@ -200,6 +273,7 @@ void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
     }
 
     ValidatePercentage(cfg.deadband_pct, "deadband_pct");
+    ValidateLowBandConfig(cfg.low_band);
 
     if (cfg.channels.empty()) {
         throw std::runtime_error(
@@ -234,6 +308,43 @@ ControlLoopConfig LoadControlLoopConfig(
     cfg.deadband_pct = loop_json.value("deadband_pct", cfg.deadband_pct);
     cfg.control_hold_ms = loop_json.value("control_hold_ms", cfg.control_hold_ms);
     cfg.cpu_temp_label = loop_json.value("cpu_temp_label", cfg.cpu_temp_label);
+
+    if (loop_json.contains("low_band") && loop_json["low_band"].is_object()) {
+        const auto& low_json = loop_json["low_band"];
+        cfg.low_band.enabled =
+            low_json.value("enabled", cfg.low_band.enabled);
+        cfg.low_band.cpu_start_c =
+            low_json.value("cpu_start_c", cfg.low_band.cpu_start_c);
+        cfg.low_band.cpu_full_c =
+            low_json.value("cpu_full_c", cfg.low_band.cpu_full_c);
+        cfg.low_band.cpu_release_c =
+            low_json.value("cpu_release_c", cfg.low_band.cpu_release_c);
+        cfg.low_band.gpu_start_c =
+            low_json.value("gpu_start_c", cfg.low_band.gpu_start_c);
+        cfg.low_band.gpu_full_c =
+            low_json.value("gpu_full_c", cfg.low_band.gpu_full_c);
+        cfg.low_band.gpu_release_c =
+            low_json.value("gpu_release_c", cfg.low_band.gpu_release_c);
+        cfg.low_band.cpu_weight =
+            low_json.value("cpu_weight", cfg.low_band.cpu_weight);
+        cfg.low_band.gpu_weight =
+            low_json.value("gpu_weight", cfg.low_band.gpu_weight);
+        cfg.low_band.rise_per_min =
+            low_json.value("rise_per_min", cfg.low_band.rise_per_min);
+        cfg.low_band.fall_per_min =
+            low_json.value("fall_per_min", cfg.low_band.fall_per_min);
+        cfg.low_band.stage_rise_pct_per_min = low_json.value(
+            "stage_rise_pct_per_min",
+            cfg.low_band.stage_rise_pct_per_min);
+        cfg.low_band.stage_fall_pct_per_min = low_json.value(
+            "stage_fall_pct_per_min",
+            cfg.low_band.stage_fall_pct_per_min);
+        cfg.low_band.stage_spacing_ms =
+            low_json.value("stage_spacing_ms", cfg.low_band.stage_spacing_ms);
+        cfg.low_band.evidence_write_interval_ms = low_json.value(
+            "evidence_write_interval_ms",
+            cfg.low_band.evidence_write_interval_ms);
+    }
 
     // Parse channels array
     if (!loop_json.contains("channels") || !loop_json["channels"].is_array()) {
@@ -283,6 +394,10 @@ ControlLoopConfig LoadControlLoopConfig(
         }
         if (ch_json.contains("fall_rate_pct_per_min")) {
             channel.fall_rate_pct_per_min = ch_json["fall_rate_pct_per_min"].get<double>();
+        }
+        if (ch_json.contains("max_setpoint_step_pct")) {
+            channel.max_setpoint_step_pct =
+                ch_json["max_setpoint_step_pct"].get<double>();
         }
 
         // Parse demand smoothing
@@ -349,6 +464,19 @@ ControlLoopConfig LoadControlLoopConfig(
         if (ch_json.contains("cpu_low_soak_max_boost_pct")) {
             channel.cpu_low_soak_max_boost_pct =
                 ch_json["cpu_low_soak_max_boost_pct"].get<double>();
+        }
+
+        channel.low_band_stage =
+            ch_json.value("low_band_stage", channel.low_band_stage);
+        if (ch_json.contains("low_band_debt_threshold")) {
+            channel.low_band_debt_threshold =
+                ch_json["low_band_debt_threshold"].get<double>();
+        }
+        channel.low_band_hold_ms =
+            ch_json.value("low_band_hold_ms", channel.low_band_hold_ms);
+        if (ch_json.contains("low_band_max_boost_pct")) {
+            channel.low_band_max_boost_pct =
+                ch_json["low_band_max_boost_pct"].get<double>();
         }
 
         // Parse temp blend

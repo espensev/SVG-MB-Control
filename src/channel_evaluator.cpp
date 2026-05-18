@@ -35,7 +35,8 @@ double RateLimitSetpoint(double desired_pct,
                          double last_pct,
                          std::uint64_t elapsed_ms,
                          double rise_rate_pct_per_min,
-                         double fall_rate_pct_per_min) {
+                         double fall_rate_pct_per_min,
+                         double max_setpoint_step_pct) {
     if (std::isnan(last_pct)) {
         return desired_pct;
     }
@@ -54,10 +55,15 @@ double RateLimitSetpoint(double desired_pct,
 
     const double allowed =
         rate * (static_cast<double>(elapsed_ms) / 60000.0);
-    if (std::abs(delta) <= allowed) {
+    double max_allowed = allowed;
+    if (!std::isnan(max_setpoint_step_pct) && max_setpoint_step_pct > 0.0) {
+        max_allowed = (std::min)(max_allowed, max_setpoint_step_pct);
+    }
+
+    if (std::abs(delta) <= max_allowed) {
         return desired_pct;
     }
-    return last_pct + (delta > 0.0 ? allowed : -allowed);
+    return last_pct + (delta > 0.0 ? max_allowed : -max_allowed);
 }
 
 double ApplyDemandSmoothing(double raw_desired_pct,
@@ -364,18 +370,24 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
         response_source =
             AddResponseModifier(std::move(response_source), "cpu_low_soak");
     }
+    if (channel.low_band_stage_boost_pct > 0.0005) {
+        response_source =
+            AddResponseModifier(std::move(response_source), "low_band_stage");
+    }
     channel.last_response_source = response_source;
     evaluation.response_source = response_source;
 
     const double desired_setpoint = std::clamp(
         smoothed_base_setpoint + channel.thermal_pressure_boost_pct +
-            channel.cpu_low_soak_boost_pct,
+            channel.cpu_low_soak_boost_pct +
+            channel.low_band_stage_boost_pct,
         0.0, 100.0);
     const double setpoint = RateLimitSetpoint(
         desired_setpoint, channel.last_issued_pct,
         evaluation.timing.elapsed_since_last_write_ms,
         channel.config.rise_rate_pct_per_min,
-        channel.config.fall_rate_pct_per_min);
+        channel.config.fall_rate_pct_per_min,
+        channel.config.max_setpoint_step_pct);
     channel.last_setpoint_pct = setpoint;
 
     if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(

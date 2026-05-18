@@ -12,6 +12,7 @@ ControlRuntimeContext::ControlRuntimeContext(
       loop(std::move(loop_config)),
       runtime_home(std::move(runtime_home_path)),
       runtime_policy(ResolveRuntimeWritePolicy(&base)) {
+    low_band.enabled = loop.low_band.enabled;
     channels.reserve(loop.channels.size());
     for (const auto& channel_config : loop.channels) {
         ChannelState state;

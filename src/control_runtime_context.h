@@ -31,6 +31,22 @@ struct ChannelState {
     double smoothed_demand_pct = std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_boost_pct = 0.0;
     double cpu_low_soak_boost_pct = 0.0;
+    double low_band_stage_boost_pct = 0.0;
+    double low_band_debt_snapshot = 0.0;
+    double low_band_signal_snapshot = 0.0;
+    double low_band_cpu_scale_snapshot = 0.0;
+    double low_band_gpu_scale_snapshot = 0.0;
+    bool low_band_stage_active = false;
+    std::uint64_t low_band_eligible_ms = 0u;
+    std::uint64_t low_band_activation_count = 0u;
+    std::uint64_t low_band_sample_count = 0u;
+    std::uint64_t low_band_active_sample_count = 0u;
+    double low_band_boost_area_pct_s = 0.0;
+    double low_band_max_boost_pct = 0.0;
+    double low_band_unboosted_rpm_sum = 0.0;
+    std::uint64_t low_band_unboosted_rpm_count = 0u;
+    double low_band_boosted_rpm_sum = 0.0;
+    std::uint64_t low_band_boosted_rpm_count = 0u;
     std::string last_response_source = "unavailable";
     std::string last_write_reason = "none";
     std::chrono::steady_clock::time_point last_evaluation_time =
@@ -46,6 +62,22 @@ struct ChannelState {
     static constexpr double kSafeModeFanDuty = 100.0;
 };
 
+struct LowBandRuntimeState {
+    bool enabled = false;
+    double debt = 0.0;
+    double signal = 0.0;
+    double cpu_scale = 0.0;
+    double gpu_scale = 0.0;
+    std::uint64_t sample_count = 0u;
+    std::uint64_t active_sample_count = 0u;
+    double max_debt = 0.0;
+    double max_cpu_c = std::numeric_limits<double>::quiet_NaN();
+    double max_gpu_c = std::numeric_limits<double>::quiet_NaN();
+    bool have_last_stage_activation = false;
+    std::chrono::steady_clock::time_point last_stage_activation_time =
+        std::chrono::steady_clock::time_point{};
+};
+
 struct ControlRuntimeContext {
     ControlRuntimeContext(ControlConfig base_config,
                           ControlLoopConfig loop_config,
@@ -56,6 +88,7 @@ struct ControlRuntimeContext {
     std::filesystem::path runtime_home;
     RuntimeWritePolicy runtime_policy;
     std::vector<ChannelState> channels;
+    LowBandRuntimeState low_band;
     std::mutex wake_mutex;
     std::condition_variable wake_cv;
 };

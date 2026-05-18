@@ -31,6 +31,15 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
         {"last_thermal_pressure_boost_pct",
          channel.thermal_pressure_boost_pct},
         {"last_cpu_low_soak_boost_pct", channel.cpu_low_soak_boost_pct},
+        {"last_low_band_stage_boost_pct",
+         channel.low_band_stage_boost_pct},
+        {"last_low_band_debt", channel.low_band_debt_snapshot},
+        {"last_low_band_signal", channel.low_band_signal_snapshot},
+        {"last_low_band_cpu_scale", channel.low_band_cpu_scale_snapshot},
+        {"last_low_band_gpu_scale", channel.low_band_gpu_scale_snapshot},
+        {"low_band_stage_active", channel.low_band_stage_active},
+        {"low_band_eligible_ms", channel.low_band_eligible_ms},
+        {"low_band_activation_count", channel.low_band_activation_count},
         {"last_response_source", channel.last_response_source},
         {"last_write_reason", channel.last_write_reason},
         {"last_observed_temp_c", JsonNumberOrZero(channel.last_observed_temp_c)},
@@ -108,6 +117,11 @@ std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
         state.thermal_pressure_boost_pct =
             channel.thermal_pressure_boost_pct;
         state.cpu_low_soak_boost_pct = channel.cpu_low_soak_boost_pct;
+        state.low_band_stage_boost_pct =
+            channel.low_band_stage_boost_pct;
+        state.low_band_debt = channel.low_band_debt_snapshot;
+        state.low_band_signal = channel.low_band_signal_snapshot;
+        state.low_band_stage_active = channel.low_band_stage_active;
         state.response_source = channel.last_response_source;
         state.write_reason = channel.last_write_reason;
         state.total_writes = channel.total_writes;

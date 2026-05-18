@@ -11,218 +11,172 @@
   "baseline_freshness_ceiling_ms": 10000,
   "restore_timeout_ms": 10000,
   "control_loop": {
-    "poll_tick_ms": 50,
-    "write_cooldown_ms": 50,
-    "deadband_pct": 0.35,
+    "poll_tick_ms": 250,
+    "write_cooldown_ms": 250,
+    "deadband_pct": 0.25,
     "control_hold_ms": 0,
     "cpu_temp_label": "Tctl/Tdie",
+    "low_band": {
+      "enabled": true,
+      "cpu_start_c": 62.0,
+      "cpu_full_c": 71.0,
+      "cpu_release_c": 60.5,
+      "gpu_start_c": 68.0,
+      "gpu_full_c": 76.0,
+      "gpu_release_c": 64.0,
+      "cpu_weight": 1.0,
+      "gpu_weight": 1.0,
+      "rise_per_min": 0.12,
+      "fall_per_min": 0.06,
+      "stage_rise_pct_per_min": 0.6,
+      "stage_fall_pct_per_min": 0.4,
+      "stage_spacing_ms": 90000,
+      "evidence_write_interval_ms": 5000
+    },
     "channels": [
       {
         "channel": 0,
         "temp_blend": "max_cpu_gpu",
-        "min_duty_pct": 20.0,
+        "min_duty_pct": 15.5,
         "curve_shape": "smootherstep",
-        "rise_rate_pct_per_min": 720.0,
-        "fall_rate_pct_per_min": 600.0,
-        "demand_smoothing_rise_alpha": 0.18,
-        "demand_smoothing_fall_alpha": 0.04,
-        "decay_latch_above_pct": 40.0,
-        "decay_latch_pct_per_min": 240.0,
-        "thermal_pressure_start_c": 84.0,
-        "thermal_pressure_full_c": 91.0,
-        "thermal_pressure_rise_pct_per_sec": 1.2,
-        "thermal_pressure_fall_pct_per_sec": 0.7,
-        "thermal_pressure_max_boost_pct": 8.0,
+        "rise_rate_pct_per_min": 75.0,
+        "fall_rate_pct_per_min": 45.0,
+        "max_setpoint_step_pct": 0.35,
+        "demand_smoothing_rise_alpha": 0.012,
+        "demand_smoothing_fall_alpha": 0.004,
+        "decay_latch_above_pct": 36.0,
+        "decay_latch_pct_per_min": 90.0,
+        "thermal_pressure_start_c": 86.0,
+        "thermal_pressure_full_c": 93.0,
+        "thermal_pressure_rise_pct_per_sec": 0.12,
+        "thermal_pressure_fall_pct_per_sec": 0.08,
+        "thermal_pressure_max_boost_pct": 6.0,
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 20
+            "duty_pct": 15.5
           },
           {
-            "temp_c": 82,
+            "temp_c": 84,
+            "duty_pct": 18
+          },
+          {
+            "temp_c": 88,
             "duty_pct": 28
           },
           {
-            "temp_c": 86,
+            "temp_c": 92,
             "duty_pct": 42
           },
           {
-            "temp_c": 90,
-            "duty_pct": 56
-          },
-          {
-            "temp_c": 95,
-            "duty_pct": 72
+            "temp_c": 96,
+            "duty_pct": 58
           }
         ],
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 20
+            "duty_pct": 15.5
           },
           {
-            "temp_c": 62,
-            "duty_pct": 26
+            "temp_c": 64,
+            "duty_pct": 15.5
           },
           {
-            "temp_c": 70,
-            "duty_pct": 36
-          },
-          {
-            "temp_c": 80,
-            "duty_pct": 48
-          },
-          {
-            "temp_c": 90,
-            "duty_pct": 62
-          },
-          {
-            "temp_c": 98,
-            "duty_pct": 72
-          }
-        ]
-      },
-      {
-        "channel": 1,
-        "temp_blend": "cpu_only",
-        "min_duty_pct": 24.0,
-        "curve_shape": "smootherstep",
-        "rise_rate_pct_per_min": 900.0,
-        "fall_rate_pct_per_min": 600.0,
-        "demand_smoothing_rise_alpha": 0.20,
-        "demand_smoothing_fall_alpha": 0.035,
-        "decay_latch_above_pct": 45.0,
-        "decay_latch_pct_per_min": 180.0,
-        "thermal_pressure_start_c": 82.0,
-        "thermal_pressure_full_c": 90.0,
-        "thermal_pressure_rise_pct_per_sec": 3.2,
-        "thermal_pressure_fall_pct_per_sec": 0.5,
-        "thermal_pressure_max_boost_pct": 22.0,
-        "cpu_low_soak_start_c": 62.0,
-        "cpu_low_soak_full_c": 71.0,
-        "cpu_low_soak_release_c": 60.5,
-        "cpu_low_soak_rise_pct_per_min": 1.2,
-        "cpu_low_soak_fall_pct_per_min": 0.5,
-        "cpu_low_soak_max_boost_pct": 2.5,
-        "cpu_override_curve": [
-          {
-            "temp_c": 75,
-            "duty_pct": 24
+            "temp_c": 72,
+            "duty_pct": 22
           },
           {
             "temp_c": 82,
             "duty_pct": 34
           },
           {
-            "temp_c": 86,
-            "duty_pct": 49
-          },
-          {
-            "temp_c": 90,
-            "duty_pct": 66
-          },
-          {
-            "temp_c": 95,
-            "duty_pct": 84
-          }
-        ],
-        "curve": [
-          {
-            "temp_c": 50,
-            "duty_pct": 24
-          },
-          {
-            "temp_c": 62,
-            "duty_pct": 30
-          },
-          {
-            "temp_c": 68,
-            "duty_pct": 45
-          },
-          {
-            "temp_c": 72,
-            "duty_pct": 58
-          },
-          {
-            "temp_c": 80,
-            "duty_pct": 72
-          },
-          {
-            "temp_c": 90,
-            "duty_pct": 88
+            "temp_c": 92,
+            "duty_pct": 50
           },
           {
             "temp_c": 98,
-            "duty_pct": 100
+            "duty_pct": 62
           }
         ]
       },
       {
-        "channel": 2,
+        "channel": 4,
         "temp_blend": "max_cpu_gpu",
-        "min_duty_pct": 50.0,
+        "min_duty_pct": 28.0,
         "curve_shape": "smootherstep",
-        "rise_rate_pct_per_min": 720.0,
-        "fall_rate_pct_per_min": 600.0,
-        "demand_smoothing_rise_alpha": 0.18,
-        "demand_smoothing_fall_alpha": 0.03,
-        "decay_latch_above_pct": 60.0,
-        "decay_latch_pct_per_min": 240.0,
+        "rise_rate_pct_per_min": 45.0,
+        "fall_rate_pct_per_min": 25.0,
+        "max_setpoint_step_pct": 0.3,
+        "demand_smoothing_rise_alpha": 0.008,
+        "demand_smoothing_fall_alpha": 0.003,
+        "decay_latch_above_pct": 34.0,
+        "decay_latch_pct_per_min": 90.0,
         "thermal_pressure_start_c": 84.0,
-        "thermal_pressure_full_c": 91.0,
-        "thermal_pressure_rise_pct_per_sec": 1.0,
-        "thermal_pressure_fall_pct_per_sec": 0.7,
-        "thermal_pressure_max_boost_pct": 6.0,
+        "thermal_pressure_full_c": 92.0,
+        "thermal_pressure_rise_pct_per_sec": 0.2,
+        "thermal_pressure_fall_pct_per_sec": 0.08,
+        "thermal_pressure_max_boost_pct": 18.0,
+        "cpu_low_soak_start_c": 72.0,
+        "cpu_low_soak_full_c": 82.0,
+        "cpu_low_soak_release_c": 68.0,
+        "cpu_low_soak_rise_pct_per_min": 0.04,
+        "cpu_low_soak_fall_pct_per_min": 0.05,
+        "cpu_low_soak_max_boost_pct": 0.3,
+        "low_band_stage": 3,
+        "low_band_debt_threshold": 0.65,
+        "low_band_hold_ms": 240000,
+        "low_band_max_boost_pct": 1.2,
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 50
+            "duty_pct": 28
           },
           {
             "temp_c": 82,
-            "duty_pct": 53
+            "duty_pct": 32
           },
           {
             "temp_c": 86,
-            "duty_pct": 60
+            "duty_pct": 44
           },
           {
             "temp_c": 90,
-            "duty_pct": 74
+            "duty_pct": 60
           },
           {
             "temp_c": 95,
-            "duty_pct": 86
+            "duty_pct": 78
           }
         ],
         "curve": [
           {
-            "temp_c": 50,
-            "duty_pct": 50
+            "temp_c": 45,
+            "duty_pct": 28
           },
           {
             "temp_c": 62,
-            "duty_pct": 54
+            "duty_pct": 28
           },
           {
-            "temp_c": 68,
-            "duty_pct": 64
+            "temp_c": 70,
+            "duty_pct": 34
           },
           {
-            "temp_c": 72,
-            "duty_pct": 74
+            "temp_c": 78,
+            "duty_pct": 46
           },
           {
-            "temp_c": 80,
-            "duty_pct": 84
+            "temp_c": 86,
+            "duty_pct": 62
           },
           {
-            "temp_c": 90,
-            "duty_pct": 95
+            "temp_c": 94,
+            "duty_pct": 82
           },
           {
             "temp_c": 98,
-            "duty_pct": 100
+            "duty_pct": 94
           }
         ]
       },
@@ -231,17 +185,22 @@
         "temp_blend": "max_cpu_gpu",
         "min_duty_pct": 50.0,
         "curve_shape": "smootherstep",
-        "rise_rate_pct_per_min": 720.0,
-        "fall_rate_pct_per_min": 600.0,
-        "demand_smoothing_rise_alpha": 0.18,
-        "demand_smoothing_fall_alpha": 0.03,
+        "rise_rate_pct_per_min": 90.0,
+        "fall_rate_pct_per_min": 45.0,
+        "max_setpoint_step_pct": 0.5,
+        "demand_smoothing_rise_alpha": 0.018,
+        "demand_smoothing_fall_alpha": 0.006,
         "decay_latch_above_pct": 60.0,
-        "decay_latch_pct_per_min": 240.0,
-        "thermal_pressure_start_c": 84.0,
-        "thermal_pressure_full_c": 91.0,
-        "thermal_pressure_rise_pct_per_sec": 1.0,
-        "thermal_pressure_fall_pct_per_sec": 0.7,
-        "thermal_pressure_max_boost_pct": 6.0,
+        "decay_latch_pct_per_min": 120.0,
+        "thermal_pressure_start_c": 86.0,
+        "thermal_pressure_full_c": 94.0,
+        "thermal_pressure_rise_pct_per_sec": 0.15,
+        "thermal_pressure_fall_pct_per_sec": 0.08,
+        "thermal_pressure_max_boost_pct": 4.0,
+        "low_band_stage": 1,
+        "low_band_debt_threshold": 0.25,
+        "low_band_hold_ms": 120000,
+        "low_band_max_boost_pct": 2.0,
         "cpu_override_curve": [
           {
             "temp_c": 75,
@@ -249,11 +208,85 @@
           },
           {
             "temp_c": 82,
-            "duty_pct": 53
+            "duty_pct": 50
           },
           {
             "temp_c": 86,
-            "duty_pct": 60
+            "duty_pct": 58
+          },
+          {
+            "temp_c": 90,
+            "duty_pct": 70
+          },
+          {
+            "temp_c": 95,
+            "duty_pct": 82
+          }
+        ],
+        "curve": [
+          {
+            "temp_c": 45,
+            "duty_pct": 50
+          },
+          {
+            "temp_c": 58,
+            "duty_pct": 52
+          },
+          {
+            "temp_c": 66,
+            "duty_pct": 58
+          },
+          {
+            "temp_c": 74,
+            "duty_pct": 68
+          },
+          {
+            "temp_c": 84,
+            "duty_pct": 80
+          },
+          {
+            "temp_c": 94,
+            "duty_pct": 90
+          },
+          {
+            "temp_c": 98,
+            "duty_pct": 95
+          }
+        ]
+      },
+      {
+        "channel": 2,
+        "temp_blend": "max_cpu_gpu",
+        "min_duty_pct": 54.0,
+        "curve_shape": "smootherstep",
+        "rise_rate_pct_per_min": 90.0,
+        "fall_rate_pct_per_min": 45.0,
+        "max_setpoint_step_pct": 0.5,
+        "demand_smoothing_rise_alpha": 0.018,
+        "demand_smoothing_fall_alpha": 0.006,
+        "decay_latch_above_pct": 60.0,
+        "decay_latch_pct_per_min": 120.0,
+        "thermal_pressure_start_c": 86.0,
+        "thermal_pressure_full_c": 94.0,
+        "thermal_pressure_rise_pct_per_sec": 0.15,
+        "thermal_pressure_fall_pct_per_sec": 0.08,
+        "thermal_pressure_max_boost_pct": 4.0,
+        "low_band_stage": 1,
+        "low_band_debt_threshold": 0.25,
+        "low_band_hold_ms": 120000,
+        "low_band_max_boost_pct": 2.0,
+        "cpu_override_curve": [
+          {
+            "temp_c": 75,
+            "duty_pct": 54
+          },
+          {
+            "temp_c": 82,
+            "duty_pct": 54
+          },
+          {
+            "temp_c": 86,
+            "duty_pct": 62
           },
           {
             "temp_c": 90,
@@ -266,28 +299,28 @@
         ],
         "curve": [
           {
-            "temp_c": 50,
-            "duty_pct": 50
-          },
-          {
-            "temp_c": 62,
+            "temp_c": 45,
             "duty_pct": 54
           },
           {
-            "temp_c": 68,
-            "duty_pct": 64
+            "temp_c": 58,
+            "duty_pct": 56
           },
           {
-            "temp_c": 72,
-            "duty_pct": 74
+            "temp_c": 66,
+            "duty_pct": 62
           },
           {
-            "temp_c": 80,
+            "temp_c": 74,
+            "duty_pct": 72
+          },
+          {
+            "temp_c": 84,
             "duty_pct": 84
           },
           {
-            "temp_c": 90,
-            "duty_pct": 95
+            "temp_c": 94,
+            "duty_pct": 94
           },
           {
             "temp_c": 98,
@@ -296,144 +329,154 @@
         ]
       },
       {
-        "channel": 4,
-        "temp_blend": "cpu_only",
-        "min_duty_pct": 22.0,
-        "curve_shape": "smootherstep",
-        "rise_rate_pct_per_min": 720.0,
-        "fall_rate_pct_per_min": 600.0,
-        "demand_smoothing_rise_alpha": 0.18,
-        "demand_smoothing_fall_alpha": 0.035,
-        "decay_latch_above_pct": 44.0,
-        "decay_latch_pct_per_min": 180.0,
-        "thermal_pressure_start_c": 82.0,
-        "thermal_pressure_full_c": 90.0,
-        "thermal_pressure_rise_pct_per_sec": 3.0,
-        "thermal_pressure_fall_pct_per_sec": 0.5,
-        "thermal_pressure_max_boost_pct": 20.0,
-        "cpu_low_soak_start_c": 62.0,
-        "cpu_low_soak_full_c": 71.0,
-        "cpu_low_soak_release_c": 60.5,
-        "cpu_low_soak_rise_pct_per_min": 1.2,
-        "cpu_low_soak_fall_pct_per_min": 0.5,
-        "cpu_low_soak_max_boost_pct": 2.0,
-        "cpu_override_curve": [
-          {
-            "temp_c": 75,
-            "duty_pct": 22
-          },
-          {
-            "temp_c": 82.5,
-            "duty_pct": 33
-          },
-          {
-            "temp_c": 86.5,
-            "duty_pct": 48
-          },
-          {
-            "temp_c": 90.5,
-            "duty_pct": 66
-          },
-          {
-            "temp_c": 95,
-            "duty_pct": 84
-          }
-        ],
-        "curve": [
-          {
-            "temp_c": 50,
-            "duty_pct": 22
-          },
-          {
-            "temp_c": 62,
-            "duty_pct": 28
-          },
-          {
-            "temp_c": 70,
-            "duty_pct": 38
-          },
-          {
-            "temp_c": 80,
-            "duty_pct": 52
-          },
-          {
-            "temp_c": 90,
-            "duty_pct": 65
-          },
-          {
-            "temp_c": 98,
-            "duty_pct": 75
-          }
-        ]
-      },
-      {
         "channel": 5,
         "temp_blend": "cpu_only",
-        "min_duty_pct": 20.0,
+        "min_duty_pct": 18.0,
         "curve_shape": "smootherstep",
-        "rise_rate_pct_per_min": 720.0,
-        "fall_rate_pct_per_min": 600.0,
-        "demand_smoothing_rise_alpha": 0.16,
-        "demand_smoothing_fall_alpha": 0.03,
-        "decay_latch_above_pct": 42.0,
-        "decay_latch_pct_per_min": 180.0,
-        "thermal_pressure_start_c": 82.0,
-        "thermal_pressure_full_c": 90.0,
-        "thermal_pressure_rise_pct_per_sec": 3.0,
-        "thermal_pressure_fall_pct_per_sec": 0.5,
-        "thermal_pressure_max_boost_pct": 20.0,
-        "cpu_low_soak_start_c": 62.0,
-        "cpu_low_soak_full_c": 71.0,
-        "cpu_low_soak_release_c": 60.5,
-        "cpu_low_soak_rise_pct_per_min": 1.2,
-        "cpu_low_soak_fall_pct_per_min": 0.5,
-        "cpu_low_soak_max_boost_pct": 2.0,
+        "rise_rate_pct_per_min": 45.0,
+        "fall_rate_pct_per_min": 25.0,
+        "max_setpoint_step_pct": 0.3,
+        "demand_smoothing_rise_alpha": 0.008,
+        "demand_smoothing_fall_alpha": 0.003,
+        "decay_latch_above_pct": 32.0,
+        "decay_latch_pct_per_min": 90.0,
+        "thermal_pressure_start_c": 86.5,
+        "thermal_pressure_full_c": 94.0,
+        "thermal_pressure_rise_pct_per_sec": 0.16,
+        "thermal_pressure_fall_pct_per_sec": 0.08,
+        "thermal_pressure_max_boost_pct": 14.0,
+        "cpu_low_soak_start_c": 72.0,
+        "cpu_low_soak_full_c": 82.0,
+        "cpu_low_soak_release_c": 68.0,
+        "cpu_low_soak_rise_pct_per_min": 0.04,
+        "cpu_low_soak_fall_pct_per_min": 0.05,
+        "cpu_low_soak_max_boost_pct": 0.3,
+        "low_band_stage": 3,
+        "low_band_debt_threshold": 0.65,
+        "low_band_hold_ms": 240000,
+        "low_band_max_boost_pct": 1.2,
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 20
+            "duty_pct": 18
           },
           {
-            "temp_c": 83,
-            "duty_pct": 32
+            "temp_c": 84,
+            "duty_pct": 24
           },
           {
-            "temp_c": 87,
-            "duty_pct": 46
-          },
-          {
-            "temp_c": 91,
-            "duty_pct": 64
-          },
-          {
-            "temp_c": 95,
-            "duty_pct": 82
-          }
-        ],
-        "curve": [
-          {
-            "temp_c": 50,
-            "duty_pct": 20
-          },
-          {
-            "temp_c": 62,
-            "duty_pct": 26
-          },
-          {
-            "temp_c": 70,
+            "temp_c": 88,
             "duty_pct": 36
           },
           {
-            "temp_c": 80,
-            "duty_pct": 49
+            "temp_c": 92,
+            "duty_pct": 52
           },
           {
-            "temp_c": 90,
-            "duty_pct": 60
+            "temp_c": 96,
+            "duty_pct": 72
+          }
+        ],
+        "curve": [
+          {
+            "temp_c": 50,
+            "duty_pct": 18
+          },
+          {
+            "temp_c": 64,
+            "duty_pct": 18
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 82,
+            "duty_pct": 38
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 56
           },
           {
             "temp_c": 98,
             "duty_pct": 70
+          }
+        ]
+      },
+      {
+        "channel": 1,
+        "temp_blend": "cpu_only",
+        "min_duty_pct": 20.0,
+        "curve_shape": "smootherstep",
+        "rise_rate_pct_per_min": 45.0,
+        "fall_rate_pct_per_min": 25.0,
+        "max_setpoint_step_pct": 0.3,
+        "demand_smoothing_rise_alpha": 0.008,
+        "demand_smoothing_fall_alpha": 0.003,
+        "decay_latch_above_pct": 38.0,
+        "decay_latch_pct_per_min": 90.0,
+        "thermal_pressure_start_c": 86.5,
+        "thermal_pressure_full_c": 94.0,
+        "thermal_pressure_rise_pct_per_sec": 0.16,
+        "thermal_pressure_fall_pct_per_sec": 0.08,
+        "thermal_pressure_max_boost_pct": 14.0,
+        "cpu_low_soak_start_c": 72.0,
+        "cpu_low_soak_full_c": 82.0,
+        "cpu_low_soak_release_c": 68.0,
+        "cpu_low_soak_rise_pct_per_min": 0.04,
+        "cpu_low_soak_fall_pct_per_min": 0.05,
+        "cpu_low_soak_max_boost_pct": 0.3,
+        "low_band_stage": 2,
+        "low_band_debt_threshold": 0.45,
+        "low_band_hold_ms": 180000,
+        "low_band_max_boost_pct": 1.8,
+        "cpu_override_curve": [
+          {
+            "temp_c": 75,
+            "duty_pct": 20
+          },
+          {
+            "temp_c": 84,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 88,
+            "duty_pct": 36
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 52
+          },
+          {
+            "temp_c": 96,
+            "duty_pct": 70
+          }
+        ],
+        "curve": [
+          {
+            "temp_c": 50,
+            "duty_pct": 20
+          },
+          {
+            "temp_c": 64,
+            "duty_pct": 20
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 82,
+            "duty_pct": 38
+          },
+          {
+            "temp_c": 92,
+            "duty_pct": 52
+          },
+          {
+            "temp_c": 98,
+            "duty_pct": 64
           }
         ]
       }

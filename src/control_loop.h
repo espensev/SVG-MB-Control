@@ -24,6 +24,7 @@ struct ChannelControlConfig {
     CurveShape curve_shape = CurveShape::Linear;
     double rise_rate_pct_per_min = std::numeric_limits<double>::quiet_NaN();
     double fall_rate_pct_per_min = std::numeric_limits<double>::quiet_NaN();
+    double max_setpoint_step_pct = std::numeric_limits<double>::quiet_NaN();
     double demand_smoothing_rise_alpha =
         std::numeric_limits<double>::quiet_NaN();
     double demand_smoothing_fall_alpha =
@@ -53,8 +54,32 @@ struct ChannelControlConfig {
         std::numeric_limits<double>::quiet_NaN();
     double cpu_low_soak_max_boost_pct =
         std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t low_band_stage = 0u;
+    double low_band_debt_threshold =
+        std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t low_band_hold_ms = 0u;
+    double low_band_max_boost_pct =
+        std::numeric_limits<double>::quiet_NaN();
     std::vector<CurvePoint> curve;
     std::vector<CurvePoint> cpu_override_curve;
+};
+
+struct LowBandControlConfig {
+    bool enabled = false;
+    double cpu_start_c = 62.0;
+    double cpu_full_c = 71.0;
+    double cpu_release_c = 60.5;
+    double gpu_start_c = 68.0;
+    double gpu_full_c = 76.0;
+    double gpu_release_c = 64.0;
+    double cpu_weight = 1.0;
+    double gpu_weight = 1.0;
+    double rise_per_min = 0.12;
+    double fall_per_min = 0.06;
+    double stage_rise_pct_per_min = 0.6;
+    double stage_fall_pct_per_min = 0.4;
+    std::uint32_t stage_spacing_ms = 90000u;
+    std::uint32_t evidence_write_interval_ms = 5000u;
 };
 
 struct ControlLoopConfig {
@@ -63,6 +88,7 @@ struct ControlLoopConfig {
     double deadband_pct = 3.0;
     std::uint32_t control_hold_ms = 60000u;
     std::string cpu_temp_label = "Tctl/Tdie";
+    LowBandControlConfig low_band;
     std::vector<ChannelControlConfig> channels;
 };
 
