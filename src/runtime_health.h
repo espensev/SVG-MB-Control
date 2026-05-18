@@ -36,6 +36,19 @@ struct RuntimeHealthResult {
     std::uint32_t pending_write_count = 0u;
     bool pending_writes_unreadable = false;
     std::uint32_t degraded_channel_count = 0u;
+    std::string last_successful_restore_time;
+
+    // Merged from the supervisor-owned control_supervisor.json sidecar.
+    bool supervisor_state_present = false;
+    std::uint32_t supervisor_pid = 0u;
+    bool supervisor_active = false;
+    std::uint32_t worker_restart_count = 0u;
+    std::uint32_t last_worker_pid = 0u;
+    std::string last_worker_started_time;
+    std::string last_worker_restart_time;
+    std::string last_worker_exit_time;
+    bool has_last_worker_exit_code = false;
+    std::int64_t last_worker_exit_code = 0;
 };
 
 const char* RuntimeHealthStateName(RuntimeHealthState state);

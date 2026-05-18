@@ -131,6 +131,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
 
     bool fatal_restore_timeout = false;
     std::uint32_t fatal_restore_channel = 0u;
+    std::string last_successful_restore_iso;
     std::chrono::steady_clock::time_point previous_tick_start;
     bool have_previous_tick_start = false;
     // Throttle snapshot-file writes: per-tick atomic rename is expensive on
@@ -268,6 +269,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                                   channel.baseline_mode_raw,
                                                   context.base.restore_timeout_ms);
                 if (restore_result) {
+                    last_successful_restore_iso =
+                        FormatLocalIso8601(std::chrono::system_clock::now());
                     AppendRuntimeEvent(
                         context.runtime_home,
                         RuntimeLogEvent{
@@ -637,7 +640,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             WriteControlLoopStatus(context.runtime_home, "control-loop", "running",
                             td.str(), tick_count, eval_iso, last_timing,
                             context.channels, log_csv_path, log_manifest_path,
-                            event_log_path);
+                            event_log_path, last_successful_restore_iso);
         }
 
         WaitForNextControlTick(context, tick_started_steady, stop_flag);
@@ -648,7 +651,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     "stop requested", tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     last_timing, context.channels, log_csv_path,
-                    log_manifest_path, event_log_path);
+                    log_manifest_path, event_log_path,
+                    last_successful_restore_iso);
     AppendRuntimeEvent(
         context.runtime_home,
         RuntimeLogEvent{
@@ -694,6 +698,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     });
                 continue;
             }
+            last_successful_restore_iso =
+                FormatLocalIso8601(std::chrono::system_clock::now());
             AppendRuntimeEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
@@ -728,7 +734,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     tick_count,
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     last_timing, context.channels, log_csv_path,
-                    log_manifest_path, event_log_path);
+                    log_manifest_path, event_log_path,
+                    last_successful_restore_iso);
     AppendRuntimeEvent(
         context.runtime_home,
         RuntimeLogEvent{

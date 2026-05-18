@@ -350,6 +350,8 @@ Control writes:
 
 - `current_state.json`
 - `control_runtime.json`
+- `control_supervisor.json`
+- `control_health.json`
 - `pending_writes.json`
 - `stop.request.json`
 - `logs\svg_mb_control_output.csv`
@@ -366,7 +368,10 @@ Control writes:
 `current_state.json`, `control_runtime.json`, and `pending_writes.json` remain
 the authoritative live state and recovery plane. `control_runtime.json` also
 publishes the active worker `process_id`, `log_csv_path`, `log_manifest_path`,
-and `event_log_path` for the active mode.
+`event_log_path`, and `last_successful_restore_time` for the active mode.
+`control_supervisor.json` publishes supervisor PID, worker restart count, and
+last worker exit code/time; `control_health.json` records the last `--health`
+assessment. `--health` / `--status` merge these sidecars.
 
 See `docs\RUNTIME_HOME.md` for field definitions.
 

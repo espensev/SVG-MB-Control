@@ -127,6 +127,7 @@ add_executable(svg_mb_control
     src/runtime_logging.cpp
     src/runtime_lifecycle.cpp
     src/runtime_snapshot.cpp
+    src/runtime_supervisor_state.cpp
     src/runtime_write_policy.cpp
     src/simulated_fan_writer.cpp
     src/sio_fan_writer.cpp

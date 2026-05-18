@@ -14,6 +14,8 @@ Control owns these files:
 
 - `current_state.json`
 - `control_runtime.json`
+- `control_supervisor.json`
+- `control_health.json`
 - `pending_writes.json`
 - `stop.request.json`
 - `logs\svg_mb_control_output.csv`
@@ -104,7 +106,13 @@ distinguish an active loop from a stale status file. `restart_count` and
 - `log_csv_path`
 - `log_manifest_path`
 - `event_log_path`
+- `last_successful_restore_time`
 - `controlled_channels`
+
+`last_successful_restore_time` is the local ISO 8601 time of the most recent
+successful baseline restore in the current worker process. It is an empty string
+until the worker completes a restore. The field is added to the existing schema
+version `4`; consumers must tolerate its absence in older status files.
 
 Timing fields describe the most recently completed control-loop tick. The first
 tick has no previous tick-start sample, so `loop_achieved_interval_ms` and
@@ -135,11 +143,59 @@ Each controlled-channel entry includes:
 it is rate-limited and should not be treated as a per-tick log. Use the active
 CSV chunk for per-tick analysis.
 
+## control_supervisor.json
+
+Written by the in-process supervisor (`--run-supervisor`, used by supervised
+`read-loop` and `control-loop` launches) with schema version `1`. The worker
+rewrites `control_runtime.json` atomically every tick, so supervisor-owned
+state is published in this separate sidecar instead of being merged into the
+worker status file.
+
+Fields:
+
+- `schema_version`
+- `supervisor_pid`
+- `worker_restart_count`
+- `last_worker_pid`
+- `last_worker_started_time`
+- `last_worker_restart_time`
+- `last_worker_exit_time`
+- `last_worker_exit_code`
+
+`last_worker_restart_time` and `last_worker_exit_time` are empty strings until
+the first worker restart and first worker exit. `last_worker_exit_code` is
+`null` until the first worker exit. The supervisor rewrites this file at
+supervisor start, each worker start, each worker exit, and each scheduled
+restart.
+
+## control_health.json
+
+Written by the `svg-mb-control --health` CLI path with schema version `1`. It
+records the most recent health assessment so the watchdog, `--status`, and the
+eval dashboard can show the last result without re-evaluating. Pure health
+evaluation does not write this file.
+
+Fields:
+
+- `schema_version`
+- `last_health_state`
+- `last_health_reason`
+- `last_health_exit_code`
+- `last_health_time`
+
 ## Health command
 
 `svg-mb-control --health --json` and `svg-mb-control --status --json` read
-`control_runtime.json`, `stop.request.json`, and `pending_writes.json` and emit a
-schema-versioned health payload. Health states are:
+`control_runtime.json`, `control_supervisor.json`, `stop.request.json`, and
+`pending_writes.json` and emit a schema-versioned health payload. The health
+payload merges the supervisor sidecar fields (`supervisor_state_present`,
+`supervisor_pid`, `supervisor_active`, `worker_restart_count`,
+`last_worker_pid`, `last_worker_started_time`, `last_worker_restart_time`,
+`last_worker_exit_time`, `last_worker_exit_code`) and the worker's
+`last_successful_restore_time`. `supervisor_state_present` is `false` and the
+merged supervisor fields keep their defaults when `control_supervisor.json` is
+absent. The `--health` path also persists the assessment to
+`control_health.json`. Health states are:
 
 - `healthy`: process is active, status is fresh, and no stop request or degraded
   channel state is present.

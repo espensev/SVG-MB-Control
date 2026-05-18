@@ -56,7 +56,8 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::vector<ChannelState>& channels,
                             const std::string& log_csv_path,
                             const std::string& log_manifest_path,
-                            const std::string& event_log_path) {
+                            const std::string& event_log_path,
+                            const std::string& last_successful_restore_iso) {
     nlohmann::json payload = MakeSchemaObject(4u);
     payload["mode"] = mode_label;
     payload["process_id"] = GetCurrentProcessId();
@@ -83,6 +84,7 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
     payload["log_csv_path"] = log_csv_path;
     payload["log_manifest_path"] = log_manifest_path;
     payload["event_log_path"] = event_log_path;
+    payload["last_successful_restore_time"] = last_successful_restore_iso;
 
     payload["controlled_channels"] = nlohmann::json::array();
     for (const auto& channel : channels) {

@@ -1,8 +1,10 @@
 #include "runtime_health.h"
 
+#include "control_scheduler.h"
 #include "json_io.h"
 #include "pending_writes.h"
 #include "runtime_lifecycle.h"
+#include "runtime_supervisor_state.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -141,6 +143,21 @@ void FillSidecarHealth(RuntimeHealthResult* result) {
     } catch (const std::exception&) {
         result->pending_writes_unreadable = true;
     }
+
+    const auto supervisor = ReadSupervisorState(result->runtime_home);
+    if (supervisor.has_value()) {
+        result->supervisor_state_present = true;
+        result->supervisor_pid = supervisor->supervisor_pid;
+        result->supervisor_active = IsProcessActive(supervisor->supervisor_pid);
+        result->worker_restart_count = supervisor->worker_restart_count;
+        result->last_worker_pid = supervisor->last_worker_pid;
+        result->last_worker_started_time = supervisor->last_worker_started_time;
+        result->last_worker_restart_time = supervisor->last_worker_restart_time;
+        result->last_worker_exit_time = supervisor->last_worker_exit_time;
+        result->has_last_worker_exit_code =
+            supervisor->has_last_worker_exit_code;
+        result->last_worker_exit_code = supervisor->last_worker_exit_code;
+    }
 }
 
 void SetState(RuntimeHealthResult* result,
@@ -148,6 +165,21 @@ void SetState(RuntimeHealthResult* result,
               std::string reason) {
     result->state = state;
     result->reason = std::move(reason);
+}
+
+// Best-effort persistence of the last health assessment so the watchdog,
+// status command, and eval dashboard can show the most recent result
+// without re-evaluating. Written only by the --health CLI path; pure
+// evaluation stays side-effect free.
+void PersistHealthAssessment(const RuntimeHealthResult& result) {
+    nlohmann::json payload = MakeSchemaObject(1u);
+    payload["last_health_state"] = RuntimeHealthStateName(result.state);
+    payload["last_health_reason"] = result.reason;
+    payload["last_health_exit_code"] = RuntimeHealthExitCode(result.state);
+    payload["last_health_time"] =
+        FormatLocalIso8601(std::chrono::system_clock::now());
+    TryWriteJsonFileAtomic(result.runtime_home / "control_health.json",
+                           payload);
 }
 
 }  // namespace
@@ -224,6 +256,8 @@ RuntimeHealthResult EvaluateRuntimeHealth(
     result.process_id = JsonUInt32Or(status, "process_id");
     result.process_active = IsProcessActive(result.process_id);
     result.degraded_channel_count = CountDegradedChannels(status);
+    result.last_successful_restore_time =
+        JsonStringOr(status, "last_successful_restore_time");
 
     if (result.pending_writes_unreadable) {
         SetState(&result, RuntimeHealthState::kFailed,
@@ -323,6 +357,20 @@ nlohmann::json RuntimeHealthToJson(const RuntimeHealthResult& result) {
     payload["pending_write_count"] = result.pending_write_count;
     payload["pending_writes_unreadable"] = result.pending_writes_unreadable;
     payload["degraded_channel_count"] = result.degraded_channel_count;
+    payload["last_successful_restore_time"] =
+        result.last_successful_restore_time;
+    payload["supervisor_state_present"] = result.supervisor_state_present;
+    payload["supervisor_pid"] = result.supervisor_pid;
+    payload["supervisor_active"] = result.supervisor_active;
+    payload["worker_restart_count"] = result.worker_restart_count;
+    payload["last_worker_pid"] = result.last_worker_pid;
+    payload["last_worker_started_time"] = result.last_worker_started_time;
+    payload["last_worker_restart_time"] = result.last_worker_restart_time;
+    payload["last_worker_exit_time"] = result.last_worker_exit_time;
+    payload["last_worker_exit_code"] =
+        result.has_last_worker_exit_code
+            ? nlohmann::json(result.last_worker_exit_code)
+            : nlohmann::json(nullptr);
     return payload;
 }
 
@@ -331,6 +379,7 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
                        std::uint32_t stale_after_ms) {
     const RuntimeHealthResult result =
         EvaluateRuntimeHealth(runtime_home, stale_after_ms);
+    PersistHealthAssessment(result);
     if (json_output) {
         std::cout << RuntimeHealthToJson(result).dump(2) << '\n';
     } else {
@@ -355,6 +404,22 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
         }
         if (!result.last_update.empty()) {
             std::cout << "  last_update: " << result.last_update << '\n';
+        }
+        if (!result.last_successful_restore_time.empty()) {
+            std::cout << "  last_successful_restore: "
+                      << result.last_successful_restore_time << '\n';
+        }
+        if (result.supervisor_state_present) {
+            std::cout << "  supervisor_pid: " << result.supervisor_pid
+                      << (result.supervisor_active ? " (active)"
+                                                   : " (not active)")
+                      << '\n'
+                      << "  worker_restart_count: "
+                      << result.worker_restart_count << '\n';
+            if (result.has_last_worker_exit_code) {
+                std::cout << "  last_worker_exit_code: "
+                          << result.last_worker_exit_code << '\n';
+            }
         }
     }
     return RuntimeHealthExitCode(result.state);

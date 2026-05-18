@@ -7,10 +7,12 @@
 #include "control_supervisor.h"
 
 #include "control_config.h"
+#include "control_scheduler.h"
 #include "json_io.h"
 #include "read_loop.h"
 #include "runtime_artifacts.h"
 #include "runtime_lifecycle.h"
+#include "runtime_supervisor_state.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -476,6 +478,34 @@ int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
     if (!event_log.empty()) {
         std::cout << "  events: " << event_log << '\n';
     }
+    const std::string last_restore =
+        JsonStringOr(*status, "last_successful_restore_time");
+    if (!last_restore.empty()) {
+        std::cout << "  last_successful_restore: " << last_restore << '\n';
+    }
+
+    const auto supervisor = ReadSupervisorState(runtime_home);
+    if (supervisor.has_value()) {
+        std::cout << "  supervisor_pid: " << supervisor->supervisor_pid
+                  << (IsProcessActive(supervisor->supervisor_pid)
+                          ? " (active)"
+                          : " (not active)")
+                  << '\n'
+                  << "  worker_restart_count: "
+                  << supervisor->worker_restart_count << '\n';
+        if (supervisor->has_last_worker_exit_code) {
+            std::cout << "  last_worker_exit_code: "
+                      << supervisor->last_worker_exit_code;
+            if (!supervisor->last_worker_exit_time.empty()) {
+                std::cout << " at " << supervisor->last_worker_exit_time;
+            }
+            std::cout << '\n';
+        }
+        if (!supervisor->last_worker_restart_time.empty()) {
+            std::cout << "  last_worker_restart_time: "
+                      << supervisor->last_worker_restart_time << '\n';
+        }
+    }
     return 0;
 }
 
@@ -624,6 +654,10 @@ int RunSupervisedLongRunningMode(RunMode mode,
         runtime_home / "svg-mb-control.worker.stderr.log";
     std::uint32_t restart_count = 0u;
 
+    SupervisorState supervisor_state;
+    supervisor_state.supervisor_pid = GetCurrentProcessId();
+    WriteSupervisorState(runtime_home, supervisor_state);
+
     svg_mb_control::AppendRuntimeEvent(
         runtime_home,
         svg_mb_control::RuntimeLogEvent{
@@ -640,6 +674,11 @@ int RunSupervisedLongRunningMode(RunMode mode,
             working_directory,
             stdout_path,
             stderr_path);
+        supervisor_state.last_worker_pid = worker.pid;
+        supervisor_state.worker_restart_count = restart_count;
+        supervisor_state.last_worker_started_time =
+            FormatLocalIso8601(std::chrono::system_clock::now());
+        WriteSupervisorState(runtime_home, supervisor_state);
         {
             std::ostringstream detail;
             detail << "worker started pid=" << worker.pid
@@ -670,6 +709,12 @@ int RunSupervisedLongRunningMode(RunMode mode,
 
         const bool stop_requested =
             svg_mb_control::RuntimeStopRequested(runtime_home);
+        supervisor_state.has_last_worker_exit_code = true;
+        supervisor_state.last_worker_exit_code =
+            static_cast<std::int64_t>(exit_code);
+        supervisor_state.last_worker_exit_time =
+            FormatLocalIso8601(std::chrono::system_clock::now());
+        WriteSupervisorState(runtime_home, supervisor_state);
         {
             std::ostringstream detail;
             detail << "worker exited pid=" << worker.pid
@@ -711,6 +756,10 @@ int RunSupervisedLongRunningMode(RunMode mode,
         }
 
         ++restart_count;
+        supervisor_state.worker_restart_count = restart_count;
+        supervisor_state.last_worker_restart_time =
+            FormatLocalIso8601(std::chrono::system_clock::now());
+        WriteSupervisorState(runtime_home, supervisor_state);
         const std::uint32_t backoff_seconds =
             (std::min)(60u, 1u << (std::min)(restart_count, 5u));
         {

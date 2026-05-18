@@ -20,7 +20,8 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::vector<ChannelState>& channels,
                             const std::string& log_csv_path,
                             const std::string& log_manifest_path,
-                            const std::string& event_log_path);
+                            const std::string& event_log_path,
+                            const std::string& last_successful_restore_iso = {});
 
 std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
     const std::vector<ChannelState>& channels);
