@@ -284,6 +284,36 @@ class SmokeTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(state, msg="restarted worker did not refresh")
                 self.assertEqual(state["amd_sensors"][0]["temperature_c"], 72.0)
+
+                # Regression: the exiting old supervisor must not clobber the
+                # successor's control_supervisor.json on an intentional
+                # restart. The sidecar must track the new worker, not the
+                # pre-restart pid.
+                restarted_pid = restarted["process_id"]
+                supervisor_state = _wait_for(
+                    lambda: (
+                        sv
+                        if (
+                            sv := _read_json(
+                                runtime_home / "control_supervisor.json"
+                            )
+                        )
+                        and sv.get("last_worker_pid") == restarted_pid
+                        else None
+                    ),
+                    timeout_s=5.0,
+                    poll_s=0.1,
+                )
+                self.assertIsNotNone(
+                    supervisor_state,
+                    msg="control_supervisor.json was clobbered by the exiting "
+                    "supervisor (stale last_worker_pid after --restart)",
+                )
+                self.assertNotEqual(
+                    supervisor_state["last_worker_pid"],
+                    first_pid,
+                    msg="supervisor sidecar still shows the pre-restart worker",
+                )
             finally:
                 _run_control("--stop", cwd=td, exe=staged_exe)
 

@@ -709,12 +709,20 @@ int RunSupervisedLongRunningMode(RunMode mode,
 
         const bool stop_requested =
             svg_mb_control::RuntimeStopRequested(runtime_home);
-        supervisor_state.has_last_worker_exit_code = true;
-        supervisor_state.last_worker_exit_code =
-            static_cast<std::int64_t>(exit_code);
-        supervisor_state.last_worker_exit_time =
-            FormatLocalIso8601(std::chrono::system_clock::now());
-        WriteSupervisorState(runtime_home, supervisor_state);
+        // On an intentional stop/restart a successor supervisor may already
+        // have published its fresh control_supervisor.json; this exiting
+        // supervisor must not clobber it with stale state. The JSONL event
+        // below still records the exit for history. Crash/backoff restarts
+        // (stop not requested) keep writing so repeated-crash visibility is
+        // preserved.
+        if (!stop_requested) {
+            supervisor_state.has_last_worker_exit_code = true;
+            supervisor_state.last_worker_exit_code =
+                static_cast<std::int64_t>(exit_code);
+            supervisor_state.last_worker_exit_time =
+                FormatLocalIso8601(std::chrono::system_clock::now());
+            WriteSupervisorState(runtime_home, supervisor_state);
+        }
         {
             std::ostringstream detail;
             detail << "worker exited pid=" << worker.pid
