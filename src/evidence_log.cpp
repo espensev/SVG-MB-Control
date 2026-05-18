@@ -150,6 +150,7 @@ int RunEvidenceLog(const ControlConfig& config,
     RuntimeCsvLogger csv_logger(runtime_home,
                                  config.log_rotate_hours,
                                  config.log_retain_days,
+                                 config.csv_flush_interval_rows,
                                  naming);
     const std::string event_log_path =
         ResolveRuntimeEventLogPath(runtime_home, naming).string();

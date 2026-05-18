@@ -30,8 +30,8 @@
 - `src/runtime_artifacts.cpp:206` - manifests publish `rows_written` compatibility accounting for finalized chunks.
 - `src/runtime_artifacts.cpp:208` - manifests publish `events_written` compatibility accounting for finalized chunks.
 - `src/runtime_artifacts.cpp:219` - manifests explicitly set `external_logging.required=false`.
-- `src/runtime_artifacts.cpp:254` - manifest records `csv_flush_policy=per_row`.
-- `src/runtime_artifacts.cpp:255` - manifest records latest-file `mirror_mode=write_through`.
+- `src/runtime_artifacts.cpp` - manifest records the active CSV flush policy,
+  flush interval, and latest-file mirror mode.
 - `src/runtime_artifacts.cpp:382` - JSONL events are appended through `AppendRuntimeEvent`.
 - `src/runtime_logging.cpp:121` - Control common CSV header starts with wall clock, mode, snapshot time, AMD summary, GPU thermal fields, fan state, and write-policy fields.
 - `src/runtime_logging.cpp:279` - control-loop CSV header adds loop tick, wall-clock, timing, CPU, memory, and per-channel control fields.

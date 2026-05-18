@@ -320,6 +320,71 @@ void WriteLowBandEvidenceFile(const ControlRuntimeContext& context,
                            payload);
 }
 
+void CaptureChannelBaselineIfAvailable(
+    const ControlRuntimeContext& context,
+    ChannelState& channel,
+    const RuntimeSnapshot& runtime_snapshot,
+    std::uint64_t tick_count) {
+    if (channel.baseline_captured) {
+        return;
+    }
+
+    const RuntimeFanSnapshot* fan =
+        FindRuntimeFanChannel(runtime_snapshot, channel.config.channel);
+    if (fan == nullptr) {
+        return;
+    }
+
+    channel.baseline_duty_raw = fan->duty_raw;
+    channel.baseline_mode_raw = fan->mode_raw;
+    channel.baseline_captured = true;
+    channel.last_issued_pct = fan->duty_percent;
+    channel.last_setpoint_pct = fan->duty_percent;
+    AppendRuntimeEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.baseline_captured",
+            .detail = "captured baseline for control channel",
+            .channel = channel.config.channel,
+            .tick_count = tick_count,
+            .success = true,
+        });
+}
+
+void AppendChannelSensorEvent(const ControlRuntimeContext& context,
+                              const ChannelState& channel,
+                              const ChannelEvaluation& evaluation,
+                              std::uint64_t tick_count) {
+    if (evaluation.sensor_event == ChannelSensorEvent::FailureDetected) {
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.sensor_failure_detected",
+                .detail = "sensor failure detected, entering safe mode (100% duty)",
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .success = false,
+            });
+        return;
+    }
+
+    if (evaluation.sensor_event == ChannelSensorEvent::Recovered) {
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.sensor_recovered",
+                .detail = "sensor recovered, resuming normal control",
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .observed_temp_c = evaluation.sensor_event_observed_temp_c,
+                .success = true,
+            });
+    }
+}
+
 }  // namespace
 
 // ------------------------ ControlLoop Impl -----------------------------
@@ -352,7 +417,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     RuntimeCsvLogger csv_logger(
         context.runtime_home,
         context.base.log_rotate_hours,
-        context.base.log_retain_days);
+        context.base.log_retain_days,
+        context.base.csv_flush_interval_rows);
     std::string log_csv_path;
     std::string log_manifest_path;
     if (csv_logger.Open("control-loop", BuildControlLoopCsvHeader())) {
@@ -544,26 +610,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             const ChannelTimingConfig channel_timing =
                 BuildChannelTimingConfig(context.loop, channel, now_steady);
 
-            if (!channel.baseline_captured) {
-                if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-                        runtime_snapshot, channel.config.channel)) {
-                    channel.baseline_duty_raw = fan->duty_raw;
-                    channel.baseline_mode_raw = fan->mode_raw;
-                    channel.baseline_captured = true;
-                    channel.last_issued_pct = fan->duty_percent;
-                    channel.last_setpoint_pct = fan->duty_percent;
-                    AppendRuntimeEvent(
-                        context.runtime_home,
-                        RuntimeLogEvent{
-                            .mode = "control-loop",
-                            .event_type = "control_loop.baseline_captured",
-                            .detail = "captured baseline for control channel",
-                            .channel = channel.config.channel,
-                            .tick_count = tick_count,
-                            .success = true,
-                        });
-                }
-            }
+            CaptureChannelBaselineIfAvailable(
+                context, channel, runtime_snapshot, tick_count);
 
             if (channel.write_active &&
                 channel_timing.effective_hold_ms > 0u &&
@@ -626,33 +674,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
 
             const ChannelEvaluation evaluation = EvaluateChannel(
                 channel, context.loop, temp_inputs, runtime_snapshot, now_steady);
-            if (evaluation.sensor_event ==
-                ChannelSensorEvent::FailureDetected) {
-                AppendRuntimeEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type = "control_loop.sensor_failure_detected",
-                        .detail = "sensor failure detected, entering safe mode (100% duty)",
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .success = false,
-                    });
-            } else if (evaluation.sensor_event ==
-                       ChannelSensorEvent::Recovered) {
-                AppendRuntimeEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type = "control_loop.sensor_recovered",
-                        .detail = "sensor recovered, resuming normal control",
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .observed_temp_c =
-                            evaluation.sensor_event_observed_temp_c,
-                        .success = true,
-                    });
-            }
+            AppendChannelSensorEvent(context, channel, evaluation, tick_count);
             if (!evaluation.has_setpoint) {
                 continue;
             }

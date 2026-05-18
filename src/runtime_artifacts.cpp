@@ -123,6 +123,7 @@ std::filesystem::path ResolveRuntimeLogManifestPath(
 RuntimeCsvLogger::RuntimeCsvLogger(std::filesystem::path runtime_home,
                                    std::uint32_t rotate_hours,
                                    std::uint32_t retain_days,
+                                   std::uint32_t csv_flush_interval_rows,
                                    RuntimeArtifactNaming naming)
     : runtime_home_(std::move(runtime_home)),
       logs_dir_(ResolveRuntimeLogsDir(runtime_home_)),
@@ -131,6 +132,9 @@ RuntimeCsvLogger::RuntimeCsvLogger(std::filesystem::path runtime_home,
       manifest_path_(ResolveRuntimeLogManifestPath(runtime_home_, naming)),
       rotate_hours_(rotate_hours),
       retain_days_(retain_days),
+      csv_flush_interval_rows_(csv_flush_interval_rows == 0u
+                                    ? 1u
+                                    : csv_flush_interval_rows),
       naming_(std::move(naming)) {}
 
 RuntimeCsvLogger::~RuntimeCsvLogger() {
@@ -165,6 +169,7 @@ bool RuntimeCsvLogger::OpenNewChunk() {
     active_manifest_path_ = active_archive_path_;
     active_manifest_path_.replace_extension(".manifest.json");
     row_count_ = 0u;
+    rows_since_flush_ = 0u;
 
     archive_stream_.open(active_archive_path_,
                          std::ios::binary | std::ios::trunc);
@@ -198,13 +203,36 @@ void RuntimeCsvLogger::WritePrologue() {
         *stream << "# mode=" << mode_ << '\n';
         *stream << "# session_start=" << opened_iso << '\n';
         *stream << header_line_ << '\n';
-        stream->flush();
     }
+    FlushStreams();
+}
+
+bool RuntimeCsvLogger::FlushStreams() {
+    if (!archive_stream_.is_open() && !mirror_stream_.is_open()) {
+        return false;
+    }
+
+    if (archive_stream_.is_open()) {
+        archive_stream_.flush();
+    }
+    if (mirror_stream_.is_open()) {
+        mirror_stream_.flush();
+    }
+    const bool ok =
+        (!archive_stream_.is_open() || archive_stream_.good()) &&
+        (!mirror_stream_.is_open() || mirror_stream_.good());
+    if (ok) {
+        rows_since_flush_ = 0u;
+    }
+    return ok;
 }
 
 void RuntimeCsvLogger::WriteManifest(std::string_view status) {
     if (active_archive_path_.empty() || active_manifest_path_.empty()) {
         return;
+    }
+    if (status == "running" && rows_since_flush_ > 0u && is_open()) {
+        FlushStreams();
     }
 
     const std::filesystem::path event_log_path =
@@ -272,8 +300,12 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
          }},
         {"writer",
          {
-             {"csv_flush_policy", "per_row"},
-             {"mirror_mode", "write_through"},
+             {"csv_flush_policy",
+              csv_flush_interval_rows_ == 1u ? "per_row" : "row_interval"},
+             {"csv_flush_interval_rows", csv_flush_interval_rows_},
+             {"mirror_mode",
+              csv_flush_interval_rows_ == 1u ? "write_through"
+                                              : "buffered_same_interval"},
          }},
     };
 
@@ -284,11 +316,8 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
 void RuntimeCsvLogger::CloseActiveChunk(std::string_view status) {
     const bool had_open_stream =
         archive_stream_.is_open() || mirror_stream_.is_open();
-    if (archive_stream_.is_open()) {
-        archive_stream_.flush();
-    }
-    if (mirror_stream_.is_open()) {
-        mirror_stream_.flush();
+    if (had_open_stream) {
+        FlushStreams();
     }
     if (had_open_stream) {
         WriteManifest(status);
@@ -369,12 +398,14 @@ bool RuntimeCsvLogger::WriteRow(std::string_view row) {
 
     archive_stream_ << row << '\n';
     mirror_stream_ << row << '\n';
-    archive_stream_.flush();
-    mirror_stream_.flush();
     if (!archive_stream_.good() || !mirror_stream_.good()) {
         return false;
     }
     ++row_count_;
+    ++rows_since_flush_;
+    if (rows_since_flush_ >= csv_flush_interval_rows_ && !FlushStreams()) {
+        return false;
+    }
     if ((row_count_ % kRuntimeManifestUpdateIntervalRows) == 0u) {
         WriteManifest("running");
     }

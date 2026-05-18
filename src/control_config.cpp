@@ -171,6 +171,8 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
         root.value("log_rotate_hours", config.log_rotate_hours);
     config.log_retain_days =
         root.value("log_retain_days", config.log_retain_days);
+    config.csv_flush_interval_rows =
+        root.value("csv_flush_interval_rows", config.csv_flush_interval_rows);
     config.evidence_gpu_sample_mode = root.value(
         "evidence_gpu_sample_mode", config.evidence_gpu_sample_mode);
     config.baseline_freshness_ceiling_ms = root.value(
@@ -209,6 +211,11 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
         hold_ms != root.end()) {
         config.write_hold_ms = hold_ms->get<std::uint32_t>();
         config.write_hold_ms_set = true;
+    }
+
+    if (config.csv_flush_interval_rows == 0u) {
+        throw std::runtime_error(
+            "csv_flush_interval_rows must be greater than zero");
     }
 
     return config;

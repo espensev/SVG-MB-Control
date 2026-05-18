@@ -71,6 +71,7 @@ class RuntimeCsvLogger {
     RuntimeCsvLogger(std::filesystem::path runtime_home,
                      std::uint32_t rotate_hours,
                      std::uint32_t retain_days,
+                     std::uint32_t csv_flush_interval_rows = 1u,
                      RuntimeArtifactNaming naming = RuntimeArtifactNaming{});
     ~RuntimeCsvLogger();
 
@@ -92,6 +93,7 @@ class RuntimeCsvLogger {
   private:
     bool OpenNewChunk();
     void WritePrologue();
+    bool FlushStreams();
     void WriteManifest(std::string_view status);
     void CloseActiveChunk(std::string_view status);
     void PruneOldArchives();
@@ -105,6 +107,8 @@ class RuntimeCsvLogger {
     std::filesystem::path manifest_path_;
     std::uint32_t rotate_hours_ = 0u;
     std::uint32_t retain_days_ = 0u;
+    std::uint32_t csv_flush_interval_rows_ = 1u;
+    std::uint32_t rows_since_flush_ = 0u;
     std::uint64_t row_count_ = 0u;
     std::chrono::system_clock::time_point opened_at_{};
     std::string mode_;

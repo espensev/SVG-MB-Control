@@ -19,6 +19,7 @@ struct ControlConfig {
     std::uint32_t staleness_threshold_ms = 0u;
     std::uint32_t log_rotate_hours = 4u;
     std::uint32_t log_retain_days = 7u;
+    std::uint32_t csv_flush_interval_rows = 1u;
     std::string evidence_gpu_sample_mode = "full";
 
     // Write-once fields.

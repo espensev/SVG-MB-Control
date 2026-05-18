@@ -139,7 +139,8 @@ int ReadLoop::RunUntilStopped() {
     RuntimeCsvLogger csv_logger(
         impl_->runtime_home,
         impl_->config.log_rotate_hours,
-        impl_->config.log_retain_days);
+        impl_->config.log_retain_days,
+        impl_->config.csv_flush_interval_rows);
     if (csv_logger.Open("read-loop", BuildReadLoopCsvHeader())) {
         status.log_csv_path = csv_logger.active_archive_path().string();
         status.log_manifest_path = csv_logger.manifest_path().string();
