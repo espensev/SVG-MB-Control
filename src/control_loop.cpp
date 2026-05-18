@@ -944,7 +944,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         }
 
         // Rate-limit status file writes to reduce disk I/O. CSV remains per tick.
-        // Write every 10 ticks (500 ms with the shipped 50 ms cadence).
+        // Write every kStatusUpdateIntervalTicks ticks (= 10 x poll_tick_ms;
+        // 2.5 s at the shipped 250 ms cadence).
         constexpr std::uint32_t kStatusUpdateIntervalTicks = 10u;
         const bool should_write_status = (tick_count % kStatusUpdateIntervalTicks) == 0u;
 
