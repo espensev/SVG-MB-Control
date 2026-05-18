@@ -15,6 +15,7 @@
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
+#include "service_probe.h"
 #include "write_orchestrator.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -461,6 +462,7 @@ int wmain(int argc, wchar_t** argv) {
         bool start_requested = false;
         bool status_requested = false;
         bool health_requested = false;
+        bool service_probe_requested = false;
         bool json_output_requested = false;
         bool stop_requested = false;
         bool restart_requested = false;
@@ -504,6 +506,8 @@ int wmain(int argc, wchar_t** argv) {
                 status_requested = true;
             } else if (arg == L"--health") {
                 health_requested = true;
+            } else if (arg == L"--service-probe") {
+                service_probe_requested = true;
             } else if (arg == L"--json") {
                 json_output_requested = true;
             } else if (arg == L"--stop") {
@@ -642,8 +646,17 @@ int wmain(int argc, wchar_t** argv) {
                 ? status_config.staleness_threshold_ms
                 : 10000u;
 
-        if (json_output_requested && !status_requested && !health_requested) {
-            throw std::runtime_error("--json requires --status or --health.");
+        if (json_output_requested && !status_requested && !health_requested &&
+            !service_probe_requested) {
+            throw std::runtime_error(
+                "--json requires --status, --health, or --service-probe.");
+        }
+
+        if (service_probe_requested) {
+            return svg_mb_control::RunServiceProbe(
+                command_runtime_home,
+                config.has_value() ? &*config : nullptr,
+                json_output_requested);
         }
 
         if (health_requested || (status_requested && json_output_requested)) {
