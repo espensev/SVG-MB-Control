@@ -61,6 +61,38 @@ long GetLongEnvOrDefault(const char* name, long fallback) {
     }
 }
 
+struct SimRuntimeOverrides {
+    bool has_write_allowed = false;
+    bool write_allowed = true;
+    bool has_policy_blocked = false;
+    bool policy_blocked = false;
+    bool has_effective_write_allowed = false;
+    bool effective_write_allowed = true;
+    bool has_policy_writes_enabled = false;
+    bool policy_writes_enabled = false;
+    long snapshot_offset_ms = 0;
+};
+
+const SimRuntimeOverrides& CachedSimRuntimeOverrides() {
+    static const SimRuntimeOverrides overrides = [] {
+        SimRuntimeOverrides value;
+        value.has_write_allowed = TryParseBoolEnv(
+            "SVG_MB_CONTROL_SIM_WRITE_ALLOWED", &value.write_allowed);
+        value.has_policy_blocked = TryParseBoolEnv(
+            "SVG_MB_CONTROL_SIM_POLICY_BLOCKED", &value.policy_blocked);
+        value.has_effective_write_allowed = TryParseBoolEnv(
+            "SVG_MB_CONTROL_SIM_EFFECTIVE_WRITE_ALLOWED",
+            &value.effective_write_allowed);
+        value.has_policy_writes_enabled = TryParseBoolEnv(
+            "SVG_MB_CONTROL_SIM_POLICY_WRITES_ENABLED",
+            &value.policy_writes_enabled);
+        value.snapshot_offset_ms = GetLongEnvOrDefault(
+            "SVG_MB_CONTROL_SIM_SNAPSHOT_OFFSET_MS", 0);
+        return value;
+    }();
+    return overrides;
+}
+
 void MergeAmdTelemetry(RuntimeSnapshot& snapshot,
                        const AmdSnapshot& amd_snapshot) {
     if (!amd_snapshot.available || amd_snapshot.samples.empty()) {
@@ -90,16 +122,7 @@ void MergeFanTelemetry(RuntimeSnapshot& snapshot,
     if (!scan_result) {
         return;
     }
-    bool sim_write_allowed = true;
-    const bool has_sim_write_allowed = TryParseBoolEnv(
-        "SVG_MB_CONTROL_SIM_WRITE_ALLOWED", &sim_write_allowed);
-    bool sim_policy_blocked = false;
-    const bool has_sim_policy_blocked = TryParseBoolEnv(
-        "SVG_MB_CONTROL_SIM_POLICY_BLOCKED", &sim_policy_blocked);
-    bool sim_effective_write_allowed = true;
-    const bool has_sim_effective_write_allowed = TryParseBoolEnv(
-        "SVG_MB_CONTROL_SIM_EFFECTIVE_WRITE_ALLOWED",
-        &sim_effective_write_allowed);
+    const SimRuntimeOverrides& sim = CachedSimRuntimeOverrides();
 
     for (const auto& fan_state : scan_result.fans) {
         RuntimeFanSnapshot& fan =
@@ -114,13 +137,13 @@ void MergeFanTelemetry(RuntimeSnapshot& snapshot,
         fan.duty_percent = fan_state.duty_percent;
         fan.tach_valid = fan_state.tach_valid;
         fan.manual_override = fan_state.manual_override;
-        fan.write_allowed = has_sim_write_allowed ? sim_write_allowed : true;
-        fan.policy_blocked = has_sim_policy_blocked
-            ? sim_policy_blocked
+        fan.write_allowed = sim.has_write_allowed ? sim.write_allowed : true;
+        fan.policy_blocked = sim.has_policy_blocked
+            ? sim.policy_blocked
             : RuntimeWritePolicyBlocksChannel(runtime_policy,
                                               fan_state.channel);
-        fan.effective_write_allowed = has_sim_effective_write_allowed
-            ? sim_effective_write_allowed
+        fan.effective_write_allowed = sim.has_effective_write_allowed
+            ? sim.effective_write_allowed
             : (fan.write_allowed && runtime_policy.writes_enabled &&
                !fan.policy_blocked);
     }
@@ -134,18 +157,15 @@ RuntimeSnapshot SampleDirectRuntimeSnapshot(
     FanWriter& fan_writer,
     const RuntimeWritePolicy& runtime_policy) {
     RuntimeSnapshot snapshot;
-    const auto snapshot_offset_ms = GetLongEnvOrDefault(
-        "SVG_MB_CONTROL_SIM_SNAPSHOT_OFFSET_MS", 0);
+    const SimRuntimeOverrides& sim = CachedSimRuntimeOverrides();
     snapshot.snapshot_time_iso = FormatLocalIso8601(
         std::chrono::system_clock::now() -
-        std::chrono::milliseconds(snapshot_offset_ms));
+        std::chrono::milliseconds(sim.snapshot_offset_ms));
     snapshot.policy_writes_enabled_present = runtime_policy.present;
     snapshot.policy_writes_enabled = runtime_policy.writes_enabled;
-    bool sim_policy_writes_enabled = false;
-    if (TryParseBoolEnv("SVG_MB_CONTROL_SIM_POLICY_WRITES_ENABLED",
-                        &sim_policy_writes_enabled)) {
+    if (sim.has_policy_writes_enabled) {
         snapshot.policy_writes_enabled_present = true;
-        snapshot.policy_writes_enabled = sim_policy_writes_enabled;
+        snapshot.policy_writes_enabled = sim.policy_writes_enabled;
     }
 
     MergeAmdTelemetry(snapshot, amd_reader.Sample());

@@ -6,8 +6,10 @@
 #include <cmath>
 #include <ctime>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 
 #ifndef SVG_MB_CONTROL_VERSION
@@ -49,6 +51,47 @@ std::uint64_t CountNonEmptyLines(const std::filesystem::path& path) {
         }
     }
     return count;
+}
+
+std::string EventCountKey(const std::filesystem::path& path) {
+    return path.lexically_normal().string();
+}
+
+struct EventCountCache {
+    std::mutex mutex;
+    std::unordered_map<std::string, std::uint64_t> counts;
+};
+
+EventCountCache& RuntimeEventCountCache() {
+    static EventCountCache cache;
+    return cache;
+}
+
+std::uint64_t CachedEventCount(const std::filesystem::path& path,
+                               bool refresh_from_disk) {
+    EventCountCache& cache = RuntimeEventCountCache();
+    const std::string key = EventCountKey(path);
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    const auto existing = cache.counts.find(key);
+    if (!refresh_from_disk && existing != cache.counts.end()) {
+        return existing->second;
+    }
+
+    const std::uint64_t count = CountNonEmptyLines(path);
+    cache.counts[key] = count;
+    return count;
+}
+
+void NoteEventAppended(const std::filesystem::path& path) {
+    EventCountCache& cache = RuntimeEventCountCache();
+    const std::string key = EventCountKey(path);
+    std::lock_guard<std::mutex> lock(cache.mutex);
+    auto existing = cache.counts.find(key);
+    if (existing == cache.counts.end()) {
+        cache.counts.emplace(key, CountNonEmptyLines(path));
+        return;
+    }
+    ++existing->second;
 }
 
 void PutOptionalDouble(nlohmann::json& payload,
@@ -237,8 +280,9 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
 
     const std::filesystem::path event_log_path =
         ResolveRuntimeEventLogPath(runtime_home_, naming_);
-    const std::uint64_t event_count = CountNonEmptyLines(event_log_path);
     const bool terminal_status = status != "running";
+    const std::uint64_t event_count =
+        CachedEventCount(event_log_path, terminal_status);
     const std::string now_iso =
         FormatRuntimeLocalIso8601(std::chrono::system_clock::now());
 
@@ -522,7 +566,11 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
     }
     stream << payload.dump() << '\n';
     stream.flush();
-    return stream.good();
+    if (!stream.good()) {
+        return false;
+    }
+    NoteEventAppended(path);
+    return true;
 }
 
 }  // namespace svg_mb_control

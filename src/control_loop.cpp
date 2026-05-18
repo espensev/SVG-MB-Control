@@ -23,6 +23,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace svg_mb_control {
@@ -385,6 +386,290 @@ void AppendChannelSensorEvent(const ControlRuntimeContext& context,
     }
 }
 
+bool HandleExpiredHoldRestore(
+    ControlRuntimeContext& context,
+    ChannelState& channel,
+    const ChannelTimingConfig& channel_timing,
+    FanWriter& fan_writer,
+    PendingWritesStore& pending_store,
+    std::chrono::steady_clock::time_point now_steady,
+    std::uint64_t tick_count,
+    std::string& last_successful_restore_iso,
+    bool& fatal_restore_timeout,
+    std::uint32_t& fatal_restore_channel) {
+    if (!channel.write_active ||
+        channel_timing.effective_hold_ms == 0u ||
+        now_steady < channel.hold_deadline ||
+        !channel.baseline_captured) {
+        return true;
+    }
+
+    const FanWriteResult restore_result =
+        fan_writer.RestoreSavedState(channel.config.channel,
+                                     channel.baseline_duty_raw,
+                                     channel.baseline_mode_raw,
+                                     context.base.restore_timeout_ms);
+    if (restore_result) {
+        last_successful_restore_iso =
+            FormatLocalIso8601(std::chrono::system_clock::now());
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.restore_applied",
+                .detail = "restored channel to captured baseline",
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .success = true,
+            });
+        channel.write_active = false;
+        channel.last_issued_pct = std::numeric_limits<double>::quiet_NaN();
+        try {
+            pending_store.QueueRemove(channel.config.channel);
+        } catch (const std::exception& e) {
+            AppendRuntimeEvent(
+                context.runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.sidecar_remove_warning",
+                    .detail = std::string(
+                                  "best-effort sidecar removal after "
+                                  "restore failed: ") +
+                              e.what(),
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .success = false,
+                });
+        }
+        return true;
+    }
+
+    AppendRuntimeEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.restore_failed",
+            .detail = restore_result.detail,
+            .channel = channel.config.channel,
+            .tick_count = tick_count,
+            .success = false,
+        });
+    if (restore_result.error == FanWriteError::kTimedOut) {
+        fatal_restore_timeout = true;
+        fatal_restore_channel = channel.config.channel;
+        return false;
+    }
+    return true;
+}
+
+std::string ResolveWriteReason(bool first_write, bool authority_reassert) {
+    if (first_write) {
+        return "first_write";
+    }
+    return authority_reassert ? "authority_reassert" : "setpoint_delta";
+}
+
+bool RuntimeFanAllowsWrite(const RuntimeSnapshot& runtime_snapshot,
+                           std::uint32_t channel_id) {
+    const RuntimeFanSnapshot* fan =
+        FindRuntimeFanChannel(runtime_snapshot, channel_id);
+    return fan == nullptr || fan->effective_write_allowed;
+}
+
+void TryApplyChannelSetpoint(
+    ControlRuntimeContext& context,
+    ChannelState& channel,
+    const RuntimeSnapshot& runtime_snapshot,
+    const ChannelEvaluation& evaluation,
+    FanWriter& fan_writer,
+    PendingWritesStore& pending_store,
+    std::string_view eval_iso,
+    std::chrono::steady_clock::time_point now_steady,
+    std::uint64_t tick_count) {
+    if (!evaluation.has_setpoint) {
+        return;
+    }
+
+    const double observed_temp_c = evaluation.observed_temp_c;
+    const double setpoint = evaluation.setpoint_pct;
+    const bool first_write = std::isnan(channel.last_issued_pct);
+    const std::string write_reason =
+        ResolveWriteReason(first_write, evaluation.authority_reassert);
+
+    if (!std::isnan(channel.last_issued_pct)) {
+        const double delta = std::abs(setpoint - channel.last_issued_pct);
+        if (!evaluation.authority_reassert &&
+            delta < evaluation.timing.effective_deadband_pct) {
+            return;
+        }
+    }
+
+    if (!first_write &&
+        evaluation.timing.elapsed_since_last_write_ms <
+            WriteCooldownForAuthorityReassert(
+                evaluation.timing, evaluation.authority_reassert)) {
+        return;
+    }
+
+    if (!channel.baseline_captured) {
+        return;
+    }
+    if (!RuntimeFanAllowsWrite(runtime_snapshot, channel.config.channel)) {
+        return;
+    }
+    if (channel.circuit_breaker_open) {
+        return;
+    }
+
+    PendingWriteEntry entry;
+    entry.channel = channel.config.channel;
+    entry.baseline_duty_raw = channel.baseline_duty_raw;
+    entry.baseline_mode_raw = channel.baseline_mode_raw;
+    entry.target_pct = setpoint;
+    entry.requested_hold_ms = evaluation.timing.effective_hold_ms;
+    entry.started_iso = std::string(eval_iso);
+    entry.child_pid = 0u;
+    try {
+        pending_store.Upsert(entry);
+    } catch (const std::exception& e) {
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.sidecar_upsert_failed",
+                .detail = std::string(
+                              "failed to write sidecar entry before "
+                              "fan write: ") +
+                          e.what(),
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .success = false,
+            });
+        return;
+    }
+
+    const FanWriteResult write_result =
+        fan_writer.ApplyDuty(channel.config.channel, setpoint);
+    if (!write_result) {
+        channel.last_write_reason = "write_failed";
+        ++channel.consecutive_write_failures;
+        if (channel.consecutive_write_failures >=
+            ChannelState::kMaxConsecutiveFailures) {
+            if (!channel.circuit_breaker_open) {
+                channel.circuit_breaker_open = true;
+                AppendRuntimeEvent(
+                    context.runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type =
+                            "control_loop.circuit_breaker_opened",
+                        .detail =
+                            "circuit breaker opened after repeated write "
+                            "failures",
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .observed_temp_c = observed_temp_c,
+                        .setpoint_pct = setpoint,
+                        .success = false,
+                    });
+            }
+        }
+
+        if (write_result.error == FanWriteError::kPolicyRefused) {
+            try {
+                pending_store.QueueRemove(channel.config.channel);
+            } catch (const std::exception& e) {
+                AppendRuntimeEvent(
+                    context.runtime_home,
+                    RuntimeLogEvent{
+                        .mode = "control-loop",
+                        .event_type =
+                            "control_loop.sidecar_remove_warning",
+                        .detail = std::string(
+                                      "best-effort sidecar removal after "
+                                      "policy refusal failed: ") +
+                                  e.what(),
+                        .channel = channel.config.channel,
+                        .tick_count = tick_count,
+                        .success = false,
+                    });
+            }
+        }
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.write_failed",
+                .detail = write_result.detail,
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .observed_temp_c = observed_temp_c,
+                .setpoint_pct = setpoint,
+                .success = false,
+            });
+        return;
+    }
+
+    if (channel.consecutive_write_failures > 0 ||
+        channel.circuit_breaker_open) {
+        if (channel.circuit_breaker_open) {
+            AppendRuntimeEvent(
+                context.runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type = "control_loop.circuit_breaker_closed",
+                    .detail =
+                        "circuit breaker closed after successful write",
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .observed_temp_c = observed_temp_c,
+                    .setpoint_pct = setpoint,
+                    .success = true,
+                });
+        }
+        channel.consecutive_write_failures = 0u;
+        channel.circuit_breaker_open = false;
+    }
+    if (evaluation.authority_reassert) {
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.authority_reasserted",
+                .detail = evaluation.authority_detail,
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .observed_temp_c = observed_temp_c,
+                .setpoint_pct = setpoint,
+                .success = true,
+            });
+    }
+    channel.write_active = true;
+    channel.hold_deadline =
+        evaluation.timing.effective_hold_ms == 0u
+            ? std::chrono::steady_clock::time_point::max()
+            : now_steady + std::chrono::milliseconds(
+                  evaluation.timing.effective_hold_ms);
+    channel.last_issued_pct = setpoint;
+    channel.last_write_time = now_steady;
+    ++channel.total_writes;
+    channel.last_write_reason = write_reason;
+    AppendRuntimeEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.write_applied",
+            .detail = "applied control-loop setpoint source=" +
+                      evaluation.response_source +
+                      " write_reason=" + write_reason,
+            .channel = channel.config.channel,
+            .tick_count = tick_count,
+            .observed_temp_c = observed_temp_c,
+            .setpoint_pct = setpoint,
+            .success = true,
+        });
+}
+
 }  // namespace
 
 // ------------------------ ControlLoop Impl -----------------------------
@@ -613,253 +898,31 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             CaptureChannelBaselineIfAvailable(
                 context, channel, runtime_snapshot, tick_count);
 
-            if (channel.write_active &&
-                channel_timing.effective_hold_ms > 0u &&
-                now_steady >= channel.hold_deadline &&
-                channel.baseline_captured) {
-                const FanWriteResult restore_result =
-                    fan_writer->RestoreSavedState(channel.config.channel,
-                                                  channel.baseline_duty_raw,
-                                                  channel.baseline_mode_raw,
-                                                  context.base.restore_timeout_ms);
-                if (restore_result) {
-                    last_successful_restore_iso =
-                        FormatLocalIso8601(std::chrono::system_clock::now());
-                    AppendRuntimeEvent(
-                        context.runtime_home,
-                        RuntimeLogEvent{
-                            .mode = "control-loop",
-                            .event_type = "control_loop.restore_applied",
-                            .detail = "restored channel to captured baseline",
-                            .channel = channel.config.channel,
-                            .tick_count = tick_count,
-                            .success = true,
-                        });
-                    channel.write_active = false;
-                    channel.last_issued_pct =
-                        std::numeric_limits<double>::quiet_NaN();
-                    try {
-                        pending_store.QueueRemove(channel.config.channel);
-                    } catch (const std::exception& e) {
-                        // Best-effort; log but don't fail
-                        AppendRuntimeEvent(
-                            context.runtime_home,
-                            RuntimeLogEvent{
-                                .mode = "control-loop",
-                                .event_type = "control_loop.sidecar_remove_warning",
-                                .detail = std::string("best-effort sidecar removal after restore failed: ") + e.what(),
-                                .channel = channel.config.channel,
-                                .tick_count = tick_count,
-                                .success = false,
-                            });
-                    }
-                } else {
-                    AppendRuntimeEvent(
-                        context.runtime_home,
-                        RuntimeLogEvent{
-                            .mode = "control-loop",
-                            .event_type = "control_loop.restore_failed",
-                            .detail = restore_result.detail,
-                            .channel = channel.config.channel,
-                            .tick_count = tick_count,
-                            .success = false,
-                        });
-                    if (restore_result.error == FanWriteError::kTimedOut) {
-                        fatal_restore_timeout = true;
-                        fatal_restore_channel = channel.config.channel;
-                        break;
-                    }
-                }
+            if (!HandleExpiredHoldRestore(context,
+                                          channel,
+                                          channel_timing,
+                                          *fan_writer,
+                                          pending_store,
+                                          now_steady,
+                                          tick_count,
+                                          last_successful_restore_iso,
+                                          fatal_restore_timeout,
+                                          fatal_restore_channel)) {
+                break;
             }
 
             const ChannelEvaluation evaluation = EvaluateChannel(
                 channel, context.loop, temp_inputs, runtime_snapshot, now_steady);
             AppendChannelSensorEvent(context, channel, evaluation, tick_count);
-            if (!evaluation.has_setpoint) {
-                continue;
-            }
-
-            const double observed_temp_c = evaluation.observed_temp_c;
-            const double setpoint = evaluation.setpoint_pct;
-            const bool first_write = std::isnan(channel.last_issued_pct);
-            const std::string write_reason =
-                first_write ? std::string("first_write")
-                            : (evaluation.authority_reassert
-                                   ? std::string("authority_reassert")
-                                   : std::string("setpoint_delta"));
-
-            if (!std::isnan(channel.last_issued_pct)) {
-                const double delta = std::abs(setpoint - channel.last_issued_pct);
-                if (!evaluation.authority_reassert &&
-                    delta < evaluation.timing.effective_deadband_pct) {
-                    continue;
-                }
-            }
-
-            if (first_write) {
-                // First write for this channel — allow immediately.
-            } else if (evaluation.timing.elapsed_since_last_write_ms <
-                       WriteCooldownForAuthorityReassert(
-                           evaluation.timing,
-                           evaluation.authority_reassert)) {
-                continue;
-            }
-
-            // Ensure we have a baseline before recording the sidecar.
-            if (!channel.baseline_captured) {
-                continue;  // skip until snapshot provides baseline
-            }
-
-            if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-                    runtime_snapshot, channel.config.channel)) {
-                if (!fan->effective_write_allowed) {
-                    continue;
-                }
-            }
-
-            // Skip write if circuit breaker is open
-            if (channel.circuit_breaker_open) {
-                continue;
-            }
-
-            // Record sidecar entry.
-            PendingWriteEntry entry;
-            entry.channel = channel.config.channel;
-            entry.baseline_duty_raw = channel.baseline_duty_raw;
-            entry.baseline_mode_raw = channel.baseline_mode_raw;
-            entry.target_pct = setpoint;
-            entry.requested_hold_ms = evaluation.timing.effective_hold_ms;
-            entry.started_iso = eval_iso;
-            entry.child_pid = 0u;
-            try {
-                pending_store.Upsert(entry);
-            } catch (const std::exception& e) {
-                AppendRuntimeEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type = "control_loop.sidecar_upsert_failed",
-                        .detail = std::string("failed to write sidecar entry before fan write: ") + e.what(),
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .success = false,
-                    });
-                continue;
-            }
-
-            const FanWriteResult write_result =
-                fan_writer->ApplyDuty(channel.config.channel, setpoint);
-            if (!write_result) {
-                channel.last_write_reason = "write_failed";
-                // Circuit breaker: track consecutive failures
-                ++channel.consecutive_write_failures;
-                if (channel.consecutive_write_failures >= ChannelState::kMaxConsecutiveFailures) {
-                    if (!channel.circuit_breaker_open) {
-                        channel.circuit_breaker_open = true;
-                        AppendRuntimeEvent(
-                            context.runtime_home,
-                            RuntimeLogEvent{
-                                .mode = "control-loop",
-                                .event_type = "control_loop.circuit_breaker_opened",
-                                .detail = "circuit breaker opened after repeated write failures",
-                                .channel = channel.config.channel,
-                                .tick_count = tick_count,
-                                .observed_temp_c = observed_temp_c,
-                                .setpoint_pct = setpoint,
-                                .success = false,
-                            });
-                    }
-                }
-
-                if (write_result.error == FanWriteError::kPolicyRefused) {
-                    try {
-                        pending_store.QueueRemove(channel.config.channel);
-                    } catch (const std::exception& e) {
-                        // Best-effort; log but continue
-                        AppendRuntimeEvent(
-                            context.runtime_home,
-                            RuntimeLogEvent{
-                                .mode = "control-loop",
-                                .event_type = "control_loop.sidecar_remove_warning",
-                                .detail = std::string("best-effort sidecar removal after policy refusal failed: ") + e.what(),
-                                .channel = channel.config.channel,
-                                .tick_count = tick_count,
-                                .success = false,
-                            });
-                    }
-                }
-                AppendRuntimeEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type = "control_loop.write_failed",
-                        .detail = write_result.detail,
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .observed_temp_c = observed_temp_c,
-                        .setpoint_pct = setpoint,
-                        .success = false,
-                    });
-                continue;
-            }
-
-            // Success: reset circuit breaker
-            if (channel.consecutive_write_failures > 0 || channel.circuit_breaker_open) {
-                if (channel.circuit_breaker_open) {
-                    AppendRuntimeEvent(
-                        context.runtime_home,
-                        RuntimeLogEvent{
-                            .mode = "control-loop",
-                            .event_type = "control_loop.circuit_breaker_closed",
-                            .detail = "circuit breaker closed after successful write",
-                            .channel = channel.config.channel,
-                            .tick_count = tick_count,
-                            .observed_temp_c = observed_temp_c,
-                            .setpoint_pct = setpoint,
-                            .success = true,
-                        });
-                }
-                channel.consecutive_write_failures = 0u;
-                channel.circuit_breaker_open = false;
-            }
-            if (evaluation.authority_reassert) {
-                AppendRuntimeEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type = "control_loop.authority_reasserted",
-                        .detail = evaluation.authority_detail,
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .observed_temp_c = observed_temp_c,
-                        .setpoint_pct = setpoint,
-                        .success = true,
-                    });
-            }
-            channel.write_active = true;
-            channel.hold_deadline =
-                evaluation.timing.effective_hold_ms == 0u
-                    ? std::chrono::steady_clock::time_point::max()
-                    : now_steady + std::chrono::milliseconds(
-                          evaluation.timing.effective_hold_ms);
-            channel.last_issued_pct = setpoint;
-            channel.last_write_time = now_steady;
-            ++channel.total_writes;
-            channel.last_write_reason = write_reason;
-            AppendRuntimeEvent(
-                context.runtime_home,
-                RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type = "control_loop.write_applied",
-                    .detail = "applied control-loop setpoint source=" +
-                              evaluation.response_source +
-                              " write_reason=" + write_reason,
-                    .channel = channel.config.channel,
-                    .tick_count = tick_count,
-                    .observed_temp_c = observed_temp_c,
-                    .setpoint_pct = setpoint,
-                    .success = true,
-                });
+            TryApplyChannelSetpoint(context,
+                                    channel,
+                                    runtime_snapshot,
+                                    evaluation,
+                                    *fan_writer,
+                                    pending_store,
+                                    eval_iso,
+                                    now_steady,
+                                    tick_count);
         }
 
         // Flush any queued pending-write removals once per tick. Upserts
