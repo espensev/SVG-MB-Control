@@ -123,6 +123,7 @@ add_executable(svg_mb_control
     src/pending_writes.cpp
     src/read_loop.cpp
     src/runtime_artifacts.cpp
+    src/runtime_health.cpp
     src/runtime_logging.cpp
     src/runtime_lifecycle.cpp
     src/runtime_snapshot.cpp

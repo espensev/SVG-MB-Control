@@ -121,6 +121,9 @@ Each controlled-channel entry includes:
 - `last_raw_demand_pct`
 - `last_smoothed_demand_pct`
 - `last_thermal_pressure_boost_pct`
+- `last_cpu_low_soak_boost_pct`
+- `last_response_source`
+- `last_write_reason`
 - `last_observed_temp_c`
 - `sensor_failed`
 - `consecutive_sensor_failures`
@@ -131,6 +134,25 @@ Each controlled-channel entry includes:
 `control_runtime.json` is a status publication. In the current implementation,
 it is rate-limited and should not be treated as a per-tick log. Use the active
 CSV chunk for per-tick analysis.
+
+## Health command
+
+`svg-mb-control --health --json` and `svg-mb-control --status --json` read
+`control_runtime.json`, `stop.request.json`, and `pending_writes.json` and emit a
+schema-versioned health payload. Health states are:
+
+- `healthy`: process is active, status is fresh, and no stop request or degraded
+  channel state is present.
+- `degraded`: process is active but an operator-visible issue exists, such as an
+  open channel breaker or stop request.
+- `stale`: process is active but status freshness is older than the configured
+  staleness threshold, or telemetry is explicitly marked stale.
+- `stopped`: no usable active worker is present.
+- `failed`: status JSON or pending-write recovery state is unreadable, or the
+  runtime has reported a failed terminal status.
+
+Exit codes are `0` for `healthy`, `1` for `degraded`, `2` for restartable
+`stale`/`stopped`, and `3` for `failed`.
 
 ## pending_writes.json
 
