@@ -97,6 +97,7 @@ endif()
 add_executable(svg_mb_control
     src/pch.cpp
     src/amd_reader.cpp
+    src/analyze/analyze_cli.cpp
     src/analyze/analyze_csv.cpp
     src/analyze/analyze_db.cpp
     src/analyze/analyze_ingest.cpp
@@ -116,24 +117,30 @@ add_executable(svg_mb_control
     src/control_supervisor.cpp
     src/csv_util.cpp
     src/direct_runtime_snapshot.cpp
+    src/env_util.cpp
     src/evidence_log.cpp
     src/fan_writer.cpp
     src/gpu_evidence_csv.cpp
     src/gpu_reader.cpp
     src/json_io.cpp
+    src/low_band_evidence.cpp
     src/main.cpp
     src/pending_writes.cpp
     src/read_loop.cpp
-    src/runtime_artifacts.cpp
+    src/runtime_csv_archive.cpp
+    src/runtime_event_log.cpp
+    src/runtime_paths.cpp
     src/runtime_health.cpp
-    src/runtime_logging.cpp
+    src/runtime_csv_rows.cpp
     src/runtime_lifecycle.cpp
     src/runtime_snapshot.cpp
     src/runtime_supervisor_state.cpp
+    src/runtime_util.cpp
     src/runtime_write_policy.cpp
     src/service_probe.cpp
     src/simulated_fan_writer.cpp
     src/sio_fan_writer.cpp
+    src/startup_banner.cpp
     src/write_orchestrator.cpp
     ${SVG_MB_CONTROL_RESOURCE_SOURCES}
 )

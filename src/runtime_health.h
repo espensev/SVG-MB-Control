@@ -64,4 +64,8 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
                        bool json_output,
                        std::uint32_t stale_after_ms = 10000u);
 
+// Prints runtime status read from <runtime_home>/control_runtime.json.
+// Returns a process exit code (currently always 0).
+int PrintRuntimeStatus(const std::filesystem::path& runtime_home);
+
 }  // namespace svg_mb_control

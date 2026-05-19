@@ -1,7 +1,7 @@
 #pragma once
 
 #include "control_runtime_context.h"
-#include "runtime_logging.h"
+#include "runtime_csv_rows.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -25,5 +25,12 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
 
 std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
     const std::vector<ChannelState>& channels);
+
+// Fill-in-place variant for the steady-state control loop: reuses `out`'s
+// vector storage and per-element string capacity across ticks (resize +
+// field assignment) instead of allocating a fresh vector every tick.
+void BuildChannelLogStates(
+    const std::vector<ChannelState>& channels,
+    std::vector<RuntimeControlChannelLogState>& out);
 
 }  // namespace svg_mb_control

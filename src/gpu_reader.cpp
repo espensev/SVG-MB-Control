@@ -4,9 +4,10 @@
 #include "gpu_telemetry/gpu_sensor_reader.h"
 #endif
 
+#include "env_util.h"
+
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 #include <exception>
 #include <string>
 #include <utility>
@@ -14,21 +15,6 @@
 namespace svg_mb_control {
 
 namespace {
-
-std::string GetEnvOrDefault(const char* name, std::string_view fallback) {
-    char* value = nullptr;
-    std::size_t size = 0u;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr ||
-        value[0] == '\0') {
-        if (value != nullptr) {
-            std::free(value);
-        }
-        return std::string(fallback);
-    }
-    std::string result(value);
-    std::free(value);
-    return result;
-}
 
 bool SimGpuEnabled() {
     const std::string mode = GetEnvOrDefault(

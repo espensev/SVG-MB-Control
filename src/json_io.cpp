@@ -1,5 +1,6 @@
 #include "json_io.h"
 
+#include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -45,6 +46,41 @@ void ReplaceFileWithTemp(const std::filesystem::path& temp,
 }
 
 }  // namespace
+
+std::string JsonStringOr(const nlohmann::json& value,
+                         std::string_view key,
+                         std::string_view fallback) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_string()) {
+        return found->get<std::string>();
+    }
+    return std::string(fallback);
+}
+
+std::uint32_t JsonUInt32Or(const nlohmann::json& value,
+                           std::string_view key,
+                           std::uint32_t fallback) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_number_unsigned()) {
+        return found->get<std::uint32_t>();
+    }
+    if (found != value.end() && found->is_number_integer()) {
+        const auto raw = found->get<std::int64_t>();
+        if (raw >= 0 && raw <= static_cast<std::int64_t>(UINT32_MAX)) {
+            return static_cast<std::uint32_t>(raw);
+        }
+    }
+    return fallback;
+}
+
+bool JsonBoolOr(const nlohmann::json& value,
+                std::string_view key,
+                bool fallback) {
+    const auto found = value.find(std::string(key));
+    return found != value.end() && found->is_boolean()
+               ? found->get<bool>()
+               : fallback;
+}
 
 nlohmann::json MakeSchemaObject(std::uint32_t schema_version) {
     nlohmann::json payload = nlohmann::json::object();

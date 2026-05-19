@@ -41,8 +41,8 @@ that location.
 2. Resolve runtime policy, if configured.
 3. Initialize the direct fan backend.
 4. On each poll, sample AMD, GPU, and fan telemetry in-process.
-5. Append the sampled row to the active CSV chunk and mirror it to the fixed
-   live CSV path.
+5. Append the sampled row to the active CSV chunk and refresh the fixed live
+   CSV mirror on the configured flush interval.
 6. Publish `current_state.json` into the runtime home.
 7. Update `control_runtime.json` with poll counters, freshness, status, and the
    active log paths.

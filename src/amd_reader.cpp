@@ -10,6 +10,8 @@
 
 #include <intrin.h>
 
+#include "env_util.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -39,27 +41,21 @@ constexpr std::uint32_t kTctlTdieAddress = 0x00059800u;
 constexpr std::uint32_t kCcdTempZen2Base = 0x00059954u;
 constexpr std::uint32_t kCcdTempZen4Base = 0x00059B08u;
 constexpr std::uint32_t kMaxCcds = 8u;
+
+// Constant per-CCD sensor labels. Indexing this table avoids rebuilding the
+// label string ("CCD" + std::to_string(index+1) + " (Tdie)") on every CCD on
+// every sample tick.
+constexpr const char* kCcdSensorLabels[kMaxCcds] = {
+    "CCD1 (Tdie)", "CCD2 (Tdie)", "CCD3 (Tdie)", "CCD4 (Tdie)",
+    "CCD5 (Tdie)", "CCD6 (Tdie)", "CCD7 (Tdie)", "CCD8 (Tdie)",
+};
+
 constexpr const char kPawnIoDevicePath[] = "\\\\?\\GLOBALROOT\\Device\\PawnIO";
 constexpr std::uint32_t kPawnIoLoadBinary = (41394u << 16) | (0x821u << 2);
 constexpr std::uint32_t kPawnIoExecuteFn = (41394u << 16) | (0x841u << 2);
 constexpr std::size_t kPawnIoFnNameLength = 32u;
 constexpr DWORD kPciMutexTimeoutMs = 100u;
 constexpr DWORD kPciMutexAccess = SYNCHRONIZE | MUTEX_MODIFY_STATE;
-
-std::string GetEnvOrDefault(const char* name, std::string_view fallback) {
-    char* value = nullptr;
-    std::size_t size = 0u;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr ||
-        value[0] == '\0') {
-        if (value != nullptr) {
-            std::free(value);
-        }
-        return std::string(fallback);
-    }
-    std::string result(value);
-    std::free(value);
-    return result;
-}
 
 std::filesystem::path CurrentExecutableDirectory() {
     std::array<char, MAX_PATH> buffer{};
@@ -518,14 +514,16 @@ struct AmdReader::Impl {
         return Status::ok;
     }
 
-    Status ReadSmn(std::uint32_t smn_address, std::uint32_t* out_value) const {
+    // Performs one SMN read. The caller must already hold the
+    // Global\Access_PCI mutex: AmdReader::Sample acquires it once for the
+    // whole Tctl+CCD sequence (see Sample) instead of once per read, so a
+    // steady-state control tick costs one mutex acquire/release rather than
+    // up to nine and yields an interleave-free SMN snapshot. Do not add a
+    // per-call lock here without revisiting Sample's single-lock scope.
+    Status ReadSmnLocked(std::uint32_t smn_address,
+                         std::uint32_t* out_value) const {
         if (!initialized || handle == nullptr || out_value == nullptr) {
             return Status::invalid_arg;
-        }
-
-        PciMutexLock pci_lock(mutex_handle);
-        if (mutex_handle != nullptr && !pci_lock.acquired()) {
-            return Status::error;
         }
 
         const std::int64_t input = static_cast<std::int64_t>(smn_address);
@@ -579,8 +577,16 @@ std::string AmdReader::init_warning() const {
     return impl_ ? impl_->init_warning : std::string();
 }
 
-AmdSnapshot AmdReader::Sample() {
-    AmdSnapshot snapshot;
+const AmdSnapshot& AmdReader::Sample() {
+    // Reset every field before any early-return branch so no value carries
+    // over from the previous Sample() call into the reused buffer. clear()
+    // retains the samples vector and string capacities across ticks.
+    AmdSnapshot& snapshot = sample_buffer_;
+    snapshot.available = false;
+    snapshot.samples.clear();
+    snapshot.cpu_name.clear();
+    snapshot.transport_path.clear();
+    snapshot.last_warning.clear();
     if (impl_ == nullptr) {
         snapshot.last_warning = "not initialized";
         return snapshot;
@@ -620,8 +626,23 @@ AmdSnapshot AmdReader::Sample() {
         return snapshot;
     }
 
+    // Acquire the system-wide PCI mutex once for the whole Tctl + CCD
+    // sequence rather than per SMN read. This drops a steady-state control
+    // tick from up to nine mutex acquire/release pairs to one, cuts the
+    // chance of hitting the per-read timeout mid-sample, and yields an
+    // interleave-free snapshot. pci_lock releases via RAII on every return
+    // path below. The warning string mirrors the previous per-read
+    // Tctl-failure message so the observable failure mode is unchanged.
+    PciMutexLock pci_lock(impl_->mutex_handle);
+    if (impl_->mutex_handle != nullptr && !pci_lock.acquired()) {
+        snapshot.last_warning =
+            std::string("read_tctl_tdie failed: ") +
+            StatusString(Status::error);
+        return snapshot;
+    }
+
     std::uint32_t raw = 0u;
-    Status status = impl_->ReadSmn(kTctlTdieAddress, &raw);
+    Status status = impl_->ReadSmnLocked(kTctlTdieAddress, &raw);
     if (status != Status::ok) {
         snapshot.last_warning =
             std::string("read_tctl_tdie failed: ") + StatusString(status);
@@ -639,7 +660,8 @@ AmdSnapshot AmdReader::Sample() {
         std::uint32_t valid_ccds = 0u;
         for (std::uint32_t index = 0u; index < kMaxCcds; ++index) {
             std::uint32_t ccd_raw = 0u;
-            status = impl_->ReadSmn(impl_->ccd_base + (index * 4u), &ccd_raw);
+            status =
+                impl_->ReadSmnLocked(impl_->ccd_base + (index * 4u), &ccd_raw);
             if (status != Status::ok) {
                 break;
             }
@@ -651,7 +673,7 @@ AmdSnapshot AmdReader::Sample() {
             }
 
             snapshot.samples.push_back(AmdTemperatureSample{
-                .label = "CCD" + std::to_string(index + 1u) + " (Tdie)",
+                .label = kCcdSensorLabels[index],
                 .temperature_c = ccd_temp,
                 .sensor_index = index + 1u,
                 .raw_value = ccd_raw,

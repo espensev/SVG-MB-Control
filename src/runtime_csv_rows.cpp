@@ -1,38 +1,21 @@
-#include "runtime_logging.h"
+#include "runtime_csv_rows.h"
 
 #include "csv_util.h"
 #include "gpu_evidence_csv.h"
 #include "runtime_artifacts.h"
+#include "runtime_util.h"
 
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#include <string>
 
 namespace svg_mb_control {
 
 namespace {
-
-std::optional<std::chrono::system_clock::time_point> ParseLocalIso8601(
-    std::string_view iso_text) {
-    if (iso_text.empty()) {
-        return std::nullopt;
-    }
-
-    std::tm tm_value{};
-    std::istringstream stream{std::string(iso_text)};
-    stream >> std::get_time(&tm_value, "%Y-%m-%dT%H:%M:%S");
-    if (stream.fail()) {
-        return std::nullopt;
-    }
-    tm_value.tm_isdst = -1;
-    const std::time_t tt = std::mktime(&tm_value);
-    if (tt == static_cast<std::time_t>(-1)) {
-        return std::nullopt;
-    }
-    return std::chrono::system_clock::from_time_t(tt);
-}
 
 double FindMaxCpuTemperature(const RuntimeSnapshot& snapshot) {
     double max_temp = std::numeric_limits<double>::quiet_NaN();
@@ -88,24 +71,33 @@ const RuntimeSioTemperatureLogState* FindSioTemperatureState(
     return nullptr;
 }
 
-std::string BuildAmdSensorSummary(const RuntimeSnapshot& snapshot) {
-    std::ostringstream summary;
+// Fills `out` with "label=temp | label=temp | ..." using fixed 3-decimal
+// temperatures. Writes into the caller-provided buffer (cleared first) so a
+// reused buffer's capacity is retained across per-tick calls instead of
+// allocating a fresh std::ostringstream + string every row. The "%.3f"
+// formatting matches the previous std::fixed/precision(3) ostream output for
+// finite values.
+void BuildAmdSensorSummary(const RuntimeSnapshot& snapshot, std::string& out) {
+    out.clear();
     bool first = true;
+    char number[32];
     for (const auto& sensor : snapshot.amd_sensors) {
         if (!first) {
-            summary << " | ";
+            out += " | ";
         }
         first = false;
-        summary << sensor.label << '=';
-        const std::streamsize old_precision = summary.precision();
-        const auto old_flags = summary.flags();
-        summary.setf(std::ios::fixed, std::ios::floatfield);
-        summary.precision(3);
-        summary << sensor.temperature_c;
-        summary.flags(old_flags);
-        summary.precision(old_precision);
+        out += sensor.label;
+        out += '=';
+        const int written = std::snprintf(number, sizeof(number), "%.3f",
+                                           sensor.temperature_c);
+        if (written > 0) {
+            out.append(number,
+                       static_cast<std::size_t>(
+                           written < static_cast<int>(sizeof(number))
+                               ? written
+                               : static_cast<int>(sizeof(number)) - 1));
+        }
     }
-    return summary.str();
 }
 
 std::string BuildCommonCsvHeader() {
@@ -135,9 +127,13 @@ std::string BuildCommonCsvHeader() {
     return header.str();
 }
 
-std::string BuildCommonCsvPrefix(const RuntimeSnapshot& snapshot,
-                                 std::string_view mode) {
-    std::ostringstream csv;
+// Writes the shared leading CSV columns directly into the caller's stream.
+// Previously this built its own std::ostringstream and returned a heap
+// std::string that the row builder then copied in; writing in place removes
+// one ostringstream + one string allocation/copy per row.
+void BuildCommonCsvPrefix(std::ostringstream& csv,
+                          const RuntimeSnapshot& snapshot,
+                          std::string_view mode) {
     AppendCsvString(csv, FormatRuntimeLocalIso8601(
                              std::chrono::system_clock::now()));
     csv << ',';
@@ -151,7 +147,9 @@ std::string BuildCommonCsvPrefix(const RuntimeSnapshot& snapshot,
         csv << age_ms;
     }
     csv << ',' << snapshot.amd_sensors.size() << ',';
-    AppendCsvString(csv, BuildAmdSensorSummary(snapshot));
+    thread_local std::string amd_summary;
+    BuildAmdSensorSummary(snapshot, amd_summary);
+    AppendCsvString(csv, amd_summary);
     csv << ',';
     AppendCsvDouble(csv, FindRuntimeAmdSensorTemperature(snapshot, "Tctl/Tdie"));
     csv << ',';
@@ -226,8 +224,6 @@ std::string BuildCommonCsvPrefix(const RuntimeSnapshot& snapshot,
             AppendCsvBool(csv, fan->effective_write_allowed);
         }
     }
-
-    return csv.str();
 }
 
 }  // namespace
@@ -249,7 +245,8 @@ std::string BuildReadLoopCsvHeader() {
 std::string BuildReadLoopCsvRow(const RuntimeSnapshot& snapshot,
                                 const RuntimeReadLoopLogState& state) {
     std::ostringstream csv;
-    csv << BuildCommonCsvPrefix(snapshot, "read-loop") << ',';
+    BuildCommonCsvPrefix(csv, snapshot, "read-loop");
+    csv << ',';
     AppendCsvBool(csv, state.telemetry_available);
     csv << ',';
     AppendCsvBool(csv, state.runtime_home_published);
@@ -309,7 +306,8 @@ std::string BuildEvidenceLogCsvHeader() {
 std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
                                    const RuntimeEvidenceLogState& state) {
     std::ostringstream csv;
-    csv << BuildCommonCsvPrefix(snapshot, "evidence-log") << ',';
+    BuildCommonCsvPrefix(csv, snapshot, "evidence-log");
+    csv << ',';
     AppendCsvBool(csv, state.telemetry_available);
     csv << ',' << state.successful_polls
         << ',' << state.skipped_polls
@@ -432,7 +430,8 @@ std::string BuildControlLoopCsvRow(
     const RuntimeControlLoopTimingState& timing,
     const std::vector<RuntimeControlChannelLogState>& channels) {
     std::ostringstream csv;
-    csv << BuildCommonCsvPrefix(snapshot, "control-loop") << ',' << tick_count << ',';
+    BuildCommonCsvPrefix(csv, snapshot, "control-loop");
+    csv << ',' << tick_count << ',';
     AppendCsvString(csv, timing.loop_started_wall_clock);
     csv << ',';
     AppendCsvString(csv, timing.loop_finished_wall_clock);

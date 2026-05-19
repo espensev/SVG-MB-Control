@@ -8,36 +8,6 @@
 
 namespace svg_mb_control {
 
-namespace {
-
-std::string JsonStringOr(const nlohmann::json& value,
-                         std::string_view key,
-                         std::string_view fallback = {}) {
-    const auto found = value.find(std::string(key));
-    if (found != value.end() && found->is_string()) {
-        return found->get<std::string>();
-    }
-    return std::string(fallback);
-}
-
-std::uint32_t JsonUInt32Or(const nlohmann::json& value,
-                           std::string_view key,
-                           std::uint32_t fallback = 0u) {
-    const auto found = value.find(std::string(key));
-    if (found != value.end() && found->is_number_unsigned()) {
-        return found->get<std::uint32_t>();
-    }
-    if (found != value.end() && found->is_number_integer()) {
-        const auto raw = found->get<std::int64_t>();
-        if (raw >= 0 && raw <= static_cast<std::int64_t>(UINT32_MAX)) {
-            return static_cast<std::uint32_t>(raw);
-        }
-    }
-    return fallback;
-}
-
-}  // namespace
-
 std::filesystem::path RuntimeSupervisorStatePath(
     const std::filesystem::path& runtime_home) {
     return runtime_home / "control_supervisor.json";

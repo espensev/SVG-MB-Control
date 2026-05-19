@@ -267,11 +267,12 @@ shared event log under `runtime\logs\`.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
 `log_retain_days` in the control config. `csv_flush_interval_rows` controls
-how often the active CSV archive and fixed-path mirror are flushed; `1`
-preserves per-row flushing, while higher values batch disk flushes and are
-flushed again on rotation and shutdown. The runtime manifest records the active
-CSV flush policy and interval. Runtime pruning removes old archive CSV chunks
-together with their matching archive manifest sidecar.
+how often the active CSV archive is flushed and how often pending rows are
+written to the fixed-path mirror; `1` preserves per-row mirror refreshes,
+while higher values batch mirror writes and disk flushes. Pending mirror rows
+are flushed again on rotation and shutdown. The runtime manifest records the
+active CSV flush policy and interval. Runtime pruning removes old archive CSV
+chunks together with their matching archive manifest sidecar.
 
 For offline cleanup, use `svg-mb-control analyze prune`. It defaults to
 dry-run, requires `--apply` for deletion, and only deletes old archive bundles

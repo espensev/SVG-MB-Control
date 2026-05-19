@@ -35,11 +35,18 @@ class AmdReader {
 
     bool available() const;
     std::string init_warning() const;
-    AmdSnapshot Sample();
+
+    // Samples current AMD temperatures. The returned reference aliases an
+    // internal buffer that is overwritten on the next Sample() call on this
+    // reader; copy it if you need to retain it past that point. Reusing the
+    // buffer avoids reallocating the samples vector on every steady-state
+    // control tick.
+    const AmdSnapshot& Sample();
 
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    AmdSnapshot sample_buffer_;
 };
 
 }  // namespace svg_mb_control

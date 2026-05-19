@@ -104,12 +104,17 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                                   payload);
 }
 
-std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
-    const std::vector<ChannelState>& channels) {
-    std::vector<RuntimeControlChannelLogState> log_states;
-    log_states.reserve(channels.size());
-    for (const auto& channel : channels) {
-        RuntimeControlChannelLogState state;
+void BuildChannelLogStates(
+    const std::vector<ChannelState>& channels,
+    std::vector<RuntimeControlChannelLogState>& out) {
+    // resize (not clear) so existing elements — and their response_source /
+    // write_reason string buffers — are reused; std::string assignment keeps
+    // capacity when the new value fits. Steady state has a fixed channel
+    // count, so resize is a no-op after the first tick.
+    out.resize(channels.size());
+    for (std::size_t i = 0u; i < channels.size(); ++i) {
+        const ChannelState& channel = channels[i];
+        RuntimeControlChannelLogState& state = out[i];
         state.channel = channel.config.channel;
         state.observed_temp_c = channel.last_observed_temp_c;
         state.setpoint_pct = channel.last_setpoint_pct;
@@ -127,8 +132,13 @@ std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
         state.total_writes = channel.total_writes;
         state.write_active = channel.write_active;
         state.baseline_captured = channel.baseline_captured;
-        log_states.push_back(state);
     }
+}
+
+std::vector<RuntimeControlChannelLogState> BuildChannelLogStates(
+    const std::vector<ChannelState>& channels) {
+    std::vector<RuntimeControlChannelLogState> log_states;
+    BuildChannelLogStates(channels, log_states);
     return log_states;
 }
 

@@ -7,7 +7,7 @@
 #include "gpu_reader.h"
 #include "json_io.h"
 #include "runtime_artifacts.h"
-#include "runtime_logging.h"
+#include "runtime_csv_rows.h"
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
@@ -200,11 +200,15 @@ int ReadLoop::RunUntilStopped() {
     GpuReader gpu_reader;
     auto last_success_time = std::chrono::steady_clock::now();
 
+    // Reused across poll iterations; SampleDirectRuntimeSnapshot fully resets
+    // it each call so no telemetry carries over (see direct_runtime_snapshot).
+    RuntimeSnapshot runtime_snapshot;
+
     while (!impl_->stop_requested.load() &&
            !RuntimeStopRequested(impl_->runtime_home)) {
         try {
-            RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
-                amd_reader, gpu_reader, *fan_writer, runtime_policy);
+            SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, *fan_writer,
+                                        runtime_policy, runtime_snapshot);
 
             if (csv_logger.MaybeRotate()) {
                 status.log_csv_path =

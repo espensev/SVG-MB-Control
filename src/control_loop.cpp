@@ -9,9 +9,10 @@
 #include "fan_writer.h"
 #include "gpu_reader.h"
 #include "json_io.h"
+#include "low_band_evidence.h"
 #include "pending_writes.h"
 #include "runtime_artifacts.h"
-#include "runtime_logging.h"
+#include "runtime_csv_rows.h"
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
 
@@ -67,23 +68,6 @@ double MoveTowardRateLimited(double current,
         return target;
     }
     return current + (delta > 0.0 ? allowed : -allowed);
-}
-
-bool LowBandChannelConfigured(const ChannelState& channel) {
-    return channel.config.low_band_stage > 0u &&
-        !std::isnan(channel.config.low_band_debt_threshold) &&
-        !std::isnan(channel.config.low_band_max_boost_pct) &&
-        channel.config.low_band_max_boost_pct > 0.0;
-}
-
-double MeanOrNan(double sum, std::uint64_t count) {
-    return count > 0u
-        ? sum / static_cast<double>(count)
-        : std::numeric_limits<double>::quiet_NaN();
-}
-
-nlohmann::json NanToNull(double value) {
-    return std::isfinite(value) ? nlohmann::json(value) : nlohmann::json(nullptr);
 }
 
 void UpdateLowBandState(ControlRuntimeContext& context,
@@ -243,82 +227,6 @@ void UpdateLowBandState(ControlRuntimeContext& context,
             }
         }
     }
-}
-
-void WriteLowBandEvidenceFile(const ControlRuntimeContext& context,
-                              std::uint64_t tick_count) {
-    const LowBandRuntimeState& state = context.low_band;
-    const LowBandControlConfig& cfg = context.loop.low_band;
-    nlohmann::json payload;
-    payload["schema"] = "svg_mb_control.low_band_evidence.v1";
-    payload["schema_version"] = 1;
-    payload["captured_local"] =
-        FormatRuntimeLocalIso8601(std::chrono::system_clock::now());
-    payload["tick_count"] = tick_count;
-    payload["enabled"] = cfg.enabled;
-    payload["debt"] = state.debt;
-    payload["signal"] = state.signal;
-    payload["cpu_scale"] = state.cpu_scale;
-    payload["gpu_scale"] = state.gpu_scale;
-    payload["sample_count"] = state.sample_count;
-    payload["active_sample_count"] = state.active_sample_count;
-    payload["max_debt"] = state.max_debt;
-    payload["max_cpu_c"] = NanToNull(state.max_cpu_c);
-    payload["max_gpu_c"] = NanToNull(state.max_gpu_c);
-    payload["config"] = {
-        {"cpu_start_c", cfg.cpu_start_c},
-        {"cpu_full_c", cfg.cpu_full_c},
-        {"cpu_release_c", cfg.cpu_release_c},
-        {"gpu_start_c", cfg.gpu_start_c},
-        {"gpu_full_c", cfg.gpu_full_c},
-        {"gpu_release_c", cfg.gpu_release_c},
-        {"cpu_weight", cfg.cpu_weight},
-        {"gpu_weight", cfg.gpu_weight},
-        {"rise_per_min", cfg.rise_per_min},
-        {"fall_per_min", cfg.fall_per_min},
-        {"stage_rise_pct_per_min", cfg.stage_rise_pct_per_min},
-        {"stage_fall_pct_per_min", cfg.stage_fall_pct_per_min},
-        {"stage_spacing_ms", cfg.stage_spacing_ms},
-        {"evidence_write_interval_ms", cfg.evidence_write_interval_ms},
-    };
-
-    payload["channels"] = nlohmann::json::array();
-    for (const auto& channel : context.channels) {
-        const double baseline_rpm = MeanOrNan(
-            channel.low_band_unboosted_rpm_sum,
-            channel.low_band_unboosted_rpm_count);
-        const double boosted_rpm = MeanOrNan(
-            channel.low_band_boosted_rpm_sum,
-            channel.low_band_boosted_rpm_count);
-        nlohmann::json channel_json = {
-            {"channel", channel.config.channel},
-            {"configured", LowBandChannelConfigured(channel)},
-            {"stage", channel.config.low_band_stage},
-            {"debt_threshold", NanToNull(channel.config.low_band_debt_threshold)},
-            {"hold_ms", channel.config.low_band_hold_ms},
-            {"max_boost_pct_config",
-             NanToNull(channel.config.low_band_max_boost_pct)},
-            {"stage_active", channel.low_band_stage_active},
-            {"eligible_ms", channel.low_band_eligible_ms},
-            {"activation_count", channel.low_band_activation_count},
-            {"current_boost_pct", channel.low_band_stage_boost_pct},
-            {"max_observed_boost_pct", channel.low_band_max_boost_pct},
-            {"sample_count", channel.low_band_sample_count},
-            {"active_sample_count", channel.low_band_active_sample_count},
-            {"boost_area_pct_s", channel.low_band_boost_area_pct_s},
-            {"rpm_unboosted_mean", NanToNull(baseline_rpm)},
-            {"rpm_boosted_mean", NanToNull(boosted_rpm)},
-            {"rpm_delta_mean", NanToNull(
-                 std::isnan(baseline_rpm) || std::isnan(boosted_rpm)
-                     ? std::numeric_limits<double>::quiet_NaN()
-                     : boosted_rpm - baseline_rpm)},
-            {"total_writes", channel.total_writes},
-        };
-        payload["channels"].push_back(std::move(channel_json));
-    }
-
-    TryWriteJsonFileAtomic(context.runtime_home / "low_band_evidence.json",
-                           payload);
 }
 
 void CaptureChannelBaselineIfAvailable(
@@ -694,6 +602,11 @@ ControlLoop::ControlLoop(ControlConfig base_config,
 
 ControlLoop::~ControlLoop() = default;
 
+void ControlLoop::RequestStop() {
+    std::lock_guard<std::mutex> lock(impl_->context.wake_mutex);
+    impl_->context.wake_cv.notify_all();
+}
+
 int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     ControlRuntimeContext& context = impl_->context;
     ClearRuntimeStopRequest(context.runtime_home);
@@ -812,9 +725,25 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     ProcessResourceSample resource_window_sample = SampleProcessResources();
     bool have_resource_window_sample = resource_window_sample.valid_cpu ||
         resource_window_sample.valid_memory;
+    std::uint64_t last_process_working_set_bytes =
+        resource_window_sample.valid_memory
+            ? resource_window_sample.working_set_bytes
+            : 0u;
+    std::uint64_t last_process_private_bytes =
+        resource_window_sample.valid_memory
+            ? resource_window_sample.private_bytes
+            : 0u;
     double last_process_cpu_delta_ms =
         std::numeric_limits<double>::quiet_NaN();
     double last_process_cpu_pct = std::numeric_limits<double>::quiet_NaN();
+
+    // Reused across ticks: SampleDirectRuntimeSnapshot fills this in place so
+    // the telemetry vectors keep their capacity instead of reallocating every
+    // tick.
+    RuntimeSnapshot runtime_snapshot;
+    // Same rationale: the per-tick CSV row's channel-log states are filled
+    // into this reused buffer instead of allocating a fresh vector each tick.
+    std::vector<RuntimeControlChannelLogState> channel_log_states;
 
     while (!stop_flag.load() &&
            !RuntimeStopRequested(context.runtime_home)) {
@@ -832,8 +761,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         const auto now_steady = tick_started_steady;
         const auto eval_iso = FormatLocalIso8601(tick_started_wall);
 
-        RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
-            amd_reader, gpu_reader, *fan_writer, context.runtime_policy);
+        SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, *fan_writer,
+                                    context.runtime_policy, runtime_snapshot);
         const bool runtime_snapshot_available =
             RuntimeSnapshotHasTelemetry(runtime_snapshot);
 
@@ -960,28 +889,35 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                   static_cast<double>(context.loop.poll_tick_ms);
         tick_timing.loop_overrun =
             work_duration_ms > static_cast<double>(context.loop.poll_tick_ms);
-        const ProcessResourceSample current_resource_sample =
-            SampleProcessResources();
-        if (current_resource_sample.valid_memory) {
-            tick_timing.process_working_set_bytes =
-                current_resource_sample.working_set_bytes;
-            tick_timing.process_private_bytes =
-                current_resource_sample.private_bytes;
-        }
-        const double resource_window_ms =
-            have_resource_window_sample
-                ? DurationMilliseconds(current_resource_sample.sampled_at -
-                                       resource_window_sample.sampled_at)
-                : 0.0;
-        if (resource_window_ms >= 1000.0) {
-            RuntimeControlLoopTimingState resource_timing;
-            UpdateTimingResources(&resource_timing,
-                                  resource_window_sample,
-                                  current_resource_sample,
-                                  have_resource_window_sample,
-                                  processor_count);
-            last_process_cpu_delta_ms = resource_timing.process_cpu_delta_ms;
-            last_process_cpu_pct = resource_timing.process_cpu_pct;
+        const bool resource_sample_due = !have_resource_window_sample ||
+            DurationMilliseconds(tick_finished_steady -
+                                 resource_window_sample.sampled_at) >=
+                1000.0;
+        if (resource_sample_due) {
+            const ProcessResourceSample current_resource_sample =
+                SampleProcessResources();
+            if (current_resource_sample.valid_memory) {
+                last_process_working_set_bytes =
+                    current_resource_sample.working_set_bytes;
+                last_process_private_bytes =
+                    current_resource_sample.private_bytes;
+            }
+            const double resource_window_ms =
+                have_resource_window_sample
+                    ? DurationMilliseconds(current_resource_sample.sampled_at -
+                                           resource_window_sample.sampled_at)
+                    : 0.0;
+            if (resource_window_ms >= 1000.0) {
+                RuntimeControlLoopTimingState resource_timing;
+                UpdateTimingResources(&resource_timing,
+                                      resource_window_sample,
+                                      current_resource_sample,
+                                      have_resource_window_sample,
+                                      processor_count);
+                last_process_cpu_delta_ms =
+                    resource_timing.process_cpu_delta_ms;
+                last_process_cpu_pct = resource_timing.process_cpu_pct;
+            }
             resource_window_sample = current_resource_sample;
             have_resource_window_sample =
                 current_resource_sample.valid_cpu ||
@@ -989,6 +925,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         }
         tick_timing.process_cpu_delta_ms = last_process_cpu_delta_ms;
         tick_timing.process_cpu_pct = last_process_cpu_pct;
+        tick_timing.process_working_set_bytes =
+            last_process_working_set_bytes;
+        tick_timing.process_private_bytes = last_process_private_bytes;
         last_timing = tick_timing;
 
         if (fatal_restore_timeout) {
@@ -1006,12 +945,13 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         }
 
         if (csv_logger.is_open()) {
+            BuildChannelLogStates(context.channels, channel_log_states);
             csv_logger.WriteRow(
                 BuildControlLoopCsvRow(
                     runtime_snapshot,
                     tick_count,
                     last_timing,
-                    BuildChannelLogStates(context.channels)));
+                    channel_log_states));
         }
 
         if (context.loop.low_band.enabled) {

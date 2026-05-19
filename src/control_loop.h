@@ -115,6 +115,12 @@ class ControlLoop {
     // started, or if a shutdown restore fails.
     int RunUntilStopped(const std::atomic<bool>& stop_flag);
 
+    // Wakes the per-tick wait so a signaled stop_flag is observed
+    // immediately instead of after up to poll_tick_ms. Safe to call from a
+    // console control handler. Does not by itself stop the loop; the caller
+    // must also set the stop_flag passed to RunUntilStopped.
+    void RequestStop();
+
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -2,10 +2,10 @@
 // test hook is a discrete translation unit, selected by CreateFanWriter when
 // SVG_MB_CONTROL_SIM_DIRECT_WRITE_MODE=enabled.
 
+#include "env_util.h"
 #include "fan_writer_internal.h"
 
 #include <chrono>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -14,21 +14,6 @@
 namespace svg_mb_control {
 
 namespace {
-
-std::string GetEnvOrDefault(const char* name, std::string_view fallback) {
-    char* value = nullptr;
-    std::size_t size = 0u;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr ||
-        value[0] == '\0') {
-        if (value != nullptr) {
-            std::free(value);
-        }
-        return std::string(fallback);
-    }
-    std::string result(value);
-    std::free(value);
-    return result;
-}
 
 class SimulatedFanWriter final : public FanWriter {
   public:

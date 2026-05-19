@@ -43,6 +43,60 @@ CalibrationOptions DefaultCalibrationOptions() {
     return options;
 }
 
+std::vector<CalibrationStepSpec> ParseCalibrationSequence(
+    const wchar_t* value) {
+    const std::wstring input(value);
+    if (input.empty()) {
+        throw std::runtime_error("--calibrate-sequence cannot be empty.");
+    }
+
+    std::vector<CalibrationStepSpec> sequence;
+    std::size_t offset = 0u;
+    while (offset < input.size()) {
+        const std::size_t comma = input.find(L',', offset);
+        const std::size_t end =
+            comma == std::wstring::npos ? input.size() : comma;
+        const std::wstring token = input.substr(offset, end - offset);
+        const std::size_t colon = token.find(L':');
+        if (token.empty() || colon == std::wstring::npos ||
+            colon == 0u || colon + 1u >= token.size()) {
+            throw std::runtime_error(
+                "Invalid --calibrate-sequence entry; expected duty_pct:hold_ms.");
+        }
+
+        double duty_pct = 0.0;
+        std::uint32_t hold_ms = 0u;
+        try {
+            duty_pct = std::stod(token.substr(0u, colon));
+            const unsigned long parsed_hold =
+                std::stoul(token.substr(colon + 1u));
+            hold_ms = static_cast<std::uint32_t>(parsed_hold);
+        } catch (const std::exception&) {
+            throw std::runtime_error(
+                "Invalid --calibrate-sequence entry; expected duty_pct:hold_ms.");
+        }
+        if (duty_pct < 0.0 || duty_pct > 100.0) {
+            throw std::runtime_error(
+                "--calibrate-sequence duty_pct must be in [0, 100].");
+        }
+        if (hold_ms == 0u) {
+            throw std::runtime_error(
+                "--calibrate-sequence hold_ms must be greater than zero.");
+        }
+        sequence.push_back({duty_pct, hold_ms});
+
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        offset = comma + 1u;
+    }
+
+    if (sequence.empty()) {
+        throw std::runtime_error("--calibrate-sequence cannot be empty.");
+    }
+    return sequence;
+}
+
 namespace {
 
 constexpr std::uint32_t kPollIntervalMs = 200u;

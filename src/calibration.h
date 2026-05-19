@@ -25,6 +25,8 @@ struct CalibrationOptions {
 
 CalibrationOptions DefaultCalibrationOptions();
 
+std::vector<CalibrationStepSpec> ParseCalibrationSequence(const wchar_t* value);
+
 int RunCalibration(const ControlConfig& base,
                    const std::filesystem::path& runtime_home,
                    const CalibrationOptions& options,

@@ -2,12 +2,12 @@
 
 #include "amd_reader.h"
 #include "control_scheduler.h"
+#include "env_util.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
 
 #include <array>
 #include <chrono>
-#include <cstdlib>
 #include <ctime>
 #include <string>
 #include <string_view>
@@ -15,21 +15,6 @@
 namespace svg_mb_control {
 
 namespace {
-
-std::string GetEnvOrDefault(const char* name, std::string_view fallback) {
-    char* value = nullptr;
-    std::size_t size = 0u;
-    if (_dupenv_s(&value, &size, name) != 0 || value == nullptr ||
-        value[0] == '\0') {
-        if (value != nullptr) {
-            std::free(value);
-        }
-        return std::string(fallback);
-    }
-    std::string result(value);
-    std::free(value);
-    return result;
-}
 
 bool TryParseBoolEnv(const char* name, bool* out_value) {
     const std::string value = GetEnvOrDefault(name, "");
@@ -151,26 +136,46 @@ void MergeFanTelemetry(RuntimeSnapshot& snapshot,
 
 }  // namespace
 
+void SampleDirectRuntimeSnapshot(
+    AmdReader& amd_reader,
+    GpuReader& gpu_reader,
+    FanWriter& fan_writer,
+    const RuntimeWritePolicy& runtime_policy,
+    RuntimeSnapshot& out) {
+    // Reset before the merges. amd_sensors/fans must be cleared explicitly:
+    // MergeAmdTelemetry early-returns without clearing when AMD is
+    // unavailable, and MergeFanTelemetry upserts into fans, so a reused
+    // snapshot would otherwise retain the previous tick's telemetry.
+    // gpu and the policy/time scalars are overwritten unconditionally below
+    // and by MergeGpuTelemetry, so they need no separate reset. clear()
+    // keeps the vector buffers allocated across ticks.
+    out.amd_sensors.clear();
+    out.fans.clear();
+
+    const SimRuntimeOverrides& sim = CachedSimRuntimeOverrides();
+    out.snapshot_time_iso = FormatLocalIso8601(
+        std::chrono::system_clock::now() -
+        std::chrono::milliseconds(sim.snapshot_offset_ms));
+    out.policy_writes_enabled_present = runtime_policy.present;
+    out.policy_writes_enabled = runtime_policy.writes_enabled;
+    if (sim.has_policy_writes_enabled) {
+        out.policy_writes_enabled_present = true;
+        out.policy_writes_enabled = sim.policy_writes_enabled;
+    }
+
+    MergeAmdTelemetry(out, amd_reader.Sample());
+    MergeGpuTelemetry(out, gpu_reader.Sample());
+    MergeFanTelemetry(out, fan_writer.ReadAllChannels(), runtime_policy);
+}
+
 RuntimeSnapshot SampleDirectRuntimeSnapshot(
     AmdReader& amd_reader,
     GpuReader& gpu_reader,
     FanWriter& fan_writer,
     const RuntimeWritePolicy& runtime_policy) {
     RuntimeSnapshot snapshot;
-    const SimRuntimeOverrides& sim = CachedSimRuntimeOverrides();
-    snapshot.snapshot_time_iso = FormatLocalIso8601(
-        std::chrono::system_clock::now() -
-        std::chrono::milliseconds(sim.snapshot_offset_ms));
-    snapshot.policy_writes_enabled_present = runtime_policy.present;
-    snapshot.policy_writes_enabled = runtime_policy.writes_enabled;
-    if (sim.has_policy_writes_enabled) {
-        snapshot.policy_writes_enabled_present = true;
-        snapshot.policy_writes_enabled = sim.policy_writes_enabled;
-    }
-
-    MergeAmdTelemetry(snapshot, amd_reader.Sample());
-    MergeGpuTelemetry(snapshot, gpu_reader.Sample());
-    MergeFanTelemetry(snapshot, fan_writer.ReadAllChannels(), runtime_policy);
+    SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, fan_writer,
+                                runtime_policy, snapshot);
     return snapshot;
 }
 

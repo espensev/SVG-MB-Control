@@ -84,8 +84,8 @@ evaluated in Horner form in the curve lookup path.
 1. Resolve config, runtime home, and runtime policy.
 2. Initialize the direct fan backend.
 3. On each tick, sample AMD, GPU, and fan telemetry in-process.
-4. Append the sampled row to the active CSV chunk and mirror it to the fixed
-   live CSV path.
+4. Append the sampled row to the active CSV chunk and refresh the fixed live
+   CSV mirror on the configured flush interval.
 5. Capture the baseline duty and mode for each configured channel.
 6. Blend temperatures according to `temp_blend`.
 7. Interpolate the configured curve and clamp with `min_duty_pct`.

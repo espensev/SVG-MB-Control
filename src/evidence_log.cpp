@@ -5,7 +5,7 @@
 #include "fan_writer.h"
 #include "gpu_reader.h"
 #include "runtime_lifecycle.h"
-#include "runtime_logging.h"
+#include "runtime_csv_rows.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 
@@ -218,10 +218,14 @@ int RunEvidenceLog(const ControlConfig& config,
     bool stale = false;
     auto last_success_time = std::chrono::steady_clock::now();
 
+    // Reused across poll iterations; SampleDirectRuntimeSnapshot fully resets
+    // it each call so no telemetry carries over (see direct_runtime_snapshot).
+    RuntimeSnapshot runtime_snapshot;
+
     while (!stop_requested.load() && !RuntimeStopRequested(runtime_home)) {
         try {
-            RuntimeSnapshot runtime_snapshot = SampleDirectRuntimeSnapshot(
-                amd_reader, gpu_reader, *fan_writer, runtime_policy);
+            SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, *fan_writer,
+                                        runtime_policy, runtime_snapshot);
 
             if (csv_logger.MaybeRotate()) {
                 AppendRuntimeEvent(

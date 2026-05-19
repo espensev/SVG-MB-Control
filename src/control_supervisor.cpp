@@ -13,6 +13,7 @@
 #include "runtime_artifacts.h"
 #include "runtime_lifecycle.h"
 #include "runtime_supervisor_state.h"
+#include "runtime_util.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -171,47 +172,6 @@ std::optional<nlohmann::json> TryReadJsonObject(
     } catch (const std::exception&) {
     }
     return std::nullopt;
-}
-
-std::string JsonStringOr(const nlohmann::json& value,
-                         std::string_view key,
-                         std::string_view fallback = {}) {
-    const auto found = value.find(std::string(key));
-    if (found != value.end() && found->is_string()) {
-        return found->get<std::string>();
-    }
-    return std::string(fallback);
-}
-
-std::uint32_t JsonUInt32Or(const nlohmann::json& value,
-                           std::string_view key,
-                           std::uint32_t fallback = 0u) {
-    const auto found = value.find(std::string(key));
-    if (found != value.end() && found->is_number_unsigned()) {
-        return found->get<std::uint32_t>();
-    }
-    if (found != value.end() && found->is_number_integer()) {
-        const auto raw = found->get<std::int64_t>();
-        if (raw > 0 && raw <= static_cast<std::int64_t>(UINT32_MAX)) {
-            return static_cast<std::uint32_t>(raw);
-        }
-    }
-    return fallback;
-}
-
-bool IsProcessActive(std::uint32_t pid) {
-    if (pid == 0u) {
-        return false;
-    }
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (process == nullptr) {
-        return false;
-    }
-    DWORD exit_code = 0u;
-    const bool active =
-        GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
-    CloseHandle(process);
-    return active;
 }
 
 std::filesystem::path RuntimeStatusPath(
@@ -432,81 +392,6 @@ RunMode ParseRunMode(std::string_view value) {
         return RunMode::kEvidenceLog;
     }
     throw std::runtime_error("Invalid default_mode in control config.");
-}
-
-int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
-    const std::filesystem::path status_path = RuntimeStatusPath(runtime_home);
-    const auto status = TryReadJsonObject(status_path, "runtime status");
-    if (!status.has_value()) {
-        std::cout << "svg-mb-control: not running\n"
-                  << "  runtime_home: " << runtime_home.string() << '\n'
-                  << "  status: " << status_path.string()
-                  << " (not found)\n";
-        return 0;
-    }
-
-    const std::string mode = JsonStringOr(*status, "mode", "(unknown)");
-    const std::string state = JsonStringOr(*status, "status", "(unknown)");
-    const std::string detail = JsonStringOr(*status, "status_detail");
-    const std::string last_eval =
-        JsonStringOr(*status, "loop_last_evaluation",
-                     JsonStringOr(*status, "last_refresh"));
-    const std::uint32_t pid = JsonUInt32Or(*status, "process_id");
-    const bool active = RuntimeStatusLooksActive(*status);
-
-    std::cout << "svg-mb-control: "
-              << (active ? "running" : "not running") << '\n'
-              << "  mode: " << mode << '\n'
-              << "  status: " << state << '\n';
-    if (!detail.empty()) {
-        std::cout << "  detail: " << detail << '\n';
-    }
-    if (pid != 0u) {
-        std::cout << "  pid: " << pid
-                  << (active ? " (active)" : " (not active)") << '\n';
-    }
-    if (!last_eval.empty()) {
-        std::cout << "  last_update: " << last_eval << '\n';
-    }
-    std::cout << "  runtime_home: " << runtime_home.string() << '\n'
-              << "  status_file: " << status_path.string() << '\n';
-    const std::string log_csv = JsonStringOr(*status, "log_csv_path");
-    const std::string event_log = JsonStringOr(*status, "event_log_path");
-    if (!log_csv.empty()) {
-        std::cout << "  csv: " << log_csv << '\n';
-    }
-    if (!event_log.empty()) {
-        std::cout << "  events: " << event_log << '\n';
-    }
-    const std::string last_restore =
-        JsonStringOr(*status, "last_successful_restore_time");
-    if (!last_restore.empty()) {
-        std::cout << "  last_successful_restore: " << last_restore << '\n';
-    }
-
-    const auto supervisor = ReadSupervisorState(runtime_home);
-    if (supervisor.has_value()) {
-        std::cout << "  supervisor_pid: " << supervisor->supervisor_pid
-                  << (IsProcessActive(supervisor->supervisor_pid)
-                          ? " (active)"
-                          : " (not active)")
-                  << '\n'
-                  << "  worker_restart_count: "
-                  << supervisor->worker_restart_count << '\n';
-        if (supervisor->has_last_worker_exit_code) {
-            std::cout << "  last_worker_exit_code: "
-                      << supervisor->last_worker_exit_code;
-            if (!supervisor->last_worker_exit_time.empty()) {
-                std::cout << " at " << supervisor->last_worker_exit_time;
-            }
-            std::cout << '\n';
-        }
-        if (!supervisor->last_worker_restart_time.empty()) {
-            std::cout << "  last_worker_restart_time: "
-                      << supervisor->last_worker_restart_time << '\n';
-        }
-    }
-    return 0;
 }
 
 int RequestStopAndWait(const std::filesystem::path& runtime_home,
