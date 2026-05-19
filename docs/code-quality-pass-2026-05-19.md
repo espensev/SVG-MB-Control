@@ -152,6 +152,19 @@ short `stop_flag` poll for prompt shutdown, or actually `notify_one()` the CV
 from the stop path so shutdown is immediate. Verify against stop-handling
 tests — this changes shutdown latency (an improvement).
 
+**Status 2026-05-19 (re-verified, resolved):** The "never notified" premise
+is outdated. `ControlLoop::RequestStop()` (`control_loop.cpp:605-607`)
+`notify_all()`s `wake_cv` under `wake_mutex`, and the console handler sets
+`g_stop_signaled` — the `stop_flag` passed to `RunUntilStopped`
+(`main.cpp:527`) — before calling it, so the interactive/console stop path is
+already immediate. The residual was the supervisor `--stop` path:
+`WaitForNextControlTick` did not check `RuntimeStopRequested(runtime_home)`
+and a cross-process `stop.request.json` cannot notify `wake_cv`, so it was
+observed up to one `poll_tick_ms` late. Resolved by a bounded-slice wait —
+predicate also checks `RuntimeStopRequested`, re-checked every 50 ms — in
+`control_scheduler.cpp`, mirroring the existing `read_loop.cpp:349-356`
+pattern.
+
 ### Already correctly throttled — no action
 - `WriteLowBandEvidenceFile` (`control_loop.cpp:248`, called `:1025`): every
   ~5000 ms (`evidence_write_interval_ms`), **not** per tick. Verified.

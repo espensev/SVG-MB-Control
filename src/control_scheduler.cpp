@@ -1,5 +1,7 @@
 #include "control_scheduler.h"
 
+#include "runtime_lifecycle.h"
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -137,15 +139,35 @@ void WaitForNextControlTick(ControlRuntimeContext& context,
                             const std::atomic<bool>& stop_flag) {
     const auto next_tick_deadline =
         tick_started + std::chrono::milliseconds(context.loop.poll_tick_ms);
-    const auto after_tick = std::chrono::steady_clock::now();
-    if (after_tick >= next_tick_deadline) {
-        return;
+    if (std::chrono::steady_clock::now() >= next_tick_deadline) {
+        return;  // loop work consumed the tick interval; do not wait
     }
 
+    // The interactive/console stop path wakes wake_cv immediately via
+    // ControlLoop::RequestStop(), so stop_flag is observed with no delay.
+    // The supervisor stop path only writes stop.request.json from another
+    // process and cannot notify wake_cv, so wait in bounded slices: this
+    // re-checks RuntimeStopRequested() within kStopPollSlice instead of only
+    // once per poll_tick_ms. One std::filesystem::exists() per slice is
+    // negligible against the per-tick hardware sampling cost.
+    constexpr std::chrono::milliseconds kStopPollSlice{50};
+    const auto stop_now = [&] {
+        return stop_flag.load() ||
+               RuntimeStopRequested(context.runtime_home);
+    };
+
     std::unique_lock<std::mutex> lock(context.wake_mutex);
-    context.wake_cv.wait_until(
-        lock, next_tick_deadline,
-        [&stop_flag] { return stop_flag.load(); });
+    while (true) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_tick_deadline) {
+            return;
+        }
+        const auto slice_deadline =
+            (std::min)(next_tick_deadline, now + kStopPollSlice);
+        if (context.wake_cv.wait_until(lock, slice_deadline, stop_now)) {
+            return;  // stop observed: console/signal flag or stop.request.json
+        }
+    }
 }
 
 }  // namespace svg_mb_control
