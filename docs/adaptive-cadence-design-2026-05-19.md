@@ -3,6 +3,11 @@
 Status: **design only, not implemented.** No code in this change implements
 this. It is the proposal requested in the code-quality pass follow-up.
 
+Revised 2026-05-19: `low_band.signal` removed from the transient score (it
+is a sustained absolute-temperature signal, not a transient — see "Why
+`low_band.signal` is excluded"); added the `WaitForNextControlTick`
+stop-latency interaction with code-quality finding 7.
+
 ## Problem
 
 Fans look "jagged" when the control loop's sample/decide/write cadence is too
@@ -53,6 +58,25 @@ the analyze tooling already tolerates irregular row spacing, so variable
 spacing needs no downstream change (verify against `analyze` ingest before
 implementing — listed as a risk below).
 
+## Interaction with `WaitForNextControlTick` stop latency
+
+`WaitForNextControlTick` (`control_scheduler.cpp`) waits on `context.wake_cv`
+until `next_tick_deadline`. Finding 7 of the code-quality pass has been
+resolved: the wait re-checks both `stop_flag` and
+`RuntimeStopRequested(runtime_home)` in bounded 50 ms slices, so both the
+interactive (CV-notified) and supervisor (`stop.request.json`) stop paths
+are observed promptly rather than up to one `poll_tick_ms` late.
+
+Adaptive cadence does not worsen this. The deadline becomes
+`tick_started + E` with `E <= P`, so worst-case stop latency during a
+transient *decreases* (bounded by `E`, not `P`); in steady state `E == P`
+and latency is unchanged from today.
+
+Adaptive cadence changes only the duration used to compute
+`next_tick_deadline`; the slice-capped wait, its dual-condition predicate,
+and the upward-only invariant are unaffected. The slice cap should become
+`min(slice, E)` so a sub-slice `E` still waits a single slice.
+
 ## Transient score
 
 Compute a unitless `transient ∈ [0, 1]` each tick from signals already
@@ -62,13 +86,34 @@ available in the loop, take the max:
    tick; `slew = |ΔT| / Δt_ms`. Map `slew` through the existing `SmoothScale`
    helper between `cadence_slew_start_c_per_s` and `cadence_slew_full_c_per_s`.
    This is the primary jagged-fan driver.
-2. **Low-band signal.** `context.low_band.signal` is already computed every
-   tick (0..1). Reuse directly.
-3. **Setpoint motion.** Max over channels of
+2. **Setpoint motion.** Max over channels of
    `|setpoint_pct_this_tick − setpoint_pct_last_tick| / Δt`, scaled. Captures
    the loop actively chasing a target (the exact moment jaggedness shows).
+   The low-band staged-debt lane acts by moving the channel setpoint, so
+   low-band-driven actuation transients already appear in this term; no
+   separate low-band input is required.
 
-`transient = max(slew_score, low_band.signal, setpoint_motion_score)`.
+`transient = max(slew_score, setpoint_motion_score)`.
+
+### Why `low_band.signal` is excluded
+
+`context.low_band.signal` is
+`clamp(max(cpu_weight * SmoothScale(cpu_c, cpu_start_c, cpu_full_c),
+gpu_weight * SmoothScale(gpu_c, gpu_start_c, gpu_full_c)), 0, 1)`
+(`control_loop.cpp:98-100`, assigned `:113`). It is a monotone function of
+*absolute* temperature within the low band, not of temperature *rate*.
+While the machine sits in the low band — a sustained operating regime, not
+a transient — `signal` holds a nonzero value for as long as the
+temperature stays there. Feeding it into `transient` directly would hold
+`E` toward `F` for the whole low-band regime, which contradicts the
+invariant that steady state is byte-identical to today (`E == P` when no
+transient). `low_band.debt` is a leaky time integral of `signal`
+(`control_loop.cpp:108-112`) and is therefore even more sustained. If a
+low-band-derived cadence input is ever wanted it must be the rate of
+change of `signal` (a derivative, transient by construction), never its
+level. The default design uses neither: slew and setpoint motion already
+cover the jagged-fan cases, and low-band actuation moves the setpoint so
+it is captured by the setpoint-motion term.
 
 `E = round(P − transient * (P − F))`. `transient = 0 → E = P` (unchanged);
 `transient = 1 → E = F` (fastest).
@@ -117,8 +162,9 @@ adaptation is auditable in the CSV/evidence.
 
 ## Test strategy (hermetic, sim-driven)
 
-The existing sim hooks (`SVG_MB_CONTROL_SIM_AMD_TCTL_SEQUENCE_C`, low-band sim)
-make this testable without hardware:
+The existing `SVG_MB_CONTROL_SIM_AMD_TCTL_SEQUENCE_C` sim hook drives the
+Tctl slew that is now the primary cadence input, so this is testable
+without hardware:
 
 1. **Steady state**: flat temp sequence → assert every tick interval `== P`
    (feature inert / no behaviour change). Guards the invariant's lower bound.
@@ -140,9 +186,13 @@ make this testable without hardware:
 - **Schema/consumer breakage** from `loop_intended_interval_ms` becoming
   variable. Mitigation: audit analyze + dashboard + tests first; add the
   explicit `cadence_transient` field.
-- **CSV volume** grows during sustained transients. Existing rotation/retention
-  (`rotate_hours`, `retain_days`, `analyze prune`) already bound this; quantify
-  worst-case (transient pinned at `F` for the rotation window) before shipping.
+- **CSV volume** grows while `transient` is high. Excluding `low_band.signal`
+  (see "Why `low_band.signal` is excluded") removes the source of a
+  *sustained* high `transient`; the remaining inputs (slew, setpoint motion)
+  are nonzero only while temperature or the setpoint is moving and return to
+  zero when the system settles. Existing rotation/retention (`rotate_hours`,
+  `retain_days`, `analyze prune`) bound the residual; quantify worst-case
+  (transient pinned at `F` for the rotation window) before shipping.
 - **Oscillation** at the tightening boundary re-introducing jaggedness.
   Mitigation: asymmetric rate limit (fast tighten, slow relax) above.
 - **Test coverage**: hermetic tests run sim mode; they validate the cadence
@@ -151,6 +201,10 @@ make this testable without hardware:
 
 ## Recommended rollout
 
+0. **Done** — code-quality-pass finding 7 fixed: `WaitForNextControlTick`
+   now waits in bounded 50 ms slices with a dual-condition stop predicate
+   (`stop_flag` or `RuntimeStopRequested`), so the deadline duration is the
+   only thing cadence changes.
 1. Land config fields + validation, default-inert (`F = P`), no behaviour
    change. Ships safely.
 2. Land the `EffectiveTickIntervalMs` computation + `WaitForNextControlTick`
