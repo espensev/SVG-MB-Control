@@ -229,6 +229,8 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         GetField(fields, header, "process_working_set_bytes"));
     row.process_private_bytes = AsInt(
         GetField(fields, header, "process_private_bytes"));
+    row.cadence_transient = AsDouble(
+        GetField(fields, header, "cadence_transient"));
 
     for (std::uint32_t fi = 0u; fi < 64u; ++fi) {
         const std::string prefix = "fan" + std::to_string(fi) + "_";

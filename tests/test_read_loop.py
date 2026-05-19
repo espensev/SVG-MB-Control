@@ -126,6 +126,9 @@ class ReadLoopTests(unittest.TestCase):
                 runtime_home=runtime_home,
                 poll_ms=100,
             )
+            config_payload = _read_json(config_path)
+            config_payload["csv_flush_interval_rows"] = 2
+            _write_json(config_path, config_payload)
             proc = _spawn_control(
                 ["--mode", "read-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=70.0),
@@ -162,6 +165,15 @@ class ReadLoopTests(unittest.TestCase):
             self.assertIsNotNone(manifest["session_stop"])
             self.assertEqual(manifest["rows_written"], manifest["row_count"])
             self.assertEqual(manifest["total_rows"], manifest["row_count"])
+            self.assertEqual(
+                manifest["writer"]["csv_flush_policy"],
+                "row_interval",
+            )
+            self.assertEqual(manifest["writer"]["csv_flush_interval_rows"], 2)
+            self.assertEqual(
+                manifest["writer"]["mirror_mode"],
+                "buffered_same_interval",
+            )
             self.assertTrue(Path(manifest["artifacts"]["csv_archive"]["path"]).is_file())
             self.assertTrue(Path(manifest["artifacts"]["csv_latest"]["path"]).is_file())
             self.assertEqual(

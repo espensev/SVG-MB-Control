@@ -126,9 +126,10 @@ void InsertTickRows(Database& db,
         "loop_work_duration_ms, loop_intended_interval_ms,"
         "loop_achieved_interval_ms, loop_slip_ms, loop_overrun,"
         "process_cpu_delta_ms, process_cpu_pct,"
-        "process_working_set_bytes, process_private_bytes"
+        "process_working_set_bytes, process_private_bytes,"
+        "cadence_transient"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,"
-        "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)");
+        "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)");
 
     Statement fan = db.Prepare(
         "INSERT INTO tick_fan_samples("
@@ -177,6 +178,7 @@ void InsertTickRows(Database& db,
         tick.BindOptionalDouble(29, row.process_cpu_pct);
         tick.BindOptionalInt(30, row.process_working_set_bytes);
         tick.BindOptionalInt(31, row.process_private_bytes);
+        tick.BindOptionalDouble(32, row.cadence_transient);
         tick.Step();
         tick.Reset();
 

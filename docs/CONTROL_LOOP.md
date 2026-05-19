@@ -28,6 +28,23 @@ Top-level config fields used by `control-loop`:
 - `cpu_temp_label`
 - non-empty `channels`
 
+Optional loop-level fields:
+
+- `poll_tick_floor_ms`: fastest tick interval the loop may use under thermal
+  transients. Defaults to `poll_tick_ms`, which disables adaptation (the loop
+  then behaves identically to a fixed `poll_tick_ms`). When set below
+  `poll_tick_ms` it must be `>= 25` and `<= poll_tick_ms`; the loop shortens
+  the interval toward this floor as CPU/GPU temperature slew rises and relaxes
+  it back toward `poll_tick_ms` at `cadence_relax_per_s`. See
+  `docs/adaptive-cadence-design-2026-05-19.md`.
+- `cadence_slew_start_c_per_s`: temperature slew (default `0.5`) below which
+  cadence does not tighten.
+- `cadence_slew_full_c_per_s`: temperature slew (default `3.0`) at or above
+  which cadence tightens fully. Must be greater than
+  `cadence_slew_start_c_per_s` when adaptation is enabled.
+- `cadence_relax_per_s`: rate the effective interval relaxes back toward
+  `poll_tick_ms`. Defaults to `(poll_tick_ms - poll_tick_floor_ms) / 3`.
+
 Each channel defines:
 
 - `channel`
@@ -84,8 +101,8 @@ evaluated in Horner form in the curve lookup path.
 1. Resolve config, runtime home, and runtime policy.
 2. Initialize the direct fan backend.
 3. On each tick, sample AMD, GPU, and fan telemetry in-process.
-4. Append the sampled row to the active CSV chunk and mirror it to the fixed
-   live CSV path.
+4. Append the sampled row to the active CSV chunk and refresh the fixed live
+   CSV mirror on the configured flush interval.
 5. Capture the baseline duty and mode for each configured channel.
 6. Blend temperatures according to `temp_blend`.
 7. Interpolate the configured curve and clamp with `min_duty_pct`.
@@ -137,11 +154,15 @@ timing fields per row:
 - `process_cpu_pct`
 - `process_working_set_bytes`
 - `process_private_bytes`
+- `cadence_transient`
 
-`loop_achieved_interval_ms` is measured between tick starts. The control loop
-uses fixed-start-period scheduling, so normal rows should land near
-`loop_intended_interval_ms`; overruns show up when work exceeds the requested
-period.
+`loop_achieved_interval_ms` is measured between tick starts. Each tick targets
+`loop_intended_interval_ms`: this equals `poll_tick_ms` when adaptive cadence
+is off (`poll_tick_floor_ms` absent or `== poll_tick_ms`), and otherwise the
+effective interval in `[poll_tick_floor_ms, poll_tick_ms]` derived from
+`cadence_transient` (a unitless `[0, 1]` slew score; `0` means no transient).
+`loop_slip_ms` and `loop_overrun` remain relative to the configured
+`poll_tick_ms`.
 
 The process CPU and memory fields are emitted in both `control_runtime.json` and
 the control-loop CSV so fast polling/write profiles can be watched for resource

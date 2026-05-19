@@ -15,6 +15,7 @@ Top-level config fields used by `read-loop`:
 - `staleness_threshold_ms`
 - `log_rotate_hours`
 - `log_retain_days`
+- `csv_flush_interval_rows`
 - `snapshot_path`
 - `runtime_policy_path`
 
@@ -40,8 +41,8 @@ that location.
 2. Resolve runtime policy, if configured.
 3. Initialize the direct fan backend.
 4. On each poll, sample AMD, GPU, and fan telemetry in-process.
-5. Append the sampled row to the active CSV chunk and mirror it to the fixed
-   live CSV path.
+5. Append the sampled row to the active CSV chunk and refresh the fixed live
+   CSV mirror on the configured flush interval.
 6. Publish `current_state.json` into the runtime home.
 7. Update `control_runtime.json` with poll counters, freshness, status, and the
    active log paths.
@@ -80,8 +81,8 @@ runtime and remain `0`. `process_id` is the active read-loop worker PID used by
 - `stale` flips to `true` once the time since the last successful refresh
   exceeds `staleness_threshold_ms`, or `poll_ms * 3` when no explicit threshold
   is configured.
-- Log chunk rotation and retention are controlled by `log_rotate_hours` and
-  `log_retain_days`.
+- Log chunk rotation, retention, and CSV flush cadence are controlled by
+  `log_rotate_hours`, `log_retain_days`, and `csv_flush_interval_rows`.
 - Poll-rate changes should wait for the cadence and timing characterization gate
   in `docs\MEASUREMENT_GATE.md`.
 

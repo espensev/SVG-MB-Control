@@ -96,6 +96,7 @@ distinguish an active loop from a stale status file. `restart_count` and
 - `loop_finished_wall_clock`
 - `loop_work_duration_ms`
 - `loop_intended_interval_ms`
+- `cadence_transient`
 - `loop_achieved_interval_ms`
 - `loop_slip_ms`
 - `loop_overrun`
@@ -266,8 +267,13 @@ shared event log under `runtime\logs\`.
   is surfaced in `control_runtime.json` as `event_log_path`.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
-`log_retain_days` in the control config. Runtime pruning removes old archive
-CSV chunks together with their matching archive manifest sidecar.
+`log_retain_days` in the control config. `csv_flush_interval_rows` controls
+how often the active CSV archive is flushed and how often pending rows are
+written to the fixed-path mirror; `1` preserves per-row mirror refreshes,
+while higher values batch mirror writes and disk flushes. Pending mirror rows
+are flushed again on rotation and shutdown. The runtime manifest records the
+active CSV flush policy and interval. Runtime pruning removes old archive CSV
+chunks together with their matching archive manifest sidecar.
 
 For offline cleanup, use `svg-mb-control analyze prune`. It defaults to
 dry-run, requires `--apply` for deletion, and only deletes old archive bundles

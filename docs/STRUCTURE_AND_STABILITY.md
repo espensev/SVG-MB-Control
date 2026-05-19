@@ -1,26 +1,27 @@
 # Structure and Stability Plan
 
-## Direction
+## Current Structure
 
 `SVG-MB-Control` should stay as one standalone runtime repo. The long-term
-stability improvement is not another repo split; it is a clearer internal module
-layout and a testable core library.
+stability improvement is not another repo split; it is the clearer internal
+module layout and testable core library now used by the build.
 
-Target layout:
+Current layout:
 
 ```text
 src/
-  app/        main, CLI parsing, mode dispatch
+  app/        thin executable entry, CLI parsing, mode dispatch
   control/    loop orchestration, channel evaluator, status model
   runtime/    runtime store, CSV logger, event log, JSON IO
   hardware/   AMD, GPU, SIO fan backends
   platform/   Windows timer, process metrics, HANDLE wrappers
   policy/     curves, blending, rate limits, demand smoothing
+  analyze/    run ingestion, pruning, reporting
 ```
 
-Add a `svg_mb_control_core` static library target. The existing
-`svg-mb-control.exe` target should become a thin app layer that links that
-library.
+`svg_mb_control_core` is the static library target for non-app implementation
+code. The `svg-mb-control.exe` target contains the executable entry point,
+app-mode dispatch, startup banners, resources, and links that core library.
 
 ## Why
 
@@ -39,6 +40,7 @@ A core library gives three stability benefits:
 
 `app/`
 
+- thin `wmain` wrapper,
 - command-line parsing,
 - config path selection,
 - mode dispatch,
@@ -88,18 +90,23 @@ A core library gives three stability benefits:
 
 ## Migration Order
 
-1. Finish behavior-preserving cleanup already in progress:
-   - remove dead JSON scanner helpers,
-   - add AMD PCI mutex RAII,
-   - expose live failure-state fields,
-   - add the run analyzer.
-2. Add `svg_mb_control_core` and move existing source files into the library
-   without changing behavior.
-3. Move files into responsibility directories in small batches.
-4. Extract pure channel evaluation and policy tests first.
-5. Split Python smoke tests by runtime mode after the core library exists.
-6. Separate build/package from live deploy/restart so local verification does
-   not implicitly stop the controller.
+Completed:
+
+1. Added `svg_mb_control_core` and moved non-app source files into the library.
+2. Kept `svg-mb-control.exe` as a thin target linking `svg_mb_control_core`.
+3. Moved implementation files into responsibility directories.
+4. Added a CTest target for core smoke coverage.
+5. Wired CTest into the release build before the Python hermetic suite.
+
+Remaining polish:
+
+1. Split `src/app/app_main.cpp` further if CLI parsing or mode dispatch grows.
+2. Convert includes to module-qualified paths only if the team wants stricter
+   include ownership; the current build keeps compatibility include roots.
+3. Split Python smoke tests by runtime mode if the single file becomes hard to
+   navigate.
+4. Separate build/package from live deploy/restart if local verification should
+   never stop the controller.
 
 ## Guardrails
 

@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     process_cpu_pct REAL,
     process_working_set_bytes INTEGER,
     process_private_bytes INTEGER,
+    cadence_transient REAL,
     PRIMARY KEY (run_id, tick_count)
 );
 

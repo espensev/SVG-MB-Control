@@ -22,7 +22,7 @@ USAGE
 OPTIONS
     -Architecture   Target architecture preset (default: x64)
     -KeepBuildDir   Keep the build/ directory after completion (default: removed)
-    -SkipTests      Skip python -m unittest discover tests -v
+    -SkipTests      Skip CTest and python -m unittest discover tests -v
     -NoStopProcesses
                     Do not stop running svg-mb-control processes before build
     -NoPublish      Build, package to dist/, and test, but do not update
@@ -234,6 +234,39 @@ function Invoke-External {
     if ($exitCode -ne 0) {
         throw "$FailureMessage (exit code: $exitCode)."
     }
+}
+
+function Resolve-CTestPath {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$CMakeExe)
+
+    $cmakeDir = Split-Path -Parent $CMakeExe
+    if ($cmakeDir) {
+        $candidate = Join-Path $cmakeDir 'ctest.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+
+    $command = Get-Command ctest.exe -ErrorAction SilentlyContinue
+    if ($command) {
+        return $command.Source
+    }
+
+    return $null
+}
+
+function Invoke-CMakeTests {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CTestExe,
+        [Parameter(Mandatory = $true)][string]$BuildDirectory
+    )
+
+    Invoke-External -FilePath $CTestExe -Arguments @(
+        '--test-dir', $BuildDirectory,
+        '--output-on-failure'
+    ) -FailureMessage 'CTest lane failed'
 }
 
 function Get-Sha256Hex {
@@ -884,6 +917,10 @@ try {
     if (-not $cmakeExe) {
         throw 'cmake not found in PATH or VCPKG_ROOT tools.'
     }
+    $ctestExe = Resolve-CTestPath -CMakeExe $cmakeExe
+    if (-not $ctestExe) {
+        throw 'ctest not found next to cmake or in PATH.'
+    }
 
     $ninjaExe = Resolve-ToolFromPathOrVcpkg -ToolName 'ninja.exe' -VcpkgRoot $vcpkgRoot
     if (-not $ninjaExe) {
@@ -906,6 +943,7 @@ try {
 
     Write-Host "cl.exe : $(Get-Command cl.exe | Select-Object -ExpandProperty Source)" -ForegroundColor Green
     Write-Host "cmake  : $cmakeExe" -ForegroundColor Green
+    Write-Host "ctest  : $ctestExe" -ForegroundColor Green
     Write-Host "ninja  : $ninjaExe" -ForegroundColor Green
     Write-Host "vcpkg  : $vcpkgRoot" -ForegroundColor Green
     Write-Host "triplet: $triplet" -ForegroundColor Green
@@ -1021,9 +1059,13 @@ try {
     Write-Host ("Main exe size  : {0:N0} bytes" -f (Get-Item -LiteralPath $distMainExe).Length)
 
     if ($SkipTests) {
-        Write-Host "`n[8/11] Hermetic tests skipped." -ForegroundColor DarkGray
+        Write-Host "`n[8/11] Tests skipped." -ForegroundColor DarkGray
     } else {
-        Write-Host "`n[8/11] Running hermetic tests..." -ForegroundColor Yellow
+        Write-Host "`n[8/11] Running CTest..." -ForegroundColor Yellow
+        Invoke-CMakeTests -CTestExe $ctestExe -BuildDirectory $BuildDir
+        Write-Host "CTest lane passed." -ForegroundColor Green
+
+        Write-Host "`n[8b/11] Running hermetic tests..." -ForegroundColor Yellow
         Invoke-HermeticTests -RepositoryRoot $RepoRoot -ControlExePath $builtMainExe
         $testsPassed = $true
         Write-Host "Hermetic test lane passed." -ForegroundColor Green
