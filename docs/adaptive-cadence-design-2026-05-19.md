@@ -95,6 +95,11 @@ available in the loop, take the max:
 
 `transient = max(slew_score, setpoint_motion_score)`.
 
+**Phase 2 status:** only `slew_score` is implemented. `setpoint_motion_score`
+is deferred to **Phase 2b** — its scale is undefined here (no config field, no
+constants) and all five tests below are slew-driven. Phase 2 therefore uses
+`transient = slew_score`.
+
 ### Why `low_band.signal` is excluded
 
 `context.low_band.signal` is
@@ -210,8 +215,14 @@ without hardware:
    `cadence_slew_full_c_per_s`, `cadence_relax_per_s`) with validation,
    default-inert (`F = P` when `poll_tick_floor_ms` is absent). Parsed and
    validated only, not yet consumed; no behaviour change.
-2. Land the `EffectiveTickIntervalMs` computation + `WaitForNextControlTick`
-   integration + `cadence_transient` field + tests 1–5.
+2. **Done (slew-only)** — `ComputeCadence` computes the slew score and
+   `E = round(P − transient * (P − F))` (instant tighten, slow relax at
+   `cadence_relax_per_s` via `MoveTowardRateLimited`), feeding
+   `WaitForNextControlTick`. `loop_intended_interval_ms` now carries the
+   effective interval and a new `cadence_transient` CSV/status field was
+   added (analyze DB schema bumped to v4). Tests 1–5 are hermetic in
+   `tests/test_control_loop.py`. The setpoint-motion term is deferred to
+   **Phase 2b** (scale undefined — see Transient score above).
 3. Real-hardware soak with `F` stepped down from `P` while watching
    `loop_overrun`/`loop_slip_ms`, to pick a safe `F` for this machine.
 4. Only then document a recommended non-default `F`.

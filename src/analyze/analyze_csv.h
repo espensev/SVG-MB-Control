@@ -71,6 +71,7 @@ struct ParsedTickRow {
     std::optional<double> process_cpu_pct;
     std::optional<std::int64_t> process_working_set_bytes;
     std::optional<std::int64_t> process_private_bytes;
+    std::optional<double> cadence_transient;
     std::vector<ParsedFanSample> fans;
     std::vector<ParsedChannelSample> channels;
 };

@@ -96,6 +96,7 @@ distinguish an active loop from a stale status file. `restart_count` and
 - `loop_finished_wall_clock`
 - `loop_work_duration_ms`
 - `loop_intended_interval_ms`
+- `cadence_transient`
 - `loop_achieved_interval_ms`
 - `loop_slip_ms`
 - `loop_overrun`

@@ -26,7 +26,7 @@ CSV_HEADER_PARTS = [
     "loop_work_duration_ms,loop_intended_interval_ms,loop_achieved_interval_ms,",
     "loop_slip_ms,loop_overrun,",
     "process_cpu_delta_ms,process_cpu_pct,",
-    "process_working_set_bytes,process_private_bytes,",
+    "process_working_set_bytes,process_private_bytes,cadence_transient,",
     # 2 channels
     "channel0_observed_temp_c,channel0_setpoint_pct,"
     "channel0_thermal_pressure_boost_pct,channel0_cpu_low_soak_boost_pct,"
@@ -65,7 +65,7 @@ def _write_fixture_csv(path: Path, session_start: str, ticks: int = 3) -> None:
             # loop
             str(tick), session_start, session_start,
             "10.0", "50", "50.0", "0.0", "false",
-            "0.0", "0.0", "33000000", "20000000",
+            "0.0", "0.0", "33000000", "20000000", "0.0",
             # channel0
             "60.000", "30.000", "0.000", "0.250",
             "primary_curve+cpu_low_soak", "first_write" if tick == 1 else "none",
@@ -339,7 +339,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "3")
+            self.assertEqual(schema[0], "4")
 
             run = _query_one(
                 db_path,
@@ -622,7 +622,7 @@ def _write_ramp_csv(path: Path, session_start: str, ticks: int = 30) -> None:
             # loop
             str(tick), wall, wall,
             "10.0", "50", "50.0", "0.0", "false",
-            "0.0", "0.0", "33000000", "20000000",
+            "0.0", "0.0", "33000000", "20000000", "0.0",
             # channel0 (total_writes cell carries the cumulative count)
             f"{cpu:.3f}", f"{ch0:.3f}", "0.000", "0.000",
             "primary_curve", first, str(tick), "true", "true",

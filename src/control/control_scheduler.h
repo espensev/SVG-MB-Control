@@ -51,6 +51,7 @@ void UpdateTimingResources(RuntimeControlLoopTimingState* timing,
 
 void WaitForNextControlTick(ControlRuntimeContext& context,
                             std::chrono::steady_clock::time_point tick_started,
+                            std::uint32_t effective_interval_ms,
                             const std::atomic<bool>& stop_flag);
 
 }  // namespace svg_mb_control

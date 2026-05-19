@@ -136,9 +136,10 @@ void UpdateTimingResources(RuntimeControlLoopTimingState* timing,
 
 void WaitForNextControlTick(ControlRuntimeContext& context,
                             std::chrono::steady_clock::time_point tick_started,
+                            std::uint32_t effective_interval_ms,
                             const std::atomic<bool>& stop_flag) {
     const auto next_tick_deadline =
-        tick_started + std::chrono::milliseconds(context.loop.poll_tick_ms);
+        tick_started + std::chrono::milliseconds(effective_interval_ms);
     if (std::chrono::steady_clock::now() >= next_tick_deadline) {
         return;  // loop work consumed the tick interval; do not wait
     }

@@ -44,6 +44,10 @@ struct RuntimeControlLoopTimingState {
     double process_cpu_pct = std::numeric_limits<double>::quiet_NaN();
     std::uint64_t process_working_set_bytes = 0u;
     std::uint64_t process_private_bytes = 0u;
+    // Upward-only adaptive cadence transient (Phase 2): the unitless [0,1]
+    // slew score that produced loop_intended_interval_ms this tick. 0 when
+    // adaptation is off or there is no transient.
+    double cadence_transient = 0.0;
 };
 
 struct RuntimeReadLoopLogState {

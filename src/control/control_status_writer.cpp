@@ -80,6 +80,8 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
         JsonNumberOrZero(timing.loop_work_duration_ms);
     payload["loop_intended_interval_ms"] =
         timing.loop_intended_interval_ms;
+    payload["cadence_transient"] =
+        JsonNumberOrZero(timing.cadence_transient);
     payload["loop_achieved_interval_ms"] =
         JsonNumberOrZero(timing.loop_achieved_interval_ms);
     payload["loop_slip_ms"] = JsonNumberOrZero(timing.loop_slip_ms);

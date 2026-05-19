@@ -65,10 +65,12 @@ class ControlLoopTests(unittest.TestCase):
                     "process_cpu_pct",
                     "process_working_set_bytes",
                     "process_private_bytes",
+                    "cadence_transient",
                 ]
                 for field in timing_fields:
                     self.assertIn(field, status)
                 self.assertEqual(status["loop_intended_interval_ms"], 50)
+                self.assertEqual(float(status["cadence_transient"]), 0.0)
                 self.assertGreaterEqual(status["loop_work_duration_ms"], 0)
                 self.assertGreaterEqual(status["loop_achieved_interval_ms"], 0)
                 self.assertIsInstance(status["loop_overrun"], bool)
@@ -86,6 +88,7 @@ class ControlLoopTests(unittest.TestCase):
                 for field in timing_fields:
                     self.assertIn(field, latest_row)
                 self.assertEqual(latest_row["loop_intended_interval_ms"], "50")
+                self.assertEqual(float(latest_row["cadence_transient"]), 0.0)
                 self.assertIn("channel0_thermal_pressure_boost_pct", latest_row)
                 self.assertIn("channel0_response_source", latest_row)
                 self.assertIn("channel0_write_reason", latest_row)
@@ -758,4 +761,181 @@ class ControlLoopTests(unittest.TestCase):
             events = _read_runtime_events(runtime_home)
             self.assertTrue(
                 any(item.get("event_type") == "control_loop.abort" for item in events)
+            )
+
+    # ---- Adaptive cadence Phase 2 (slew-only; design tests 1-5) ----
+
+    def _run_cadence_loop(
+        self,
+        td: Path,
+        *,
+        tctl_sequence: str,
+        poll_tick_ms: int = 200,
+        floor_ms: int | None = 50,
+        min_ticks: int = 30,
+        timeout_s: float = 20.0,
+        relax_per_s: float = 50.0,
+    ):
+        runtime_home = td / "runtime"
+        extra: dict[str, object] | None = None
+        if floor_ms is not None:
+            extra = {
+                "poll_tick_floor_ms": floor_ms,
+                "cadence_slew_start_c_per_s": 0.5,
+                "cadence_slew_full_c_per_s": 3.0,
+                "cadence_relax_per_s": relax_per_s,
+            }
+        config_path = _write_control_loop_config(
+            td,
+            runtime_home=runtime_home,
+            channel=0,
+            poll_tick_ms=poll_tick_ms,
+            write_cooldown_ms=poll_tick_ms,
+            deadband_pct=0.25,
+            control_hold_ms=0,
+            extra_loop_fields=extra,
+        )
+        proc = _spawn_control(
+            ["--mode", "control-loop", "--config", str(config_path)],
+            env={
+                **_sim_direct_env(channel=0, amd_temp_c=50.0),
+                "SVG_MB_CONTROL_SIM_AMD_TCTL_SEQUENCE_C": tctl_sequence,
+            },
+        )
+        try:
+            observed = _wait_for(
+                lambda: (_read_runtime_status(runtime_home) or {}).get(
+                    "loop_tick_count", 0
+                )
+                >= min_ticks,
+                timeout_s=timeout_s,
+            )
+            self.assertTrue(
+                observed, msg="control loop did not reach min_ticks"
+            )
+            status = _read_runtime_status(runtime_home)
+        finally:
+            if proc.poll() is None:
+                _stop_and_wait(proc)
+        self.assertIsNotNone(status)
+        rows = _read_runtime_csv_rows(Path(status["log_csv_path"]))
+        self.assertTrue(rows, msg="cadence CSV rows missing")
+        return runtime_home, status, rows
+
+    def test_cadence_steady_state_holds_p(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            _, _, rows = self._run_cadence_loop(
+                Path(td_str), tctl_sequence="62.0", min_ticks=25
+            )
+        intervals = [int(r["loop_intended_interval_ms"]) for r in rows]
+        self.assertTrue(
+            all(v == 200 for v in intervals),
+            msg=f"flat temp must hold P=200, got {sorted(set(intervals))}",
+        )
+        self.assertTrue(
+            all(float(r["cadence_transient"]) < 1e-6 for r in rows)
+        )
+
+    def test_cadence_tightens_under_ramp_within_bounds(self) -> None:
+        ramp = ",".join([f"{50 + 3 * i}" for i in range(25)] + ["95"] * 40)
+        with tempfile.TemporaryDirectory() as td_str:
+            _, _, rows = self._run_cadence_loop(
+                Path(td_str),
+                tctl_sequence=ramp,
+                min_ticks=40,
+                timeout_s=25.0,
+            )
+        intervals = [int(r["loop_intended_interval_ms"]) for r in rows]
+        self.assertLess(
+            min(intervals),
+            200,
+            msg=f"ramp should shorten interval, got {sorted(set(intervals))}",
+        )
+        self.assertGreaterEqual(
+            min(intervals), 50, msg="interval must not drop below F"
+        )
+        self.assertLessEqual(
+            max(intervals), 200, msg="interval must never exceed P"
+        )
+        self.assertGreater(
+            max(float(r["cadence_transient"]) for r in rows), 0.5
+        )
+
+    def test_cadence_relaxes_gradually_after_ramp(self) -> None:
+        ramp = ",".join([f"{50 + 4 * i}" for i in range(20)] + ["95"] * 80)
+        with tempfile.TemporaryDirectory() as td_str:
+            _, _, rows = self._run_cadence_loop(
+                Path(td_str),
+                tctl_sequence=ramp,
+                min_ticks=70,
+                timeout_s=30.0,
+                relax_per_s=40.0,
+            )
+        intervals = [int(r["loop_intended_interval_ms"]) for r in rows]
+        self.assertLess(
+            min(intervals), 150, msg="ramp should tighten cadence"
+        )
+        # Rate-limited relax produces intervals strictly between F and P
+        # rather than an instant F->P snap.
+        self.assertTrue(
+            any(50 < v < 200 for v in intervals),
+            msg=f"expected gradual relax intermediates, got {sorted(set(intervals))}",
+        )
+        self.assertGreater(
+            intervals[-1],
+            min(intervals),
+            msg="interval should recover after the transient ends",
+        )
+
+    def test_cadence_disabled_is_byte_identical(self) -> None:
+        ramp = ",".join([f"{50 + 5 * i}" for i in range(20)] + ["95"] * 30)
+        with tempfile.TemporaryDirectory() as td_str:
+            _, _, rows = self._run_cadence_loop(
+                Path(td_str),
+                tctl_sequence=ramp,
+                poll_tick_ms=200,
+                floor_ms=200,
+                min_ticks=30,
+                timeout_s=20.0,
+            )
+        intervals = [int(r["loop_intended_interval_ms"]) for r in rows]
+        self.assertTrue(
+            all(v == 200 for v in intervals),
+            msg=f"floor==P must pin interval to P, got {sorted(set(intervals))}",
+        )
+        self.assertTrue(
+            all(float(r["cadence_transient"]) == 0.0 for r in rows),
+            msg="disabled cadence must report zero transient",
+        )
+
+    def test_cadence_variable_run_ingests_under_schema_v4(self) -> None:
+        ramp = ",".join([f"{50 + 3 * i}" for i in range(25)] + ["95"] * 40)
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home, _, rows = self._run_cadence_loop(
+                td, tctl_sequence=ramp, min_ticks=40, timeout_s=25.0
+            )
+            intervals = [int(r["loop_intended_interval_ms"]) for r in rows]
+            self.assertGreater(
+                len(set(intervals)),
+                1,
+                msg="run should have produced variable cadence",
+            )
+            db_path = td / "out.db"
+            result = _run_control(
+                "analyze",
+                "ingest",
+                "--runtime-home",
+                str(runtime_home),
+                "--db",
+                str(db_path),
+                "--quiet",
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"{result.stdout}\n{result.stderr}",
+            )
+            self.assertTrue(
+                db_path.is_file() and db_path.stat().st_size > 0
             )

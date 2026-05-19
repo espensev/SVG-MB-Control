@@ -401,7 +401,8 @@ std::string BuildControlLoopCsvHeader() {
            << ",process_cpu_delta_ms"
            << ",process_cpu_pct"
            << ",process_working_set_bytes"
-           << ",process_private_bytes";
+           << ",process_private_bytes"
+           << ",cadence_transient";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
@@ -449,6 +450,8 @@ std::string BuildControlLoopCsvRow(
     AppendCsvDouble(csv, timing.process_cpu_pct);
     csv << ',' << timing.process_working_set_bytes
         << ',' << timing.process_private_bytes;
+    csv << ',';
+    AppendCsvDouble(csv, timing.cadence_transient);
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {

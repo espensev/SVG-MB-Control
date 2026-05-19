@@ -70,6 +70,84 @@ double MoveTowardRateLimited(double current,
     return current + (delta > 0.0 ? allowed : -allowed);
 }
 
+// Upward-only adaptive cadence (design: docs/adaptive-cadence-design-
+// 2026-05-19.md, Phase 2). Slew-only: the setpoint-motion transient term is
+// deferred to Phase 2b (its scale is undefined in the design). State carried
+// across ticks for the slew delta and the rate-limited effective interval.
+struct CadenceRuntimeState {
+    double prev_cpu_c = std::numeric_limits<double>::quiet_NaN();
+    double prev_gpu_c = std::numeric_limits<double>::quiet_NaN();
+    double effective_ms = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct CadenceTick {
+    std::uint32_t effective_interval_ms = 0u;
+    double transient = 0.0;
+};
+
+// Returns the effective interval E in [F, P] for the iteration just
+// completed and the unitless transient that produced it. F >= P (the default
+// when poll_tick_floor_ms is absent) pins E == P every tick, so the loop is
+// byte-identical to the pre-feature path.
+CadenceTick ComputeCadence(const ControlLoopConfig& cfg,
+                           const TempInputs& temp_inputs,
+                           double dt_ms,
+                           CadenceRuntimeState& state) {
+    const double P = static_cast<double>(cfg.poll_tick_ms);
+    const double F = static_cast<double>(cfg.poll_tick_floor_ms);
+
+    CadenceTick out;
+    if (F >= P) {
+        // Adaptation disabled (default-inert when poll_tick_floor_ms is
+        // absent): no transient, E == P, byte-identical to the pre-feature
+        // loop.
+        out.effective_interval_ms = cfg.poll_tick_ms;
+        return out;
+    }
+    if (std::isnan(state.effective_ms)) {
+        state.effective_ms = P;
+    }
+
+    const double dt_s = dt_ms / 1000.0;
+    if (std::isfinite(dt_ms) && dt_s > 0.0) {
+        double slew_c_per_s = 0.0;
+        if (temp_inputs.cpu_available && !std::isnan(state.prev_cpu_c)) {
+            slew_c_per_s = (std::max)(slew_c_per_s,
+                std::abs(temp_inputs.cpu_c - state.prev_cpu_c) / dt_s);
+        }
+        if (temp_inputs.gpu_available && !std::isnan(state.prev_gpu_c)) {
+            slew_c_per_s = (std::max)(slew_c_per_s,
+                std::abs(temp_inputs.gpu_c - state.prev_gpu_c) / dt_s);
+        }
+        out.transient = SmoothScale(slew_c_per_s,
+                                    cfg.cadence_slew_start_c_per_s,
+                                    cfg.cadence_slew_full_c_per_s);
+    }
+
+    // Carry this tick's temperatures for the next slew delta. NaN when a
+    // sensor is unavailable so a sampling gap cannot fabricate a slew.
+    state.prev_cpu_c = temp_inputs.cpu_available
+        ? temp_inputs.cpu_c : std::numeric_limits<double>::quiet_NaN();
+    state.prev_gpu_c = temp_inputs.gpu_available
+        ? temp_inputs.gpu_c : std::numeric_limits<double>::quiet_NaN();
+
+    const double target = std::round(P - out.transient * (P - F));
+    // Tighten (target below current) responds immediately; relax (target
+    // above current, decaying back toward P) is rate-limited to
+    // cadence_relax_per_s. MoveTowardRateLimited takes per-minute rates with
+    // dt in minutes.
+    const double dt_min = dt_s / 60.0;
+    constexpr double kInstantPerMin = 1.0e12;
+    state.effective_ms = MoveTowardRateLimited(
+        state.effective_ms, target, dt_min,
+        /*rise_per_min=*/cfg.cadence_relax_per_s * 60.0,  // up = slow relax
+        /*fall_per_min=*/kInstantPerMin);                 // down = instant
+    state.effective_ms = std::clamp(state.effective_ms, F, P);
+    out.effective_interval_ms =
+        static_cast<std::uint32_t>(std::lround(state.effective_ms));
+    return out;
+}
+
 void UpdateLowBandState(ControlRuntimeContext& context,
                         const TempInputs& temp_inputs,
                         const RuntimeSnapshot& runtime_snapshot,
@@ -691,6 +769,7 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     std::string last_successful_restore_iso;
     std::chrono::steady_clock::time_point previous_tick_start;
     bool have_previous_tick_start = false;
+    CadenceRuntimeState cadence_state;
     // Throttle snapshot-file writes: per-tick atomic rename is expensive on
     // Windows and the per-tick CSV row already records the same state. The
     // read-loop process publishes snapshot.json at full poll rate; the
@@ -876,12 +955,15 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         const auto tick_finished_wall = std::chrono::system_clock::now();
         const double work_duration_ms =
             DurationMilliseconds(tick_finished_steady - tick_started_steady);
+        const CadenceTick cadence = ComputeCadence(
+            context.loop, temp_inputs, achieved_interval_ms, cadence_state);
         RuntimeControlLoopTimingState tick_timing;
         tick_timing.loop_started_wall_clock = eval_iso;
         tick_timing.loop_finished_wall_clock =
             FormatLocalIso8601(tick_finished_wall);
         tick_timing.loop_work_duration_ms = work_duration_ms;
-        tick_timing.loop_intended_interval_ms = context.loop.poll_tick_ms;
+        tick_timing.loop_intended_interval_ms = cadence.effective_interval_ms;
+        tick_timing.cadence_transient = cadence.transient;
         tick_timing.loop_achieved_interval_ms = achieved_interval_ms;
         tick_timing.loop_slip_ms = std::isnan(achieved_interval_ms)
             ? std::numeric_limits<double>::quiet_NaN()
@@ -989,7 +1071,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                             event_log_path, last_successful_restore_iso);
         }
 
-        WaitForNextControlTick(context, tick_started_steady, stop_flag);
+        WaitForNextControlTick(context, tick_started_steady,
+                               cadence.effective_interval_ms, stop_flag);
     }
 
     // Shutdown: restore controlled channels back to their captured baseline.
