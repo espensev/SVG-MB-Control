@@ -66,8 +66,8 @@ namespace {
 constexpr const char* kVersion = SVG_MB_CONTROL_VERSION;
 constexpr const char* kGitHash = SVG_MB_CONTROL_GIT_HASH;
 
-svg_mb_control::ReadLoop* g_active_read_loop = nullptr;
-svg_mb_control::ControlLoop* g_active_control_loop = nullptr;
+std::atomic<svg_mb_control::ReadLoop*> g_active_read_loop{nullptr};
+std::atomic<svg_mb_control::ControlLoop*> g_active_control_loop{nullptr};
 std::atomic<bool> g_stop_signaled{false};
 
 BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
@@ -78,11 +78,11 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD ctrl_type) {
         case CTRL_LOGOFF_EVENT:
         case CTRL_SHUTDOWN_EVENT:
             g_stop_signaled.store(true);
-            if (g_active_read_loop != nullptr) {
-                g_active_read_loop->RequestStop();
+            if (auto* read_loop = g_active_read_loop.load()) {
+                read_loop->RequestStop();
             }
-            if (g_active_control_loop != nullptr) {
-                g_active_control_loop->RequestStop();
+            if (auto* control_loop = g_active_control_loop.load()) {
+                control_loop->RequestStop();
             }
             return TRUE;
         default:
@@ -124,11 +124,11 @@ private:
 class ActiveControlLoopScope {
 public:
     explicit ActiveControlLoopScope(svg_mb_control::ControlLoop& control_loop) {
-        g_active_control_loop = &control_loop;
+        g_active_control_loop.store(&control_loop);
         try {
             console_ctrl_.Install();
         } catch (...) {
-            g_active_control_loop = nullptr;
+            g_active_control_loop.store(nullptr);
             throw;
         }
     }
@@ -138,7 +138,7 @@ public:
 
     ~ActiveControlLoopScope() {
         console_ctrl_.Reset();
-        g_active_control_loop = nullptr;
+        g_active_control_loop.store(nullptr);
     }
 
 private:
@@ -148,11 +148,11 @@ private:
 class ActiveReadLoopScope {
 public:
     explicit ActiveReadLoopScope(svg_mb_control::ReadLoop& read_loop) {
-        g_active_read_loop = &read_loop;
+        g_active_read_loop.store(&read_loop);
         try {
             console_ctrl_.Install();
         } catch (...) {
-            g_active_read_loop = nullptr;
+            g_active_read_loop.store(nullptr);
             throw;
         }
     }
@@ -162,7 +162,7 @@ public:
 
     ~ActiveReadLoopScope() {
         console_ctrl_.Reset();
-        g_active_read_loop = nullptr;
+        g_active_read_loop.store(nullptr);
     }
 
 private:

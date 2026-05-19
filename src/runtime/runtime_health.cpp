@@ -362,19 +362,33 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
 int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
     const std::filesystem::path status_path = RuntimeStatusPath(runtime_home);
     std::optional<nlohmann::json> status;
+    std::string status_error;
     try {
         nlohmann::json payload = ReadJsonFile(status_path, "runtime status");
         if (payload.is_object()) {
             status = std::move(payload);
+        } else {
+            status_error = "status file is not a JSON object";
         }
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {
+        status_error = error.what();
     }
     if (!status.has_value()) {
-        std::cout << "svg-mb-control: not running\n"
+        std::error_code exists_ec;
+        const bool present =
+            std::filesystem::exists(status_path, exists_ec) && !exists_ec;
+        if (!present) {
+            std::cout << "svg-mb-control: not running\n"
+                      << "  runtime_home: " << runtime_home.string() << '\n'
+                      << "  status: " << status_path.string()
+                      << " (not found)\n";
+            return 0;
+        }
+        std::cerr << "svg-mb-control: status file present but unreadable\n"
                   << "  runtime_home: " << runtime_home.string() << '\n'
-                  << "  status: " << status_path.string()
-                  << " (not found)\n";
-        return 0;
+                  << "  status: " << status_path.string() << '\n'
+                  << "  error: " << status_error << '\n';
+        return 1;
     }
 
     const std::string mode = JsonStringOr(*status, "mode", "(unknown)");
