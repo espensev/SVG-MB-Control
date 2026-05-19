@@ -28,6 +28,21 @@ Top-level config fields used by `control-loop`:
 - `cpu_temp_label`
 - non-empty `channels`
 
+Optional loop-level fields:
+
+- `poll_tick_floor_ms`: fastest tick interval the loop may use. Defaults to
+  `poll_tick_ms`, which disables adaptation. When set below `poll_tick_ms` it
+  must be `>= 25` and `<= poll_tick_ms`. Parsed and validated; the adaptive
+  cadence computation that would consume it is not implemented yet (see
+  `docs/adaptive-cadence-design-2026-05-19.md`).
+- `cadence_slew_start_c_per_s`: temperature slew (default `0.5`) below which
+  cadence does not tighten.
+- `cadence_slew_full_c_per_s`: temperature slew (default `3.0`) at or above
+  which cadence tightens fully. Must be greater than
+  `cadence_slew_start_c_per_s` when adaptation is enabled.
+- `cadence_relax_per_s`: rate the effective interval relaxes back toward
+  `poll_tick_ms`. Defaults to `(poll_tick_ms - poll_tick_floor_ms) / 3`.
+
 Each channel defines:
 
 - `channel`

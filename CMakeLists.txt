@@ -5,6 +5,8 @@ string(STRIP "${SVG_MB_CONTROL_VERSION_RAW}" SVG_MB_CONTROL_VERSION)
 
 project(svg_mb_control VERSION ${SVG_MB_CONTROL_VERSION} LANGUAGES C CXX)
 
+include(CTest)
+
 set(SVG_MB_CONTROL_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 
 set(SVG_MB_CONTROL_NLOHMANN_JSON_INCLUDE_DIR
@@ -94,9 +96,76 @@ if(WIN32)
     )
 endif()
 
-add_executable(svg_mb_control
+set(SVG_MB_CONTROL_COMMON_DEFINITIONS
+    SVG_MB_CONTROL_VERSION="${PROJECT_VERSION}"
+    SVG_MB_CONTROL_GIT_HASH="${SVG_MB_CONTROL_GIT_HASH}"
+)
+
+set(SVG_MB_CONTROL_INCLUDE_DIRS
+    src
+    src/app
+    src/control
+    src/hardware
+    src/platform
+    src/policy
+    src/runtime
+)
+
+function(configure_svg_mb_control_target target_name)
+    target_include_directories(${target_name} PRIVATE
+        ${SVG_MB_CONTROL_INCLUDE_DIRS}
+    )
+    target_compile_features(${target_name} PRIVATE cxx_std_20)
+    target_precompile_headers(${target_name} PRIVATE src/pch.h)
+    target_compile_definitions(${target_name} PRIVATE
+        ${SVG_MB_CONTROL_COMMON_DEFINITIONS}
+    )
+
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE /W4 /permissive- /MP)
+    else()
+        target_compile_options(${target_name} PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+add_library(svg_mb_control_core STATIC
     src/pch.cpp
-    src/amd_reader.cpp
+    src/control/calibration.cpp
+    src/control/channel_evaluator.cpp
+    src/control/control_config.cpp
+    src/control/control_loop.cpp
+    src/control/control_loop_config.cpp
+    src/control/control_runtime_context.cpp
+    src/control/control_scheduler.cpp
+    src/control/control_status_writer.cpp
+    src/control/control_supervisor.cpp
+    src/control/low_band_evidence.cpp
+    src/hardware/amd_reader.cpp
+    src/hardware/fan_writer.cpp
+    src/hardware/gpu_reader.cpp
+    src/hardware/simulated_fan_writer.cpp
+    src/hardware/sio_fan_writer.cpp
+    src/platform/direct_runtime_snapshot.cpp
+    src/platform/env_util.cpp
+    src/platform/runtime_util.cpp
+    src/platform/service_probe.cpp
+    src/policy/control_policy.cpp
+    src/policy/runtime_write_policy.cpp
+    src/policy/write_orchestrator.cpp
+    src/runtime/csv_util.cpp
+    src/runtime/evidence_log.cpp
+    src/runtime/gpu_evidence_csv.cpp
+    src/runtime/json_io.cpp
+    src/runtime/pending_writes.cpp
+    src/runtime/read_loop.cpp
+    src/runtime/runtime_csv_archive.cpp
+    src/runtime/runtime_event_log.cpp
+    src/runtime/runtime_paths.cpp
+    src/runtime/runtime_health.cpp
+    src/runtime/runtime_csv_rows.cpp
+    src/runtime/runtime_lifecycle.cpp
+    src/runtime/runtime_snapshot.cpp
+    src/runtime/runtime_supervisor_state.cpp
     src/analyze/analyze_cli.cpp
     src/analyze/analyze_csv.cpp
     src/analyze/analyze_db.cpp
@@ -105,76 +174,49 @@ add_executable(svg_mb_control
     src/analyze/analyze_json_artifacts.cpp
     src/analyze/analyze_prune.cpp
     src/analyze/analyze_report.cpp
-    src/calibration.cpp
-    src/channel_evaluator.cpp
-    src/control_config.cpp
-    src/control_loop.cpp
-    src/control_loop_config.cpp
-    src/control_policy.cpp
-    src/control_runtime_context.cpp
-    src/control_scheduler.cpp
-    src/control_status_writer.cpp
-    src/control_supervisor.cpp
-    src/csv_util.cpp
-    src/direct_runtime_snapshot.cpp
-    src/env_util.cpp
-    src/evidence_log.cpp
-    src/fan_writer.cpp
-    src/gpu_evidence_csv.cpp
-    src/gpu_reader.cpp
-    src/json_io.cpp
-    src/low_band_evidence.cpp
-    src/main.cpp
-    src/pending_writes.cpp
-    src/read_loop.cpp
-    src/runtime_csv_archive.cpp
-    src/runtime_event_log.cpp
-    src/runtime_paths.cpp
-    src/runtime_health.cpp
-    src/runtime_csv_rows.cpp
-    src/runtime_lifecycle.cpp
-    src/runtime_snapshot.cpp
-    src/runtime_supervisor_state.cpp
-    src/runtime_util.cpp
-    src/runtime_write_policy.cpp
-    src/service_probe.cpp
-    src/simulated_fan_writer.cpp
-    src/sio_fan_writer.cpp
-    src/startup_banner.cpp
-    src/write_orchestrator.cpp
-    ${SVG_MB_CONTROL_RESOURCE_SOURCES}
 )
 
-target_link_libraries(svg_mb_control PRIVATE
-    svg_mb_sio::svg_mb_sio
+target_link_libraries(svg_mb_control_core PUBLIC
     nlohmann_json::nlohmann_json
+)
+
+target_link_libraries(svg_mb_control_core PRIVATE
+    svg_mb_sio::svg_mb_sio
     sqlite3::sqlite3
 )
 
 if(WIN32)
-    target_link_libraries(svg_mb_control PRIVATE psapi winmm)
+    target_link_libraries(svg_mb_control_core PRIVATE psapi winmm)
 endif()
 
 if(TARGET gpu_telemetry::gpu_telemetry)
-    target_link_libraries(svg_mb_control PRIVATE gpu_telemetry::gpu_telemetry)
-    target_compile_definitions(svg_mb_control PRIVATE SVG_MB_CONTROL_GPU_TELEMETRY_ENABLED=1)
+    target_link_libraries(svg_mb_control_core PRIVATE gpu_telemetry::gpu_telemetry)
+    target_compile_definitions(svg_mb_control_core PRIVATE SVG_MB_CONTROL_GPU_TELEMETRY_ENABLED=1)
 endif()
+
+configure_svg_mb_control_target(svg_mb_control_core)
+
+add_executable(svg_mb_control
+    src/app/app_main.cpp
+    src/app/startup_banner.cpp
+    src/main.cpp
+    ${SVG_MB_CONTROL_RESOURCE_SOURCES}
+)
+
+target_link_libraries(svg_mb_control PRIVATE svg_mb_control_core)
 
 set_target_properties(svg_mb_control PROPERTIES OUTPUT_NAME "svg-mb-control")
 
-target_include_directories(svg_mb_control PRIVATE src)
-target_compile_features(svg_mb_control PRIVATE cxx_std_20)
+configure_svg_mb_control_target(svg_mb_control)
 
-# Enable precompiled headers for faster builds
-target_precompile_headers(svg_mb_control PRIVATE src/pch.h)
-
-target_compile_definitions(svg_mb_control PRIVATE
-    SVG_MB_CONTROL_VERSION="${PROJECT_VERSION}"
-    SVG_MB_CONTROL_GIT_HASH="${SVG_MB_CONTROL_GIT_HASH}"
-)
-
-if(MSVC)
-    target_compile_options(svg_mb_control PRIVATE /W4 /permissive- /MP)
-else()
-    target_compile_options(svg_mb_control PRIVATE -Wall -Wextra -Wpedantic)
+if(BUILD_TESTING)
+    add_executable(svg_mb_control_core_tests
+        tests/cpp/core_smoke_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_core_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_core_tests)
+    add_test(NAME svg_mb_control_core_tests
+             COMMAND svg_mb_control_core_tests)
 endif()

@@ -260,6 +260,40 @@ void ValidateLowBandConfig(const LowBandControlConfig& cfg) {
     }
 }
 
+void ValidateCadenceConfig(const ControlLoopConfig& cfg) {
+    // poll_tick_floor_ms == poll_tick_ms means adaptation is off (the
+    // loader's default when the key is absent); skip the floor bounds so
+    // configs without cadence fields are unaffected.
+    if (cfg.poll_tick_floor_ms == cfg.poll_tick_ms) {
+        return;
+    }
+    if (cfg.poll_tick_floor_ms == 0u) {
+        throw std::runtime_error("poll_tick_floor_ms must be > 0");
+    }
+    if (cfg.poll_tick_floor_ms < 25u) {
+        throw std::runtime_error(
+            "poll_tick_floor_ms must be >= 25, got " +
+            std::to_string(cfg.poll_tick_floor_ms));
+    }
+    if (cfg.poll_tick_floor_ms > cfg.poll_tick_ms) {
+        throw std::runtime_error(
+            "poll_tick_floor_ms must be <= poll_tick_ms (cadence may only "
+            "tighten); got poll_tick_floor_ms=" +
+            std::to_string(cfg.poll_tick_floor_ms) +
+            " poll_tick_ms=" + std::to_string(cfg.poll_tick_ms));
+    }
+    ValidatePositive(cfg.cadence_slew_start_c_per_s,
+                     "cadence_slew_start_c_per_s");
+    ValidatePositive(cfg.cadence_slew_full_c_per_s,
+                     "cadence_slew_full_c_per_s");
+    if (cfg.cadence_slew_full_c_per_s <= cfg.cadence_slew_start_c_per_s) {
+        throw std::runtime_error(
+            "cadence_slew_full_c_per_s must be > "
+            "cadence_slew_start_c_per_s");
+    }
+    ValidatePositive(cfg.cadence_relax_per_s, "cadence_relax_per_s");
+}
+
 void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
                               const std::filesystem::path& config_path) {
     if (cfg.poll_tick_ms == 0u) {
@@ -272,6 +306,7 @@ void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
                     cfg.poll_tick_ms);
     }
 
+    ValidateCadenceConfig(cfg);
     ValidatePercentage(cfg.deadband_pct, "deadband_pct");
     ValidateLowBandConfig(cfg.low_band);
 
@@ -308,6 +343,21 @@ ControlLoopConfig LoadControlLoopConfig(
     cfg.deadband_pct = loop_json.value("deadband_pct", cfg.deadband_pct);
     cfg.control_hold_ms = loop_json.value("control_hold_ms", cfg.control_hold_ms);
     cfg.cpu_temp_label = loop_json.value("cpu_temp_label", cfg.cpu_temp_label);
+
+    // Upward-only adaptive cadence (Phase 1: parsed + validated, not yet
+    // consumed). An absent poll_tick_floor_ms defaults to poll_tick_ms, which
+    // disables adaptation; an absent cadence_relax_per_s derives (P - F) / 3.
+    cfg.poll_tick_floor_ms = loop_json.contains("poll_tick_floor_ms")
+        ? loop_json.value("poll_tick_floor_ms", cfg.poll_tick_ms)
+        : cfg.poll_tick_ms;
+    cfg.cadence_slew_start_c_per_s = loop_json.value(
+        "cadence_slew_start_c_per_s", cfg.cadence_slew_start_c_per_s);
+    cfg.cadence_slew_full_c_per_s = loop_json.value(
+        "cadence_slew_full_c_per_s", cfg.cadence_slew_full_c_per_s);
+    cfg.cadence_relax_per_s = loop_json.contains("cadence_relax_per_s")
+        ? loop_json.value("cadence_relax_per_s", 0.0)
+        : (static_cast<double>(cfg.poll_tick_ms) -
+           static_cast<double>(cfg.poll_tick_floor_ms)) / 3.0;
 
     if (loop_json.contains("low_band") && loop_json["low_band"].is_object()) {
         const auto& low_json = loop_json["low_band"];

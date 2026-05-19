@@ -88,6 +88,14 @@ struct ControlLoopConfig {
     double deadband_pct = 3.0;
     std::uint32_t control_hold_ms = 60000u;
     std::string cpu_temp_label = "Tctl/Tdie";
+    // Upward-only adaptive cadence (design: docs/adaptive-cadence-design-
+    // 2026-05-19.md). Phase 1: parsed and validated only, not yet consumed.
+    // poll_tick_floor_ms == poll_tick_ms disables adaptation; the loader sets
+    // it to poll_tick_ms when the key is absent (default-inert).
+    std::uint32_t poll_tick_floor_ms = 0u;
+    double cadence_slew_start_c_per_s = 0.5;
+    double cadence_slew_full_c_per_s = 3.0;
+    double cadence_relax_per_s = 0.0;
     LowBandControlConfig low_band;
     std::vector<ChannelControlConfig> channels;
 };

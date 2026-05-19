@@ -205,8 +205,11 @@ without hardware:
    now waits in bounded 50 ms slices with a dual-condition stop predicate
    (`stop_flag` or `RuntimeStopRequested`), so the deadline duration is the
    only thing cadence changes.
-1. Land config fields + validation, default-inert (`F = P`), no behaviour
-   change. Ships safely.
+1. **Done** — adaptive-cadence Phase 1 landed: additive loop-config fields
+   (`poll_tick_floor_ms`, `cadence_slew_start_c_per_s`,
+   `cadence_slew_full_c_per_s`, `cadence_relax_per_s`) with validation,
+   default-inert (`F = P` when `poll_tick_floor_ms` is absent). Parsed and
+   validated only, not yet consumed; no behaviour change.
 2. Land the `EffectiveTickIntervalMs` computation + `WaitForNextControlTick`
    integration + `cadence_transient` field + tests 1–5.
 3. Real-hardware soak with `F` stepped down from `P` while watching

@@ -529,6 +529,52 @@ class ControlLoopTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("empty channels array", result.stderr)
 
+    def test_control_loop_cadence_floor_above_tick_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=200,
+                extra_loop_fields={"poll_tick_floor_ms": 250},
+            )
+            result = _run_control(
+                "--mode",
+                "control-loop",
+                "--config",
+                str(config_path),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "poll_tick_floor_ms must be <= poll_tick_ms",
+                result.stderr,
+            )
+
+    def test_control_loop_cadence_floor_zero_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=200,
+                extra_loop_fields={"poll_tick_floor_ms": 0},
+            )
+            result = _run_control(
+                "--mode",
+                "control-loop",
+                "--config",
+                str(config_path),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "poll_tick_floor_ms must be > 0",
+                result.stderr,
+            )
+
     def test_control_loop_empty_channel_curve_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
