@@ -26,9 +26,12 @@ app-mode dispatch, startup banners, resources, and links that core library.
 ## Why
 
 The current repo has the right ownership boundary: one executable owns telemetry,
-policy, runtime state, writes, restore, and logs. The main structural risk is
-that implementation responsibilities are concentrated in large translation
-units, especially the control loop and smoke test file.
+policy, runtime state, writes, restore, and logs. The structural risk used to
+be that implementation responsibilities were concentrated in large translation
+units, especially the control loop. That has been addressed: `control_loop.cpp`
+is now a thin lifecycle wrapper, and the steady-state per-tick body, cadence
+score, low-band integrator, and channel-write decisions live in their own
+modules (see `control/` below).
 
 A core library gives three stability benefits:
 
@@ -49,12 +52,15 @@ A core library gives three stability benefits:
 
 `control/`
 
-- control-loop orchestration,
-- channel evaluation,
-- write decision model,
-- authority/reassert logic,
-- failure-state model,
-- control status publication shape.
+- control-loop lifecycle (`control_loop.cpp`: startup, shutdown, dispatch),
+- per-tick body (`tick_runner.cpp`: sampling, channel decisions, artifacts, wait),
+- channel evaluation (`channel_evaluator.cpp`: curve, smoothing, pressure terms),
+- channel-write gates (`channel_write.cpp`: deadband, cooldown, breaker, hold restore),
+- adaptive cadence (`cadence_score.cpp`: slew score, effective tick interval),
+- low-band integrator (`low_band_integrator.cpp`: signal, debt, stage activation),
+- control status publication shape (`control_status_writer.cpp`),
+- supervisor and run-mode dispatch (`control_supervisor.cpp`),
+- config loading and validation (`control_loop_config.cpp`, `control_config.cpp`).
 
 `runtime/`
 
@@ -97,6 +103,10 @@ Completed:
 3. Moved implementation files into responsibility directories.
 4. Added a CTest target for core smoke coverage.
 5. Wired CTest into the release build before the Python hermetic suite.
+6. Split `control_loop.cpp` (was 1116 lines) into focused modules:
+   `cadence_score`, `low_band_integrator`, `channel_write`, and
+   `tick_runner`. The residual `control_loop.cpp` (~283 lines) holds only
+   the `ControlLoop` public surface and startup/shutdown choreography.
 
 Remaining polish:
 
