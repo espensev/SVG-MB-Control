@@ -12,7 +12,7 @@ struct sqlite3_stmt;
 
 namespace svg_mb_control::analyze {
 
-constexpr int kSchemaVersion = 4;
+constexpr int kSchemaVersion = 5;
 
 class SqliteError : public std::runtime_error {
   public:

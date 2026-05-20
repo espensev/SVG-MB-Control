@@ -141,10 +141,11 @@ void InsertTickRows(Database& db,
     Statement ch = db.Prepare(
         "INSERT INTO tick_channel_samples("
         "run_id, tick_count, channel, observed_temp_c, setpoint_pct,"
-        "thermal_pressure_boost_pct, cpu_low_soak_boost_pct,"
+        "thermal_pressure_boost_pct, midband_pressure_boost_pct,"
+        "gpu_airflow_boost_pct, cpu_low_soak_boost_pct,"
         "response_source, write_reason, total_writes, write_active,"
         "baseline_captured, feedforward_pct, correction_pct"
-        ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
+        ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)");
 
     for (const auto& row : rows) {
         tick.BindInt(1, run_id);
@@ -209,14 +210,16 @@ void InsertTickRows(Database& db,
             ch.BindOptionalDouble(4, c.observed_temp_c);
             ch.BindOptionalDouble(5, c.setpoint_pct);
             ch.BindOptionalDouble(6, c.thermal_pressure_boost_pct);
-            ch.BindOptionalDouble(7, c.cpu_low_soak_boost_pct);
-            ch.BindOptionalText(8, c.response_source);
-            ch.BindOptionalText(9, c.write_reason);
-            ch.BindOptionalInt(10, c.total_writes);
-            ch.BindOptionalInt(11, c.write_active);
-            ch.BindOptionalInt(12, c.baseline_captured);
-            ch.BindOptionalDouble(13, c.feedforward_pct);
-            ch.BindOptionalDouble(14, c.correction_pct);
+            ch.BindOptionalDouble(7, c.midband_pressure_boost_pct);
+            ch.BindOptionalDouble(8, c.gpu_airflow_boost_pct);
+            ch.BindOptionalDouble(9, c.cpu_low_soak_boost_pct);
+            ch.BindOptionalText(10, c.response_source);
+            ch.BindOptionalText(11, c.write_reason);
+            ch.BindOptionalInt(12, c.total_writes);
+            ch.BindOptionalInt(13, c.write_active);
+            ch.BindOptionalInt(14, c.baseline_captured);
+            ch.BindOptionalDouble(15, c.feedforward_pct);
+            ch.BindOptionalDouble(16, c.correction_pct);
             ch.Step();
             ch.Reset();
         }

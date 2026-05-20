@@ -38,6 +38,8 @@ struct ChannelStats {
     std::vector<double> duty_pct;
     std::vector<double> rpm;
     double max_thermal_pressure_boost_pct = 0.0;
+    double max_midband_pressure_boost_pct = 0.0;
+    double max_gpu_airflow_boost_pct = 0.0;
     double max_cpu_low_soak_boost_pct = 0.0;
     std::optional<std::int64_t> total_writes_min;
     std::optional<std::int64_t> total_writes_max;
@@ -322,8 +324,9 @@ int RunAnalyzeReport(const ReportOptions& options) {
     try {
         Statement stmt = db.Prepare(
             "SELECT tick_count, channel, setpoint_pct, "
-            "thermal_pressure_boost_pct, cpu_low_soak_boost_pct, "
-            "total_writes FROM tick_channel_samples WHERE run_id = ?1 "
+            "thermal_pressure_boost_pct, midband_pressure_boost_pct, "
+            "gpu_airflow_boost_pct, cpu_low_soak_boost_pct, total_writes "
+            "FROM tick_channel_samples WHERE run_id = ?1 "
             "ORDER BY channel ASC, tick_count ASC");
         stmt.BindInt(1, run_id);
         while (stmt.Step()) {
@@ -331,8 +334,10 @@ int RunAnalyzeReport(const ReportOptions& options) {
             ChannelStats& cs = channels[channel];
             auto setpoint = ColumnOptionalDouble(stmt, 2);
             auto tp = ColumnOptionalDouble(stmt, 3);
-            auto soak = ColumnOptionalDouble(stmt, 4);
-            auto writes = ColumnOptionalInt(stmt, 5);
+            auto mid = ColumnOptionalDouble(stmt, 4);
+            auto gpu = ColumnOptionalDouble(stmt, 5);
+            auto soak = ColumnOptionalDouble(stmt, 6);
+            auto writes = ColumnOptionalInt(stmt, 7);
             if (setpoint) {
                 cs.setpoint_pct.push_back(*setpoint);
                 if (cs.last_setpoint) {
@@ -351,6 +356,14 @@ int RunAnalyzeReport(const ReportOptions& options) {
             if (tp) {
                 cs.max_thermal_pressure_boost_pct =
                     std::max(cs.max_thermal_pressure_boost_pct, *tp);
+            }
+            if (mid) {
+                cs.max_midband_pressure_boost_pct =
+                    std::max(cs.max_midband_pressure_boost_pct, *mid);
+            }
+            if (gpu) {
+                cs.max_gpu_airflow_boost_pct =
+                    std::max(cs.max_gpu_airflow_boost_pct, *gpu);
             }
             if (soak) {
                 cs.max_cpu_low_soak_boost_pct =
@@ -572,6 +585,10 @@ int RunAnalyzeReport(const ReportOptions& options) {
                   {"max", OptToJson(Percentile(cs.rpm, 100.0))}}},
                 {"max_thermal_pressure_boost_pct",
                  cs.max_thermal_pressure_boost_pct},
+                {"max_midband_pressure_boost_pct",
+                 cs.max_midband_pressure_boost_pct},
+                {"max_gpu_airflow_boost_pct",
+                 cs.max_gpu_airflow_boost_pct},
                 {"max_cpu_low_soak_boost_pct",
                  cs.max_cpu_low_soak_boost_pct},
                 {"writes", writes},
@@ -638,6 +655,10 @@ int RunAnalyzeReport(const ReportOptions& options) {
            << " max=" << OptToText(Percentile(cs.rpm, 100.0)) << '\n';
         os << "       thermal_pressure_boost_pct max="
            << cs.max_thermal_pressure_boost_pct
+           << "  midband_pressure_boost_pct max="
+           << cs.max_midband_pressure_boost_pct
+           << "  gpu_airflow_boost_pct max="
+           << cs.max_gpu_airflow_boost_pct
            << "  cpu_low_soak_boost_pct max="
            << cs.max_cpu_low_soak_boost_pct << "  writes=" << writes
            << "  reversals=" << cs.reversals

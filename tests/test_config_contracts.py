@@ -166,6 +166,76 @@ class ConfigContractTests(unittest.TestCase):
                     channel["thermal_pressure_fall_pct_per_sec"],
                 )
 
+    def test_shipped_lanes_include_midband_and_gpu_airflow(self) -> None:
+        midband_keys = {
+            "midband_pressure_start_c",
+            "midband_pressure_full_c",
+            "midband_pressure_rise_pct_per_sec",
+            "midband_pressure_fall_pct_per_sec",
+            "midband_pressure_max_boost_pct",
+        }
+        gpu_keys = {
+            "gpu_airflow_start_c",
+            "gpu_airflow_full_c",
+            "gpu_airflow_rise_pct_per_sec",
+            "gpu_airflow_fall_pct_per_sec",
+            "gpu_airflow_max_boost_pct",
+        }
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            loop = payload["control_loop"]
+            cap = loop.get("low_band_residual_cap_pct")
+            self.assertIsNotNone(
+                cap,
+                msg=f"{rel_path} missing low_band_residual_cap_pct",
+            )
+            self.assertGreater(cap, 0.0)
+            self.assertLessEqual(
+                cap,
+                2.0,
+                msg=f"{rel_path} low-band must stay a small residual",
+            )
+            for channel in loop["channels"]:
+                cid = channel["channel"]
+                self.assertEqual(
+                    sorted(midband_keys.difference(channel)),
+                    [],
+                    msg=f"{rel_path} channel {cid} missing midband keys",
+                )
+                self.assertEqual(
+                    sorted(gpu_keys.difference(channel)),
+                    [],
+                    msg=f"{rel_path} channel {cid} missing gpu_airflow keys",
+                )
+                # Mid-band must engage below the high-temperature
+                # thermal-pressure stage (<= 86.5 C elsewhere) and hand off
+                # to it.
+                self.assertLessEqual(
+                    channel["midband_pressure_start_c"], 70.0
+                )
+                self.assertGreater(
+                    channel["midband_pressure_full_c"],
+                    channel["midband_pressure_start_c"],
+                )
+                self.assertLessEqual(
+                    channel["midband_pressure_max_boost_pct"], 20.0
+                )
+                # GPU airflow must start early (tight-band intent) but above
+                # true idle.
+                self.assertLessEqual(channel["gpu_airflow_start_c"], 64.0)
+                self.assertGreaterEqual(channel["gpu_airflow_start_c"], 55.0)
+                self.assertGreater(
+                    channel["gpu_airflow_full_c"],
+                    channel["gpu_airflow_start_c"],
+                )
+                self.assertLessEqual(
+                    channel["gpu_airflow_max_boost_pct"], 20.0
+                )
+
     def test_shipped_radiator_lanes_include_cpu_low_soak(self) -> None:
         required = {
             "cpu_low_soak_start_c",

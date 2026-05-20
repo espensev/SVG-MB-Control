@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS tick_channel_samples (
     observed_temp_c REAL,
     setpoint_pct REAL,
     thermal_pressure_boost_pct REAL,
+    midband_pressure_boost_pct REAL,
+    gpu_airflow_boost_pct REAL,
     cpu_low_soak_boost_pct REAL,
     response_source TEXT,
     write_reason TEXT,
@@ -540,6 +542,21 @@ void MigrateSchema(Database& db) {
         if (version < 3) {
             SetSchemaVersion(db, 3);
         }
+    }
+    if (version <= 4) {
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "midband_pressure_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN midband_pressure_boost_pct REAL");
+        }
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "gpu_airflow_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN gpu_airflow_boost_pct REAL");
+        }
+        SetSchemaVersion(db, 5);
     }
 }
 

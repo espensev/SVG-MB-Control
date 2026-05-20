@@ -285,6 +285,32 @@ function column(rows, name) {
   return rows.map((row) => maybeNumber(row[name])).filter((value) => value !== null);
 }
 
+function channelResponseBoost(row, channel) {
+  const names = [
+    `channel${channel}_thermal_pressure_boost_pct`,
+    `channel${channel}_midband_pressure_boost_pct`,
+    `channel${channel}_gpu_airflow_boost_pct`,
+    `channel${channel}_cpu_low_soak_boost_pct`,
+  ];
+  let total = 0;
+  let seen = false;
+  names.forEach((name) => {
+    const value = maybeNumber(row[name]);
+    if (value !== null) {
+      total += value;
+      seen = true;
+    }
+  });
+  const effectiveLowBand = maybeNumber(row[`channel${channel}_low_band_effective_boost_pct`]);
+  const rawLowBand = maybeNumber(row[`channel${channel}_low_band_stage_boost_pct`]);
+  const lowBand = effectiveLowBand !== null ? effectiveLowBand : rawLowBand;
+  if (lowBand !== null) {
+    total += lowBand;
+    seen = true;
+  }
+  return seen ? total : null;
+}
+
 function eventCounts(events) {
   const counts = new Map();
   events.forEach((event) => {
@@ -300,7 +326,7 @@ function eventCounts(events) {
  * A fan controller is a disturbance regulator: the configured curve is a static
  * reference manifold, feedforward_pct is that curve at the live temperature
  * (instantaneous demand), and setpoint_pct is what the dynamic layer (EWMA
- * smoothing + decay-latch + thermal-pressure boost + slew limit) delivered.
+ * smoothing + decay-latch + response boosts + slew limit) delivered.
  * correction_pct = setpoint - feedforward is the whole dynamic signature.
  * ------------------------------------------------------------------------- */
 
@@ -826,7 +852,10 @@ function channelGrids(rows, elapsed, ch, grid) {
     ff: pick(`channel${ch}_feedforward_pct`),
     sp: pick(`channel${ch}_setpoint_pct`),
     temp: pick(`channel${ch}_observed_temp_c`),
-    boost: pick(`channel${ch}_thermal_pressure_boost_pct`),
+    boost: resampleToGrid(
+      finitePairs(xs, rows.map((r) => channelResponseBoost(r, ch))),
+      grid,
+    ),
     fan: pick(`fan${ch}_rpm`),
   };
 }
@@ -883,7 +912,7 @@ function channelQuality(rows, elapsed, ch, grid, dtSec, durationMin) {
   let boostOn = 0;
   let boostTot = 0;
   for (const r of rows) {
-    const b = maybeNumber(r[`channel${ch}_thermal_pressure_boost_pct`]);
+    const b = channelResponseBoost(r, ch);
     if (b !== null) {
       boostTot += 1;
       if (b > 0.01) {
@@ -1117,6 +1146,11 @@ function snapshotToRow(rt, st, intervalMs) {
       row[`channel${ch}_smoothed_pct`] = num(c.last_smoothed_demand_pct);
       row[`channel${ch}_setpoint_pct`] = num(c.last_setpoint_pct);
       row[`channel${ch}_thermal_pressure_boost_pct`] = num(c.last_thermal_pressure_boost_pct);
+      row[`channel${ch}_midband_pressure_boost_pct`] = num(c.last_midband_pressure_boost_pct);
+      row[`channel${ch}_gpu_airflow_boost_pct`] = num(c.last_gpu_airflow_boost_pct);
+      row[`channel${ch}_cpu_low_soak_boost_pct`] = num(c.last_cpu_low_soak_boost_pct);
+      row[`channel${ch}_low_band_stage_boost_pct`] = num(c.last_low_band_stage_boost_pct);
+      row[`channel${ch}_low_band_effective_boost_pct`] = num(c.last_low_band_effective_boost_pct);
       row[`channel${ch}_total_writes`] = num(c.total_writes);
       row[`channel${ch}_sensor_failed`] = c.sensor_failed ? "true" : "false";
       row[`channel${ch}_circuit_breaker_open`] = c.circuit_breaker_open ? "true" : "false";
@@ -1196,7 +1230,9 @@ function computeModel(rows, events, opts) {
   const channels = detectChannels(rows);
   const channelSummaries = channels.map((channel) => {
     const setpoints = column(rows, `channel${channel}_setpoint_pct`);
-    const boosts = column(rows, `channel${channel}_thermal_pressure_boost_pct`);
+    const boosts = rows
+      .map((row) => channelResponseBoost(row, channel))
+      .filter((value) => value !== null);
     const writes = column(rows, `channel${channel}_total_writes`);
     const writeDelta = writes.length
       ? Math.max(0, Math.max(...writes) - Math.min(...writes))

@@ -9,3 +9,9 @@
 
 - Keep the repo standalone. Runtime behavior must not depend on sibling repos.
 - Do not reintroduce external bridge code paths or subprocess adapters.
+
+## Documentation Maintenance
+
+- Keep `docs\CONTROL_PIPELINE_MATH.md` updated with control-computation changes
+  and with real-data validation notes when runtime CSV/status evidence changes
+  the maintained control identities.

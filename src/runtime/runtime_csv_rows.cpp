@@ -27,48 +27,47 @@ double FindMaxCpuTemperature(const RuntimeSnapshot& snapshot) {
     return max_temp;
 }
 
-const RuntimeControlChannelLogState* FindChannelState(
-    const std::vector<RuntimeControlChannelLogState>& channels,
-    std::uint32_t channel) {
-    for (const auto& entry : channels) {
-        if (entry.channel == channel) {
+// Generic linear lookup used by the per-tick row builder. Member-pointer
+// based so the four typed Find* wrappers below collapse to a one-liner
+// each and stay strongly typed for the caller.
+template <class T, class Key>
+const T* FindByKey(const std::vector<T>& items,
+                   Key T::*member,
+                   Key key) {
+    for (const auto& entry : items) {
+        if (entry.*member == key) {
             return &entry;
         }
     }
     return nullptr;
+}
+
+const RuntimeControlChannelLogState* FindChannelState(
+    const std::vector<RuntimeControlChannelLogState>& channels,
+    std::uint32_t channel) {
+    return FindByKey(channels,
+                     &RuntimeControlChannelLogState::channel, channel);
 }
 
 const RuntimeSioVoltageLogState* FindSioVoltageState(
     const std::vector<RuntimeSioVoltageLogState>& voltages,
     std::uint32_t index) {
-    for (const auto& entry : voltages) {
-        if (entry.index == index) {
-            return &entry;
-        }
-    }
-    return nullptr;
+    return FindByKey(voltages,
+                     &RuntimeSioVoltageLogState::index, index);
 }
 
 const RuntimeFanTachEvidenceLogState* FindFanTachEvidenceState(
     const std::vector<RuntimeFanTachEvidenceLogState>& fans,
     std::uint32_t channel) {
-    for (const auto& entry : fans) {
-        if (entry.channel == channel) {
-            return &entry;
-        }
-    }
-    return nullptr;
+    return FindByKey(fans,
+                     &RuntimeFanTachEvidenceLogState::channel, channel);
 }
 
 const RuntimeSioTemperatureLogState* FindSioTemperatureState(
     const std::vector<RuntimeSioTemperatureLogState>& temperatures,
     std::uint32_t index) {
-    for (const auto& entry : temperatures) {
-        if (entry.index == index) {
-            return &entry;
-        }
-    }
-    return nullptr;
+    return FindByKey(temperatures,
+                     &RuntimeSioTemperatureLogState::index, index);
 }
 
 // Fills `out` with "label=temp | label=temp | ..." using fixed 3-decimal
@@ -409,8 +408,11 @@ std::string BuildControlLoopCsvHeader() {
         header << ",channel" << channel << "_observed_temp_c"
                << ",channel" << channel << "_setpoint_pct"
                << ",channel" << channel << "_thermal_pressure_boost_pct"
+               << ",channel" << channel << "_midband_pressure_boost_pct"
+               << ",channel" << channel << "_gpu_airflow_boost_pct"
                << ",channel" << channel << "_cpu_low_soak_boost_pct"
                << ",channel" << channel << "_low_band_stage_boost_pct"
+               << ",channel" << channel << "_low_band_effective_boost_pct"
                << ",channel" << channel << "_low_band_debt"
                << ",channel" << channel << "_low_band_signal"
                << ",channel" << channel << "_low_band_stage_active"
@@ -471,11 +473,23 @@ std::string BuildControlLoopCsvRow(
         }
         csv << ',';
         if (state != nullptr) {
+            AppendCsvDouble(csv, state->midband_pressure_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->gpu_airflow_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
             AppendCsvDouble(csv, state->cpu_low_soak_boost_pct);
         }
         csv << ',';
         if (state != nullptr) {
             AppendCsvDouble(csv, state->low_band_stage_boost_pct);
+        }
+        csv << ',';
+        if (state != nullptr) {
+            AppendCsvDouble(csv, state->low_band_effective_boost_pct);
         }
         csv << ',';
         if (state != nullptr) {

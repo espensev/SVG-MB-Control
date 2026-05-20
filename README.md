@@ -347,13 +347,14 @@ Field notes:
   can distinguish primary curve demand, CPU override, thermal pressure, first
   writes, setpoint deltas, and authority reasserts.
 - Channels `1`, `4`, and `5` also include a small CPU low/mid soak lane. It
-  starts at `62 C`, fills by `71 C`, and is capped at `2-2.5%` to give sustained
+  starts at `72 C`, fills by `82 C`, releases at `68 C`, and is capped at
+  `0.3%` to give sustained
   common CPU work a slow airflow nudge without lowering the fast CPU override.
 - The packaged live runtime policy keeps Channel `6` blocked.
-- The packaged control loop uses a fast-step `50 ms` tick and `50 ms` write
-  cooldown so normal movement can be written as small intermediate PWM steps.
-  Runtime status and CSV logs include process CPU and memory fields for watching
-  the cost of this profile.
+- The packaged control loop currently uses a `250 ms` tick and `250 ms` write
+  cooldown with sub-one-percent step caps so normal movement can still be
+  written as small intermediate PWM steps. Runtime status and CSV logs include
+  process CPU and memory fields for watching the cost of this profile.
 - `log_rotate_hours` controls CSV chunk rotation under `runtime\logs\archive\`.
 - `log_retain_days` controls archive pruning for rotated CSV chunks.
 - `evidence_gpu_sample_mode` controls the GPU tier used only by foreground
@@ -418,6 +419,7 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 
 - `docs\MEASUREMENT_GATE.md`
 - `docs\CONTROL_LOOP.md`
+- `docs\CONTROL_PIPELINE_MATH.md`
 - `docs\READ_LOOP.md`
 - `docs\WRITE_ORCHESTRATION.md`
 - `docs\RUNTIME_HOME.md`
@@ -427,8 +429,10 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 - `docs\response-evaluation-tuning-plan.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
-`docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow. The
-old packaged `200 ms` gate has been superseded by the current measured `50 ms`
-control/write profile; faster cadence, new live channels, or broader controller
-strategy changes still require fresh measurement evidence before changing
-defaults.
+`docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow.
+Use `docs\CONTROL_PIPELINE_MATH.md` as the maintained numerical reference for
+curve lookup, smoothing, boost composition, low-band behavior, cadence scoring,
+and CSV/status identities. The current shipped configs assert a `250 ms`
+control/write profile; lowering cadence, enabling an adaptive floor below that
+profile, adding live channels, or broader controller strategy changes still
+require fresh measurement evidence before changing defaults.

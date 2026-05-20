@@ -42,6 +42,35 @@ struct ChannelControlConfig {
         std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_max_boost_pct =
         std::numeric_limits<double>::quiet_NaN();
+    // Mid-band pressure stage. Same smootherstep boost shape as thermal
+    // pressure but configured for the ~64-84 C band so a rising-temperature
+    // high-load segment gets a proportional upward response before the
+    // high-temperature thermal-pressure stage (>=84 C) engages. Any field set
+    // requires start_c and full_c; absent (NaN) leaves the term inert.
+    double midband_pressure_start_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double midband_pressure_full_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double midband_pressure_rise_pct_per_sec =
+        std::numeric_limits<double>::quiet_NaN();
+    double midband_pressure_fall_pct_per_sec =
+        std::numeric_limits<double>::quiet_NaN();
+    double midband_pressure_max_boost_pct =
+        std::numeric_limits<double>::quiet_NaN();
+    // GPU early-airflow boost. Driven by the GPU control envelope
+    // (max core/memjn/hotspot) independent of temp_blend, so even cpu_only
+    // lanes can start airflow when the GPU warms. Same smootherstep shape;
+    // absent (NaN) leaves the term inert.
+    double gpu_airflow_start_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double gpu_airflow_full_c =
+        std::numeric_limits<double>::quiet_NaN();
+    double gpu_airflow_rise_pct_per_sec =
+        std::numeric_limits<double>::quiet_NaN();
+    double gpu_airflow_fall_pct_per_sec =
+        std::numeric_limits<double>::quiet_NaN();
+    double gpu_airflow_max_boost_pct =
+        std::numeric_limits<double>::quiet_NaN();
     double cpu_low_soak_start_c =
         std::numeric_limits<double>::quiet_NaN();
     double cpu_low_soak_full_c =
@@ -96,6 +125,13 @@ struct ControlLoopConfig {
     double cadence_slew_start_c_per_s = 0.5;
     double cadence_slew_full_c_per_s = 3.0;
     double cadence_relax_per_s = 0.0;
+    // Low-band is second priority: its per-channel stage boost contribution to
+    // the final setpoint is hard-capped at this many percent, and global debt
+    // accrual is frozen while a primary response (mid-band pressure, GPU
+    // airflow, or thermal pressure) is active. NaN/absent disables the extra
+    // cap, preserving the pre-feature behavior for configs that omit the key.
+    double low_band_residual_cap_pct =
+        std::numeric_limits<double>::quiet_NaN();
     LowBandControlConfig low_band;
     std::vector<ChannelControlConfig> channels;
 };

@@ -30,8 +30,11 @@ struct ChannelState {
     double last_raw_demand_pct = std::numeric_limits<double>::quiet_NaN();
     double smoothed_demand_pct = std::numeric_limits<double>::quiet_NaN();
     double thermal_pressure_boost_pct = 0.0;
+    double midband_pressure_boost_pct = 0.0;
+    double gpu_airflow_boost_pct = 0.0;
     double cpu_low_soak_boost_pct = 0.0;
     double low_band_stage_boost_pct = 0.0;
+    double low_band_effective_boost_pct = 0.0;
     double low_band_debt_snapshot = 0.0;
     double low_band_signal_snapshot = 0.0;
     double low_band_cpu_scale_snapshot = 0.0;

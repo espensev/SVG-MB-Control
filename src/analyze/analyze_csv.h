@@ -30,6 +30,8 @@ struct ParsedChannelSample {
     std::optional<double> observed_temp_c;
     std::optional<double> setpoint_pct;
     std::optional<double> thermal_pressure_boost_pct;
+    std::optional<double> midband_pressure_boost_pct;
+    std::optional<double> gpu_airflow_boost_pct;
     std::optional<double> cpu_low_soak_boost_pct;
     std::optional<std::string> response_source;
     std::optional<std::string> write_reason;

@@ -2,14 +2,16 @@
 
 ## Current Status
 
-As of 2026-05-14, the original packaged `200 ms` control gate is superseded.
-The current packaged live controller uses `control_loop.poll_tick_ms=50`,
-`write_cooldown_ms=50`, `deadband_pct=0.35`, and live channels
-`0,1,2,3,4,5` with channel `6` blocked by policy.
+As of 2026-05-20, the current packaged live controller uses
+`control_loop.poll_tick_ms=250`, `write_cooldown_ms=250`,
+`deadband_pct<=0.25`, and live channels `0,1,2,3,4,5` with channel `6`
+blocked by policy.
 
 This does not mean all future cadence work is open-ended. It means the current
-50 ms profile is the measured baseline, and future changes must be evaluated
-against that baseline.
+250 ms profile is the shipped baseline, and future changes must be evaluated
+against that baseline. Earlier 50 ms CSV evidence remains useful historical
+data, but it is not the current shipped profile unless a new run is collected
+with matching config/build identity.
 
 ## Purpose
 
@@ -23,8 +25,9 @@ UI work is out of scope for this gate.
 
 ## What This Blocks
 
-- Faster than `50 ms` control ticks.
-- Faster than `50 ms` write cooldown.
+- Faster than the shipped `250 ms` control tick.
+- Faster than the shipped `250 ms` write cooldown.
+- Adaptive cadence floors below the shipped profile.
 - Adding channel `6` or any other currently blocked live channel.
 - Strategy changes that assume CPU/GPU/SIO cadence is already known at a higher
   rate.
@@ -54,13 +57,15 @@ has fixed-start-period loop timing fields and process-resource fields.
 ## Current Evidence
 
 - `docs\discovery-steady-response-control.md` covers the 2026-05-14 high-heat
-  response pass. The important result is that the current 50 ms profile is
-  usable for channels `0-5`: no live overrun, process CPU around `0.29%`, and
-  radiator channels reaching meaningful setpoints during sustained heat.
-- The later local run
-  `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_035931.csv`
-  was lower heat and showed no overruns, `50.610 ms` average achieved interval,
-  `58.150 ms` max achieved interval, and average process CPU around `0.207%`.
+  response pass. The important historical result is that the prior 50 ms
+  profile was usable for channels `0-5`: no live overrun, process CPU around
+  `0.29%`, and radiator channels reaching meaningful setpoints during
+  sustained heat.
+- The later local-only `20260514_035931` run was lower heat and showed no
+  overruns, `50.610 ms` average achieved interval, `58.150 ms` max achieved
+  interval, and average process CPU around `0.207%`. Treat this as historical
+  evidence for a prior profile until repeated against the current shipped
+  config.
 
 ## Exit Criteria
 

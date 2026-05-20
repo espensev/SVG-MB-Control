@@ -57,6 +57,40 @@ def numeric_column(rows: list[dict[str, str]], name: str) -> list[float]:
     return values
 
 
+RESPONSE_BOOST_SUFFIXES = (
+    "thermal_pressure_boost_pct",
+    "midband_pressure_boost_pct",
+    "gpu_airflow_boost_pct",
+    "cpu_low_soak_boost_pct",
+)
+
+
+def row_response_boost(row: dict[str, str], prefix: str) -> float | None:
+    total = 0.0
+    seen = False
+    for suffix in RESPONSE_BOOST_SUFFIXES:
+        parsed = maybe_float(row.get(prefix + suffix))
+        if parsed is not None:
+            total += parsed
+            seen = True
+    low_band = maybe_float(row.get(prefix + "low_band_effective_boost_pct"))
+    if low_band is None:
+        low_band = maybe_float(row.get(prefix + "low_band_stage_boost_pct"))
+    if low_band is not None:
+        total += low_band
+        seen = True
+    return total if seen else None
+
+
+def response_boost_column(rows: list[dict[str, str]], prefix: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        parsed = row_response_boost(row, prefix)
+        if parsed is not None:
+            values.append(parsed)
+    return values
+
+
 def percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
@@ -263,7 +297,10 @@ def summarize_channels(
     for channel in channels:
         prefix = f"channel{channel}_"
         setpoints = numeric_column(rows, prefix + "setpoint_pct")
-        boosts = numeric_column(rows, prefix + "thermal_pressure_boost_pct")
+        thermal_boosts = numeric_column(
+            rows, prefix + "thermal_pressure_boost_pct"
+        )
+        boosts = response_boost_column(rows, prefix)
         total_writes = [
             value
             for row in rows
@@ -293,7 +330,8 @@ def summarize_channels(
             "final_total_writes": max(total_writes) if total_writes else 0,
             "write_count_delta": write_count,
             "writes_per_min": writes_per_min,
-            "thermal_pressure_boost": stats(boosts),
+            "thermal_pressure_boost": stats(thermal_boosts),
+            "response_boost": stats(boosts),
             "boost_cap_rows": boost_cap_rows,
             "large_down_steps": len(drops),
             "max_down_step_pct": max(drops) if drops else None,
@@ -354,9 +392,7 @@ def summarize_gpu_response(
                 "setpoint_at_peak_pct": maybe_float(
                     peak_row.get(prefix + "setpoint_pct")
                 ),
-                "boost_at_peak_pct": maybe_float(
-                    peak_row.get(prefix + "thermal_pressure_boost_pct")
-                ),
+                "boost_at_peak_pct": row_response_boost(peak_row, prefix),
                 "total_writes_at_peak": maybe_int(
                     peak_row.get(prefix + "total_writes")
                 ),
@@ -574,7 +610,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
             fmt(data["setpoint"]["max"]),
             str(data["final_total_writes"]),
             fmt(data["writes_per_min"], 2),
-            fmt(data["thermal_pressure_boost"]["max"]),
+            fmt(data["response_boost"]["max"]),
             str(data["large_down_steps"]),
             fmt(data["max_down_step_pct"]),
         ])

@@ -113,51 +113,92 @@ double ApplyDemandSmoothing(double raw_desired_pct,
     return std::clamp(smoothed, 0.0, 100.0);
 }
 
-double UpdateThermalPressureBoost(double observed_temp_c,
-                                  double current_boost_pct,
-                                  std::uint64_t elapsed_ms,
-                                  const ChannelControlConfig& config) {
-    if (std::isnan(config.thermal_pressure_start_c) ||
-        std::isnan(config.thermal_pressure_full_c) ||
-        std::isnan(config.thermal_pressure_rise_pct_per_sec) ||
-        std::isnan(config.thermal_pressure_fall_pct_per_sec) ||
-        std::isnan(config.thermal_pressure_max_boost_pct) ||
-        config.thermal_pressure_rise_pct_per_sec <= 0.0 ||
-        config.thermal_pressure_fall_pct_per_sec < 0.0 ||
-        config.thermal_pressure_max_boost_pct <= 0.0) {
+// Generic smootherstep pressure boost integrator shared by the
+// high-temperature thermal-pressure stage, the mid-band pressure stage, and
+// the GPU early-airflow boost. Returns 0.0 (inert) when the parameter set is
+// incomplete or non-positive, matching the original thermal-pressure
+// disabled-path contract.
+double UpdatePressureBoost(double temp_c,
+                           double current_boost_pct,
+                           std::uint64_t elapsed_ms,
+                           double start_c,
+                           double full_c,
+                           double rise_pct_per_sec,
+                           double fall_pct_per_sec,
+                           double max_boost_pct) {
+    if (std::isnan(start_c) || std::isnan(full_c) ||
+        std::isnan(rise_pct_per_sec) || std::isnan(fall_pct_per_sec) ||
+        std::isnan(max_boost_pct) ||
+        rise_pct_per_sec <= 0.0 ||
+        fall_pct_per_sec < 0.0 ||
+        max_boost_pct <= 0.0) {
         return 0.0;
     }
 
     double boost = std::isnan(current_boost_pct)
         ? 0.0
-        : std::clamp(
-              current_boost_pct, 0.0, config.thermal_pressure_max_boost_pct);
-    if (elapsed_ms == 0u || std::isnan(observed_temp_c)) {
+        : std::clamp(current_boost_pct, 0.0, max_boost_pct);
+    if (elapsed_ms == 0u || std::isnan(temp_c)) {
         return boost;
     }
 
     const double dt_seconds = static_cast<double>(elapsed_ms) / 1000.0;
-    if (observed_temp_c >= config.thermal_pressure_start_c) {
+    if (temp_c >= start_c) {
         double pressure_scale = 1.0;
-        if (config.thermal_pressure_full_c >
-            config.thermal_pressure_start_c) {
+        if (full_c > start_c) {
             double t = std::clamp(
-                (observed_temp_c - config.thermal_pressure_start_c) /
-                    (config.thermal_pressure_full_c -
-                     config.thermal_pressure_start_c),
-                0.0, 1.0);
+                (temp_c - start_c) / (full_c - start_c), 0.0, 1.0);
             pressure_scale = t * t * t * ((6.0 * t - 15.0) * t + 10.0);
         }
 
-        if (boost < config.thermal_pressure_max_boost_pct) {
-            boost += config.thermal_pressure_rise_pct_per_sec *
-                     pressure_scale * dt_seconds;
+        if (boost < max_boost_pct) {
+            boost += rise_pct_per_sec * pressure_scale * dt_seconds;
         }
     } else {
-        boost -= config.thermal_pressure_fall_pct_per_sec * dt_seconds;
+        boost -= fall_pct_per_sec * dt_seconds;
     }
 
-    return std::clamp(boost, 0.0, config.thermal_pressure_max_boost_pct);
+    return std::clamp(boost, 0.0, max_boost_pct);
+}
+
+double UpdateThermalPressureBoost(double observed_temp_c,
+                                  double current_boost_pct,
+                                  std::uint64_t elapsed_ms,
+                                  const ChannelControlConfig& config) {
+    return UpdatePressureBoost(
+        observed_temp_c, current_boost_pct, elapsed_ms,
+        config.thermal_pressure_start_c, config.thermal_pressure_full_c,
+        config.thermal_pressure_rise_pct_per_sec,
+        config.thermal_pressure_fall_pct_per_sec,
+        config.thermal_pressure_max_boost_pct);
+}
+
+double UpdateMidbandPressureBoost(double observed_temp_c,
+                                  double current_boost_pct,
+                                  std::uint64_t elapsed_ms,
+                                  const ChannelControlConfig& config) {
+    return UpdatePressureBoost(
+        observed_temp_c, current_boost_pct, elapsed_ms,
+        config.midband_pressure_start_c, config.midband_pressure_full_c,
+        config.midband_pressure_rise_pct_per_sec,
+        config.midband_pressure_fall_pct_per_sec,
+        config.midband_pressure_max_boost_pct);
+}
+
+double UpdateGpuAirflowBoost(double gpu_temp_c,
+                             bool gpu_available,
+                             double current_boost_pct,
+                             std::uint64_t elapsed_ms,
+                             const ChannelControlConfig& config) {
+    const double temp_c = gpu_available
+        ? gpu_temp_c
+        : std::numeric_limits<double>::quiet_NaN();
+    return UpdatePressureBoost(
+        temp_c, current_boost_pct, elapsed_ms,
+        config.gpu_airflow_start_c, config.gpu_airflow_full_c,
+        config.gpu_airflow_rise_pct_per_sec,
+        config.gpu_airflow_fall_pct_per_sec,
+        config.gpu_airflow_max_boost_pct);
 }
 
 double UpdateCpuLowSoakBoost(double cpu_temp_c,
@@ -358,6 +399,13 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     channel.thermal_pressure_boost_pct = UpdateThermalPressureBoost(
         observed_temp_c, channel.thermal_pressure_boost_pct,
         evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
+    channel.midband_pressure_boost_pct = UpdateMidbandPressureBoost(
+        observed_temp_c, channel.midband_pressure_boost_pct,
+        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
+    channel.gpu_airflow_boost_pct = UpdateGpuAirflowBoost(
+        temp_inputs.gpu_c, temp_inputs.gpu_available,
+        channel.gpu_airflow_boost_pct,
+        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
     channel.cpu_low_soak_boost_pct = UpdateCpuLowSoakBoost(
         temp_inputs.cpu_c, temp_inputs.cpu_available,
         channel.cpu_low_soak_boost_pct,
@@ -365,6 +413,14 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     if (channel.thermal_pressure_boost_pct > 0.0005) {
         response_source =
             AddResponseModifier(std::move(response_source), "thermal_pressure");
+    }
+    if (channel.midband_pressure_boost_pct > 0.0005) {
+        response_source =
+            AddResponseModifier(std::move(response_source), "midband_pressure");
+    }
+    if (channel.gpu_airflow_boost_pct > 0.0005) {
+        response_source =
+            AddResponseModifier(std::move(response_source), "gpu_airflow");
     }
     if (channel.cpu_low_soak_boost_pct > 0.0005) {
         response_source =
@@ -377,10 +433,21 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     channel.last_response_source = response_source;
     evaluation.response_source = response_source;
 
+    // Low-band is second priority: hard-cap its contribution to the final
+    // setpoint at low_band_residual_cap_pct when configured. NaN preserves the
+    // pre-feature uncapped behavior.
+    double low_band_contrib = channel.low_band_stage_boost_pct;
+    if (!std::isnan(loop.low_band_residual_cap_pct)) {
+        low_band_contrib =
+            (std::min)(low_band_contrib, loop.low_band_residual_cap_pct);
+    }
+    channel.low_band_effective_boost_pct = low_band_contrib;
     const double desired_setpoint = std::clamp(
         smoothed_base_setpoint + channel.thermal_pressure_boost_pct +
+            channel.midband_pressure_boost_pct +
+            channel.gpu_airflow_boost_pct +
             channel.cpu_low_soak_boost_pct +
-            channel.low_band_stage_boost_pct,
+            low_band_contrib,
         0.0, 100.0);
     const double setpoint = RateLimitSetpoint(
         desired_setpoint, channel.last_issued_pct,

@@ -46,6 +46,7 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertFalse(channel_status["circuit_breaker_open"])
                 self.assertEqual(channel_status["consecutive_write_failures"], 0)
                 self.assertEqual(channel_status["last_response_source"], "primary_curve")
+                self.assertIn("last_low_band_effective_boost_pct", channel_status)
                 self.assertIn("last_write_reason", channel_status)
                 self.assertTrue(status["log_csv_path"])
                 self.assertTrue(status["log_manifest_path"])
@@ -90,6 +91,9 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(latest_row["loop_intended_interval_ms"], "50")
                 self.assertEqual(float(latest_row["cadence_transient"]), 0.0)
                 self.assertIn("channel0_thermal_pressure_boost_pct", latest_row)
+                self.assertIn("channel0_midband_pressure_boost_pct", latest_row)
+                self.assertIn("channel0_gpu_airflow_boost_pct", latest_row)
+                self.assertIn("channel0_low_band_effective_boost_pct", latest_row)
                 self.assertIn("channel0_response_source", latest_row)
                 self.assertIn("channel0_write_reason", latest_row)
                 self.assertIn("channel0_feedforward_pct", latest_row)
@@ -278,6 +282,140 @@ class ControlLoopTests(unittest.TestCase):
             finally:
                 _stop_and_wait(proc)
 
+    def test_control_loop_midband_pressure_accumulates_in_mid_band(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (100.0, 20.0)],
+                extra_channel_fields={
+                    "midband_pressure_start_c": 64.0,
+                    "midband_pressure_full_c": 84.0,
+                    "midband_pressure_rise_pct_per_sec": 25.0,
+                    "midband_pressure_fall_pct_per_sec": 2.0,
+                    "midband_pressure_max_boost_pct": 12.0,
+                },
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=74.0),
+            )
+            try:
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0][
+                            "last_midband_pressure_boost_pct"
+                        ]
+                        >= 4.0
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertGreaterEqual(
+                    channel["last_midband_pressure_boost_pct"], 4.0
+                )
+                self.assertIn(
+                    "midband_pressure", channel["last_response_source"]
+                )
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 24.0)
+                self.assertGreaterEqual(channel["total_writes"], 2)
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows)
+                latest_row = rows[-1]
+                self.assertIn("channel0_midband_pressure_boost_pct", latest_row)
+                self.assertGreaterEqual(
+                    float(latest_row["channel0_midband_pressure_boost_pct"]),
+                    4.0,
+                )
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_gpu_airflow_starts_on_warm_gpu(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (100.0, 20.0)],
+                extra_channel_fields={
+                    "gpu_airflow_start_c": 62.0,
+                    "gpu_airflow_full_c": 80.0,
+                    "gpu_airflow_rise_pct_per_sec": 25.0,
+                    "gpu_airflow_fall_pct_per_sec": 2.0,
+                    "gpu_airflow_max_boost_pct": 12.0,
+                },
+            )
+            # CPU held cool so only the GPU envelope drives a response.
+            env = _sim_direct_env(channel=0, amd_temp_c=45.0)
+            env.update(
+                {
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "60.0",
+                    "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "72.0",
+                    "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "70.0",
+                }
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=env,
+            )
+            try:
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0][
+                            "last_gpu_airflow_boost_pct"
+                        ]
+                        >= 4.0
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertGreaterEqual(
+                    channel["last_gpu_airflow_boost_pct"], 4.0
+                )
+                self.assertIn("gpu_airflow", channel["last_response_source"])
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 24.0)
+                self.assertGreaterEqual(channel["total_writes"], 2)
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows)
+                latest_row = rows[-1]
+                self.assertIn("channel0_gpu_airflow_boost_pct", latest_row)
+                self.assertGreaterEqual(
+                    float(latest_row["channel0_gpu_airflow_boost_pct"]),
+                    4.0,
+                )
+            finally:
+                _stop_and_wait(proc)
+
     def test_control_loop_cpu_low_soak_accumulates_under_sustained_mid_cpu(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
@@ -409,6 +547,7 @@ class ControlLoopTests(unittest.TestCase):
                         "stage_spacing_ms": 100,
                         "evidence_write_interval_ms": 200,
                     },
+                    "low_band_residual_cap_pct": 0.25,
                 },
                 extra_channel_fields={
                     "low_band_stage": 1,
@@ -438,15 +577,29 @@ class ControlLoopTests(unittest.TestCase):
                 channel = status["controlled_channels"][0]
                 self.assertIn("low_band_stage", channel["last_response_source"])
                 self.assertTrue(channel["low_band_stage_active"])
-                self.assertGreaterEqual(channel["last_setpoint_pct"], 20.5)
+                self.assertGreaterEqual(
+                    channel["last_low_band_stage_boost_pct"], 0.5
+                )
+                self.assertLessEqual(
+                    channel["last_low_band_effective_boost_pct"], 0.2501
+                )
+                self.assertGreaterEqual(channel["last_setpoint_pct"], 20.25)
+                self.assertLessEqual(channel["last_setpoint_pct"], 20.35)
                 self.assertGreaterEqual(channel["low_band_activation_count"], 1)
 
                 rows = _read_runtime_csv_rows(Path(status["log_csv_path"]))
                 self.assertTrue(rows)
                 latest_row = rows[-1]
                 self.assertIn("channel0_low_band_stage_boost_pct", latest_row)
+                self.assertIn(
+                    "channel0_low_band_effective_boost_pct", latest_row
+                )
                 self.assertIn("channel0_low_band_debt", latest_row)
                 self.assertIn("channel0_low_band_stage_active", latest_row)
+                self.assertLessEqual(
+                    float(latest_row["channel0_low_band_effective_boost_pct"]),
+                    0.2501,
+                )
 
                 evidence = _wait_for(
                     lambda: _read_json(runtime_home / "low_band_evidence.json"),
@@ -799,6 +952,10 @@ class ControlLoopTests(unittest.TestCase):
             ["--mode", "control-loop", "--config", str(config_path)],
             env={
                 **_sim_direct_env(channel=0, amd_temp_c=50.0),
+                "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                "SVG_MB_CONTROL_SIM_GPU_CORE_C": "50.0",
+                "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "50.0",
+                "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "50.0",
                 "SVG_MB_CONTROL_SIM_AMD_TCTL_SEQUENCE_C": tctl_sequence,
             },
         )
@@ -908,7 +1065,7 @@ class ControlLoopTests(unittest.TestCase):
             msg="disabled cadence must report zero transient",
         )
 
-    def test_cadence_variable_run_ingests_under_schema_v4(self) -> None:
+    def test_cadence_variable_run_ingests_under_current_schema(self) -> None:
         ramp = ",".join([f"{50 + 3 * i}" for i in range(25)] + ["95"] * 40)
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

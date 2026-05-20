@@ -142,6 +142,53 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
         }
     }
 
+    // Mid-band pressure stage: same partial-set / ordering rules as thermal
+    // pressure. Inert when every field is NaN.
+    if (!std::isnan(ch.midband_pressure_start_c) ||
+        !std::isnan(ch.midband_pressure_full_c) ||
+        !std::isnan(ch.midband_pressure_rise_pct_per_sec) ||
+        !std::isnan(ch.midband_pressure_fall_pct_per_sec) ||
+        !std::isnan(ch.midband_pressure_max_boost_pct)) {
+        if (std::isnan(ch.midband_pressure_start_c) ||
+            std::isnan(ch.midband_pressure_full_c)) {
+            throw std::runtime_error(
+                prefix + " midband_pressure requires both start_c and full_c");
+        }
+        ValidatePositive(ch.midband_pressure_rise_pct_per_sec,
+                        prefix + " midband_pressure_rise_pct_per_sec", true);
+        ValidatePositive(ch.midband_pressure_fall_pct_per_sec,
+                        prefix + " midband_pressure_fall_pct_per_sec", true);
+        ValidatePercentage(ch.midband_pressure_max_boost_pct,
+                          prefix + " midband_pressure_max_boost_pct", true);
+        if (ch.midband_pressure_full_c <= ch.midband_pressure_start_c) {
+            throw std::runtime_error(
+                prefix + " midband_pressure_full_c must be > start_c");
+        }
+    }
+
+    // GPU early-airflow boost: same partial-set / ordering rules.
+    if (!std::isnan(ch.gpu_airflow_start_c) ||
+        !std::isnan(ch.gpu_airflow_full_c) ||
+        !std::isnan(ch.gpu_airflow_rise_pct_per_sec) ||
+        !std::isnan(ch.gpu_airflow_fall_pct_per_sec) ||
+        !std::isnan(ch.gpu_airflow_max_boost_pct)) {
+        if (std::isnan(ch.gpu_airflow_start_c) ||
+            std::isnan(ch.gpu_airflow_full_c)) {
+            throw std::runtime_error(
+                prefix + " gpu_airflow requires both start_c and full_c");
+        }
+        ValidatePositive(ch.gpu_airflow_rise_pct_per_sec,
+                        prefix + " gpu_airflow_rise_pct_per_sec", true);
+        ValidatePositive(ch.gpu_airflow_fall_pct_per_sec,
+                        prefix + " gpu_airflow_fall_pct_per_sec", true);
+        ValidatePercentage(ch.gpu_airflow_max_boost_pct,
+                          prefix + " gpu_airflow_max_boost_pct", true);
+        if (ch.gpu_airflow_full_c <= ch.gpu_airflow_start_c) {
+            throw std::runtime_error(
+                prefix + " gpu_airflow_full_c must be > start_c");
+        }
+    }
+
     if (!std::isnan(ch.cpu_low_soak_start_c) ||
         !std::isnan(ch.cpu_low_soak_full_c) ||
         !std::isnan(ch.cpu_low_soak_release_c) ||
@@ -308,6 +355,8 @@ void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
 
     ValidateCadenceConfig(cfg);
     ValidatePercentage(cfg.deadband_pct, "deadband_pct");
+    ValidatePercentage(cfg.low_band_residual_cap_pct,
+                       "low_band_residual_cap_pct", true);
     ValidateLowBandConfig(cfg.low_band);
 
     if (cfg.channels.empty()) {
@@ -358,6 +407,11 @@ ControlLoopConfig LoadControlLoopConfig(
         ? loop_json.value("cadence_relax_per_s", 0.0)
         : (static_cast<double>(cfg.poll_tick_ms) -
            static_cast<double>(cfg.poll_tick_floor_ms)) / 3.0;
+
+    if (loop_json.contains("low_band_residual_cap_pct")) {
+        cfg.low_band_residual_cap_pct =
+            loop_json["low_band_residual_cap_pct"].get<double>();
+    }
 
     if (loop_json.contains("low_band") && loop_json["low_band"].is_object()) {
         const auto& low_json = loop_json["low_band"];
@@ -489,6 +543,50 @@ ControlLoopConfig LoadControlLoopConfig(
         if (ch_json.contains("thermal_pressure_max_boost_pct")) {
             channel.thermal_pressure_max_boost_pct =
                 ch_json["thermal_pressure_max_boost_pct"].get<double>();
+        }
+
+        // Mid-band pressure stage (P1 high-load upward response).
+        if (ch_json.contains("midband_pressure_start_c")) {
+            channel.midband_pressure_start_c =
+                ch_json["midband_pressure_start_c"].get<double>();
+        }
+        if (ch_json.contains("midband_pressure_full_c")) {
+            channel.midband_pressure_full_c =
+                ch_json["midband_pressure_full_c"].get<double>();
+        }
+        if (ch_json.contains("midband_pressure_rise_pct_per_sec")) {
+            channel.midband_pressure_rise_pct_per_sec =
+                ch_json["midband_pressure_rise_pct_per_sec"].get<double>();
+        }
+        if (ch_json.contains("midband_pressure_fall_pct_per_sec")) {
+            channel.midband_pressure_fall_pct_per_sec =
+                ch_json["midband_pressure_fall_pct_per_sec"].get<double>();
+        }
+        if (ch_json.contains("midband_pressure_max_boost_pct")) {
+            channel.midband_pressure_max_boost_pct =
+                ch_json["midband_pressure_max_boost_pct"].get<double>();
+        }
+
+        // GPU early-airflow boost.
+        if (ch_json.contains("gpu_airflow_start_c")) {
+            channel.gpu_airflow_start_c =
+                ch_json["gpu_airflow_start_c"].get<double>();
+        }
+        if (ch_json.contains("gpu_airflow_full_c")) {
+            channel.gpu_airflow_full_c =
+                ch_json["gpu_airflow_full_c"].get<double>();
+        }
+        if (ch_json.contains("gpu_airflow_rise_pct_per_sec")) {
+            channel.gpu_airflow_rise_pct_per_sec =
+                ch_json["gpu_airflow_rise_pct_per_sec"].get<double>();
+        }
+        if (ch_json.contains("gpu_airflow_fall_pct_per_sec")) {
+            channel.gpu_airflow_fall_pct_per_sec =
+                ch_json["gpu_airflow_fall_pct_per_sec"].get<double>();
+        }
+        if (ch_json.contains("gpu_airflow_max_boost_pct")) {
+            channel.gpu_airflow_max_boost_pct =
+                ch_json["gpu_airflow_max_boost_pct"].get<double>();
         }
 
         if (ch_json.contains("cpu_low_soak_start_c")) {

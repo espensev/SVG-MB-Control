@@ -1,24 +1,32 @@
 #include "json_io.h"
 
+#include <atomic>
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include "windows_lean.h"
 
 namespace svg_mb_control {
 
 namespace {
+
+// Builds a per-process, per-call unique temp suffix so concurrent writers
+// (multiple processes, or even multiple threads inside one process) targeting
+// the same JSON file never clobber each other's in-flight temp file.
+std::string MakeUniqueTempSuffix() {
+    static std::atomic<std::uint64_t> counter{0};
+    const std::uint64_t seq = counter.fetch_add(1u, std::memory_order_relaxed);
+#ifdef _WIN32
+    const unsigned long pid = static_cast<unsigned long>(GetCurrentProcessId());
+#else
+    const unsigned long pid = 0u;
+#endif
+    return ".tmp." + std::to_string(pid) + "." + std::to_string(seq);
+}
 
 void ReplaceFileWithTemp(const std::filesystem::path& temp,
                          const std::filesystem::path& target) {
@@ -125,7 +133,7 @@ void WriteJsonFileAtomic(const std::filesystem::path& target_path,
 
     const std::filesystem::path temp =
         target_path.parent_path() /
-        (target_path.filename().string() + ".tmp");
+        (target_path.filename().string() + MakeUniqueTempSuffix());
     {
         std::ofstream stream(temp, std::ios::binary | std::ios::trunc);
         if (!stream.is_open()) {
@@ -139,6 +147,39 @@ void WriteJsonFileAtomic(const std::filesystem::path& target_path,
                                      temp.string());
         }
     }
+
+#ifdef _WIN32
+    // Force data sectors to disk before the rename. Without this, a crash
+    // after the rename can leave the target file backed by uncommitted
+    // sectors that read back as whitespace.
+    {
+        HANDLE handle = CreateFileW(temp.wstring().c_str(),
+                                    GENERIC_WRITE,
+                                    0,
+                                    nullptr,
+                                    OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL,
+                                    nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            std::error_code cleanup_ec;
+            std::filesystem::remove(temp, cleanup_ec);
+            throw std::runtime_error(
+                "Could not reopen JSON temp file for flush " + temp.string() +
+                ": Windows error " + std::to_string(error));
+        }
+        const BOOL ok = FlushFileBuffers(handle);
+        const DWORD flush_error = ok ? 0u : GetLastError();
+        CloseHandle(handle);
+        if (!ok) {
+            std::error_code cleanup_ec;
+            std::filesystem::remove(temp, cleanup_ec);
+            throw std::runtime_error("Failed to flush JSON temp file " +
+                                     temp.string() + ": Windows error " +
+                                     std::to_string(flush_error));
+        }
+    }
+#endif
 
     ReplaceFileWithTemp(temp, target_path);
 }

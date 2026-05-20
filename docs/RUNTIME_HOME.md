@@ -130,7 +130,18 @@ Each controlled-channel entry includes:
 - `last_raw_demand_pct`
 - `last_smoothed_demand_pct`
 - `last_thermal_pressure_boost_pct`
+- `last_midband_pressure_boost_pct`
+- `last_gpu_airflow_boost_pct`
 - `last_cpu_low_soak_boost_pct`
+- `last_low_band_stage_boost_pct`
+- `last_low_band_effective_boost_pct`
+- `last_low_band_debt`
+- `last_low_band_signal`
+- `last_low_band_cpu_scale`
+- `last_low_band_gpu_scale`
+- `low_band_stage_active`
+- `low_band_eligible_ms`
+- `low_band_activation_count`
 - `last_response_source`
 - `last_write_reason`
 - `last_observed_temp_c`
@@ -143,6 +154,11 @@ Each controlled-channel entry includes:
 `control_runtime.json` is a status publication. In the current implementation,
 it is rate-limited and should not be treated as a per-tick log. Use the active
 CSV chunk for per-tick analysis.
+
+The maintained numerical contract for these per-channel status fields and their
+matching CSV columns lives in `docs\CONTROL_PIPELINE_MATH.md`. Update that file
+whenever a status/CSV control field is added, renamed, removed, or changes
+meaning.
 
 ## control_supervisor.json
 

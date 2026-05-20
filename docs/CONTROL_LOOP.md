@@ -6,6 +6,11 @@
 and fan state in-process, calculates channel setpoints from config curves, and
 applies writes through `SVG-MB-SIO`.
 
+`docs\CONTROL_PIPELINE_MATH.md` is the maintained numerical reference for the
+per-tick computation: curve lookup, smoothing, boost composition, low-band
+behavior, cadence scoring, and CSV/status identities. Update it with this file
+whenever the control computation or its telemetry fields change.
+
 ## Inputs
 
 Top-level config fields used by `control-loop`:
@@ -79,6 +84,19 @@ Optional channel overrides:
   temperature falls below `thermal_pressure_start_c`
 - `thermal_pressure_max_boost_pct`: maximum extra duty added after demand
   smoothing and before the normal rate limiter
+- `midband_pressure_start_c`: optional smootherstep pressure-boost threshold
+  for the mid-temperature band
+- `midband_pressure_full_c`: temperature where the mid-band pressure boost
+  accumulates at its full configured rise rate
+- `midband_pressure_rise_pct_per_sec`: mid-band boost accumulation rate
+- `midband_pressure_fall_pct_per_sec`: mid-band boost decay rate
+- `midband_pressure_max_boost_pct`: maximum extra duty from mid-band pressure
+- `gpu_airflow_start_c`: optional GPU-envelope threshold for early airflow
+- `gpu_airflow_full_c`: GPU-envelope temperature where the airflow boost
+  accumulates at its full configured rise rate
+- `gpu_airflow_rise_pct_per_sec`: GPU airflow boost accumulation rate
+- `gpu_airflow_fall_pct_per_sec`: GPU airflow boost decay rate
+- `gpu_airflow_max_boost_pct`: maximum extra duty from GPU airflow
 - `cpu_low_soak_start_c`: optional low/medium CPU sustained-heat threshold
 - `cpu_low_soak_full_c`: CPU temperature where the low-soak term accumulates at
   its full configured rise rate
@@ -88,6 +106,12 @@ Optional channel overrides:
   in the configured band
 - `cpu_low_soak_fall_pct_per_min`: low-soak decay rate
 - `cpu_low_soak_max_boost_pct`: maximum extra duty from low/medium CPU soak
+
+Optional loop-level response override:
+
+- `low_band_residual_cap_pct`: caps how much of the raw low-band stage boost
+  contributes to the final setpoint. Runtime CSV/status publish both the raw
+  low-band stage value and the effective capped value.
 
 Config loading validates basic ranges and required curve/channel structure. A
 bad control config should fail at startup instead of producing undefined fan
@@ -109,8 +133,8 @@ evaluated in Horner form in the curve lookup path.
 8. If `cpu_override_curve` is present and CPU telemetry is available,
    interpolate it against CPU/Tctl and use the higher duty.
 9. Smooth the raw demand and apply bounded decay, then add any configured
-   thermal-pressure boost and CPU low-soak boost before the normal rate limiter.
-   This allows
+   thermal-pressure, mid-band pressure, GPU airflow, CPU low-soak, and
+   low-band stage boost before the normal rate limiter. This allows
    intermediate PWM steps while preventing repeated high-temperature up/down
    writes caused by small sensor swings.
 10. Detect repeated missing primary temperature input for a channel and enter a
@@ -169,11 +193,11 @@ the control-loop CSV so fast polling/write profiles can be watched for resource
 cost. CPU percent is a rolling roughly one-second process average; memory fields
 are sampled on each loop row.
 
-Each controlled channel also publishes `last_thermal_pressure_boost_pct` and
+Each controlled channel also publishes `last_thermal_pressure_boost_pct`,
+`last_midband_pressure_boost_pct`, `last_gpu_airflow_boost_pct`, and
 `last_cpu_low_soak_boost_pct` in `control_runtime.json`, with matching
-`channelN_thermal_pressure_boost_pct` and `channelN_cpu_low_soak_boost_pct`
-columns in the control-loop CSV. These values are slow leaky-integral terms
-added on top of the base curve/EMA demand.
+`channelN_*_boost_pct` columns in the control-loop CSV. These values are slow
+leaky-integral terms added on top of the base curve/EMA demand.
 
 The control-loop CSV also includes `channelN_feedforward_pct` and
 `channelN_correction_pct`. Feedforward is the raw curve/overlay demand before
@@ -183,7 +207,8 @@ correction is the final setpoint minus that feedforward term.
 Response attribution is emitted as `last_response_source` in
 `control_runtime.json` and `channelN_response_source` in the CSV. Current
 sources are `primary_curve`, `cpu_override`, `sensor_safe_mode`, and optional
-modifiers such as `+thermal_pressure`. CSV rows also include
+modifiers such as `+thermal_pressure`, `+midband_pressure`, and
+`+gpu_airflow`. CSV rows also include
 `channelN_write_reason`, which is `first_write`, `setpoint_delta`,
 `authority_reassert`, `write_failed`, or `none` for ticks without a write.
 
@@ -240,11 +265,11 @@ current terminal and does not add supervisor restart behavior.
 - The published fan payload exposes `write_allowed`, `policy_blocked`, and
   `effective_write_allowed`.
 - The packaged live control policy controls Channels `0,1,2,3,4,5`.
-- The packaged loop cadence is `poll_tick_ms=50` with `write_cooldown_ms=50`
+- The packaged loop cadence is `poll_tick_ms=250` with `write_cooldown_ms=250`
   and a sub-one-percent deadband. The goal is to preserve authority and emit
   small intermediate PWM steps rather than audible multi-second staircases.
 - While `control-loop` runs, Control requests a 1 ms Windows timer period so the
-  50 ms fixed-start-period loop is not stretched by the default scheduler
+  fixed-start-period loop is not stretched by the default scheduler
   quantum.
 - On this host, the radiator Noctua lanes inside that set are `1,4,5`. Excluding
   Channel `6` does not mean "no radiator control"; it only keeps the separate
@@ -259,10 +284,10 @@ current terminal and does not add supervisor restart behavior.
 - The same radiator lanes also carry a slow thermal-pressure boost. Sustained
   high heat can add duty even when the instantaneous curve/EMA would otherwise
   hover too low or drop during small temperature dips.
-- Lanes `1,4,5` also carry a small CPU low/mid soak term. It starts around
-  `62 C`, fills around `71 C`, and is capped at `2-2.5%` so common CPU work can
-  earn a slow airflow nudge without turning the high-temperature CPU override
-  into an always-on low-band curve.
+- Lanes `1,4,5` also carry a small CPU low/mid soak term. In the shipped
+  configs it starts at `72 C`, fills at `82 C`, releases at `68 C`, and is
+  capped at `0.3%` so common CPU work can earn a slow airflow nudge without
+  turning the high-temperature CPU override into an always-on low-band curve.
 - Channel `6` remains explicitly blocked in the shipped live runtime policy.
 - Do not assume one identical curve shape or RPM target across the three
   radiator Noctua lanes. Rear-radiator, front-radiator, and center-radiator
@@ -295,6 +320,7 @@ non-zero exit code. The shutdown path also appends restore/shutdown events to
   process ownership.
 - Log chunk rotation and archive pruning remain product-owned here through
   `log_rotate_hours` and `log_retain_days`.
-- Faster than `50 ms` control ticks, faster sensor polling, or additional live
-  channels still require a fresh measurement gate pass through
+- Faster than the shipped `250 ms` control/write profile, faster sensor polling,
+  adaptive cadence floors below the shipped profile, or additional live channels
+  still require a fresh measurement gate pass through
   `docs\MEASUREMENT_GATE.md`.

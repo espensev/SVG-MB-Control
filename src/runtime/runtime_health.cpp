@@ -7,13 +7,7 @@
 #include "runtime_supervisor_state.h"
 #include "runtime_util.h"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include "windows_lean.h"
 
 #include <algorithm>
 #include <chrono>

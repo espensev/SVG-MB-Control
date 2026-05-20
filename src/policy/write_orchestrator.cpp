@@ -17,11 +17,34 @@
 #include <optional>
 #include <sstream>
 #include <chrono>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 
 namespace svg_mb_control {
 
 namespace {
+
+// Builds and appends a runtime event for the write-once / reconcile flows.
+// Centralizing the RuntimeLogEvent construction here keeps the orchestrator
+// readable: every call site collapses from ~10 lines to a single statement.
+void LogOrchestratorEvent(const std::filesystem::path& runtime_home,
+                          std::string_view mode,
+                          std::string_view event_type,
+                          std::string detail,
+                          std::optional<std::uint32_t> channel,
+                          std::optional<double> target_pct,
+                          bool success) {
+    RuntimeLogEvent event;
+    event.mode = std::string(mode);
+    event.event_type = std::string(event_type);
+    event.detail = std::move(detail);
+    event.channel = channel;
+    event.target_pct = target_pct;
+    event.success = success;
+    AppendRuntimeEvent(runtime_home, event);
+}
 
 std::optional<std::chrono::system_clock::time_point> ParseSnapshotLocalTime(
     const std::string& iso_text) {
@@ -84,15 +107,10 @@ int RunWriteOnce(const ControlConfig& config,
                  const WriteRequest& request,
                  const std::atomic<bool>& stop_flag) {
     if (request.target_pct < 0.0 || request.target_pct > 100.0) {
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "write-once",
-                .event_type = "write_once.invalid_request",
-                .detail = "target_pct outside [0, 100]",
-                .target_pct = request.target_pct,
-                .success = false,
-            });
+        LogOrchestratorEvent(runtime_home, "write-once",
+                             "write_once.invalid_request",
+                             "target_pct outside [0, 100]",
+                             std::nullopt, request.target_pct, false);
         std::cerr << "Error: --write-pct must be in [0, 100]" << '\n';
         return 2;
     }
@@ -118,16 +136,10 @@ int RunWriteOnce(const ControlConfig& config,
             std::chrono::system_clock::now());
 
         if (!baseline.freshness_ok) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.rejected",
-                    .detail = "snapshot exceeded freshness ceiling",
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.rejected",
+                                 "snapshot exceeded freshness ceiling",
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: snapshot age "
                       << baseline.snapshot_age_ms
                       << " ms exceeds baseline_freshness_ceiling_ms="
@@ -138,47 +150,29 @@ int RunWriteOnce(const ControlConfig& config,
         }
         if (baseline.policy_writes_enabled_present &&
             !baseline.policy_writes_enabled) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.rejected",
-                    .detail = "runtime policy disables writes",
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.rejected",
+                                 "runtime policy disables writes",
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: runtime policy has writes_enabled=false; "
                       << "no write attempted." << '\n';
             return 6;
         }
         if (!baseline.present) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.rejected",
-                    .detail = "target channel missing from direct fan state",
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.rejected",
+                                 "target channel missing from direct fan state",
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: channel " << request.channel
                       << " not present in direct fan state" << '\n';
             return 3;
         }
         if (baseline.snapshot_channel_present &&
             !baseline.effective_write_allowed) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.rejected",
-                    .detail = "effective_write_allowed=false",
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.rejected",
+                                 "effective_write_allowed=false",
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: channel " << request.channel
                       << " effective_write_allowed=false"
                       << " (write_allowed="
@@ -203,16 +197,10 @@ int RunWriteOnce(const ControlConfig& config,
         try {
             UpsertPendingWrite(runtime_home, entry);
         } catch (const std::exception& error) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.sidecar_failed",
-                    .detail = error.what(),
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.sidecar_failed",
+                                 error.what(),
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: failed to record pending-writes sidecar: "
                       << error.what() << '\n';
             return 1;
@@ -222,16 +210,10 @@ int RunWriteOnce(const ControlConfig& config,
         const FanWriteResult write_result =
             writer->ApplyDuty(request.channel, request.target_pct);
         if (!write_result) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.write_failed",
-                    .detail = write_result.detail,
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.write_failed",
+                                 write_result.detail,
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: direct write failed: "
                       << write_result.detail << '\n';
             if (write_result.error == FanWriteError::kPolicyRefused) {
@@ -246,16 +228,10 @@ int RunWriteOnce(const ControlConfig& config,
             }
             return 1;
         }
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "write-once",
-                .event_type = "write_once.write_applied",
-                .detail = "applied direct duty write",
-                .channel = request.channel,
-                .target_pct = request.target_pct,
-                .success = true,
-            });
+        LogOrchestratorEvent(runtime_home, "write-once",
+                             "write_once.write_applied",
+                             "applied direct duty write",
+                             request.channel, request.target_pct, true);
 
         // Step 5: hold until timeout or stop request, then restore baseline.
         const auto hold_deadline =
@@ -271,51 +247,49 @@ int RunWriteOnce(const ControlConfig& config,
                 std::chrono::steady_clock::now() >= hold_deadline) {
                 break;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            // Short slice so stop_flag is observed within ~5ms instead of
+            // up to 50ms. Sleep is also clamped to the remaining hold
+            // window to avoid overshooting hold_deadline by up to one slice.
+            constexpr auto kSliceMs = std::chrono::milliseconds(5);
+            auto slice = kSliceMs;
+            if (request.hold_ms > 0u) {
+                const auto remaining = hold_deadline -
+                    std::chrono::steady_clock::now();
+                if (remaining < slice) {
+                    slice = std::chrono::duration_cast<
+                        std::chrono::milliseconds>(remaining);
+                }
+                if (slice.count() <= 0) {
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(slice);
         }
 
         const FanWriteResult restore_result = writer->RestoreSavedState(
             request.channel, baseline.duty_raw, baseline.mode_raw,
             config.restore_timeout_ms);
         if (!restore_result) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.restore_failed",
-                    .detail = restore_result.detail,
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.restore_failed",
+                                 restore_result.detail,
+                                 request.channel, request.target_pct, false);
             std::cerr << "Error: restore failed after direct write: "
                       << restore_result.detail << '\n';
             return 1;
         }
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "write-once",
-                .event_type = "write_once.restore_applied",
-                .detail = "restored baseline after hold window",
-                .channel = request.channel,
-                .target_pct = request.target_pct,
-                .success = true,
-            });
+        LogOrchestratorEvent(runtime_home, "write-once",
+                             "write_once.restore_applied",
+                             "restored baseline after hold window",
+                             request.channel, request.target_pct, true);
 
         try {
             RemovePendingWrite(runtime_home, request.channel);
         } catch (const std::exception& error) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "write-once",
-                    .event_type = "write_once.sidecar_cleanup_failed",
-                    .detail = error.what(),
-                    .channel = request.channel,
-                    .target_pct = request.target_pct,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "write-once",
+                                 "write_once.sidecar_cleanup_failed",
+                                 error.what(),
+                                 request.channel, request.target_pct, false);
             std::cerr
                 << "Warning: direct write completed but sidecar clear failed: "
                 << error.what() << '\n';
@@ -323,16 +297,10 @@ int RunWriteOnce(const ControlConfig& config,
         }
         return 0;
     } catch (const std::exception& error) {
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "write-once",
-                .event_type = "write_once.init_failed",
-                .detail = error.what(),
-                .channel = request.channel,
-                .target_pct = request.target_pct,
-                .success = false,
-            });
+        LogOrchestratorEvent(runtime_home, "write-once",
+                             "write_once.init_failed",
+                             error.what(),
+                             request.channel, request.target_pct, false);
         std::cerr << "Error: direct writer init failed: "
                   << error.what() << '\n';
         return 1;
@@ -348,14 +316,10 @@ int ReconcilePendingWrites(const std::filesystem::path& runtime_home,
     try {
         entries = ReadPendingWrites(runtime_home);
     } catch (const std::exception& error) {
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "reconcile",
-                .event_type = "reconcile.sidecar_read_failed",
-                .detail = error.what(),
-                .success = false,
-            });
+        LogOrchestratorEvent(runtime_home, "reconcile",
+                             "reconcile.sidecar_read_failed",
+                             error.what(),
+                             std::nullopt, std::nullopt, false);
         std::cerr << "Error: could not read pending-writes sidecar: "
                   << error.what() << '\n';
         return 1;
@@ -368,65 +332,63 @@ int ReconcilePendingWrites(const std::filesystem::path& runtime_home,
     try {
         writer = CreateFanWriter(runtime_policy);
     } catch (const std::exception& error) {
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "reconcile",
-                .event_type = "reconcile.init_failed",
-                .detail = error.what(),
-                .success = false,
-            });
+        LogOrchestratorEvent(runtime_home, "reconcile",
+                             "reconcile.init_failed",
+                             error.what(),
+                             std::nullopt, std::nullopt, false);
         std::cerr << "Error: direct writer init failed during reconciliation: "
                   << error.what() << '\n';
         return 1;
     }
 
     bool any_failure = false;
+    // Use a single store so the sidecar is read/parsed once and rewritten
+    // once at the end instead of on every successfully-restored channel.
+    PendingWritesStore store(runtime_home);
+    try {
+        store.Load();
+    } catch (const std::exception& error) {
+        LogOrchestratorEvent(runtime_home, "reconcile",
+                             "reconcile.sidecar_read_failed",
+                             error.what(),
+                             std::nullopt, std::nullopt, false);
+        std::cerr << "Error: could not read pending-writes sidecar: "
+                  << error.what() << '\n';
+        return 1;
+    }
+
     for (const auto& entry : entries) {
         const FanWriteResult restore_result = writer->RestoreSavedState(
             entry.channel, entry.baseline_duty_raw, entry.baseline_mode_raw,
             restore_timeout_ms);
         if (!restore_result) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "reconcile",
-                    .event_type = "reconcile.restore_failed",
-                    .detail = restore_result.detail,
-                    .channel = entry.channel,
-                    .success = false,
-                });
+            LogOrchestratorEvent(runtime_home, "reconcile",
+                                 "reconcile.restore_failed",
+                                 restore_result.detail,
+                                 entry.channel, std::nullopt, false);
             std::cerr << "Error: reconcile restore failed for channel "
                       << entry.channel << ": "
                       << restore_result.detail << '\n';
             any_failure = true;
             continue;
         }
-        AppendRuntimeEvent(
-            runtime_home,
-            RuntimeLogEvent{
-                .mode = "reconcile",
-                .event_type = "reconcile.restore_applied",
-                .detail = "restored pending channel from sidecar entry",
-                .channel = entry.channel,
-                .success = true,
-            });
-        try {
-            RemovePendingWrite(runtime_home, entry.channel);
-        } catch (const std::exception& error) {
-            AppendRuntimeEvent(
-                runtime_home,
-                RuntimeLogEvent{
-                    .mode = "reconcile",
-                    .event_type = "reconcile.sidecar_cleanup_failed",
-                    .detail = error.what(),
-                    .channel = entry.channel,
-                    .success = false,
-                });
-            std::cerr << "Error: restore-auto succeeded but sidecar remove failed: "
-                      << error.what() << '\n';
-            any_failure = true;
-        }
+        LogOrchestratorEvent(runtime_home, "reconcile",
+                             "reconcile.restore_applied",
+                             "restored pending channel from sidecar entry",
+                             entry.channel, std::nullopt, true);
+        store.QueueRemove(entry.channel);
+    }
+
+    try {
+        store.Flush();
+    } catch (const std::exception& error) {
+        LogOrchestratorEvent(runtime_home, "reconcile",
+                             "reconcile.sidecar_cleanup_failed",
+                             error.what(),
+                             std::nullopt, std::nullopt, false);
+        std::cerr << "Error: restore-auto succeeded but sidecar flush failed: "
+                  << error.what() << '\n';
+        any_failure = true;
     }
     return any_failure ? 1 : 0;
 }

@@ -29,12 +29,16 @@ CSV_HEADER_PARTS = [
     "process_working_set_bytes,process_private_bytes,cadence_transient,",
     # 2 channels
     "channel0_observed_temp_c,channel0_setpoint_pct,"
-    "channel0_thermal_pressure_boost_pct,channel0_cpu_low_soak_boost_pct,"
+    "channel0_thermal_pressure_boost_pct,"
+    "channel0_midband_pressure_boost_pct,channel0_gpu_airflow_boost_pct,"
+    "channel0_cpu_low_soak_boost_pct,"
     "channel0_response_source,channel0_write_reason,channel0_total_writes,"
     "channel0_write_active,channel0_baseline_captured,"
     "channel0_feedforward_pct,channel0_correction_pct,",
     "channel1_observed_temp_c,channel1_setpoint_pct,"
-    "channel1_thermal_pressure_boost_pct,channel1_cpu_low_soak_boost_pct,"
+    "channel1_thermal_pressure_boost_pct,"
+    "channel1_midband_pressure_boost_pct,channel1_gpu_airflow_boost_pct,"
+    "channel1_cpu_low_soak_boost_pct,"
     "channel1_response_source,channel1_write_reason,channel1_total_writes,"
     "channel1_write_active,channel1_baseline_captured,"
     "channel1_feedforward_pct,channel1_correction_pct",
@@ -67,11 +71,12 @@ def _write_fixture_csv(path: Path, session_start: str, ticks: int = 3) -> None:
             "10.0", "50", "50.0", "0.0", "false",
             "0.0", "0.0", "33000000", "20000000", "0.0",
             # channel0
-            "60.000", "30.000", "0.000", "0.250",
-            "primary_curve+cpu_low_soak", "first_write" if tick == 1 else "none",
+            "60.000", "30.000", "0.000", "0.500", "0.750", "0.250",
+            "primary_curve+midband_pressure+gpu_airflow+cpu_low_soak",
+            "first_write" if tick == 1 else "none",
             str(tick), "true", "true", "30.000", "0.000",
             # channel1
-            "60.000", "32.000", "0.000", "0.000",
+            "60.000", "32.000", "0.000", "0.000", "0.000", "0.000",
             "primary_curve", "first_write" if tick == 1 else "none",
             str(tick), "true", "true", "32.000", "0.000",
         ]
@@ -339,7 +344,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "4")
+            self.assertEqual(schema[0], "5")
 
             run = _query_one(
                 db_path,
@@ -380,12 +385,18 @@ class AnalyzeIngestTests(unittest.TestCase):
 
             attribution = _query_one(
                 db_path,
-                "SELECT cpu_low_soak_boost_pct, response_source, write_reason "
+                "SELECT midband_pressure_boost_pct, gpu_airflow_boost_pct, "
+                "cpu_low_soak_boost_pct, response_source, write_reason "
                 "FROM tick_channel_samples WHERE channel=0 AND tick_count=1",
             )
-            self.assertEqual(attribution[0], 0.25)
-            self.assertEqual(attribution[1], "primary_curve+cpu_low_soak")
-            self.assertEqual(attribution[2], "first_write")
+            self.assertEqual(attribution[0], 0.5)
+            self.assertEqual(attribution[1], 0.75)
+            self.assertEqual(attribution[2], 0.25)
+            self.assertEqual(
+                attribution[3],
+                "primary_curve+midband_pressure+gpu_airflow+cpu_low_soak",
+            )
+            self.assertEqual(attribution[4], "first_write")
 
             fan_label = _query_one(
                 db_path,
@@ -624,11 +635,11 @@ def _write_ramp_csv(path: Path, session_start: str, ticks: int = 30) -> None:
             "10.0", "50", "50.0", "0.0", "false",
             "0.0", "0.0", "33000000", "20000000", "0.0",
             # channel0 (total_writes cell carries the cumulative count)
-            f"{cpu:.3f}", f"{ch0:.3f}", "0.000", "0.000",
+            f"{cpu:.3f}", f"{ch0:.3f}", "0.000", "1.500", "0.750", "0.000",
             "primary_curve", first, str(tick), "true", "true",
             f"{ch0:.3f}", "0.000",
             # channel1
-            f"{cpu:.3f}", f"{ch1:.3f}", "0.000", "0.000",
+            f"{cpu:.3f}", f"{ch1:.3f}", "0.000", "0.000", "0.000", "0.000",
             "primary_curve", first, str(tick), "true", "true",
             f"{ch1:.3f}", "0.000",
         ]
@@ -739,6 +750,8 @@ class AnalyzeReportTests(unittest.TestCase):
             self.assertIn("authority_reasserted=1", out)
             self.assertIn("ch0 setpoint_pct", out)
             self.assertIn("ch1 setpoint_pct", out)
+            self.assertIn("midband_pressure_boost_pct max=1.5", out)
+            self.assertIn("gpu_airflow_boost_pct max=0.75", out)
 
     def test_report_json_emits_structured_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -766,6 +779,10 @@ class AnalyzeReportTests(unittest.TestCase):
             self.assertGreaterEqual(channels[0]["reversals"], 1)
             self.assertEqual(channels[0]["mode_leave_ticks"], 0)
             self.assertEqual(channels[0]["writes"], 29)
+            self.assertEqual(
+                channels[0]["max_midband_pressure_boost_pct"], 1.5
+            )
+            self.assertEqual(channels[0]["max_gpu_airflow_boost_pct"], 0.75)
 
     def test_report_run_selection_and_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:

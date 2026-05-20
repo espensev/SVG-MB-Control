@@ -2,13 +2,7 @@
 
 #include "json_io.h"
 
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
+#include "windows_lean.h"
 
 #include <cmath>
 
@@ -30,9 +24,14 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
          JsonNumberOrZero(channel.smoothed_demand_pct)},
         {"last_thermal_pressure_boost_pct",
          channel.thermal_pressure_boost_pct},
+        {"last_midband_pressure_boost_pct",
+         channel.midband_pressure_boost_pct},
+        {"last_gpu_airflow_boost_pct", channel.gpu_airflow_boost_pct},
         {"last_cpu_low_soak_boost_pct", channel.cpu_low_soak_boost_pct},
         {"last_low_band_stage_boost_pct",
          channel.low_band_stage_boost_pct},
+        {"last_low_band_effective_boost_pct",
+         channel.low_band_effective_boost_pct},
         {"last_low_band_debt", channel.low_band_debt_snapshot},
         {"last_low_band_signal", channel.low_band_signal_snapshot},
         {"last_low_band_cpu_scale", channel.low_band_cpu_scale_snapshot},
@@ -123,9 +122,14 @@ void BuildChannelLogStates(
         state.feedforward_pct = channel.last_raw_demand_pct;
         state.thermal_pressure_boost_pct =
             channel.thermal_pressure_boost_pct;
+        state.midband_pressure_boost_pct =
+            channel.midband_pressure_boost_pct;
+        state.gpu_airflow_boost_pct = channel.gpu_airflow_boost_pct;
         state.cpu_low_soak_boost_pct = channel.cpu_low_soak_boost_pct;
         state.low_band_stage_boost_pct =
             channel.low_band_stage_boost_pct;
+        state.low_band_effective_boost_pct =
+            channel.low_band_effective_boost_pct;
         state.low_band_debt = channel.low_band_debt_snapshot;
         state.low_band_signal = channel.low_band_signal_snapshot;
         state.low_band_stage_active = channel.low_band_stage_active;

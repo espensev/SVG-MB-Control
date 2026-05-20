@@ -2,31 +2,37 @@
 
 ## Status
 
-Current as of 2026-05-14.
+Current as of 2026-05-20.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
-`control_loop.poll_tick_ms=50`, `write_cooldown_ms=50`, and
-`deadband_pct=0.35`.
+`control_loop.poll_tick_ms=250`, `write_cooldown_ms=250`, and
+`deadband_pct<=0.25` in the shipped configs.
 
 Implementation sequencing for the logging work lives in
 `docs\LOGGING_IMPROVEMENT_PLAN.md`.
 
-Recent local evidence:
+Earlier local evidence from the previous `50 ms` profile:
 
-- `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_033423.csv`
-  contained 19,432 rows. CPU/Tctl max was `86.625 C`, achieved loop interval
-  averaged `50.641 ms`, radiator channel setpoints reached `71.40%`,
-  `68.00%`, and `65.86%`, and the live status showed no overrun with process
-  CPU around `0.29%`.
-- `release\runtime\logs\archive\svg_mb_control_control-loop_20260514_035931.csv`
-  contained 17,773 rows from a lower-heat/idle recovery run. CPU/Tctl max was
+- A local-only `20260514_033423` control-loop CSV (not committed) contained
+  19,432 rows. CPU/Tctl max was `86.625 C`, achieved loop interval averaged
+  `50.641 ms`, radiator channel setpoints reached `71.40%`, `68.00%`, and
+  `65.86%`, and the live status showed no overrun with process CPU around
+  `0.29%`.
+- A local-only `20260514_035931` control-loop CSV (not committed) contained
+  17,773 rows from a lower-heat/idle recovery run. CPU/Tctl max was
   `77.500 C`, achieved loop interval averaged `50.610 ms`, max interval was
   `58.150 ms`, average loop work was `4.314 ms`, average process CPU was
   `0.207%`, and no overrun rows were recorded.
 
 Raw captures are local evidence. Do not commit full runtime CSV captures by
 default; commit small summaries and decision records instead.
+
+The numerical control-pipeline contract lives in
+`docs\CONTROL_PIPELINE_MATH.md`. Keep that document updated when runtime data
+shows a changed control identity, when status/CSV fields move, or when source
+changes alter curve lookup, smoothing, boost composition, low-band behavior, or
+adaptive cadence.
 
 ## Current Logging Surfaces
 
@@ -64,8 +70,9 @@ source. Use the CSV for timing and response analysis.
   sibling process or bridge helper.
 - Control logs per-tick telemetry, fan state, setpoints, feedforward/correction
   split, thermal-pressure boost, timing quality, and process resource cost.
-- The 50 ms loop is currently observable and stable enough for the shipped
-  channel set under local testing.
+- The logging plane is observable enough for the shipped channel set under
+  local testing. Treat the old `50 ms` captures above as historical unless a
+  fresh run is collected with the current shipped config.
 - JSONL events separate discrete control actions and failures from the dense CSV
   stream.
 - Rotation and retention are local config fields, so long runs do not require
@@ -151,6 +158,9 @@ Use this loop for controller changes:
    - authority reassertions, policy refusals, write failures, sensor failures,
      and circuit-breaker events,
    - recovery time back to near-idle setpoints after load stops.
+   Also check `docs\CONTROL_PIPELINE_MATH.md` against the run's CSV/status
+   identities: feedforward/correction math, low-band effective-cap behavior,
+   cadence bounds, setpoint bounds, and response-source attribution.
 6. Change one class of knob at a time:
    - curve breakpoints,
    - thermal-pressure boost,
