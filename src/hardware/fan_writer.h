@@ -114,7 +114,12 @@ class FanWriter {
     virtual ~FanWriter() = default;
 
     virtual FanReadResult ReadChannelState(std::uint32_t channel) = 0;
-    virtual FanScanResult ReadAllChannels() = 0;
+    // Fills `out` in place so callers can retain `out.fans` capacity across
+    // calls instead of allocating a fresh vector + per-entry strings every
+    // sample. `out.error`, `out.detail`, and `out.fans` are reset before the
+    // backend writes new state. The control loop's steady-state sampler reuses
+    // a thread-local scratch buffer; one-shot callers can pass a local.
+    virtual void ReadAllChannels(FanScanResult& out) = 0;
     virtual FanTachEvidenceScanResult ReadFanTachEvidence() = 0;
     virtual SioVoltageScanResult ReadVoltages() = 0;
     virtual SioTemperatureScanResult ReadSioTemperatures() = 0;

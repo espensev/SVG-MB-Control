@@ -109,9 +109,12 @@ class GpuReader {
     // Diagnostic message from initialization. Empty on clean init.
     std::string init_warning() const;
 
-    // Samples GPU 0 (first enumerated GPU). Returns an empty sample with
-    // available=false on any failure.
-    GpuTempSample Sample();
+    // Samples GPU 0 (first enumerated GPU). Returns a reference to an
+    // internally held sample so steady-state callers do not allocate a
+    // GpuTempSample (and its inner strings) per call; subsequent Sample()
+    // calls overwrite the held buffer. On any failure the held sample has
+    // `available=false` and `last_warning` populated.
+    const GpuTempSample& Sample();
 
     // Samples GPU 0 using the requested evidence tier: thermal-fast, fast,
     // medium, slow, rare, or full. This is intentionally separate from

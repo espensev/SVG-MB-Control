@@ -97,7 +97,8 @@ void CheckSioAndLifecycle(const ControlConfig* config,
         {
             std::unique_ptr<FanWriter> fan_writer =
                 CreateFanWriter(runtime_policy);
-            const FanScanResult scan = fan_writer->ReadAllChannels();
+            FanScanResult scan;
+            fan_writer->ReadAllChannels(scan);
             sio_check->ok = scan.ok();
             if (scan.ok()) {
                 sio_check->detail = "backend=\"" + fan_writer->BackendLabel() +

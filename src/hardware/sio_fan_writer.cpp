@@ -108,21 +108,23 @@ class SioFanWriter final : public FanWriter {
         return MakeReadOk(state);
     }
 
-    FanScanResult ReadAllChannels() override {
+    void ReadAllChannels(FanScanResult& out) override {
+        out.error = FanWriteError::kNone;
+        out.detail.clear();
+        out.fans.clear();
+
         std::vector<MbFanSnapshot> fans;
         const MbSioStatus status = controller_.read_fans(device_, fans);
         if (status != MbSioStatus::ok) {
-            return MakeScanResult(
-                TranslateStatus(status, 0u, "read_fans").error,
-                "svg_mb_sio read_fans failed: " + StatusString(status));
+            out.error = TranslateStatus(status, 0u, "read_fans").error;
+            out.detail = "svg_mb_sio read_fans failed: " + StatusString(status);
+            return;
         }
 
-        std::vector<FanChannelState> out;
-        out.reserve(fans.size());
+        out.fans.reserve(fans.size());
         for (const auto& fan : fans) {
-            out.push_back(TranslateFan(fan));
+            out.fans.push_back(TranslateFan(fan));
         }
-        return MakeScanOk(std::move(out));
     }
 
     FanTachEvidenceScanResult ReadFanTachEvidence() override {

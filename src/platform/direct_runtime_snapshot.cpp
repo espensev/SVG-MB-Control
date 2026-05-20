@@ -165,7 +165,14 @@ void SampleDirectRuntimeSnapshot(
 
     MergeAmdTelemetry(out, amd_reader.Sample());
     MergeGpuTelemetry(out, gpu_reader.Sample());
-    MergeFanTelemetry(out, fan_writer.ReadAllChannels(), runtime_policy);
+
+    // Reused across calls on this thread; FanWriter::ReadAllChannels resets
+    // out.error/out.detail and clear()s out.fans while retaining capacity, so
+    // a previous sample's state does not bleed in. Each sampler thread
+    // (control loop, read loop, evidence log) keeps its own buffer.
+    thread_local FanScanResult fan_scan_scratch;
+    fan_writer.ReadAllChannels(fan_scan_scratch);
+    MergeFanTelemetry(out, fan_scan_scratch, runtime_policy);
 }
 
 RuntimeSnapshot SampleDirectRuntimeSnapshot(

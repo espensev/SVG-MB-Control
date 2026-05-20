@@ -359,6 +359,7 @@ struct GpuReader::Impl {
     bool initialized = false;
     std::string init_warning;
     std::string gpu_name;
+    GpuTempSample last_sample;
 };
 
 GpuReader::GpuReader() : impl_(std::make_unique<Impl>()) {
@@ -388,14 +389,24 @@ std::string GpuReader::init_warning() const {
     return impl_ ? impl_->init_warning : std::string();
 }
 
-GpuTempSample GpuReader::Sample() {
+const GpuTempSample& GpuReader::Sample() {
+    GpuTempSample& out = impl_->last_sample;
+    out.available = false;
+    out.core_c = 0.0;
+    out.memjn_c = 0.0;
+    out.hotspot_c = 0.0;
+    out.gpu_name.clear();
+    out.last_warning.clear();
+
     if (SimGpuEnabled()) {
-        return MakeSimGpuTempSample();
+        out = MakeSimGpuTempSample();
+        return out;
     }
 
-    GpuTempSample out;
     if (!available()) {
-        out.last_warning = impl_ ? impl_->init_warning : "not initialized";
+        out.last_warning = impl_->init_warning.empty()
+            ? std::string("not initialized")
+            : impl_->init_warning;
         return out;
     }
     GpuSnapshot snap;
@@ -449,6 +460,7 @@ GpuEvidenceSample GpuReader::SampleEvidence(std::string_view mode_label) {
 struct GpuReader::Impl {
     std::string init_warning =
         "gpu_telemetry not linked at build time";
+    GpuTempSample last_sample;
 };
 
 GpuReader::GpuReader() : impl_(std::make_unique<Impl>()) {}
@@ -460,12 +472,20 @@ std::string GpuReader::init_warning() const {
     return impl_ ? impl_->init_warning : std::string();
 }
 
-GpuTempSample GpuReader::Sample() {
+const GpuTempSample& GpuReader::Sample() {
+    GpuTempSample& out = impl_->last_sample;
+    out.available = false;
+    out.core_c = 0.0;
+    out.memjn_c = 0.0;
+    out.hotspot_c = 0.0;
+    out.gpu_name.clear();
+    out.last_warning.clear();
+
     if (SimGpuEnabled()) {
-        return MakeSimGpuTempSample();
+        out = MakeSimGpuTempSample();
+        return out;
     }
 
-    GpuTempSample out;
     out.last_warning = init_warning();
     return out;
 }

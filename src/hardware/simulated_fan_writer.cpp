@@ -108,12 +108,17 @@ class SimulatedFanWriter final : public FanWriter {
         return MakeReadOk(state);
     }
 
-    FanScanResult ReadAllChannels() override {
+    void ReadAllChannels(FanScanResult& out) override {
+        out.error = FanWriteError::kNone;
+        out.detail.clear();
+        out.fans.clear();
+
         const std::string mode = GetEnvOrDefault(
             "SVG_MB_CONTROL_SIM_READ_MODE", "success");
         if (mode == "fail") {
-            return MakeScanResult(FanWriteError::kUnavailable,
-                                  "simulated direct fan read failure");
+            out.error = FanWriteError::kUnavailable;
+            out.detail = "simulated direct fan read failure";
+            return;
         }
 
         const std::uint32_t channel = ParseEnvUInt32(
@@ -121,14 +126,14 @@ class SimulatedFanWriter final : public FanWriter {
             "SVG_MB_CONTROL_SIM_FAN_CHANNEL", 0u);
         const FanReadResult read_result = ReadChannelState(channel);
         if (!read_result) {
-            return MakeScanResult(read_result.error, read_result.detail);
+            out.error = read_result.error;
+            out.detail = read_result.detail;
+            return;
         }
 
-        std::vector<FanChannelState> fans;
         if (read_result.state.present) {
-            fans.push_back(read_result.state);
+            out.fans.push_back(read_result.state);
         }
-        return MakeScanOk(std::move(fans));
     }
 
     FanTachEvidenceScanResult ReadFanTachEvidence() override {
