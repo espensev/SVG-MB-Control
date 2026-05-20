@@ -130,8 +130,10 @@ endfunction()
 
 add_library(svg_mb_control_core STATIC
     src/pch.cpp
+    src/control/cadence_score.cpp
     src/control/calibration.cpp
     src/control/channel_evaluator.cpp
+    src/control/channel_write.cpp
     src/control/control_config.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
@@ -140,6 +142,7 @@ add_library(svg_mb_control_core STATIC
     src/control/control_status_writer.cpp
     src/control/control_supervisor.cpp
     src/control/low_band_evidence.cpp
+    src/control/low_band_integrator.cpp
     src/hardware/amd_reader.cpp
     src/hardware/fan_writer.cpp
     src/hardware/gpu_reader.cpp
