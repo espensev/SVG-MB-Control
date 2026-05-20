@@ -143,6 +143,7 @@ add_library(svg_mb_control_core STATIC
     src/control/control_supervisor.cpp
     src/control/low_band_evidence.cpp
     src/control/low_band_integrator.cpp
+    src/control/tick_runner.cpp
     src/hardware/amd_reader.cpp
     src/hardware/fan_writer.cpp
     src/hardware/gpu_reader.cpp
