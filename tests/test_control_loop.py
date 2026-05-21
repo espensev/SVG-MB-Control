@@ -54,6 +54,17 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertTrue(Path(status["log_csv_path"]).is_file())
                 self.assertTrue(Path(status["log_manifest_path"]).is_file())
                 self.assertTrue((runtime_home / "logs" / "svg_mb_control_output.csv").is_file())
+                prologue = _read_runtime_csv_prologue(Path(status["log_csv_path"]))
+                self.assertEqual(prologue["producer"], "svg-mb-control")
+                self.assertIn("build_version", prologue)
+                self.assertIn("git_hash", prologue)
+                self.assertEqual(
+                    Path(prologue["config_path"]).resolve(),
+                    config_path.resolve(),
+                )
+                self.assertRegex(prologue["config_sha256"], r"^[0-9a-f]{64}$")
+                self.assertEqual(prologue["control_poll_tick_ms"], "50")
+                self.assertEqual(prologue["control_write_cooldown_ms"], "50")
                 timing_fields = [
                     "loop_started_wall_clock",
                     "loop_finished_wall_clock",
@@ -109,14 +120,20 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertNotEqual(latest_row["process_cpu_pct"], "")
                 self.assertNotEqual(latest_row["process_working_set_bytes"], "")
                 self.assertNotEqual(latest_row["process_private_bytes"], "")
-                event_observed = _wait_for(
-                    lambda: any(
-                        item.get("event_type") == "control_loop.write_applied"
-                        for item in _read_runtime_events(runtime_home)
+                write_event = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type") == "control_loop.write_applied"
+                        ),
+                        None,
                     ),
                     timeout_s=5.0,
                 )
-                self.assertTrue(event_observed)
+                self.assertIsNotNone(write_event)
+                self.assertEqual(write_event["severity"], "info")
+                self.assertEqual(write_event["error_code"], "none")
             finally:
                 _stop_and_wait(proc)
 
@@ -852,20 +869,106 @@ class ControlLoopTests(unittest.TestCase):
                 },
             )
             try:
-                refused_and_flushed = _wait_for(
+                failed_event = _wait_for(
                     lambda: (
-                        not _read_pending_writes(runtime_home)
-                        and any(
-                            item.get("event_type") == "control_loop.write_failed"
-                            and item.get("success") is False
-                            for item in _read_runtime_events(runtime_home)
+                        next(
+                            (
+                                item
+                                for item in _read_runtime_events(runtime_home)
+                                if item.get("event_type") == "control_loop.write_failed"
+                                and item.get("success") is False
+                            ),
+                            None,
                         )
+                        if not _read_pending_writes(runtime_home)
+                        else None
                     ),
                     timeout_s=5.0,
                 )
-                self.assertTrue(
-                    refused_and_flushed,
+                self.assertIsNotNone(
+                    failed_event,
                     msg="policy-refused pending write entry was not flushed",
+                )
+                self.assertEqual(failed_event["severity"], "error")
+                self.assertEqual(
+                    failed_event["error_code"], "CONTROL_LOOP_WRITE_FAILED"
+                )
+            finally:
+                _stop_and_wait(proc)
+
+    def test_control_loop_accepts_operator_breaker_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.1,
+                control_hold_ms=0,
+            )
+            proc = _spawn_control(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=75.0),
+                    "SVG_MB_CONTROL_SIM_WRITE_MODE": "fail_immediate",
+                },
+            )
+            try:
+                opened = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type")
+                            == "control_loop.circuit_breaker_opened"
+                        ),
+                        None,
+                    ),
+                    timeout_s=6.0,
+                )
+                self.assertIsNotNone(opened)
+
+                result = _run_control(
+                    "--reset-breakers",
+                    "--reset-breaker-channel",
+                    "0",
+                    "--config",
+                    str(config_path),
+                )
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    msg=f"{result.stdout}\n{result.stderr}",
+                )
+                self.assertIn("channel: 0", result.stdout)
+
+                reset_event = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type")
+                            == "control_loop.circuit_breaker_reset"
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(reset_event)
+                self.assertEqual(reset_event["channel"], 0)
+                self.assertEqual(reset_event["severity"], "info")
+                self.assertEqual(reset_event["error_code"], "none")
+                self.assertTrue(
+                    _wait_for(
+                        lambda: not (
+                            runtime_home
+                            / "circuit_breaker_reset.request.json"
+                        ).exists(),
+                        timeout_s=2.0,
+                    )
                 )
             finally:
                 _stop_and_wait(proc)
@@ -912,9 +1015,17 @@ class ControlLoopTests(unittest.TestCase):
             self.assertIsNotNone(status)
             self.assertEqual(status["status_detail"], "restore failed")
             events = _read_runtime_events(runtime_home)
-            self.assertTrue(
-                any(item.get("event_type") == "control_loop.abort" for item in events)
+            abort_event = next(
+                (
+                    item
+                    for item in events
+                    if item.get("event_type") == "control_loop.abort"
+                ),
+                None,
             )
+            self.assertIsNotNone(abort_event)
+            self.assertEqual(abort_event["severity"], "critical")
+            self.assertEqual(abort_event["error_code"], "CONTROL_LOOP_ABORT")
 
     # ---- Adaptive cadence Phase 2 (slew-only; design tests 1-5) ----
 

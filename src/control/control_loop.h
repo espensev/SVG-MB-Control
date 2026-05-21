@@ -118,7 +118,8 @@ struct ControlLoopConfig {
     std::uint32_t control_hold_ms = 60000u;
     std::string cpu_temp_label = "Tctl/Tdie";
     // Upward-only adaptive cadence (design: docs/adaptive-cadence-design-
-    // 2026-05-19.md). Phase 1: parsed and validated only, not yet consumed.
+    // 2026-05-19.md). Phase 2 is slew-only; the setpoint-motion term remains
+    // deferred until it has a defined scale.
     // poll_tick_floor_ms == poll_tick_ms disables adaptation; the loader sets
     // it to poll_tick_ms when the key is absent (default-inert).
     std::uint32_t poll_tick_floor_ms = 0u;

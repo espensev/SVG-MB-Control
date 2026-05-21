@@ -393,9 +393,9 @@ ControlLoopConfig LoadControlLoopConfig(
     cfg.control_hold_ms = loop_json.value("control_hold_ms", cfg.control_hold_ms);
     cfg.cpu_temp_label = loop_json.value("cpu_temp_label", cfg.cpu_temp_label);
 
-    // Upward-only adaptive cadence (Phase 1: parsed + validated, not yet
-    // consumed). An absent poll_tick_floor_ms defaults to poll_tick_ms, which
-    // disables adaptation; an absent cadence_relax_per_s derives (P - F) / 3.
+    // Upward-only adaptive cadence. An absent poll_tick_floor_ms defaults to
+    // poll_tick_ms, which disables adaptation; an absent cadence_relax_per_s
+    // derives (P - F) / 3.
     cfg.poll_tick_floor_ms = loop_json.contains("poll_tick_floor_ms")
         ? loop_json.value("poll_tick_floor_ms", cfg.poll_tick_ms)
         : cfg.poll_tick_ms;

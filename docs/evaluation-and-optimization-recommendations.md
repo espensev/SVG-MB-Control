@@ -25,8 +25,8 @@ maintainability and experiment tooling rather than urgent controller safety.
   comprehensive runtime logging, crash/restore sidecars, control-loop config
   validation, sensor-failure safe mode, and write-failure circuit breakers
 - **Weaknesses:** `RunUntilStopped()` is still too large, config/build identity
-  is not yet written into CSV prologues, circuit-breaker reset is still restart
-  based, and deeper sensor-group timing is not present yet
+  is not yet fully extracted into smaller behavior-preserving helpers, and
+  deeper control-loop sensor-group timing is not present yet
 
 ## Current Implementation Status
 
@@ -50,7 +50,7 @@ Use this table before acting on the detailed recommendations below.
 | 4.3 Reserve more log-string space | Minor / opportunistic | Some reserves exist. This is not a standalone task; adjust when editing JSON/CSV escaping code. |
 | 4.4 Use RAII for AMD PCI mutex | Done | Keep. `amd_reader.cpp` now uses a scoped PCI mutex lock so acquired mutex ownership is released on every return path. |
 | 5.1 Adaptive tick skip/resync | Partly done | Fixed-start scheduling and overrun reporting exist. Skip-accounting is deferred because measured 50 ms runs are stable. |
-| 5.2 Circuit breaker for repeated write failures | Done with manual recovery | Repeated write failures open a per-channel breaker, log events, and publish live status fields. Add a reset command only if operators need live recovery without restart. |
+| 5.2 Circuit breaker for repeated write failures | Done | Repeated write failures open a per-channel breaker, log events, publish live status fields, and can be reset through `--reset-breakers`. |
 | 5.3 Metrics export | Defer | Do not add HTTP/Prometheus now. Use the local CSV/event analyzer plus run manifests first. |
 | 5.4 Temperature sensor failure detection | Done | Repeated missing primary input commands safe full-speed duty and logs failure/recovery events. |
 | 6.1 Unit tests for control algorithms | Partly covered | Hermetic smoke tests cover main behavior. Add pure C++/unit tests when extracting channel evaluation or policy helpers. |
@@ -60,16 +60,12 @@ Use this table before acting on the detailed recommendations below.
 
 Current short list:
 
-1. Add config/build identity to the CSV prologue so a standalone capture can be
-   traced back to its exact binary and config.
-2. Refactor `RunUntilStopped()` after the analyzer/manifest path has produced a
+1. Refactor `RunUntilStopped()` after the analyzer/manifest path has produced a
    behavior baseline, keeping channel write decisions and failure paths
    unchanged.
-3. Add an explicit circuit-breaker reset command or operator workflow if live
-   recovery without process restart becomes necessary.
-4. Add per-sensor-group timing only if measured cadence evidence requires it.
-5. Add normalized event severity/error codes and compact decision records before
-   building dashboard or ingestion infrastructure.
+2. Add per-sensor-group timing only if measured cadence evidence requires it.
+3. Build dashboard or ingestion infrastructure only after the local
+   summary/manifest/decision-record path has produced enough tuning evidence.
 
 ## RunUntilStopped Refactor Boundary
 
@@ -824,14 +820,15 @@ graph TD
 2. **Refactor `RunUntilStopped()` after behavior stabilizes.** Extract channel
    evaluation/write application with focused regression tests and
    analyzer-backed before/after checks.
-3. **Add an explicit circuit-breaker reset path only if needed.** Current
-   recovery is process restart; do not add runtime controls until operations
-   need them.
+3. **Circuit-breaker reset path is now explicit.** Use `--reset-breakers`
+   instead of process restart when the operator wants to clear an open
+   write-failure breaker.
 4. **Add per-sensor-group timing only if cadence diagnosis needs it.** Current
    loop work duration and achieved interval are enough for the observed 50 ms
    profile.
-5. **Normalize event severity/error codes before dashboard work.** Keep local
-   summaries and decision records as the next reporting layer.
+5. **Dashboard/ingestion work stays behind local evidence.** Event
+   severity/error codes and compact decision records are now implemented; keep
+   using local summaries until they show a need for heavier infrastructure.
 
 ### Defer
 
@@ -884,7 +881,7 @@ process CPU fields from the CSV before doing any performance-motivated change.
 
 - Done: add live per-channel failure-state fields to `control_runtime.json`.
 - Done: add run manifests and a Control-owned CSV/event analyzer.
-- Add compact decision records for tuning changes.
+- Done: add analyzer-generated compact decision records for tuning changes.
 
 ### Phase 3: Maintainability
 

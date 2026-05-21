@@ -9,8 +9,11 @@ class AnalyzerToolTests(unittest.TestCase):
             td = Path(td_str)
             csv_path = td / "run.csv"
             events_path = td / "events.jsonl"
+            config_path = td / "control.json"
             summary_path = td / "summary.md"
+            decision_path = td / "summary.decision.md"
             manifest_path = td / "manifest.json"
+            config_path.write_text('{"control_loop":{"poll_tick_ms":250}}\n', encoding="utf-8")
             csv_path.write_text(
                 "\n".join(
                     [
@@ -20,10 +23,14 @@ class AnalyzerToolTests(unittest.TestCase):
                         "loop_overrun,process_cpu_delta_ms,process_cpu_pct,"
                         "process_working_set_bytes,process_private_bytes,"
                         "channel0_setpoint_pct,channel0_thermal_pressure_boost_pct,"
+                        "channel0_response_source,channel0_write_reason,"
                         "channel0_total_writes",
-                        "70,72,50,60,65,50,4,0,false,2,0.1,1000,2000,50,0,1",
-                        "75,76,52,62,67,50,5,0,false,2,0.2,1100,2100,55,1,2",
-                        "74,75,51,61,66,60,6,10,false,2,0.2,1200,2200,54.4,1,3",
+                        "70,72,50,60,65,50,4,0,false,2,0.1,1000,2000,50,0,"
+                        "primary_curve,first_write,1",
+                        "75,76,52,62,67,50,5,0,false,2,0.2,1100,2100,55,1,"
+                        "primary_curve,setpoint_delta,2",
+                        "74,75,51,61,66,60,6,10,false,2,0.2,1200,2200,54.4,1,"
+                        "primary_curve,setpoint_delta,3",
                     ]
                 )
                 + "\n",
@@ -32,8 +39,20 @@ class AnalyzerToolTests(unittest.TestCase):
             events_path.write_text(
                 "\n".join(
                     [
-                        json.dumps({"event_type": "control_loop.write_applied"}),
-                        json.dumps({"event_type": "control_loop.circuit_breaker_opened"}),
+                        json.dumps(
+                            {
+                                "event_type": "control_loop.write_applied",
+                                "severity": "info",
+                                "error_code": "none",
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "event_type": "control_loop.circuit_breaker_opened",
+                                "severity": "warning",
+                                "error_code": "CONTROL_LOOP_CIRCUIT_BREAKER_OPENED",
+                            }
+                        ),
                     ]
                 )
                 + "\n",
@@ -48,12 +67,16 @@ class AnalyzerToolTests(unittest.TestCase):
                     str(csv_path),
                     "--events",
                     str(events_path),
+                    "--config",
+                    str(config_path),
                     "--out",
                     str(summary_path),
                     "--manifest-out",
                     str(manifest_path),
                     "--profile",
                     "smoke",
+                    "--hypothesis",
+                    "verify automatic decision record",
                     "--gpu-load-threshold-c",
                     "66",
                 ],
@@ -70,12 +93,38 @@ class AnalyzerToolTests(unittest.TestCase):
             self.assertIn("rows above/equal: 2", summary)
             self.assertIn("control_loop.write_applied", summary)
             self.assertIn("control_loop.circuit_breaker_opened", summary)
+            self.assertIn("Event severity: info:1, warning:1", summary)
+            self.assertIn(
+                "CONTROL_LOOP_CIRCUIT_BREAKER_OPENED:1",
+                summary,
+            )
+
+            self.assertTrue(decision_path.is_file())
+            decision = decision_path.read_text(encoding="utf-8")
+            self.assertIn("SVG-MB-Control Decision Record", decision)
+            self.assertIn("- Decision: pending operator review", decision)
+            self.assertIn("verify automatic decision record", decision)
+            self.assertIn("primary_curve:3", decision)
+            self.assertIn("setpoint_delta:2", decision)
+            self.assertIn("Event severity", decision)
+            self.assertIn("CONTROL_LOOP_CIRCUIT_BREAKER_OPENED:1", decision)
+            self.assertIn("Concerning event count: control_loop.circuit_breaker_opened=1.", decision)
 
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["schema"], "svg_mb_control.analysis_manifest.v1")
             self.assertEqual(manifest["row_count"], 3)
             self.assertEqual(manifest["event_count"], 2)
             self.assertTrue(manifest["artifacts"]["csv"]["sha256"])
+            self.assertTrue(manifest["artifacts"]["config"]["sha256"])
+            self.assertTrue(manifest["artifacts"]["decision_record"]["sha256"])
+            self.assertEqual(
+                manifest["artifacts"]["decision_record"]["path"],
+                str(decision_path),
+            )
+            self.assertEqual(
+                manifest["analysis_thresholds"]["cpu_load_threshold_c"],
+                75.0,
+            )
 
             json_path = td / "summary.json"
             result_json = subprocess.run(

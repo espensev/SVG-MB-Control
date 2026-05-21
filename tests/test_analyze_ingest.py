@@ -126,6 +126,8 @@ def _write_fixture_events(path: Path, session_start: str) -> None:
             "schema": "svg_mb_control.event.v1",
             "event_time": session_start,
             "event_type": "control_loop.start",
+            "severity": "info",
+            "error_code": "none",
             "mode": "control-loop",
             "success": True,
             "detail": "control-loop started",
@@ -134,6 +136,8 @@ def _write_fixture_events(path: Path, session_start: str) -> None:
             "schema": "svg_mb_control.event.v1",
             "event_time": session_start,
             "event_type": "control_loop.baseline_captured",
+            "severity": "info",
+            "error_code": "none",
             "mode": "control-loop",
             "channel": 0,
             "tick_count": 1,
@@ -143,6 +147,8 @@ def _write_fixture_events(path: Path, session_start: str) -> None:
             "schema": "svg_mb_control.event.v1",
             "event_time": session_start,
             "event_type": "control_loop.write_applied",
+            "severity": "info",
+            "error_code": "none",
             "mode": "control-loop",
             "channel": 0,
             "tick_count": 1,
@@ -154,6 +160,8 @@ def _write_fixture_events(path: Path, session_start: str) -> None:
             "schema": "svg_mb_control.event.v1",
             "event_time": session_start,
             "event_type": "control_loop.write_applied",
+            "severity": "info",
+            "error_code": "none",
             "mode": "control-loop",
             "channel": 1,
             "tick_count": 1,
@@ -165,6 +173,8 @@ def _write_fixture_events(path: Path, session_start: str) -> None:
             "schema": "svg_mb_control.event.v1",
             "event_time": session_start,
             "event_type": "control_loop.shutdown",
+            "severity": "info",
+            "error_code": "none",
             "mode": "control-loop",
             "success": True,
         },
@@ -344,7 +354,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "5")
+            self.assertEqual(schema[0], "6")
 
             run = _query_one(
                 db_path,
@@ -363,6 +373,14 @@ class AnalyzeIngestTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM events WHERE run_id IS NOT NULL",
             )[0]
             self.assertEqual(events_with_run, 5)
+
+            event_identity = _query_one(
+                db_path,
+                "SELECT severity, error_code FROM events "
+                "WHERE event_type='control_loop.write_applied' LIMIT 1",
+            )
+            self.assertEqual(event_identity[0], "info")
+            self.assertEqual(event_identity[1], "none")
 
             fan_count = _query_one(
                 db_path,

@@ -2,8 +2,8 @@
 
 **Goal:** Move to the next logging target while accounting for work already present in the current tree.
 **Date:** 2026-05-16
-**Status:** complete - evidence logger includes SIO voltage/temperature, fan tach hi/lo fields, configurable GPU sample modes, and richer GPU row fields; focused evidence test and full no-publish local CI passed
-**Recommended next:** Add per-sensor-group timing/cadence fields and optional change flags.
+**Status:** complete - evidence logger includes SIO voltage/temperature, fan tach hi/lo fields, configurable GPU sample modes, richer GPU row fields, per-backend read timing, poll cadence, change flags, analyzer-generated compact decision records, and normalized event severity/error codes; focused evidence/analyzer tests and full no-publish local CI passed
+**Recommended next:** Refactor `RunUntilStopped()` only after current response tuning stabilizes and analyzer-backed behavior baselines exist.
 
 ---
 
@@ -136,7 +136,9 @@
 **Implications:**
 - A second logger now uses `RuntimeCsvLogger` without overwriting the controller's latest CSV/manifest/event surfaces.
 - SIO and GPU evidence-schema widening are now implemented.
-- The next useful schema target is per-backend read duration/cadence and optional change flags.
+- The evidence logger now has per-backend read duration/cadence and optional
+  change flags, so stale or unchanged backend samples can be separated from
+  low controller response.
 - Evidence artifacts now have their own latest files while archive files remain durable.
 
 ---
@@ -178,4 +180,12 @@ Ready for a small implementation sequence.
 3. Done: add a minimal foreground evidence logger that reuses the artifact layer and starts with current runtime snapshot fields only.
 4. Done: add SIO voltage/temperature and fan tach high/low evidence.
 5. Done: add configurable GPU sample modes and richer GPU row fields.
-6. Next: add per-sensor-group timing/cadence fields and optional change flags.
+6. Done: add per-backend read timing/cadence fields and optional change flags
+   to the foreground evidence logger.
+7. Done: add analyzer-generated compact decision records for response-tuning
+   runs.
+8. Done: add normalized event severity/error codes for response-tuning runs.
+9. Done: add an explicit circuit-breaker reset command/operator workflow for
+   live recovery without process restart.
+10. Next: refactor `RunUntilStopped()` only after current response tuning
+   stabilizes and analyzer-backed behavior baselines exist.

@@ -9,17 +9,6 @@ namespace svg_mb_control {
 
 namespace {
 
-std::filesystem::path ResolveRuntimePolicyPath(const ControlConfig* config) {
-    std::filesystem::path path = GetEnvironmentPath(L"SVG_MB_RUNTIME_POLICY");
-    if (!path.empty()) {
-        return std::filesystem::absolute(path).lexically_normal();
-    }
-    if (config != nullptr && !config->runtime_policy_path.empty()) {
-        return config->runtime_policy_path;
-    }
-    return {};
-}
-
 std::vector<std::uint32_t> ParseBlockedChannels(
     const nlohmann::json& control_json) {
     std::vector<std::uint32_t> blocked;
@@ -42,6 +31,18 @@ std::vector<std::uint32_t> ParseBlockedChannels(
 }
 
 }  // namespace
+
+std::filesystem::path ResolveRuntimePolicySourcePath(
+    const ControlConfig* config) {
+    std::filesystem::path path = GetEnvironmentPath(L"SVG_MB_RUNTIME_POLICY");
+    if (!path.empty()) {
+        return std::filesystem::absolute(path).lexically_normal();
+    }
+    if (config != nullptr && !config->runtime_policy_path.empty()) {
+        return config->runtime_policy_path;
+    }
+    return {};
+}
 
 RuntimeWritePolicy LoadRuntimeWritePolicy(const std::filesystem::path& path) {
     if (path.empty()) {
@@ -68,7 +69,7 @@ RuntimeWritePolicy LoadRuntimeWritePolicy(const std::filesystem::path& path) {
 }
 
 RuntimeWritePolicy ResolveRuntimeWritePolicy(const ControlConfig* config) {
-    const std::filesystem::path path = ResolveRuntimePolicyPath(config);
+    const std::filesystem::path path = ResolveRuntimePolicySourcePath(config);
     if (path.empty()) {
         return RuntimeWritePolicy{};
     }

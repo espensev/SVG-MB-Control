@@ -134,7 +134,13 @@ int ReadLoop::RunUntilStopped() {
         impl_->runtime_home,
         impl_->config.log_rotate_hours,
         impl_->config.log_retain_days,
-        impl_->config.csv_flush_interval_rows);
+        impl_->config.csv_flush_interval_rows,
+        RuntimeArtifactNaming{},
+        RuntimeCsvIdentity{
+            .config_path = impl_->config.source_path,
+            .runtime_policy_path =
+                ResolveRuntimePolicySourcePath(&impl_->config),
+        });
     if (csv_logger.Open("read-loop", BuildReadLoopCsvHeader())) {
         status.log_csv_path = csv_logger.active_archive_path().string();
         status.log_manifest_path = csv_logger.manifest_path().string();

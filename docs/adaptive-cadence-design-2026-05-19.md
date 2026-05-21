@@ -1,7 +1,9 @@
 # Upward-Only Adaptive Cadence — Design (B1)
 
-Status: **design only, not implemented.** No code in this change implements
-this. It is the proposal requested in the code-quality pass follow-up.
+Status: **partially implemented.** Phase 1 config parsing/validation and Phase
+2 slew-only adaptive cadence are implemented. Phase 2b setpoint-motion scoring
+is still deferred because its scale is not defined here, and the non-default
+cadence floor still needs real-hardware soak evidence before being recommended.
 
 Revised 2026-05-19: `low_band.signal` removed from the transient score (it
 is a sustained absolute-temperature signal, not a transient — see "Why
@@ -213,8 +215,7 @@ without hardware:
 1. **Done** — adaptive-cadence Phase 1 landed: additive loop-config fields
    (`poll_tick_floor_ms`, `cadence_slew_start_c_per_s`,
    `cadence_slew_full_c_per_s`, `cadence_relax_per_s`) with validation,
-   default-inert (`F = P` when `poll_tick_floor_ms` is absent). Parsed and
-   validated only, not yet consumed; no behaviour change.
+   default-inert (`F = P` when `poll_tick_floor_ms` is absent).
 2. **Done (slew-only)** — `ComputeCadence` computes the slew score and
    `E = round(P − transient * (P − F))` (instant tighten, slow relax at
    `cadence_relax_per_s` via `MoveTowardRateLimited`), feeding

@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <mutex>
@@ -67,6 +68,66 @@ void PutOptionalDouble(nlohmann::json& payload,
         : nlohmann::json(nullptr);
 }
 
+bool Contains(std::string_view text, std::string_view needle) {
+    return text.find(needle) != std::string_view::npos;
+}
+
+std::string NormalizeEventCode(std::string_view event_type) {
+    std::string code;
+    code.reserve(event_type.size());
+    bool last_was_separator = false;
+    for (unsigned char ch : event_type) {
+        if (std::isalnum(ch)) {
+            code.push_back(static_cast<char>(std::toupper(ch)));
+            last_was_separator = false;
+        } else if (!last_was_separator) {
+            code.push_back('_');
+            last_was_separator = true;
+        }
+    }
+    while (!code.empty() && code.back() == '_') {
+        code.pop_back();
+    }
+    return code.empty() ? "UNKNOWN_EVENT" : code;
+}
+
+std::string InferSeverity(const RuntimeLogEvent& event) {
+    if (!event.severity.empty()) {
+        return event.severity;
+    }
+
+    const std::string_view type(event.event_type);
+    if (Contains(type, ".abort") || Contains(type, "fatal")) {
+        return "critical";
+    }
+    if (Contains(type, "warning") || Contains(type, "skipped") ||
+        Contains(type, "rejected") || Contains(type, "invalid_request") ||
+        Contains(type, "circuit_breaker_opened") ||
+        Contains(type, "sensor_failure_detected") ||
+        Contains(type, "worker_restart_scheduled")) {
+        return "warning";
+    }
+    if (event.success.has_value() && !*event.success) {
+        return "error";
+    }
+    if (Contains(type, "failed") || Contains(type, "failure") ||
+        Contains(type, "timeout")) {
+        return "error";
+    }
+    return "info";
+}
+
+std::string InferErrorCode(const RuntimeLogEvent& event,
+                           std::string_view severity) {
+    if (!event.error_code.empty()) {
+        return event.error_code;
+    }
+    if (severity == "info") {
+        return "none";
+    }
+    return NormalizeEventCode(event.event_type);
+}
+
 }  // namespace
 
 std::uint64_t CachedEventCount(const std::filesystem::path& path,
@@ -103,12 +164,16 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
     const std::string event_time = event.event_time_iso.empty()
         ? FormatRuntimeLocalIso8601(std::chrono::system_clock::now())
         : event.event_time_iso;
+    const std::string severity = InferSeverity(event);
+    const std::string error_code = InferErrorCode(event, severity);
 
     nlohmann::json payload = {
         {"schema", "svg_mb_control.event.v1"},
         {"event_time", event_time},
         {"mode", event.mode},
         {"event_type", event.event_type},
+        {"severity", severity},
+        {"error_code", error_code},
         {"detail", event.detail},
     };
     if (event.channel.has_value()) {

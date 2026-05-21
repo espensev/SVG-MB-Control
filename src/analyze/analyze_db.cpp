@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS events (
     run_id INTEGER REFERENCES runs(id) ON DELETE CASCADE,
     event_time TEXT NOT NULL,
     event_type TEXT NOT NULL,
+    severity TEXT,
+    error_code TEXT,
     mode TEXT,
     success INTEGER,
     channel INTEGER,
@@ -137,6 +139,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_run_time ON events(run_id, event_time);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity, error_code);
 
 CREATE TABLE IF NOT EXISTS plant_model_captures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -557,6 +560,18 @@ void MigrateSchema(Database& db) {
                 "ADD COLUMN gpu_airflow_boost_pct REAL");
         }
         SetSchemaVersion(db, 5);
+    }
+    if (version <= 5) {
+        if (!ColumnExists(db, "events", "severity")) {
+            db.Exec("ALTER TABLE events ADD COLUMN severity TEXT");
+        }
+        if (!ColumnExists(db, "events", "error_code")) {
+            db.Exec("ALTER TABLE events ADD COLUMN error_code TEXT");
+        }
+        db.Exec(
+            "CREATE INDEX IF NOT EXISTS idx_events_severity "
+            "ON events(severity, error_code)");
+        SetSchemaVersion(db, 6);
     }
 }
 

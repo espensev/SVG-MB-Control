@@ -11,7 +11,9 @@
 
 #include <chrono>
 #include <exception>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -29,6 +31,66 @@ std::uint32_t ResolveEvidenceStalenessThresholdMs(
     }
     const std::uint32_t poll = config.poll_ms > 0u ? config.poll_ms : 1000u;
     return poll * 3u;
+}
+
+double DurationMs(std::chrono::steady_clock::duration duration) {
+    return std::chrono::duration<double, std::milli>(duration).count();
+}
+
+bool DetectChanged(std::optional<std::string>& previous,
+                   const std::string& current) {
+    const bool changed = !previous.has_value() || *previous != current;
+    previous = current;
+    return changed;
+}
+
+std::string AmdSignature(const RuntimeSnapshot& snapshot) {
+    std::ostringstream sig;
+    sig << snapshot.amd_sensors.size();
+    for (const auto& sensor : snapshot.amd_sensors) {
+        sig << '|' << sensor.label << '=' << sensor.temperature_c;
+    }
+    return sig.str();
+}
+
+std::string GpuThermalSignature(const RuntimeSnapshot& snapshot) {
+    std::ostringstream sig;
+    sig << snapshot.gpu.available
+        << '|' << snapshot.gpu.gpu_name
+        << '|' << snapshot.gpu.last_warning
+        << '|' << snapshot.gpu.core_c
+        << '|' << snapshot.gpu.memjn_c
+        << '|' << snapshot.gpu.hotspot_c;
+    return sig.str();
+}
+
+std::string FanStateSignature(const RuntimeSnapshot& snapshot) {
+    std::ostringstream sig;
+    sig << snapshot.fans.size();
+    for (const auto& fan : snapshot.fans) {
+        sig << '|' << fan.channel
+            << ':' << fan.rpm
+            << ':' << fan.tach_raw
+            << ':' << static_cast<unsigned int>(fan.duty_raw)
+            << ':' << static_cast<unsigned int>(fan.mode_raw)
+            << ':' << fan.duty_percent
+            << ':' << fan.tach_valid
+            << ':' << fan.manual_override
+            << ':' << fan.write_allowed
+            << ':' << fan.policy_blocked
+            << ':' << fan.effective_write_allowed;
+    }
+    return sig.str();
+}
+
+std::string RuntimeSnapshotSignature(const RuntimeSnapshot& snapshot) {
+    std::ostringstream sig;
+    sig << snapshot.policy_writes_enabled_present
+        << '|' << snapshot.policy_writes_enabled
+        << "|amd:" << AmdSignature(snapshot)
+        << "|gpu:" << GpuThermalSignature(snapshot)
+        << "|fan:" << FanStateSignature(snapshot);
+    return sig.str();
 }
 
 std::vector<RuntimeSioVoltageLogState> ConvertVoltages(
@@ -66,6 +128,18 @@ std::vector<RuntimeFanTachEvidenceLogState> ConvertFanTachEvidence(
     return fans;
 }
 
+std::string FanTachEvidenceSignature(
+    const FanTachEvidenceScanResult& result) {
+    std::ostringstream sig;
+    sig << result.ok() << '|' << result.fans.size();
+    for (const auto& fan : result.fans) {
+        sig << '|' << fan.channel
+            << ':' << static_cast<unsigned int>(fan.tach_hi_raw)
+            << ':' << static_cast<unsigned int>(fan.tach_lo_raw);
+    }
+    return sig.str();
+}
+
 std::vector<RuntimeSioTemperatureLogState> ConvertTemperatures(
     const SioTemperatureScanResult& result) {
     std::vector<RuntimeSioTemperatureLogState> temperatures;
@@ -84,6 +158,83 @@ std::vector<RuntimeSioTemperatureLogState> ConvertTemperatures(
         });
     }
     return temperatures;
+}
+
+std::string VoltageSignature(const SioVoltageScanResult& result) {
+    std::ostringstream sig;
+    sig << result.ok() << '|' << result.voltages.size();
+    for (const auto& voltage : result.voltages) {
+        sig << '|' << voltage.index
+            << ':' << voltage.label
+            << ':' << static_cast<unsigned int>(voltage.raw)
+            << ':' << voltage.voltage_v;
+    }
+    return sig.str();
+}
+
+std::string TemperatureSignature(const SioTemperatureScanResult& result) {
+    std::ostringstream sig;
+    sig << result.ok() << '|' << result.temperatures.size();
+    for (const auto& temperature : result.temperatures) {
+        sig << '|' << temperature.index
+            << ':' << temperature.label
+            << ':' << static_cast<unsigned int>(temperature.raw)
+            << ':' << static_cast<unsigned int>(temperature.half_raw)
+            << ':' << temperature.valid
+            << ':' << temperature.temperature_c;
+    }
+    return sig.str();
+}
+
+std::string GpuEvidenceSignature(const GpuEvidenceSample& sample) {
+    std::ostringstream sig;
+    sig << sample.available
+        << '|' << sample.sample_mode
+        << '|' << sample.gpu_name
+        << '|' << sample.last_warning
+        << '|' << sample.core_c
+        << '|' << sample.memjn_c
+        << '|' << sample.hotspot_c
+        << '|' << sample.nvml_temp_c
+        << '|' << sample.clock_graphics_mhz
+        << '|' << sample.clock_memory_mhz
+        << '|' << sample.clock_video_mhz
+        << '|' << sample.pstate
+        << '|' << sample.util_gpu_pct
+        << '|' << sample.util_fb_pct
+        << '|' << sample.util_vid_pct
+        << '|' << sample.nvml_util_gpu_pct
+        << '|' << sample.nvml_util_mem_pct
+        << '|' << sample.vram_used_mb
+        << '|' << sample.vram_free_mb
+        << '|' << sample.vram_total_mb
+        << '|' << sample.nvml_power_mw
+        << '|' << sample.power_source
+        << '|' << sample.voltage_core_mv
+        << '|' << sample.pcie_tx_kb_s
+        << '|' << sample.pcie_rx_kb_s
+        << '|' << sample.throttle_reasons
+        << "|fans:" << sample.fan_count;
+    for (std::uint32_t index = 0u;
+         index < sample.fan_count && index < kGpuEvidenceMaxFans;
+         ++index) {
+        sig << '|' << sample.fans[index].level_pct
+            << ':' << sample.fans[index].rpm;
+    }
+    sig << "|rails:" << sample.power_rail_count;
+    for (std::uint32_t index = 0u;
+         index < sample.power_rail_count && index < kGpuEvidenceMaxPowerRails;
+         ++index) {
+        sig << '|' << sample.power_rails[index].domain
+            << ':' << sample.power_rails[index].power_mw;
+    }
+    sig << "|thermal:" << sample.thermal_slot_count;
+    for (std::uint32_t index = 0u;
+         index < sample.thermal_slot_count && index < kGpuEvidenceMaxThermalSlots;
+         ++index) {
+        sig << '|' << sample.thermal_slots[index];
+    }
+    return sig.str();
 }
 
 std::string BuildSioEvidenceDetail(
@@ -151,7 +302,12 @@ int RunEvidenceLog(const ControlConfig& config,
                                  config.log_rotate_hours,
                                  config.log_retain_days,
                                  config.csv_flush_interval_rows,
-                                 naming);
+                                 naming,
+                                 RuntimeCsvIdentity{
+                                     .config_path = config.source_path,
+                                     .runtime_policy_path =
+                                         ResolveRuntimePolicySourcePath(&config),
+                                 });
     const std::string event_log_path =
         ResolveRuntimeEventLogPath(runtime_home, naming).string();
     if (!csv_logger.Open("evidence-log", BuildEvidenceLogCsvHeader())) {
@@ -217,15 +373,32 @@ int RunEvidenceLog(const ControlConfig& config,
     std::uint64_t skipped_polls = 0u;
     bool stale = false;
     auto last_success_time = std::chrono::steady_clock::now();
+    std::optional<std::chrono::steady_clock::time_point> previous_poll_started;
+    std::optional<std::string> previous_runtime_snapshot_signature;
+    std::optional<std::string> previous_amd_signature;
+    std::optional<std::string> previous_gpu_thermal_signature;
+    std::optional<std::string> previous_fan_state_signature;
+    std::optional<std::string> previous_fan_tach_signature;
+    std::optional<std::string> previous_voltage_signature;
+    std::optional<std::string> previous_temperature_signature;
+    std::optional<std::string> previous_gpu_evidence_signature;
 
     // Reused across poll iterations; SampleDirectRuntimeSnapshot fully resets
     // it each call so no telemetry carries over (see direct_runtime_snapshot).
     RuntimeSnapshot runtime_snapshot;
 
     while (!stop_requested.load() && !RuntimeStopRequested(runtime_home)) {
+        const auto poll_started = std::chrono::steady_clock::now();
+        const double poll_interval_ms = previous_poll_started.has_value()
+            ? DurationMs(poll_started - *previous_poll_started)
+            : std::numeric_limits<double>::quiet_NaN();
+        previous_poll_started = poll_started;
+
         try {
+            DirectRuntimeSnapshotTiming snapshot_timing;
             SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, *fan_writer,
-                                        runtime_policy, runtime_snapshot);
+                                        runtime_policy, runtime_snapshot,
+                                        &snapshot_timing);
 
             if (csv_logger.MaybeRotate()) {
                 AppendRuntimeEvent(
@@ -247,14 +420,32 @@ int RunEvidenceLog(const ControlConfig& config,
 
             const bool telemetry_available =
                 RuntimeSnapshotHasTelemetry(runtime_snapshot);
+            const auto fan_tach_started = std::chrono::steady_clock::now();
             const FanTachEvidenceScanResult fan_tach_result =
                 fan_writer->ReadFanTachEvidence();
+            const double fan_tach_read_ms =
+                DurationMs(std::chrono::steady_clock::now() -
+                           fan_tach_started);
+            const auto voltage_started = std::chrono::steady_clock::now();
             const SioVoltageScanResult voltage_result =
                 fan_writer->ReadVoltages();
+            const double sio_voltage_read_ms =
+                DurationMs(std::chrono::steady_clock::now() -
+                           voltage_started);
+            const auto temperature_started = std::chrono::steady_clock::now();
             const SioTemperatureScanResult temperature_result =
                 fan_writer->ReadSioTemperatures();
+            const double sio_temperature_read_ms =
+                DurationMs(std::chrono::steady_clock::now() -
+                           temperature_started);
+            const auto gpu_evidence_started = std::chrono::steady_clock::now();
             const GpuEvidenceSample gpu_evidence =
                 gpu_reader.SampleEvidence(config.evidence_gpu_sample_mode);
+            const double gpu_evidence_read_ms =
+                DurationMs(std::chrono::steady_clock::now() -
+                           gpu_evidence_started);
+            const double sample_duration_ms =
+                DurationMs(std::chrono::steady_clock::now() - poll_started);
             const bool sio_evidence_available =
                 fan_tach_result || voltage_result || temperature_result;
             const std::string sio_evidence_detail =
@@ -278,6 +469,29 @@ int RunEvidenceLog(const ControlConfig& config,
             stale = static_cast<std::uint64_t>(since_success_ms) >
                     static_cast<std::uint64_t>(staleness_threshold_ms);
 
+            const bool runtime_snapshot_changed = DetectChanged(
+                previous_runtime_snapshot_signature,
+                RuntimeSnapshotSignature(runtime_snapshot));
+            const bool amd_changed = DetectChanged(
+                previous_amd_signature, AmdSignature(runtime_snapshot));
+            const bool gpu_thermal_changed = DetectChanged(
+                previous_gpu_thermal_signature,
+                GpuThermalSignature(runtime_snapshot));
+            const bool fan_state_changed = DetectChanged(
+                previous_fan_state_signature,
+                FanStateSignature(runtime_snapshot));
+            const bool fan_tach_changed = DetectChanged(
+                previous_fan_tach_signature,
+                FanTachEvidenceSignature(fan_tach_result));
+            const bool sio_voltage_changed = DetectChanged(
+                previous_voltage_signature, VoltageSignature(voltage_result));
+            const bool sio_temperature_changed = DetectChanged(
+                previous_temperature_signature,
+                TemperatureSignature(temperature_result));
+            const bool gpu_evidence_changed = DetectChanged(
+                previous_gpu_evidence_signature,
+                GpuEvidenceSignature(gpu_evidence));
+
             const bool row_written = csv_logger.WriteRow(BuildEvidenceLogCsvRow(
                 runtime_snapshot,
                 RuntimeEvidenceLogState{
@@ -286,6 +500,24 @@ int RunEvidenceLog(const ControlConfig& config,
                     .skipped_polls = skipped_polls,
                     .stale = stale,
                     .status_detail = status_detail,
+                    .evidence_poll_interval_ms = poll_interval_ms,
+                    .evidence_sample_duration_ms = sample_duration_ms,
+                    .runtime_snapshot_read_ms = snapshot_timing.total_read_ms,
+                    .amd_read_ms = snapshot_timing.amd_read_ms,
+                    .gpu_thermal_read_ms = snapshot_timing.gpu_thermal_read_ms,
+                    .fan_scan_read_ms = snapshot_timing.fan_scan_read_ms,
+                    .fan_tach_read_ms = fan_tach_read_ms,
+                    .sio_voltage_read_ms = sio_voltage_read_ms,
+                    .sio_temperature_read_ms = sio_temperature_read_ms,
+                    .gpu_evidence_read_ms = gpu_evidence_read_ms,
+                    .runtime_snapshot_changed = runtime_snapshot_changed,
+                    .amd_changed = amd_changed,
+                    .gpu_thermal_changed = gpu_thermal_changed,
+                    .fan_state_changed = fan_state_changed,
+                    .fan_tach_changed = fan_tach_changed,
+                    .sio_voltage_changed = sio_voltage_changed,
+                    .sio_temperature_changed = sio_temperature_changed,
+                    .gpu_evidence_changed = gpu_evidence_changed,
                     .sio_evidence_available = sio_evidence_available,
                     .sio_evidence_detail = sio_evidence_detail,
                     .fan_tach_evidence =

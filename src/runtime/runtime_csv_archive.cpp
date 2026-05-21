@@ -2,17 +2,23 @@
 
 #include "json_io.h"
 #include "runtime_event_log.h"
+#include "windows_lean.h"
 
 #include <nlohmann/json.hpp>
+
+#include <bcrypt.h>
 
 #include <array>
 #include <chrono>
 #include <ctime>
+#include <iomanip>
 #include <iostream>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 #ifndef SVG_MB_CONTROL_VERSION
 #define SVG_MB_CONTROL_VERSION "unknown"
@@ -40,13 +46,143 @@ std::string FormatArchiveTimestamp(std::chrono::system_clock::time_point tp) {
     return written > 0u ? std::string(buffer.data(), written) : std::string();
 }
 
+std::string SanitizePrologueValue(std::string value) {
+    for (char& ch : value) {
+        if (ch == '\r' || ch == '\n') {
+            ch = ' ';
+        }
+    }
+    return value;
+}
+
+void WritePrologueField(std::ostream& stream,
+                        std::string_view key,
+                        const std::string& value) {
+    stream << "# " << key << '=' << SanitizePrologueValue(value) << '\n';
+}
+
+void WriteOptionalPrologueField(std::ostream& stream,
+                                std::string_view key,
+                                const std::optional<std::uint32_t>& value) {
+    if (value.has_value()) {
+        WritePrologueField(stream, key, std::to_string(*value));
+    }
+}
+
+std::string Sha256FileHex(const std::filesystem::path& path) {
+    if (path.empty()) {
+        return {};
+    }
+
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream.is_open()) {
+        return {};
+    }
+
+    BCRYPT_ALG_HANDLE algorithm = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    const auto cleanup = [&]() {
+        if (hash != nullptr) {
+            BCryptDestroyHash(hash);
+        }
+        if (algorithm != nullptr) {
+            BCryptCloseAlgorithmProvider(algorithm, 0);
+        }
+    };
+
+    NTSTATUS status = BCryptOpenAlgorithmProvider(
+        &algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        cleanup();
+        return {};
+    }
+
+    DWORD object_length = 0;
+    DWORD result_length = 0;
+    status = BCryptGetProperty(
+        algorithm, BCRYPT_OBJECT_LENGTH,
+        reinterpret_cast<PUCHAR>(&object_length), sizeof(object_length),
+        &result_length, 0);
+    if (!BCRYPT_SUCCESS(status) || object_length == 0u) {
+        cleanup();
+        return {};
+    }
+
+    DWORD hash_length = 0;
+    status = BCryptGetProperty(
+        algorithm, BCRYPT_HASH_LENGTH,
+        reinterpret_cast<PUCHAR>(&hash_length), sizeof(hash_length),
+        &result_length, 0);
+    if (!BCRYPT_SUCCESS(status) || hash_length == 0u) {
+        cleanup();
+        return {};
+    }
+
+    std::vector<UCHAR> hash_object(object_length);
+    std::vector<UCHAR> digest(hash_length);
+    status = BCryptCreateHash(
+        algorithm, &hash, hash_object.data(),
+        static_cast<ULONG>(hash_object.size()), nullptr, 0, 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        cleanup();
+        return {};
+    }
+
+    std::array<char, 64 * 1024> buffer{};
+    while (stream.good()) {
+        stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+        const std::streamsize bytes_read = stream.gcount();
+        if (bytes_read <= 0) {
+            continue;
+        }
+        status = BCryptHashData(
+            hash, reinterpret_cast<PUCHAR>(buffer.data()),
+            static_cast<ULONG>(bytes_read), 0);
+        if (!BCRYPT_SUCCESS(status)) {
+            cleanup();
+            return {};
+        }
+    }
+    if (stream.bad()) {
+        cleanup();
+        return {};
+    }
+
+    status = BCryptFinishHash(
+        hash, digest.data(), static_cast<ULONG>(digest.size()), 0);
+    if (!BCRYPT_SUCCESS(status)) {
+        cleanup();
+        return {};
+    }
+
+    cleanup();
+
+    std::ostringstream hex;
+    hex << std::hex << std::setfill('0');
+    for (UCHAR byte : digest) {
+        hex << std::setw(2) << static_cast<unsigned int>(byte);
+    }
+    return hex.str();
+}
+
+nlohmann::json IdentityFileJson(const std::filesystem::path& path,
+                                const std::string& sha256) {
+    return {
+        {"path", path.empty() ? nlohmann::json(nullptr)
+                              : nlohmann::json(path.string())},
+        {"sha256", sha256.empty() ? nlohmann::json(nullptr)
+                                  : nlohmann::json(sha256)},
+    };
+}
+
 }  // namespace
 
 RuntimeCsvLogger::RuntimeCsvLogger(std::filesystem::path runtime_home,
                                    std::uint32_t rotate_hours,
                                    std::uint32_t retain_days,
                                    std::uint32_t csv_flush_interval_rows,
-                                   RuntimeArtifactNaming naming)
+                                   RuntimeArtifactNaming naming,
+                                   RuntimeCsvIdentity identity)
     : runtime_home_(std::move(runtime_home)),
       logs_dir_(ResolveRuntimeLogsDir(runtime_home_)),
       archive_dir_(ResolveRuntimeArchiveDir(runtime_home_)),
@@ -57,7 +193,8 @@ RuntimeCsvLogger::RuntimeCsvLogger(std::filesystem::path runtime_home,
       csv_flush_interval_rows_(csv_flush_interval_rows == 0u
                                     ? 1u
                                     : csv_flush_interval_rows),
-      naming_(std::move(naming)) {}
+      naming_(std::move(naming)),
+      identity_(std::move(identity)) {}
 
 RuntimeCsvLogger::~RuntimeCsvLogger() {
     Close();
@@ -67,7 +204,13 @@ bool RuntimeCsvLogger::Open(std::string_view mode,
                             std::string_view header_line) {
     mode_ = std::string(mode);
     header_line_ = std::string(header_line);
+    ResolveIdentityHashes();
     return OpenNewChunk();
+}
+
+void RuntimeCsvLogger::ResolveIdentityHashes() {
+    config_sha256_ = Sha256FileHex(identity_.config_path);
+    runtime_policy_sha256_ = Sha256FileHex(identity_.runtime_policy_path);
 }
 
 bool RuntimeCsvLogger::OpenNewChunk() {
@@ -125,6 +268,20 @@ void RuntimeCsvLogger::WritePrologue() {
         *stream << "# schema=svg_mb_control.log.v1\n";
         *stream << "# mode=" << mode_ << '\n';
         *stream << "# session_start=" << opened_iso << '\n';
+        WritePrologueField(*stream, "producer", "svg-mb-control");
+        WritePrologueField(*stream, "build_version", SVG_MB_CONTROL_VERSION);
+        WritePrologueField(*stream, "git_hash", SVG_MB_CONTROL_GIT_HASH);
+        WritePrologueField(*stream, "config_path",
+                           identity_.config_path.string());
+        WritePrologueField(*stream, "config_sha256", config_sha256_);
+        WritePrologueField(*stream, "runtime_policy_path",
+                           identity_.runtime_policy_path.string());
+        WritePrologueField(*stream, "runtime_policy_sha256",
+                           runtime_policy_sha256_);
+        WriteOptionalPrologueField(*stream, "control_poll_tick_ms",
+                                   identity_.control_poll_tick_ms);
+        WriteOptionalPrologueField(*stream, "control_write_cooldown_ms",
+                                   identity_.control_write_cooldown_ms);
         *stream << header_line_ << '\n';
     }
     FlushStreams();
@@ -196,6 +353,21 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
              {"tool", "svg-mb-control"},
              {"version", SVG_MB_CONTROL_VERSION},
              {"git_hash", SVG_MB_CONTROL_GIT_HASH},
+         }},
+        {"config", IdentityFileJson(identity_.config_path, config_sha256_)},
+        {"runtime_policy",
+         IdentityFileJson(identity_.runtime_policy_path,
+                          runtime_policy_sha256_)},
+        {"control_loop",
+         {
+             {"poll_tick_ms",
+              identity_.control_poll_tick_ms
+                  ? nlohmann::json(*identity_.control_poll_tick_ms)
+                  : nlohmann::json(nullptr)},
+             {"write_cooldown_ms",
+              identity_.control_write_cooldown_ms
+                  ? nlohmann::json(*identity_.control_write_cooldown_ms)
+                  : nlohmann::json(nullptr)},
          }},
         {"external_logging",
          {

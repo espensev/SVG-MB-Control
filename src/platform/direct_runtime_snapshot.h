@@ -3,11 +3,20 @@
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 
+#include <limits>
+
 namespace svg_mb_control {
 
 class AmdReader;
 class FanWriter;
 class GpuReader;
+
+struct DirectRuntimeSnapshotTiming {
+    double total_read_ms = std::numeric_limits<double>::quiet_NaN();
+    double amd_read_ms = std::numeric_limits<double>::quiet_NaN();
+    double gpu_thermal_read_ms = std::numeric_limits<double>::quiet_NaN();
+    double fan_scan_read_ms = std::numeric_limits<double>::quiet_NaN();
+};
 
 RuntimeSnapshot SampleDirectRuntimeSnapshot(
     AmdReader& amd_reader,
@@ -25,6 +34,14 @@ void SampleDirectRuntimeSnapshot(
     FanWriter& fan_writer,
     const RuntimeWritePolicy& runtime_policy,
     RuntimeSnapshot& out);
+
+void SampleDirectRuntimeSnapshot(
+    AmdReader& amd_reader,
+    GpuReader& gpu_reader,
+    FanWriter& fan_writer,
+    const RuntimeWritePolicy& runtime_policy,
+    RuntimeSnapshot& out,
+    DirectRuntimeSnapshotTiming* timing);
 
 bool RuntimeSnapshotHasTelemetry(const RuntimeSnapshot& snapshot);
 

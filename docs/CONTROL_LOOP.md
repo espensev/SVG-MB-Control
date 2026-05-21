@@ -247,6 +247,9 @@ Operator commands use the same runtime-home resolution as the active config:
   restore/shutdown path.
 - `--restart` performs the same cooperative stop and only launches a new
   supervisor after the previous worker reports stopped.
+- `--reset-breakers` writes `circuit_breaker_reset.request.json`; the
+  control-loop consumes it on the next tick and clears open write-failure
+  breakers. Add `--reset-breaker-channel <n>` to target one channel.
 
 `Install-SVG-MB-ControlWatchdogScheduledTask.ps1` adds a separate watchdog task
 that checks health at logon and every minute. It restarts only `stale` or
@@ -301,8 +304,11 @@ current terminal and does not add supervisor restart behavior.
   returns.
 - After repeated write failures for a channel, the loop logs
   `control_loop.circuit_breaker_opened` and stops trying that channel. The
-  current reset path is process restart or a future explicit breaker-reset
-  mechanism; do not assume automatic recovery from the open state.
+  reset path is `--reset-breakers` or
+  `--reset-breakers --reset-breaker-channel <n>`. The reset clears
+  `circuit_breaker_open` and `consecutive_write_failures`, logs
+  `control_loop.circuit_breaker_reset`, and leaves policy/fan-write gates in
+  place; if the underlying write failure remains, the breaker can open again.
 - Sidecar failures are logged to `svg_mb_control_events.jsonl`; the loop avoids
   applying a write when it cannot record the pending-write sidecar first.
 

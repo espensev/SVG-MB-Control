@@ -77,6 +77,33 @@ class EvidenceLogTests(unittest.TestCase):
                 self.assertEqual(row["telemetry_available"], "true")
                 self.assertGreaterEqual(int(row["successful_polls"]), 1)
                 self.assertEqual(row["status_detail"], "direct sample captured")
+                self.assertIn("evidence_poll_interval_ms", row)
+                timing_fields = [
+                    "evidence_sample_duration_ms",
+                    "runtime_snapshot_read_ms",
+                    "amd_read_ms",
+                    "gpu_thermal_read_ms",
+                    "fan_scan_read_ms",
+                    "fan_tach_read_ms",
+                    "sio_voltage_read_ms",
+                    "sio_temperature_read_ms",
+                    "gpu_evidence_read_ms",
+                ]
+                for field in timing_fields:
+                    self.assertNotEqual(row[field], "", msg=field)
+                    self.assertGreaterEqual(float(row[field]), 0.0, msg=field)
+                change_fields = [
+                    "runtime_snapshot_changed",
+                    "amd_changed",
+                    "gpu_thermal_changed",
+                    "fan_state_changed",
+                    "fan_tach_changed",
+                    "sio_voltage_changed",
+                    "sio_temperature_changed",
+                    "gpu_evidence_changed",
+                ]
+                for field in change_fields:
+                    self.assertIn(row[field], ("true", "false"), msg=field)
                 self.assertEqual(row["sio_evidence_available"], "true")
                 self.assertEqual(
                     row["sio_evidence_detail"],

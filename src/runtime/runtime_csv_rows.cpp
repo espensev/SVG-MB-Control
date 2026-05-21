@@ -270,6 +270,24 @@ std::string BuildEvidenceLogCsvHeader() {
            << ",skipped_polls"
            << ",stale"
            << ",status_detail"
+           << ",evidence_poll_interval_ms"
+           << ",evidence_sample_duration_ms"
+           << ",runtime_snapshot_read_ms"
+           << ",amd_read_ms"
+           << ",gpu_thermal_read_ms"
+           << ",fan_scan_read_ms"
+           << ",fan_tach_read_ms"
+           << ",sio_voltage_read_ms"
+           << ",sio_temperature_read_ms"
+           << ",gpu_evidence_read_ms"
+           << ",runtime_snapshot_changed"
+           << ",amd_changed"
+           << ",gpu_thermal_changed"
+           << ",fan_state_changed"
+           << ",fan_tach_changed"
+           << ",sio_voltage_changed"
+           << ",sio_temperature_changed"
+           << ",gpu_evidence_changed"
            << ",sio_evidence_available"
            << ",sio_evidence_detail"
            << ",sio_voltage_count"
@@ -314,6 +332,42 @@ std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
     AppendCsvBool(csv, state.stale);
     csv << ',';
     AppendCsvString(csv, state.status_detail);
+    csv << ',';
+    AppendCsvDouble(csv, state.evidence_poll_interval_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.evidence_sample_duration_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.runtime_snapshot_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.amd_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.gpu_thermal_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.fan_scan_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.fan_tach_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.sio_voltage_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.sio_temperature_read_ms);
+    csv << ',';
+    AppendCsvDouble(csv, state.gpu_evidence_read_ms);
+    csv << ',';
+    AppendCsvBool(csv, state.runtime_snapshot_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.amd_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.gpu_thermal_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.fan_state_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.fan_tach_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.sio_voltage_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.sio_temperature_changed);
+    csv << ',';
+    AppendCsvBool(csv, state.gpu_evidence_changed);
     csv << ',';
     AppendCsvBool(csv, state.sio_evidence_available);
     csv << ',';

@@ -142,6 +142,22 @@ void SampleDirectRuntimeSnapshot(
     FanWriter& fan_writer,
     const RuntimeWritePolicy& runtime_policy,
     RuntimeSnapshot& out) {
+    SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, fan_writer,
+                                runtime_policy, out, nullptr);
+}
+
+void SampleDirectRuntimeSnapshot(
+    AmdReader& amd_reader,
+    GpuReader& gpu_reader,
+    FanWriter& fan_writer,
+    const RuntimeWritePolicy& runtime_policy,
+    RuntimeSnapshot& out,
+    DirectRuntimeSnapshotTiming* timing) {
+    const auto total_started = std::chrono::steady_clock::now();
+    if (timing != nullptr) {
+        *timing = DirectRuntimeSnapshotTiming{};
+    }
+
     // Reset before the merges. amd_sensors/fans must be cleared explicitly:
     // MergeAmdTelemetry early-returns without clearing when AMD is
     // unavailable, and MergeFanTelemetry upserts into fans, so a reused
@@ -163,16 +179,43 @@ void SampleDirectRuntimeSnapshot(
         out.policy_writes_enabled = sim.policy_writes_enabled;
     }
 
-    MergeAmdTelemetry(out, amd_reader.Sample());
-    MergeGpuTelemetry(out, gpu_reader.Sample());
+    const auto amd_started = std::chrono::steady_clock::now();
+    const AmdSnapshot& amd_snapshot = amd_reader.Sample();
+    if (timing != nullptr) {
+        timing->amd_read_ms =
+            DurationMilliseconds(std::chrono::steady_clock::now() -
+                                 amd_started);
+    }
+    MergeAmdTelemetry(out, amd_snapshot);
+
+    const auto gpu_started = std::chrono::steady_clock::now();
+    const GpuTempSample& gpu_sample = gpu_reader.Sample();
+    if (timing != nullptr) {
+        timing->gpu_thermal_read_ms =
+            DurationMilliseconds(std::chrono::steady_clock::now() -
+                                 gpu_started);
+    }
+    MergeGpuTelemetry(out, gpu_sample);
 
     // Reused across calls on this thread; FanWriter::ReadAllChannels resets
     // out.error/out.detail and clear()s out.fans while retaining capacity, so
     // a previous sample's state does not bleed in. Each sampler thread
     // (control loop, read loop, evidence log) keeps its own buffer.
     thread_local FanScanResult fan_scan_scratch;
+    const auto fan_scan_started = std::chrono::steady_clock::now();
     fan_writer.ReadAllChannels(fan_scan_scratch);
+    if (timing != nullptr) {
+        timing->fan_scan_read_ms =
+            DurationMilliseconds(std::chrono::steady_clock::now() -
+                                 fan_scan_started);
+    }
     MergeFanTelemetry(out, fan_scan_scratch, runtime_policy);
+
+    if (timing != nullptr) {
+        timing->total_read_ms =
+            DurationMilliseconds(std::chrono::steady_clock::now() -
+                                 total_started);
+    }
 }
 
 RuntimeSnapshot SampleDirectRuntimeSnapshot(

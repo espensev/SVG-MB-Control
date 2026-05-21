@@ -19,6 +19,9 @@ struct RuntimeWritePolicy {
 RuntimeWritePolicy LoadRuntimeWritePolicy(
     const std::filesystem::path& path);
 
+std::filesystem::path ResolveRuntimePolicySourcePath(
+    const ControlConfig* config);
+
 RuntimeWritePolicy ResolveRuntimeWritePolicy(
     const ControlConfig* config);
 

@@ -23,6 +23,115 @@
 
 namespace svg_mb_control {
 
+namespace {
+
+bool ChannelMatchesResetRequest(
+    const RuntimeBreakerResetRequest& request,
+    const ChannelState& channel) {
+    return !request.channel.has_value() ||
+           *request.channel == channel.config.channel;
+}
+
+void ProcessCircuitBreakerResetRequest(ControlRuntimeContext& context,
+                                       std::uint64_t tick_count,
+                                       ControlLoopRunState& state) {
+    const auto request =
+        TakeRuntimeBreakerResetRequest(context.runtime_home);
+    if (!request.has_value()) {
+        return;
+    }
+
+    state.force_status_write = true;
+
+    if (!request->parse_error.empty()) {
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type =
+                    "control_loop.circuit_breaker_reset_invalid",
+                .severity = "warning",
+                .error_code =
+                    "CONTROL_LOOP_CIRCUIT_BREAKER_RESET_INVALID",
+                .detail = request->parse_error,
+                .tick_count = tick_count,
+                .success = false,
+            });
+        return;
+    }
+
+    std::uint32_t matching_channels = 0u;
+    std::uint32_t reset_channels = 0u;
+    for (auto& channel : context.channels) {
+        if (!ChannelMatchesResetRequest(*request, channel)) {
+            continue;
+        }
+        ++matching_channels;
+        const bool had_breaker_state =
+            channel.circuit_breaker_open ||
+            channel.consecutive_write_failures > 0u;
+        if (!had_breaker_state) {
+            continue;
+        }
+
+        channel.circuit_breaker_open = false;
+        channel.consecutive_write_failures = 0u;
+        channel.last_write_reason = "breaker_reset";
+        ++reset_channels;
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.circuit_breaker_reset",
+                .detail = "operator reset of channel circuit breaker",
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .success = true,
+            });
+    }
+
+    if (reset_channels > 0u) {
+        return;
+    }
+
+    std::ostringstream detail;
+    if (matching_channels == 0u && request->channel.has_value()) {
+        detail << "operator reset requested for unknown channel "
+               << *request->channel;
+        AppendRuntimeEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .mode = "control-loop",
+                .event_type = "control_loop.circuit_breaker_reset_noop",
+                .severity = "warning",
+                .error_code =
+                    "CONTROL_LOOP_CIRCUIT_BREAKER_RESET_NOOP",
+                .detail = detail.str(),
+                .channel = *request->channel,
+                .tick_count = tick_count,
+                .success = true,
+            });
+        return;
+    }
+
+    detail << "operator reset requested but no matching breaker was open";
+    if (request->channel.has_value()) {
+        detail << " for channel " << *request->channel;
+    }
+    AppendRuntimeEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .mode = "control-loop",
+            .event_type = "control_loop.circuit_breaker_reset_noop",
+            .detail = detail.str(),
+            .channel = request->channel,
+            .tick_count = tick_count,
+            .success = true,
+        });
+}
+
+}  // namespace
+
 bool RunControlTick(ControlRuntimeContext& context,
                     const std::atomic<bool>& stop_flag,
                     AmdReader& amd_reader,
@@ -84,6 +193,8 @@ bool RunControlTick(ControlRuntimeContext& context,
         temp_inputs.gpu_available = true;
         temp_inputs.gpu_label = "gpu_envelope";
     }
+
+    ProcessCircuitBreakerResetRequest(context, state.tick_count, state);
 
     std::uint64_t low_band_elapsed_ms = context.loop.poll_tick_ms;
     if (std::isfinite(achieved_interval_ms) &&
@@ -268,6 +379,7 @@ bool RunControlTick(ControlRuntimeContext& context,
     // 2.5 s at the shipped 250 ms cadence).
     constexpr std::uint32_t kStatusUpdateIntervalTicks = 10u;
     const bool should_write_status =
+        state.force_status_write ||
         (state.tick_count % kStatusUpdateIntervalTicks) == 0u;
 
     if (should_write_status) {
@@ -284,6 +396,7 @@ bool RunControlTick(ControlRuntimeContext& context,
                         state.last_timing, context.channels,
                         state.log_csv_path, state.log_manifest_path,
                         event_log_path, state.last_successful_restore_iso);
+        state.force_status_write = false;
     }
 
     WaitForNextControlTick(context, tick_started_steady,

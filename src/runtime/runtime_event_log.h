@@ -13,6 +13,8 @@ struct RuntimeLogEvent {
     std::string event_time_iso;
     std::string mode;
     std::string event_type;
+    std::string severity;
+    std::string error_code;
     std::string detail;
     std::optional<std::uint32_t> channel;
     std::optional<std::uint64_t> tick_count;

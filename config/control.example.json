@@ -413,19 +413,23 @@
           },
           {
             "temp_c": 84,
-            "duty_pct": 24
+            "duty_pct": 28
           },
           {
             "temp_c": 88,
-            "duty_pct": 36
+            "duty_pct": 46
+          },
+          {
+            "temp_c": 90,
+            "duty_pct": 62
           },
           {
             "temp_c": 92,
-            "duty_pct": 52
+            "duty_pct": 78
           },
           {
             "temp_c": 96,
-            "duty_pct": 72
+            "duty_pct": 95
           }
         ],
         "curve": [
@@ -499,19 +503,23 @@
           },
           {
             "temp_c": 84,
-            "duty_pct": 24
+            "duty_pct": 28
           },
           {
             "temp_c": 88,
-            "duty_pct": 36
+            "duty_pct": 46
+          },
+          {
+            "temp_c": 90,
+            "duty_pct": 62
           },
           {
             "temp_c": 92,
-            "duty_pct": 52
+            "duty_pct": 78
           },
           {
             "temp_c": 96,
-            "duty_pct": 70
+            "duty_pct": 95
           }
         ],
         "curve": [

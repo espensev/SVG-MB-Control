@@ -65,7 +65,14 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         context.runtime_home,
         context.base.log_rotate_hours,
         context.base.log_retain_days,
-        context.base.csv_flush_interval_rows);
+        context.base.csv_flush_interval_rows,
+        RuntimeArtifactNaming{},
+        RuntimeCsvIdentity{
+            .config_path = context.base.source_path,
+            .runtime_policy_path = context.runtime_policy.source_path,
+            .control_poll_tick_ms = context.loop.poll_tick_ms,
+            .control_write_cooldown_ms = context.loop.write_cooldown_ms,
+        });
 
     ControlLoopRunState state;
     state.last_timing.loop_intended_interval_ms = context.loop.poll_tick_ms;

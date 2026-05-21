@@ -190,7 +190,7 @@ target_link_libraries(svg_mb_control_core PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(svg_mb_control_core PRIVATE psapi winmm)
+    target_link_libraries(svg_mb_control_core PRIVATE psapi winmm bcrypt)
 endif()
 
 if(TARGET gpu_telemetry::gpu_telemetry)

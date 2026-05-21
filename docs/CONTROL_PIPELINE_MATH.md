@@ -521,8 +521,10 @@ records `last_write_time` $= t_k$.
 
 A **failed** write increments `consecutive_write_failures`; once it
 reaches `kMaxConsecutiveFailures` ($= 5$) the breaker opens. The open breaker
-then gates future writes for that channel, so the current practical reset path
-is process restart or a future explicit breaker-reset operation.
+then gates future writes for that channel. `--reset-breakers` clears open
+breakers and failure counters through `circuit_breaker_reset.request.json`;
+`--reset-breaker-channel <n>` narrows the reset to one channel. The next write
+still passes through the same baseline, policy, cooldown, and fan-backend gates.
 
 ---
 

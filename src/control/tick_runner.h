@@ -62,6 +62,7 @@ struct ControlLoopRunState {
     // the logger rotates.
     std::string log_csv_path;
     std::string log_manifest_path;
+    bool force_status_write = false;
 };
 
 // Runs one iteration of the steady-state control loop. Returns false

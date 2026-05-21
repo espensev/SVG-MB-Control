@@ -166,6 +166,8 @@ std::vector<EventData> ParseEventsJsonl(const std::filesystem::path& path) {
         if (event.event_time.empty() || event.event_type.empty()) {
             continue;
         }
+        event.severity = JsonOptionalString(doc, "severity");
+        event.error_code = JsonOptionalString(doc, "error_code");
         event.mode = JsonOptionalString(doc, "mode");
         event.success = JsonOptionalInt(doc, "success");
         event.channel = JsonOptionalInt(doc, "channel");
@@ -175,8 +177,9 @@ std::vector<EventData> ParseEventsJsonl(const std::filesystem::path& path) {
         event.detail = JsonOptionalString(doc, "detail");
 
         nlohmann::json extras = doc;
-        for (const char* key : {"event_time", "event_type", "mode", "success",
-                                "channel", "setpoint_pct", "observed_temp_c",
+        for (const char* key : {"event_time", "event_type", "severity",
+                                "error_code", "mode", "success", "channel",
+                                "setpoint_pct", "observed_temp_c",
                                 "tick_count", "detail", "schema"}) {
             extras.erase(key);
         }

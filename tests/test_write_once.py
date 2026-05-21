@@ -269,6 +269,16 @@ class WriteOnceTests(unittest.TestCase):
             self.assertIn("timed out", result.stderr)
             self.assertEqual(len(_read_pending_writes(runtime_home)), 1)
             events = _read_runtime_events(runtime_home)
-            self.assertTrue(
-                any(item.get("event_type") == "write_once.restore_failed" for item in events)
+            restore_failed = next(
+                (
+                    item
+                    for item in events
+                    if item.get("event_type") == "write_once.restore_failed"
+                ),
+                None,
+            )
+            self.assertIsNotNone(restore_failed)
+            self.assertEqual(restore_failed["severity"], "error")
+            self.assertEqual(
+                restore_failed["error_code"], "WRITE_ONCE_RESTORE_FAILED"
             )

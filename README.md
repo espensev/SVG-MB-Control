@@ -121,13 +121,17 @@ cd .\release
 .\svg-mb-control.exe --health --json
 .\svg-mb-control.exe --stop
 .\svg-mb-control.exe --restart
+.\svg-mb-control.exe --reset-breakers
+.\svg-mb-control.exe --reset-breakers --reset-breaker-channel 4
 ```
 
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,
 mode, status detail, runtime home, and log paths. `--health --json` returns a
 machine-readable health state: `healthy`, `degraded`, `stale`, `stopped`, or
-`failed`.
+`failed`. `--reset-breakers` writes a live control-loop request to clear open
+per-channel write-failure breakers without restarting; omit
+`--reset-breaker-channel` to reset all channels.
 
 Recommended Windows install:
 
@@ -252,7 +256,7 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `3`). The schema
+- The DB schema is bootstrapped on first use (schema version `6`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
@@ -283,6 +287,29 @@ Behavior:
   use nearest-rank on sorted ascending values where `p100` is the maximum.
   `--json` emits the same metrics as a JSON object. `analyze report` is
   read-only; it never writes to fans, the runtime, or the database.
+
+Post-run response-test summaries and decision records:
+
+```powershell
+python scripts\analyze_control_run.py `
+  --csv release\runtime\logs\archive\svg_mb_control_control-loop_<timestamp>.csv `
+  --events release\runtime\logs\svg_mb_control_events.jsonl `
+  --status release\runtime\control_runtime.json `
+  --current-state release\runtime\current_state.json `
+  --config release\control.json `
+  --profile combined-load `
+  --gpu-load-threshold-c 70 `
+  --notes "ambient and subjective noise notes" `
+  --out runtime\analysis\combined-load-summary.md `
+  --manifest-out runtime\analysis\combined-load-manifest.json
+```
+
+When `--out` writes a Markdown summary, the analyzer also writes a sibling
+`*.decision.md` record automatically. The generated decision record includes
+run identity, artifact hashes, response metrics, channel attribution counts,
+and automatic flags for hot-but-low/no-response runs. Use
+`--decision-record-out <path>` or `--decision-record-out auto` to override the
+path, and `--no-decision-record` to suppress it.
 
 Local eval dashboard:
 
@@ -346,6 +373,8 @@ Field notes:
 - Runtime status and CSV rows include per-channel response attribution so traces
   can distinguish primary curve demand, CPU override, thermal pressure, first
   writes, setpoint deltas, and authority reasserts.
+- Runtime events include normalized `severity` and `error_code` fields for
+  response-test triage and offline ingest.
 - Channels `1`, `4`, and `5` also include a small CPU low/mid soak lane. It
   starts at `72 C`, fills by `82 C`, releases at `68 C`, and is capped at
   `0.3%` to give sustained
@@ -383,6 +412,7 @@ Control writes:
 - `control_health.json`
 - `pending_writes.json`
 - `stop.request.json`
+- `circuit_breaker_reset.request.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`

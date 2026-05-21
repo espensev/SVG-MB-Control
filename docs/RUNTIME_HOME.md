@@ -262,6 +262,21 @@ Fields:
 - `requested_at`
 - `reason`
 
+## circuit_breaker_reset.request.json
+
+Created by `svg-mb-control --reset-breakers` and consumed by `control-loop`.
+The loop removes the file after reading it, clears matching open
+write-failure breakers and failure counters, then logs
+`control_loop.circuit_breaker_reset`. If no matching breaker is open, the loop
+logs `control_loop.circuit_breaker_reset_noop`.
+
+Fields:
+
+- `schema_version`
+- `requested_at`
+- `reason`
+- `channel`, optional; absent or `null` means all controlled channels
+
 ## logs\
 
 `read-loop` and `control-loop` can publish historical CSV telemetry and a
@@ -280,7 +295,9 @@ shared event log under `runtime\logs\`.
   `control_runtime.json` as `log_manifest_path`.
 - `svg_mb_control_events.jsonl` stores append-only JSONL events for starts,
   rotations, write attempts, restores, reconcile work, and failures. Its path
-  is surfaced in `control_runtime.json` as `event_log_path`.
+  is surfaced in `control_runtime.json` as `event_log_path`. Event rows include
+  normalized `severity` and `error_code` fields so tools can group warnings,
+  errors, and critical aborts without parsing the detail string.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
 `log_retain_days` in the control config. `csv_flush_interval_rows` controls
@@ -324,7 +341,9 @@ Control-loop CSV rows include the common telemetry/fan columns plus:
 The JSONL event stream uses schema `svg_mb_control.event.v1`. It is the source
 for discrete operational events such as startup, rotation, write attempts,
 restore results, policy refusals, sidecar warnings, sensor failure/recovery, and
-circuit-breaker transitions.
+circuit-breaker transitions. Normal rows use `severity=info` and
+`error_code=none`; warning/error/critical rows use stable uppercase event codes
+such as `CONTROL_LOOP_WRITE_FAILED`.
 
 ## Ownership Rules
 

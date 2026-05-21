@@ -25,6 +25,8 @@ struct ManifestData {
 struct EventData {
     std::string event_time;
     std::string event_type;
+    std::optional<std::string> severity;
+    std::optional<std::string> error_code;
     std::optional<std::string> mode;
     std::optional<std::int64_t> success;
     std::optional<std::int64_t> channel;

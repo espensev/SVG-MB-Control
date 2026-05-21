@@ -12,8 +12,12 @@ just enough structure to compare runs and justify config changes.
 - Runtime manifests are implemented by the controller itself:
   `logs\svg_mb_control_manifest.json` and
   `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json`.
-- Analysis manifests remain useful as curated decision artifacts that attach a
-  profile, notes, and hashes to a chosen run.
+- Runtime CSV prologues include build/config/runtime-policy identity fields
+  without changing row shape.
+- The analyzer now writes compact decision records automatically beside
+  Markdown summaries and records them in the analysis manifest.
+- Runtime JSONL events include normalized `severity` and `error_code` fields,
+  and SQLite ingest stores them in first-class event columns.
 
 ## Phase 1: Offline Summaries
 
@@ -31,6 +35,7 @@ Outputs:
 
 - compact Markdown summary for humans,
 - compact JSON summary for future tooling.
+- compact Markdown decision record for Markdown summary runs.
 
 Minimum metrics:
 
@@ -52,12 +57,14 @@ Acceptance:
 - Analyzer tolerates comment prologue lines and missing optional fields.
 - Summary output is small enough to commit under `docs\` or
   `runtime\analysis\` when it represents a tuning decision.
+- Markdown summary output automatically gets a sibling `*.decision.md` record,
+  unless the operator passes `--no-decision-record`.
 
 ## Phase 2: Run Manifests
 
 The controller now writes a native runtime manifest during each run. Keep adding
-curated analysis manifests beside important summaries when a run supports a
-tuning decision.
+curated analysis manifests and generated decision records beside important
+summaries when a run supports a tuning decision.
 
 Minimum fields:
 
@@ -81,8 +88,13 @@ Acceptance:
   and build.
 - Raw CSV captures remain optional to commit; summaries and manifests are the
   durable repo artifact.
+- The decision record path and hash are captured in the analysis manifest when
+  generated.
 
 ## Phase 3: Runtime Identity In Logs
+
+Status: implemented for runtime CSV prologues and mirrored in native runtime
+manifests.
 
 Extend the CSV prologue with identity fields that do not change row shape:
 
@@ -116,10 +128,14 @@ Acceptance:
 - Event JSONL remains the durable history.
 - Status JSON gives the operator enough current state to see why a channel is no
   longer writing.
-- Circuit-breaker reset behavior is explicit. If reset requires process
-  restart, document that; if runtime reset is added, log the reset event.
+- Circuit-breaker reset behavior is explicit. `--reset-breakers` writes a live
+  reset request, and the control-loop logs reset/no-op/invalid reset events
+  when it consumes the request.
 
 ## Phase 5: Deeper Cadence Diagnostics
+
+Status: implemented for foreground `evidence-log`; still deferred for the
+control-loop hot path unless measured evidence requires it.
 
 Only add these if Phase 1 summaries show unexplained jitter or runtime cost:
 
@@ -136,11 +152,29 @@ Acceptance:
 - They do not obscure the main control-loop CSV or materially increase hot-path
   overhead.
 
+## Phase 6: Event Classification
+
+Status: implemented for runtime JSONL events and SQLite ingest.
+
+Every event row now carries:
+
+- `severity`: `info`, `warning`, `error`, or `critical`,
+- `error_code`: `none` for non-fault rows, otherwise a stable uppercase code
+  derived from `event_type` unless a caller overrides it.
+
+Acceptance:
+
+- Existing event parsers still accept older rows with no classification fields.
+- New runtime events can be grouped by severity/error code without parsing
+  human-readable details or suffix-matching event names.
+
 ## Ordering
 
 Do Phase 1 first. It gives immediate value from existing logs and avoids changing
 the runtime before the current data is easy to compare.
 
 Do Phase 2 and Phase 3 next so future tuning runs are self-describing. Do Phase
-4 before depending on `control_runtime.json` for operations. Defer Phase 5 until
-there is evidence that per-sensor timing is needed.
+4 before depending on `control_runtime.json` for operations. Keep Phase 5
+diagnostics in foreground evidence mode unless there is evidence that
+control-loop per-sensor timing is needed. Phase 6 is implemented as an event
+writer/parser widening with backward-compatible optional fields.

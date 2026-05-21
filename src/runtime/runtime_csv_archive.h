@@ -6,10 +6,18 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 
 namespace svg_mb_control {
+
+struct RuntimeCsvIdentity {
+    std::filesystem::path config_path;
+    std::filesystem::path runtime_policy_path;
+    std::optional<std::uint32_t> control_poll_tick_ms;
+    std::optional<std::uint32_t> control_write_cooldown_ms;
+};
 
 class RuntimeCsvLogger {
   public:
@@ -17,7 +25,8 @@ class RuntimeCsvLogger {
                      std::uint32_t rotate_hours,
                      std::uint32_t retain_days,
                      std::uint32_t csv_flush_interval_rows = 1u,
-                     RuntimeArtifactNaming naming = RuntimeArtifactNaming{});
+                     RuntimeArtifactNaming naming = RuntimeArtifactNaming{},
+                     RuntimeCsvIdentity identity = RuntimeCsvIdentity{});
     ~RuntimeCsvLogger();
 
     RuntimeCsvLogger(const RuntimeCsvLogger&) = delete;
@@ -37,6 +46,7 @@ class RuntimeCsvLogger {
 
   private:
     bool OpenNewChunk();
+    void ResolveIdentityHashes();
     void WritePrologue();
     bool FlushStreams();
     void WriteManifest(std::string_view status);
@@ -59,6 +69,9 @@ class RuntimeCsvLogger {
     std::string mode_;
     std::string header_line_;
     RuntimeArtifactNaming naming_;
+    RuntimeCsvIdentity identity_;
+    std::string config_sha256_;
+    std::string runtime_policy_sha256_;
     std::ofstream archive_stream_;
     std::ofstream mirror_stream_;
     std::string mirror_pending_rows_;

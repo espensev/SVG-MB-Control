@@ -208,6 +208,20 @@ def _read_runtime_csv_rows(path: Path) -> list[dict[str, str]]:
     return list(csv.DictReader(lines))
 
 
+def _read_runtime_csv_prologue(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    fields: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("#"):
+            break
+        body = line[1:].strip()
+        key, sep, value = body.partition("=")
+        if sep:
+            fields[key] = value
+    return fields
+
+
 def _seed_pending_writes(runtime_home: Path, entries: list[dict]) -> None:
     runtime_home.mkdir(parents=True, exist_ok=True)
     payload = {"schema_version": 1, "entries": entries}

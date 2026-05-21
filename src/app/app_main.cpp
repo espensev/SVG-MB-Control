@@ -166,7 +166,8 @@ private:
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--start|--status|--health|--stop|--restart] [--json] [--config <path>]\n"
+        << "  svg-mb-control [--start|--status|--health|--stop|--restart|--reset-breakers] [--json] [--config <path>]\n"
+        << "                 [--reset-breaker-channel <n>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate|evidence-log>] [--config <path>] "
            << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
         << "  svg-mb-control --mode calibrate [--calibrate-channel <n>] "
@@ -273,6 +274,8 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
         bool json_output_requested = false;
         bool stop_requested = false;
         bool restart_requested = false;
+        bool reset_breakers_requested = false;
+        std::optional<std::uint32_t> reset_breaker_channel;
         RunMode run_mode = RunMode::kOneShot;
         bool run_mode_explicit = false;
         std::uint32_t write_channel = 0u;
@@ -321,6 +324,12 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 stop_requested = true;
             } else if (arg == L"--restart") {
                 restart_requested = true;
+            } else if (arg == L"--reset-breakers") {
+                reset_breakers_requested = true;
+            } else if (arg == L"--reset-breaker-channel") {
+                reset_breaker_channel = ParseUInt32Arg(
+                    require_value(), "--reset-breaker-channel");
+                reset_breakers_requested = true;
             } else if (arg == L"--confirm-start") {
                 confirm_start = true;
             } else if (arg == L"--mode") {
@@ -460,6 +469,14 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 "--json requires --status, --health, or --service-probe.");
         }
 
+        if (reset_breakers_requested &&
+            (start_requested || status_requested || health_requested ||
+             service_probe_requested || stop_requested || restart_requested ||
+             foreground_launch || supervisor_launch)) {
+            throw std::runtime_error(
+                "--reset-breakers cannot be combined with another runtime command.");
+        }
+
         if (service_probe_requested) {
             return svg_mb_control::RunServiceProbe(
                 command_runtime_home,
@@ -475,6 +492,29 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
 
         if (status_requested) {
             return PrintRuntimeStatus(command_runtime_home);
+        }
+
+        if (reset_breakers_requested) {
+            if (!svg_mb_control::RequestRuntimeBreakerReset(
+                    command_runtime_home, reset_breaker_channel)) {
+                std::cerr
+                    << "Error: failed to write circuit-breaker reset request.\n";
+                return 1;
+            }
+            std::cout << "svg-mb-control: circuit-breaker reset requested\n"
+                      << "  channel: ";
+            if (reset_breaker_channel.has_value()) {
+                std::cout << *reset_breaker_channel;
+            } else {
+                std::cout << "all";
+            }
+            std::cout << '\n'
+                      << "  request: "
+                      << svg_mb_control::RuntimeBreakerResetRequestPath(
+                             command_runtime_home)
+                             .string()
+                      << '\n';
+            return 0;
         }
 
         if (stop_requested && !restart_requested) {
