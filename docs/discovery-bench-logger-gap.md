@@ -2,8 +2,15 @@
 
 **Goal:** Evaluate the updated SVG-MB-Bench logger against SVG-MB-Control so Control can stop relying on external loggers.
 **Date:** 2026-05-14
-**Status:** complete
-**Recommended next:** implement the remaining richer hardware evidence fields directly in SVG-MB-Control; do not introduce runtime dependency on SVG-MB-Bench.
+**Status:** complete; superseded by later Control evidence-log work
+**Recommended next:** no remaining Bench dependency work. Control now owns the
+normal validation logger plus a foreground `evidence-log` plane with richer
+GPU/SIO/fan evidence. Keep Bench as an optional characterization reference, not
+a runtime dependency.
+
+> Historical note, 2026-05-21: the gap analysis below predates the Control
+> evidence-log widening. Statements about missing Control evidence are retained
+> as original context, not current status.
 
 ---
 
@@ -62,8 +69,10 @@
 - `D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:302` - GPU logger columns include validity/change flags, power, fans, VRAM, PCIe, voltage, and throttle reasons.
 
 **Implications:**
-- Control's current logging is useful but not yet a complete evidence contract.
-- Replacing external loggers means Control needs run-native manifests and richer hardware rows, not just current telemetry snapshots.
+- Original finding: Control's logging was useful but incomplete as a standalone
+  evidence contract.
+- Current status: run-native manifests and richer hardware rows now exist in
+  Control; phase/load markers remain optional future context.
 
 ### Q3: What does Control already log?
 
@@ -90,16 +99,20 @@
 
 **Implications:**
 - Control is already enough for control-loop tuning and operational visibility.
-- Control is not yet enough to replace Bench/external reference logging for full hardware characterization.
+- Current status: Control is now enough for normal validation and richer
+  foreground evidence capture. Bench remains useful for specialized comparison,
+  not as a required external logger.
 
-### Q4: What gaps remain?
+### Q4: What gaps remained at the time?
 
-**Answer:** Four main gaps remain.
+**Answer:** Four main gaps remained in the original snapshot. The first three
+have since landed in Control's foreground evidence plane; phase/load context is
+still deferred until run summaries show a need.
 
 **Evidence and implications:**
-- Full GPU evidence is missing. Control samples only `core_c`, `memjn_c`, `hotspot_c`, and GPU name/warning (`src\gpu_reader.h:7`, `src\gpu_reader.cpp:45`). Bench records NVML temp, utilization, power/source, clocks, P-state, GPU fan rows, VRAM, PCIe, voltage, throttle reasons, validity flags, and change flags (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\logger\logger_gpu.h:32`).
-- SIO voltage and motherboard temperature evidence is missing. Bench current state includes voltage and temperature arrays (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\state_snapshot.h:150`, `D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\state_snapshot.h:151`); Control currently records AMD sensors and fans plus narrow GPU fields.
-- Raw fan count-byte evidence and change flags are missing. Control logs `tach_raw`, `duty_raw`, and `mode_raw` (`src\runtime_logging.cpp:165`, `src\runtime_logging.cpp:167`, `src\runtime_logging.cpp:169`), but Bench contract preserves `tach_hi_raw`, `tach_lo_raw`, rpm/duty changed flags, and full field semantics (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:299`).
+- Full GPU evidence was missing. Control samples only `core_c`, `memjn_c`, `hotspot_c`, and GPU name/warning (`src\gpu_reader.h:7`, `src\gpu_reader.cpp:45`). Bench records NVML temp, utilization, power/source, clocks, P-state, GPU fan rows, VRAM, PCIe, voltage, throttle reasons, validity flags, and change flags (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\logger\logger_gpu.h:32`). Current Control evidence-log rows now cover the richer GPU set.
+- SIO voltage and motherboard temperature evidence was missing. Bench current state includes voltage and temperature arrays (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\state_snapshot.h:150`, `D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\state_snapshot.h:151`); Control then recorded AMD sensors and fans plus narrow GPU fields. Current Control evidence-log rows now include SIO voltage/temperature evidence.
+- Raw fan count-byte evidence and change flags were missing. Control logs `tach_raw`, `duty_raw`, and `mode_raw` (`src\runtime_logging.cpp:165`, `src\runtime_logging.cpp:167`, `src\runtime_logging.cpp:169`), but Bench contract preserves `tach_hi_raw`, `tach_lo_raw`, rpm/duty changed flags, and full field semantics (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:299`). Current Control evidence-log rows now include tach high/low bytes and change flags.
 - Phase/load/external-writer context is incomplete. Bench contract explicitly preserves phase transitions and load state (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\docs\LOG_ARTIFACT_CONTRACT.md:202`), plus external writer accounting (`D:\Development\Thermals\SVG-MB\SVG-MB-Bench\src\logger\logger_segment.cpp:202`).
 
 ---
@@ -166,12 +179,18 @@ src\hardware\sio_snapshot.*
 
 If a smaller first step is preferred, keep the current flat style and introduce only `runtime_artifacts.*`, `runtime_manifest.*`, `gpu_telemetry_reader.*`, and `sio_board_snapshot.*`, then move them under `src\logging\` / `src\hardware\` once the interfaces settle.
 
-Proceed in this order:
+Historical implementation order:
 
-1. Extend the native runtime manifests with finalized artifact hashes and any config/policy hashes needed for standalone archival.
-2. Port the richer GPU telemetry model into Control's `GpuReader`, with configurable sample mode and CSV/current-state fields.
-3. Add optional SIO voltage and temperature capture to Control's runtime snapshot, gated by config and cadence.
-4. Extend fan evidence with tach high/low bytes and changed flags.
-5. Add phase/load markers and feed them through CSV, events, and manifest.
+1. Done: extend native runtime manifests with finalized accounting and
+   config/policy hashes needed for standalone archival.
+2. Done: port richer GPU telemetry into Control evidence capture with
+   configurable sample modes and CSV/current-state fields.
+3. Done: add SIO voltage and temperature capture to the foreground evidence
+   plane.
+4. Done: extend fan evidence with tach high/low bytes and changed flags.
+5. Deferred: add phase/load markers only if the analyzer summaries and decision
+   records prove that manual run labels are insufficient.
 
-Control's native CSV/JSONL/manifest logger is now the default for normal controller validation. After the remaining richer hardware evidence lands, Bench can remain the characterization tool, but not a required live sidecar.
+Control's native CSV/JSONL/manifest logger is now the default for normal
+controller validation. Bench can remain a characterization tool, but not a
+required live sidecar.

@@ -106,10 +106,10 @@
 
 | Risk | Likelihood | Impact | Notes |
 |------|------------|--------|-------|
-| Health pill updates while charts remain stale | High | Medium | Current bootstrap polls health but not CSV/events. |
-| Dashboard reads the wrong runtime home | Medium | Medium | Any run outside `release/runtime` will be invisible unless files are manually loaded. |
-| Polling CSV tails too often | Medium | Medium | Re-fetching and re-rendering 8 MB tails would waste CPU/browser time on low-end systems. |
-| Stale `control_health.json` looks authoritative | Medium | Medium | UI shows checked time but does not classify age. |
+| Health pill updates while charts remain stale | Low | Medium | Metadata-gated refresh now reloads CSV/events when health metadata changes. |
+| Dashboard reads the wrong runtime home | Low | Medium | Server and launcher now accept an explicit runtime home. |
+| Polling CSV tails too often | Medium | Medium | Re-fetching and re-rendering 8 MB tails would waste CPU/browser time on low-end systems; metadata gating limits this. |
+| Stale `control_health.json` looks authoritative | Low | Medium | UI exposes file age/freshness metadata. |
 
 ### Open Questions
 

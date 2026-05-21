@@ -24,9 +24,9 @@ maintainability and experiment tooling rather than urgent controller safety.
 - **Strengths:** direct runtime ownership, stable 50 ms control cadence,
   comprehensive runtime logging, crash/restore sidecars, control-loop config
   validation, sensor-failure safe mode, and write-failure circuit breakers
-- **Weaknesses:** `RunUntilStopped()` is still too large, config/build identity
-  is not yet fully extracted into smaller behavior-preserving helpers, and
-  deeper control-loop sensor-group timing is not present yet
+- **Weaknesses:** `RunUntilStopped()` is still broad, deeper control-loop
+  sensor-group timing is intentionally outside the hot path, and a few
+  best-effort catches still deserve opportunistic audit.
 
 ## Current Implementation Status
 
@@ -814,19 +814,15 @@ graph TD
 
 ### Do Next
 
-1. **Add config/build identity to the CSV prologue.** The analyzer can hash
-   artifacts passed to it, but a standalone CSV should still carry enough
-   identity to trace the exact binary and config.
-2. **Refactor `RunUntilStopped()` after behavior stabilizes.** Extract channel
+1. **Refactor `RunUntilStopped()` after behavior stabilizes.** Extract channel
    evaluation/write application with focused regression tests and
    analyzer-backed before/after checks.
-3. **Circuit-breaker reset path is now explicit.** Use `--reset-breakers`
-   instead of process restart when the operator wants to clear an open
-   write-failure breaker.
-4. **Add per-sensor-group timing only if cadence diagnosis needs it.** Current
+2. **Add per-sensor-group timing only if cadence diagnosis needs it.** Current
    loop work duration and achieved interval are enough for the observed 50 ms
    profile.
-5. **Dashboard/ingestion work stays behind local evidence.** Event
+3. **Audit remaining best-effort catches opportunistically.** Either emit
+   structured runtime events or document why the catch must stay silent.
+4. **Dashboard/ingestion work stays behind local evidence.** Event
    severity/error codes and compact decision records are now implemented; keep
    using local summaries until they show a need for heavier infrastructure.
 
@@ -866,9 +862,12 @@ process CPU fields from the CSV before doing any performance-motivated change.
 - 50 ms fixed-start control profile
 - Runtime CSV and event JSONL logging
 - Resource-use fields
+- Runtime config/build identity in CSV prologues and manifests
 - Sensor-failure safe mode
 - Circuit-breaker events
 - Thermal-pressure boost visibility
+- Event severity/error codes
+- Analyzer-generated compact decision records
 
 ### Phase 1: Cleanup
 
@@ -882,6 +881,7 @@ process CPU fields from the CSV before doing any performance-motivated change.
 - Done: add live per-channel failure-state fields to `control_runtime.json`.
 - Done: add run manifests and a Control-owned CSV/event analyzer.
 - Done: add analyzer-generated compact decision records for tuning changes.
+- Done: add runtime config/policy hashes and manifest event accounting.
 
 ### Phase 3: Maintainability
 

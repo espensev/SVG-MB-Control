@@ -3,7 +3,15 @@
 **Goal:** Assess what it would take to make logging a clean C++-owned priority, then reduce Python where it is not close to essential, using the existing Bench and Control repos as the baseline.
 **Date:** 2026-04-16
 **Status:** complete
-**Recommended next:** Ready to plan. If you want implementation, run a planner pass for "extract shared native logging core from Bench, finish Control logger cleanup, then retire low-value Python wrappers in Bench."
+**Recommended next:** historical only. The original next step was to plan a
+shared native logging cleanup across Bench and Control; Control's current
+runtime/evidence logging work has since advanced enough that new planning should
+start from `docs\RUNTIME_LOGGING_AND_EVALUATION.md` instead.
+
+> Historical note, 2026-05-21: Control now owns a richer runtime/evidence
+> logging plane and analyzer path. This document remains useful for the
+> native-first rationale, but its Control cleanup recommendations are older than
+> the current runtime logging docs.
 
 ---
 

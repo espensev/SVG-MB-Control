@@ -1,5 +1,10 @@
 # Code Quality / Optimization Pass — 2026-05-19
 
+> Historical note, 2026-05-21: this was a point-in-time assessment before the
+> runtime logger/analyzer widening, event classification, and control-loop split
+> work landed. Some `file:line` anchors and module names below are stale. Use it
+> for rationale and risk ranking, not as current source navigation.
+
 Read-only assessment of `src/` (64 files, ~16.5k lines). No code was modified.
 Scope requested: hot-path performance, organization / file responsibility,
 duplication / code quality. Findings below are ranked by payoff (impact ÷

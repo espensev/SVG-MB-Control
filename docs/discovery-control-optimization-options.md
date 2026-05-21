@@ -3,9 +3,16 @@
 **Goal:** Evaluate `SVG-MB-Control` for additional optimization and code-quality
 opportunities after CSV flush tuning.
 **Date:** 2026-05-19
-**Status:** complete
-**Recommended next:** Direct implementation pass for the low-risk items, then a
-small refactor pass for `ControlLoop::RunUntilStopped()`.
+**Status:** complete; partly superseded by the 2026-05-21 runtime/analyzer pass
+**Recommended next:** treat the optimization register as historical. Runtime
+event counts, direct-runtime simulation caching, and major control-loop splitting
+have moved since this document was written. The current remaining structural
+candidate is a smaller `RunUntilStopped()` extraction after response tuning has a
+baseline.
+
+> Historical note, 2026-05-21: file/line anchors and some hot-path candidates
+> below predate the runtime module split and analyzer/logging commit. Treat the
+> optimization register's updated decisions as the current reading.
 
 ---
 
@@ -186,14 +193,14 @@ matter.
 
 | Candidate | Type | Evidence | Risk | Confidence | Decision |
 |-----------|------|----------|------|------------|----------|
-| Maintain runtime event counts instead of scanning JSONL on every manifest write | hot-path I/O | `src/runtime_artifacts.cpp:39`, `src/runtime_artifacts.cpp:240`, `src/runtime_artifacts.cpp:409` | Medium | High | implement-next |
-| Cache direct-runtime simulation environment overrides once per process | hot-path/code quality | `src/direct_runtime_snapshot.cpp:19`, `src/direct_runtime_snapshot.cpp:94`, `src/direct_runtime_snapshot.cpp:137` | Low | High | implement-next |
-| Extract hold-restore and write-apply helpers from `RunUntilStopped()` | structural | `src/control_loop.cpp:616`, `src/control_loop.cpp:682` | Medium | High | implement-next |
-| Resolve 50 ms documentation vs 250 ms shipped config drift | correctness/code quality | `docs/MEASUREMENT_GATE.md:6`, `config/control.release.json:15`, `tests/test_config_contracts.py:27` | Medium | High | needs owner decision |
-| Avoid per-row parsing of `snapshot_time_iso` by carrying time/age in `RuntimeSnapshot` | hot-path allocation/parsing | `src/runtime_logging.cpp:17`, `src/runtime_logging.cpp:148`, `src/direct_runtime_snapshot.cpp:139` | Medium | Medium | suggest-only |
-| Build indexed fan/channel views for CSV/control decisions | hot-path/structure | `src/runtime_snapshot.cpp:137`, `src/runtime_logging.cpp:178`, `src/runtime_logging.cpp:453` | Low | Medium | defer |
-| Sample process memory/resources on a one-second cadence instead of every tick | hot-path WinAPI | `src/control_loop.cpp:900`, `src/control_scheduler.cpp:70` | Medium | Medium | suggest-only |
-| Add a persistent runtime event logger | I/O | `src/runtime_artifacts.cpp:443`, `src/runtime_artifacts.cpp:454`, `src/control_loop.cpp:849` | Medium | Medium | measure-first |
+| Maintain runtime event counts instead of scanning JSONL on every manifest write | hot-path I/O | now owned by `RuntimeEventLog` and `RuntimeCsvLogger` | Medium | High | implemented |
+| Cache direct-runtime simulation environment overrides once per process | hot-path/code quality | direct-runtime snapshot simulation env handling was cleaned up after this note | Low | High | implemented |
+| Extract hold-restore and write-apply helpers from `RunUntilStopped()` | structural | `tick_runner` and related helpers reduced the old control-loop body | Medium | High | partly done; defer remaining extraction |
+| Resolve 50 ms documentation vs 250 ms shipped config drift | correctness/code quality | shipped configs/tests now assert the 250 ms profile while docs record measurement gates separately | Medium | High | resolved as shipped 250 ms profile |
+| Avoid per-row parsing of `snapshot_time_iso` by carrying time/age in `RuntimeSnapshot` | hot-path allocation/parsing | snapshot timing/age fields were widened after this note | Medium | Medium | partly done |
+| Build indexed fan/channel views for CSV/control decisions | hot-path/structure | current direct snapshot/control row path still uses small fixed-size scans | Low | Medium | defer |
+| Sample process memory/resources on a one-second cadence instead of every tick | hot-path WinAPI | resource sampling is already windowed for CPU percentage | Medium | Medium | suggest-only |
+| Add a persistent runtime event logger | I/O | runtime JSONL event writer and classification are implemented | Medium | Medium | implemented |
 
 ## Baseline
 
@@ -239,14 +246,16 @@ matter.
 
 ## Recommendation
 
-Proceed with a small direct implementation pass:
+Historical recommendation, now mostly implemented:
 
-1. Replace manifest event-log recounting with an incremental count that is
-   initialized from the existing JSONL once on chunk open and updated through the
-   runtime event writer where possible.
-2. Cache simulation-only environment overrides in direct runtime sampling.
-3. Extract `HandleExpiredHoldRestore` and `TryApplyChannelSetpoint` from
-   `RunUntilStopped()` while preserving sidecar ordering.
-4. Resolve the 50 ms vs 250 ms cadence contract explicitly before drawing new
-   runtime-profile conclusions.
+1. Done: replace repeated manifest event-log recounting with runtime event
+   accounting.
+2. Done: clean up simulation-only environment override handling in direct
+   runtime sampling.
+3. Partly done: split the old control-loop body into `tick_runner` and related
+   helpers while preserving sidecar ordering.
+4. Done: treat the packaged 250 ms cadence as the shipped profile; use measured
+   run summaries before changing it again.
 
+Current next step: use analyzer-backed run data before any further hot-path
+optimization or control-loop extraction.

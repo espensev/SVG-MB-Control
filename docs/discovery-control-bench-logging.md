@@ -2,8 +2,15 @@
 
 **Goal:** Evaluate next possible logging steps, compare Control logging against Bench logging, and assess whether the general logging layer can be improved outside the controller.
 **Date:** 2026-05-16
-**Status:** stage 1 implemented
-**Recommended next:** Add a read-only evidence logger outside the control loop, using the new Control-owned artifact/logging substrate.
+**Status:** complete; superseded by later evidence-log and analyzer work
+**Recommended next:** use `docs\RUNTIME_LOGGING_AND_EVALUATION.md` and
+`docs\LOGGING_IMPROVEMENT_PLAN.md` for current workflow. The read-only
+`evidence-log` plane, richer GPU/SIO/fan fields, decision records, and event
+classification are implemented.
+
+> Historical note, 2026-05-21: many file/line references below predate the
+> runtime module split. Keep the findings as design history; use the maintained
+> runtime logging docs for current paths and workflow.
 
 ---
 
@@ -133,7 +140,10 @@
 
 ### Q5: What are the next implementation steps?
 
-**Answer:** Do this in stages. First extract general artifact plumbing, then add a read-only evidence logger, then broaden field coverage. Avoid putting the entire Bench logger into the active control loop.
+**Historical answer:** Do this in stages. First extract general artifact
+plumbing, then add a read-only evidence logger, then broaden field coverage.
+That staged plan has since landed. The durable guidance is still to avoid
+putting the entire Bench logger into the active control loop.
 
 **Evidence:**
 - `src/runtime_artifacts.cpp:184` - Control manifests are now isolated in the artifact layer.
@@ -179,15 +189,22 @@
 
 ## Recommendation
 
-Stage 1 is implemented. The next planned slice is the read-only evidence logger.
+This recommendation has been implemented. The read-only evidence logger now
+uses separate artifact names under the Control runtime home, captures richer
+SIO/fan/GPU evidence, supports GPU sample modes, and reports per-backend timing
+outside the controller hot path.
 
-Recommended implementation order:
+Historical implementation order:
 
 1. Done: extract Control's generic artifact path/writer/manifest code out of `runtime_logging.cpp` into a small Control-owned logging core. Preserve current control/read-loop behavior.
 2. Done: add manifest compatibility fields: `rows_written`, `events_written`, `session_stop`, and terminal row accounting alongside the existing Control manifest fields.
-3. Add a read-only evidence logger outside the control loop. It should produce its own archive CSV, latest CSV, JSONL events, manifest, and current-state JSON.
-4. Expand evidence capture in that logger first: fan raw byte split/change flags, SIO voltage/temp arrays, and selectable GPU sample modes.
-5. Only after evidence logger stability, decide whether any subset should be mirrored into the controller's per-tick CSV.
+3. Done: add a read-only evidence logger outside the control loop. It produces
+   its own archive CSV, latest CSV, JSONL events, manifest, and current-state
+   JSON.
+4. Done: expand evidence capture with fan raw byte split/change flags, SIO
+   voltage/temp arrays, selectable GPU sample modes, and per-backend timing.
+5. Still current: mirror a subset into the controller's per-tick CSV only when
+   control-loop evidence proves the hot path needs it.
 
 Do not make the controller the "complete logger." Make Control own two planes:
 
