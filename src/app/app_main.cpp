@@ -272,6 +272,188 @@ std::string SampleDirectSnapshotJson(
     return svg_mb_control::SerializeRuntimeSnapshotJson(snapshot);
 }
 
+int RunDiagnoseAmd() {
+    svg_mb_control::AmdReader reader;
+    std::cout << "amd_reader.available: "
+              << (reader.available() ? "true" : "false") << '\n';
+    std::cout << "amd_reader.init_warning: \""
+              << reader.init_warning() << "\"\n";
+    const auto snapshot = reader.Sample();
+    std::cout << "sample.available: "
+              << (snapshot.available ? "true" : "false") << '\n';
+    std::cout << "sample.cpu_name: \"" << snapshot.cpu_name << "\"\n";
+    std::cout << "sample.transport_path: \""
+              << snapshot.transport_path << "\"\n";
+    std::cout << "sample.last_warning: \""
+              << snapshot.last_warning << "\"\n";
+    std::cout << "sample.count: " << snapshot.samples.size() << '\n';
+    for (std::size_t sample_index = 0u;
+         sample_index < snapshot.samples.size();
+         ++sample_index) {
+        const auto& sample = snapshot.samples[sample_index];
+        std::cout << "sample[" << sample_index << "].label: \""
+                  << sample.label << "\"\n";
+        std::cout << "sample[" << sample_index
+                  << "].temperature_c: " << sample.temperature_c << '\n';
+    }
+    return snapshot.available ? 0 : 1;
+}
+
+int RunDiagnoseGpu() {
+    svg_mb_control::GpuReader reader;
+    std::cout << "gpu_reader.available: "
+              << (reader.available() ? "true" : "false") << '\n';
+    std::cout << "gpu_reader.init_warning: \""
+              << reader.init_warning() << "\"\n";
+    const auto sample = reader.Sample();
+    std::cout << "sample.available: "
+              << (sample.available ? "true" : "false") << '\n';
+    std::cout << "sample.gpu_name: \"" << sample.gpu_name << "\"\n";
+    std::cout << "sample.core_c: " << sample.core_c << '\n';
+    std::cout << "sample.memjn_c: " << sample.memjn_c << '\n';
+    std::cout << "sample.hotspot_c: " << sample.hotspot_c << '\n';
+    std::cout << "sample.last_warning: \""
+              << sample.last_warning << "\"\n";
+    return sample.available ? 0 : 1;
+}
+
+// Parsed CLI state. Each field maps directly to a previously inline local in
+// RunApp. Action shortcuts (help, version, diagnose-*) are flagged here and
+// dispatched after parsing, so the parse loop has no side-effects beyond
+// populating this struct.
+struct CliOptions {
+    std::filesystem::path config_path;
+    bool config_path_explicit = false;
+    bool foreground_launch = false;
+    bool supervisor_launch = false;
+    bool confirm_start = false;
+    bool start_requested = false;
+    bool status_requested = false;
+    bool health_requested = false;
+    bool service_probe_requested = false;
+    bool json_output_requested = false;
+    bool stop_requested = false;
+    bool restart_requested = false;
+    bool reset_breakers_requested = false;
+    std::optional<std::uint32_t> reset_breaker_channel;
+    RunMode run_mode = RunMode::kOneShot;
+    bool run_mode_explicit = false;
+    std::uint32_t write_channel = 0u;
+    bool write_channel_explicit = false;
+    double write_pct = 0.0;
+    bool write_pct_explicit = false;
+    std::uint32_t write_hold_ms = 0u;
+    bool write_hold_ms_explicit = false;
+    std::optional<std::uint32_t> calibrate_channel;
+    std::optional<std::uint32_t> calibrate_step_ms;
+    std::optional<std::uint32_t> calibrate_cooldown_ms;
+    std::optional<std::vector<svg_mb_control::CalibrationStepSpec>>
+        calibrate_sequence;
+    std::optional<std::uint32_t> calibrate_settle_window_ms;
+    std::optional<double> calibrate_abort_temp_c;
+    std::filesystem::path calibrate_output_path;
+    bool help_requested = false;
+    bool version_requested = false;
+    bool diagnose_amd_requested = false;
+    bool diagnose_gpu_requested = false;
+};
+
+CliOptions ParseCliOptions(int argc, wchar_t** argv) {
+    CliOptions options;
+    for (int index = 1; index < argc; ++index) {
+        const std::wstring arg = argv[index];
+        auto require_value = [&]() -> const wchar_t* {
+            if (index + 1 >= argc) {
+                throw std::runtime_error("Missing value for option.");
+            }
+            ++index;
+            return argv[index];
+        };
+
+        if (arg == L"--config") {
+            options.config_path = std::filesystem::path(require_value());
+            options.config_path_explicit = true;
+        } else if (arg == L"--run-foreground") {
+            options.foreground_launch = true;
+        } else if (arg == L"--run-supervisor") {
+            options.supervisor_launch = true;
+        } else if (arg == L"--start") {
+            options.start_requested = true;
+        } else if (arg == L"--status") {
+            options.status_requested = true;
+        } else if (arg == L"--health") {
+            options.health_requested = true;
+        } else if (arg == L"--service-probe") {
+            options.service_probe_requested = true;
+        } else if (arg == L"--json") {
+            options.json_output_requested = true;
+        } else if (arg == L"--stop") {
+            options.stop_requested = true;
+        } else if (arg == L"--restart") {
+            options.restart_requested = true;
+        } else if (arg == L"--reset-breakers") {
+            options.reset_breakers_requested = true;
+        } else if (arg == L"--reset-breaker-channel") {
+            options.reset_breaker_channel = ParseUInt32Arg(
+                require_value(), "--reset-breaker-channel");
+            options.reset_breakers_requested = true;
+        } else if (arg == L"--confirm-start") {
+            options.confirm_start = true;
+        } else if (arg == L"--mode") {
+            options.run_mode = ParseRunMode(require_value());
+            options.run_mode_explicit = true;
+        } else if (arg == L"--write-channel") {
+            options.write_channel = ParseWriteChannel(require_value());
+            options.write_channel_explicit = true;
+        } else if (arg == L"--write-pct") {
+            options.write_pct = ParseWritePct(require_value());
+            options.write_pct_explicit = true;
+        } else if (arg == L"--write-hold-ms") {
+            options.write_hold_ms = ParseWriteHoldMs(require_value());
+            options.write_hold_ms_explicit = true;
+        } else if (arg == L"--calibrate-channel") {
+            options.calibrate_channel = ParseUInt32Arg(
+                require_value(), "--calibrate-channel");
+        } else if (arg == L"--calibrate-step-ms") {
+            options.calibrate_step_ms = ParseUInt32Arg(
+                require_value(), "--calibrate-step-ms");
+        } else if (arg == L"--calibrate-cooldown-ms") {
+            options.calibrate_cooldown_ms = ParseUInt32Arg(
+                require_value(), "--calibrate-cooldown-ms");
+        } else if (arg == L"--calibrate-sequence") {
+            options.calibrate_sequence =
+                svg_mb_control::ParseCalibrationSequence(require_value());
+        } else if (arg == L"--calibrate-settle-window-ms") {
+            options.calibrate_settle_window_ms = ParseUInt32Arg(
+                require_value(), "--calibrate-settle-window-ms");
+        } else if (arg == L"--calibrate-abort-temp-c") {
+            options.calibrate_abort_temp_c = ParseDoubleArg(
+                require_value(), "--calibrate-abort-temp-c");
+        } else if (arg == L"--calibrate-output") {
+            options.calibrate_output_path =
+                std::filesystem::path(require_value());
+        } else if (arg == L"--help" || arg == L"-h") {
+            options.help_requested = true;
+        } else if (arg == L"--version") {
+            options.version_requested = true;
+        } else if (arg == L"--bridge-exe-path" ||
+                   arg == L"--bench-exe-path" ||
+                   arg == L"--bridge-command" ||
+                   arg == L"--duration-ms" ||
+                   arg == L"--timeout-ms") {
+            throw std::runtime_error(
+                "Legacy bridge options were removed. This branch runs direct-only.");
+        } else if (arg == L"--diagnose-amd") {
+            options.diagnose_amd_requested = true;
+        } else if (arg == L"--diagnose-gpu") {
+            options.diagnose_gpu_requested = true;
+        } else {
+            throw std::runtime_error("Unknown option.");
+        }
+    }
+    return options;
+}
+
 }  // namespace
 
 int svg_mb_control::RunApp(int argc, wchar_t** argv) {
@@ -280,185 +462,42 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             return svg_mb_control::analyze::RunAnalyzeCommand(argc, argv);
         }
         const bool no_launch_args = argc == 1;
-        std::filesystem::path config_path;
-        bool config_path_explicit = false;
-        bool foreground_launch = false;
-        bool supervisor_launch = false;
-        bool confirm_start = false;
-        bool start_requested = false;
-        bool status_requested = false;
-        bool health_requested = false;
-        bool service_probe_requested = false;
-        bool json_output_requested = false;
-        bool stop_requested = false;
-        bool restart_requested = false;
-        bool reset_breakers_requested = false;
-        std::optional<std::uint32_t> reset_breaker_channel;
-        RunMode run_mode = RunMode::kOneShot;
-        bool run_mode_explicit = false;
-        std::uint32_t write_channel = 0u;
-        bool write_channel_explicit = false;
-        double write_pct = 0.0;
-        bool write_pct_explicit = false;
-        std::uint32_t write_hold_ms = 0u;
-        bool write_hold_ms_explicit = false;
-        std::optional<std::uint32_t> calibrate_channel;
-        std::optional<std::uint32_t> calibrate_step_ms;
-        std::optional<std::uint32_t> calibrate_cooldown_ms;
-        std::optional<std::vector<svg_mb_control::CalibrationStepSpec>>
-            calibrate_sequence;
-        std::optional<std::uint32_t> calibrate_settle_window_ms;
-        std::optional<double> calibrate_abort_temp_c;
-        std::filesystem::path calibrate_output_path;
+        CliOptions options = ParseCliOptions(argc, argv);
 
-        for (int index = 1; index < argc; ++index) {
-            const std::wstring arg = argv[index];
-            auto require_value = [&]() -> const wchar_t* {
-                if (index + 1 >= argc) {
-                    throw std::runtime_error("Missing value for option.");
-                }
-                ++index;
-                return argv[index];
-            };
-
-            if (arg == L"--config") {
-                config_path = std::filesystem::path(require_value());
-                config_path_explicit = true;
-            } else if (arg == L"--run-foreground") {
-                foreground_launch = true;
-            } else if (arg == L"--run-supervisor") {
-                supervisor_launch = true;
-            } else if (arg == L"--start") {
-                start_requested = true;
-            } else if (arg == L"--status") {
-                status_requested = true;
-            } else if (arg == L"--health") {
-                health_requested = true;
-            } else if (arg == L"--service-probe") {
-                service_probe_requested = true;
-            } else if (arg == L"--json") {
-                json_output_requested = true;
-            } else if (arg == L"--stop") {
-                stop_requested = true;
-            } else if (arg == L"--restart") {
-                restart_requested = true;
-            } else if (arg == L"--reset-breakers") {
-                reset_breakers_requested = true;
-            } else if (arg == L"--reset-breaker-channel") {
-                reset_breaker_channel = ParseUInt32Arg(
-                    require_value(), "--reset-breaker-channel");
-                reset_breakers_requested = true;
-            } else if (arg == L"--confirm-start") {
-                confirm_start = true;
-            } else if (arg == L"--mode") {
-                run_mode = ParseRunMode(require_value());
-                run_mode_explicit = true;
-            } else if (arg == L"--write-channel") {
-                write_channel = ParseWriteChannel(require_value());
-                write_channel_explicit = true;
-            } else if (arg == L"--write-pct") {
-                write_pct = ParseWritePct(require_value());
-                write_pct_explicit = true;
-            } else if (arg == L"--write-hold-ms") {
-                write_hold_ms = ParseWriteHoldMs(require_value());
-                write_hold_ms_explicit = true;
-            } else if (arg == L"--calibrate-channel") {
-                calibrate_channel = ParseUInt32Arg(
-                    require_value(), "--calibrate-channel");
-            } else if (arg == L"--calibrate-step-ms") {
-                calibrate_step_ms = ParseUInt32Arg(
-                    require_value(), "--calibrate-step-ms");
-            } else if (arg == L"--calibrate-cooldown-ms") {
-                calibrate_cooldown_ms = ParseUInt32Arg(
-                    require_value(), "--calibrate-cooldown-ms");
-            } else if (arg == L"--calibrate-sequence") {
-                calibrate_sequence =
-                    svg_mb_control::ParseCalibrationSequence(require_value());
-            } else if (arg == L"--calibrate-settle-window-ms") {
-                calibrate_settle_window_ms = ParseUInt32Arg(
-                    require_value(), "--calibrate-settle-window-ms");
-            } else if (arg == L"--calibrate-abort-temp-c") {
-                calibrate_abort_temp_c = ParseDoubleArg(
-                    require_value(), "--calibrate-abort-temp-c");
-            } else if (arg == L"--calibrate-output") {
-                calibrate_output_path =
-                    std::filesystem::path(require_value());
-            } else if (arg == L"--help" || arg == L"-h") {
-                PrintUsage();
-                return 0;
-            } else if (arg == L"--version") {
-                PrintVersion();
-                return 0;
-            } else if (arg == L"--bridge-exe-path" ||
-                       arg == L"--bench-exe-path" ||
-                       arg == L"--bridge-command" ||
-                       arg == L"--duration-ms" ||
-                       arg == L"--timeout-ms") {
-                throw std::runtime_error(
-                    "Legacy bridge options were removed. This branch runs direct-only.");
-            } else if (arg == L"--diagnose-amd") {
-                svg_mb_control::AmdReader reader;
-                std::cout << "amd_reader.available: "
-                          << (reader.available() ? "true" : "false") << '\n';
-                std::cout << "amd_reader.init_warning: \""
-                          << reader.init_warning() << "\"\n";
-                const auto snapshot = reader.Sample();
-                std::cout << "sample.available: "
-                          << (snapshot.available ? "true" : "false") << '\n';
-                std::cout << "sample.cpu_name: \"" << snapshot.cpu_name << "\"\n";
-                std::cout << "sample.transport_path: \""
-                          << snapshot.transport_path << "\"\n";
-                std::cout << "sample.last_warning: \""
-                          << snapshot.last_warning << "\"\n";
-                std::cout << "sample.count: " << snapshot.samples.size() << '\n';
-                for (std::size_t sample_index = 0u;
-                     sample_index < snapshot.samples.size();
-                     ++sample_index) {
-                    const auto& sample = snapshot.samples[sample_index];
-                    std::cout << "sample[" << sample_index << "].label: \""
-                              << sample.label << "\"\n";
-                    std::cout << "sample[" << sample_index
-                              << "].temperature_c: " << sample.temperature_c
-                              << '\n';
-                }
-                return snapshot.available ? 0 : 1;
-            } else if (arg == L"--diagnose-gpu") {
-                svg_mb_control::GpuReader reader;
-                std::cout << "gpu_reader.available: "
-                          << (reader.available() ? "true" : "false") << '\n';
-                std::cout << "gpu_reader.init_warning: \""
-                          << reader.init_warning() << "\"\n";
-                const auto sample = reader.Sample();
-                std::cout << "sample.available: "
-                          << (sample.available ? "true" : "false") << '\n';
-                std::cout << "sample.gpu_name: \"" << sample.gpu_name << "\"\n";
-                std::cout << "sample.core_c: " << sample.core_c << '\n';
-                std::cout << "sample.memjn_c: " << sample.memjn_c << '\n';
-                std::cout << "sample.hotspot_c: " << sample.hotspot_c << '\n';
-                std::cout << "sample.last_warning: \""
-                          << sample.last_warning << "\"\n";
-                return sample.available ? 0 : 1;
-            } else {
-                throw std::runtime_error("Unknown option.");
-            }
+        if (options.help_requested) {
+            PrintUsage();
+            return 0;
+        }
+        if (options.version_requested) {
+            PrintVersion();
+            return 0;
+        }
+        if (options.diagnose_amd_requested) {
+            return RunDiagnoseAmd();
+        }
+        if (options.diagnose_gpu_requested) {
+            return RunDiagnoseGpu();
         }
 
-        if (config_path.empty()) {
-            config_path = svg_mb_control::GetEnvironmentPath(L"SVG_MB_CONTROL_CONFIG");
-            if (!config_path.empty()) {
-                config_path_explicit = true;
+        if (options.config_path.empty()) {
+            options.config_path =
+                svg_mb_control::GetEnvironmentPath(L"SVG_MB_CONTROL_CONFIG");
+            if (!options.config_path.empty()) {
+                options.config_path_explicit = true;
             }
         }
-        if (config_path.empty()) {
-            config_path = svg_mb_control::ResolveDefaultControlConfigPath();
+        if (options.config_path.empty()) {
+            options.config_path =
+                svg_mb_control::ResolveDefaultControlConfigPath();
         }
 
         std::optional<svg_mb_control::ControlConfig> config;
-        if (!config_path.empty()) {
+        if (!options.config_path.empty()) {
             const std::filesystem::path absolute_config_path =
-                std::filesystem::absolute(config_path).lexically_normal();
+                std::filesystem::absolute(options.config_path)
+                    .lexically_normal();
             if (!std::filesystem::exists(absolute_config_path)) {
-                if (config_path_explicit) {
+                if (options.config_path_explicit) {
                     throw std::runtime_error("Control config not found: " +
                                              absolute_config_path.string());
                 }
@@ -467,9 +506,9 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             }
         }
 
-        if (!run_mode_explicit && config.has_value() &&
+        if (!options.run_mode_explicit && config.has_value() &&
             !config->default_mode.empty()) {
-            run_mode = ParseRunMode(config->default_mode);
+            options.run_mode = ParseRunMode(config->default_mode);
         }
 
         const svg_mb_control::ControlConfig status_config =
@@ -481,48 +520,50 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 ? status_config.staleness_threshold_ms
                 : 10000u;
 
-        if (json_output_requested && !status_requested && !health_requested &&
-            !service_probe_requested) {
+        if (options.json_output_requested && !options.status_requested &&
+            !options.health_requested && !options.service_probe_requested) {
             throw std::runtime_error(
                 "--json requires --status, --health, or --service-probe.");
         }
 
-        if (reset_breakers_requested &&
-            (start_requested || status_requested || health_requested ||
-             service_probe_requested || stop_requested || restart_requested ||
-             foreground_launch || supervisor_launch)) {
+        if (options.reset_breakers_requested &&
+            (options.start_requested || options.status_requested ||
+             options.health_requested || options.service_probe_requested ||
+             options.stop_requested || options.restart_requested ||
+             options.foreground_launch || options.supervisor_launch)) {
             throw std::runtime_error(
                 "--reset-breakers cannot be combined with another runtime command.");
         }
 
-        if (service_probe_requested) {
+        if (options.service_probe_requested) {
             return svg_mb_control::RunServiceProbe(
                 command_runtime_home,
                 config.has_value() ? &*config : nullptr,
-                json_output_requested);
+                options.json_output_requested);
         }
 
-        if (health_requested || (status_requested && json_output_requested)) {
+        if (options.health_requested ||
+            (options.status_requested && options.json_output_requested)) {
             return PrintRuntimeHealth(command_runtime_home,
-                                      json_output_requested,
+                                      options.json_output_requested,
                                       health_stale_after_ms);
         }
 
-        if (status_requested) {
+        if (options.status_requested) {
             return PrintRuntimeStatus(command_runtime_home);
         }
 
-        if (reset_breakers_requested) {
+        if (options.reset_breakers_requested) {
             if (!svg_mb_control::RequestRuntimeBreakerReset(
-                    command_runtime_home, reset_breaker_channel)) {
+                    command_runtime_home, options.reset_breaker_channel)) {
                 std::cerr
                     << "Error: failed to write circuit-breaker reset request.\n";
                 return 1;
             }
             std::cout << "svg-mb-control: circuit-breaker reset requested\n"
                       << "  channel: ";
-            if (reset_breaker_channel.has_value()) {
-                std::cout << *reset_breaker_channel;
+            if (options.reset_breaker_channel.has_value()) {
+                std::cout << *options.reset_breaker_channel;
             } else {
                 std::cout << "all";
             }
@@ -535,42 +576,44 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             return 0;
         }
 
-        if (stop_requested && !restart_requested) {
+        if (options.stop_requested && !options.restart_requested) {
             return RequestStopAndWait(command_runtime_home);
         }
 
-        if (restart_requested) {
+        if (options.restart_requested) {
             const int stop_result =
                 RequestStopAndWait(command_runtime_home, true);
             if (stop_result != 0) {
                 return stop_result;
             }
-            start_requested = true;
+            options.start_requested = true;
         }
 
-        if (supervisor_launch) {
+        if (options.supervisor_launch) {
             if (!config.has_value()) {
                 throw std::runtime_error(
                     "--run-supervisor requires a control config.");
             }
-            if (!IsLongRunningMode(run_mode)) {
+            if (!IsLongRunningMode(options.run_mode)) {
                 throw std::runtime_error(
                     "--run-supervisor requires read-loop or control-loop.");
             }
-            return RunSupervisedLongRunningMode(run_mode, *config);
+            return RunSupervisedLongRunningMode(options.run_mode, *config);
         }
 
-        if (!foreground_launch && config.has_value() &&
-            IsLongRunningMode(run_mode) &&
-            (no_launch_args || confirm_start || start_requested)) {
-            if (confirm_start && !ConfirmDetachedLaunch(run_mode, *config)) {
+        if (!options.foreground_launch && config.has_value() &&
+            IsLongRunningMode(options.run_mode) &&
+            (no_launch_args || options.confirm_start ||
+             options.start_requested)) {
+            if (options.confirm_start &&
+                !ConfirmDetachedLaunch(options.run_mode, *config)) {
                 std::cout << "svg-mb-control: start cancelled\n";
                 return 0;
             }
-            return LaunchDetachedLongRunningMode(run_mode, *config);
+            return LaunchDetachedLongRunningMode(options.run_mode, *config);
         }
 
-        if (start_requested || restart_requested) {
+        if (options.start_requested || options.restart_requested) {
             throw std::runtime_error(
                 "--start/--restart requires a control config whose mode is read-loop or control-loop.");
         }
@@ -611,18 +654,18 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             return 2;
         };
 
-        if (run_mode == RunMode::kControlLoop) {
+        if (options.run_mode == RunMode::kControlLoop) {
             if (!config.has_value()) {
                 throw std::runtime_error("--mode control-loop requires a control config.");
             }
-            if (config_path.empty()) {
+            if (options.config_path.empty()) {
                 throw std::runtime_error("--mode control-loop requires a resolvable config path.");
             }
             const int singleton_result = acquire_worker_singleton();
             if (singleton_result != 0) {
                 return singleton_result;
             }
-        } else if (run_mode == RunMode::kReadLoop) {
+        } else if (options.run_mode == RunMode::kReadLoop) {
             if (!config.has_value()) {
                 throw std::runtime_error("--mode read-loop requires a control config.");
             }
@@ -643,39 +686,42 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             return reconcile_result;
         }
 
-        if (run_mode == RunMode::kWriteOnce) {
+        if (options.run_mode == RunMode::kWriteOnce) {
             if (!config.has_value()) {
                 svg_mb_control::ControlConfig defaults;
                 config = defaults;
             }
-            if (!write_channel_explicit && !config->write_channel_set) {
+            if (!options.write_channel_explicit &&
+                !config->write_channel_set) {
                 throw std::runtime_error("--mode write-once requires --write-channel or write_channel in config.");
             }
-            if (!write_pct_explicit && !config->write_target_pct_set) {
+            if (!options.write_pct_explicit &&
+                !config->write_target_pct_set) {
                 throw std::runtime_error("--mode write-once requires --write-pct or write_target_pct in config.");
             }
-            if (!write_hold_ms_explicit && !config->write_hold_ms_set) {
+            if (!options.write_hold_ms_explicit &&
+                !config->write_hold_ms_set) {
                 throw std::runtime_error("--mode write-once requires --write-hold-ms or write_hold_ms in config.");
             }
             svg_mb_control::WriteRequest request;
-            request.channel = write_channel_explicit
-                ? write_channel : config->write_channel;
-            request.target_pct = write_pct_explicit
-                ? write_pct : config->write_target_pct;
-            request.hold_ms = write_hold_ms_explicit
-                ? write_hold_ms : config->write_hold_ms;
+            request.channel = options.write_channel_explicit
+                ? options.write_channel : config->write_channel;
+            request.target_pct = options.write_pct_explicit
+                ? options.write_pct : config->write_target_pct;
+            request.hold_ms = options.write_hold_ms_explicit
+                ? options.write_hold_ms : config->write_hold_ms;
 
             ConsoleCtrlScope console_ctrl;
             console_ctrl.Install();
-            const int result = svg_mb_control::RunWriteOnce(
+            return svg_mb_control::RunWriteOnce(
                 *config, reconcile_runtime_home, request, g_stop_signaled);
-            return result;
         }
 
-        if (run_mode == RunMode::kControlLoop) {
+        if (options.run_mode == RunMode::kControlLoop) {
             const svg_mb_control::ControlLoopConfig loop_config =
                 svg_mb_control::LoadControlLoopConfig(
-                    std::filesystem::absolute(config_path).lexically_normal());
+                    std::filesystem::absolute(options.config_path)
+                        .lexically_normal());
             const svg_mb_control::RuntimeWritePolicy runtime_policy =
                 svg_mb_control::ResolveRuntimeWritePolicy(&*config);
             PrintControlLoopStartup(
@@ -685,69 +731,67 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 *config, loop_config, reconcile_runtime_home);
 
             ActiveControlLoopScope active_loop(control_loop);
-            const int result = control_loop.RunUntilStopped(g_stop_signaled);
-            return result;
+            return control_loop.RunUntilStopped(g_stop_signaled);
         }
 
-        if (run_mode == RunMode::kCalibrate) {
-            if (calibrate_sequence.has_value() &&
-                (calibrate_step_ms.has_value() ||
-                 calibrate_cooldown_ms.has_value())) {
+        if (options.run_mode == RunMode::kCalibrate) {
+            if (options.calibrate_sequence.has_value() &&
+                (options.calibrate_step_ms.has_value() ||
+                 options.calibrate_cooldown_ms.has_value())) {
                 throw std::runtime_error(
                     "--calibrate-sequence cannot be combined with "
                     "--calibrate-step-ms or --calibrate-cooldown-ms.");
             }
-            svg_mb_control::CalibrationOptions options =
+            svg_mb_control::CalibrationOptions calibrate_options =
                 svg_mb_control::DefaultCalibrationOptions();
-            if (calibrate_sequence.has_value()) {
-                options.sequence = *calibrate_sequence;
+            if (options.calibrate_sequence.has_value()) {
+                calibrate_options.sequence = *options.calibrate_sequence;
             }
-            if (calibrate_step_ms.has_value()) {
-                for (auto& step : options.sequence) {
-                    step.hold_ms = *calibrate_step_ms;
+            if (options.calibrate_step_ms.has_value()) {
+                for (auto& step : calibrate_options.sequence) {
+                    step.hold_ms = *options.calibrate_step_ms;
                 }
             }
-            if (calibrate_cooldown_ms.has_value() &&
-                !options.sequence.empty()) {
-                options.sequence.back().hold_ms = *calibrate_cooldown_ms;
+            if (options.calibrate_cooldown_ms.has_value() &&
+                !calibrate_options.sequence.empty()) {
+                calibrate_options.sequence.back().hold_ms =
+                    *options.calibrate_cooldown_ms;
             }
-            if (calibrate_settle_window_ms.has_value()) {
-                options.settle_window_ms = *calibrate_settle_window_ms;
+            if (options.calibrate_settle_window_ms.has_value()) {
+                calibrate_options.settle_window_ms =
+                    *options.calibrate_settle_window_ms;
             }
-            if (calibrate_abort_temp_c.has_value()) {
-                options.abort_temp_ceiling_c = *calibrate_abort_temp_c;
+            if (options.calibrate_abort_temp_c.has_value()) {
+                calibrate_options.abort_temp_ceiling_c =
+                    *options.calibrate_abort_temp_c;
             }
-            if (calibrate_channel.has_value()) {
-                options.only_channel = *calibrate_channel;
+            if (options.calibrate_channel.has_value()) {
+                calibrate_options.only_channel = *options.calibrate_channel;
             }
-            if (!calibrate_output_path.empty()) {
-                options.output_path = calibrate_output_path;
+            if (!options.calibrate_output_path.empty()) {
+                calibrate_options.output_path = options.calibrate_output_path;
             }
             ConsoleCtrlScope console_ctrl;
             console_ctrl.Install();
             const svg_mb_control::ControlConfig effective_config =
                 config.has_value() ? *config
                                    : svg_mb_control::ControlConfig{};
-            const int result = svg_mb_control::RunCalibration(
-                effective_config, reconcile_runtime_home, options,
+            return svg_mb_control::RunCalibration(
+                effective_config, reconcile_runtime_home, calibrate_options,
                 g_stop_signaled);
-            return result;
         }
 
-        if (run_mode == RunMode::kReadLoop) {
+        if (options.run_mode == RunMode::kReadLoop) {
             const svg_mb_control::RuntimeWritePolicy runtime_policy =
                 svg_mb_control::ResolveRuntimeWritePolicy(&*config);
             PrintReadLoopStartup(*config, reconcile_runtime_home, runtime_policy);
 
             svg_mb_control::ReadLoop loop(*config, reconcile_runtime_home);
             ActiveReadLoopScope active_loop(loop);
-
-            const int loop_exit = loop.RunUntilStopped();
-
-            return loop_exit;
+            return loop.RunUntilStopped();
         }
 
-        if (run_mode == RunMode::kEvidenceLog) {
+        if (options.run_mode == RunMode::kEvidenceLog) {
             if (!config.has_value()) {
                 throw std::runtime_error("--mode evidence-log requires a control config.");
             }
@@ -760,11 +804,8 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
 
             ConsoleCtrlScope console_ctrl;
             console_ctrl.Install();
-
-            const int result = svg_mb_control::RunEvidenceLog(
+            return svg_mb_control::RunEvidenceLog(
                 *config, runtime_home, g_stop_signaled);
-
-            return result;
         }
 
         const std::string snapshot_json = SampleDirectSnapshotJson(
