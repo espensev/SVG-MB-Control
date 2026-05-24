@@ -72,193 +72,68 @@ std::string BuildGpuEvidenceCsvHeader() {
 
 void AppendGpuEvidenceCsvRow(std::ostringstream& csv,
                              const GpuEvidenceSample& sample) {
-    csv << ',';
-    AppendCsvBool(csv, sample.available);
-    csv << ',';
-    AppendCsvString(csv, sample.sample_mode);
-    csv << ',';
-    AppendCsvString(csv, sample.requested_sample_mode);
-    csv << ',';
-    AppendCsvString(csv, sample.detail);
-    csv << ',';
-    AppendCsvString(csv, sample.gpu_name);
-    csv << ',';
-    AppendCsvString(csv, sample.last_warning);
-    csv << ',';
-    if (sample.available) {
-        csv << sample.gpu_index;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.time_ms;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.dt_ms;
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvDouble(csv, sample.core_c);
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvDouble(csv, sample.memjn_c);
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvDouble(csv, sample.hotspot_c);
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_temp_c;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.clock_graphics_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.clock_memory_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.clock_video_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.clock_boost_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_clock_graphics_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_clock_memory_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_clock_video_mhz;
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvInt32WhenAvailable(csv, sample.pstate);
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvInt32WhenAvailable(csv, sample.util_gpu_pct);
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvInt32WhenAvailable(csv, sample.util_fb_pct);
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvInt32WhenAvailable(csv, sample.util_vid_pct);
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_util_gpu_pct;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_util_mem_pct;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_encoder_pct;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_decoder_pct;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.vram_used_mb;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.vram_free_mb;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.vram_total_mb;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.nvml_power_mw;
-    }
-    csv << ',';
-    if (sample.available) {
-        AppendCsvString(csv, sample.power_source);
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.voltage_core_mv;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.pcie_tx_kb_s;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.pcie_rx_kb_s;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.pcie_link_gen;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.pcie_link_width;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.throttle_reasons;
-    }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.fan_count;
-    }
+    const bool ok = sample.available;
+    AppendCsvFieldBool(csv, ok);
+    AppendCsvFieldString(csv, sample.sample_mode);
+    AppendCsvFieldString(csv, sample.requested_sample_mode);
+    AppendCsvFieldString(csv, sample.detail);
+    AppendCsvFieldString(csv, sample.gpu_name);
+    AppendCsvFieldString(csv, sample.last_warning);
+    AppendCsvFieldIf(csv, ok, sample.gpu_index);
+    AppendCsvFieldIf(csv, ok, sample.time_ms);
+    AppendCsvFieldIf(csv, ok, sample.dt_ms);
+    AppendCsvFieldDoubleIf(csv, ok, sample.core_c);
+    AppendCsvFieldDoubleIf(csv, ok, sample.memjn_c);
+    AppendCsvFieldDoubleIf(csv, ok, sample.hotspot_c);
+    AppendCsvFieldIf(csv, ok, sample.nvml_temp_c);
+    AppendCsvFieldIf(csv, ok, sample.clock_graphics_mhz);
+    AppendCsvFieldIf(csv, ok, sample.clock_memory_mhz);
+    AppendCsvFieldIf(csv, ok, sample.clock_video_mhz);
+    AppendCsvFieldIf(csv, ok, sample.clock_boost_mhz);
+    AppendCsvFieldIf(csv, ok, sample.nvml_clock_graphics_mhz);
+    AppendCsvFieldIf(csv, ok, sample.nvml_clock_memory_mhz);
+    AppendCsvFieldIf(csv, ok, sample.nvml_clock_video_mhz);
+    AppendCsvFieldInt32IfAvailable(csv, ok, sample.pstate);
+    AppendCsvFieldInt32IfAvailable(csv, ok, sample.util_gpu_pct);
+    AppendCsvFieldInt32IfAvailable(csv, ok, sample.util_fb_pct);
+    AppendCsvFieldInt32IfAvailable(csv, ok, sample.util_vid_pct);
+    AppendCsvFieldIf(csv, ok, sample.nvml_util_gpu_pct);
+    AppendCsvFieldIf(csv, ok, sample.nvml_util_mem_pct);
+    AppendCsvFieldIf(csv, ok, sample.nvml_encoder_pct);
+    AppendCsvFieldIf(csv, ok, sample.nvml_decoder_pct);
+    AppendCsvFieldIf(csv, ok, sample.vram_used_mb);
+    AppendCsvFieldIf(csv, ok, sample.vram_free_mb);
+    AppendCsvFieldIf(csv, ok, sample.vram_total_mb);
+    AppendCsvFieldIf(csv, ok, sample.nvml_power_mw);
+    AppendCsvFieldStringIf(csv, ok, sample.power_source);
+    AppendCsvFieldIf(csv, ok, sample.voltage_core_mv);
+    AppendCsvFieldIf(csv, ok, sample.pcie_tx_kb_s);
+    AppendCsvFieldIf(csv, ok, sample.pcie_rx_kb_s);
+    AppendCsvFieldIf(csv, ok, sample.pcie_link_gen);
+    AppendCsvFieldIf(csv, ok, sample.pcie_link_width);
+    AppendCsvFieldIf(csv, ok, sample.throttle_reasons);
+    AppendCsvFieldIf(csv, ok, sample.fan_count);
     for (std::uint32_t index = 0u;
          index < static_cast<std::uint32_t>(kGpuEvidenceMaxFans);
          ++index) {
-        csv << ',';
-        if (sample.available && index < sample.fan_count) {
-            csv << sample.fans[index].level_pct;
-        }
-        csv << ',';
-        if (sample.available && index < sample.fan_count) {
-            csv << sample.fans[index].rpm;
-        }
+        const bool fan_ok = ok && index < sample.fan_count;
+        AppendCsvFieldIf(csv, fan_ok, sample.fans[index].level_pct);
+        AppendCsvFieldIf(csv, fan_ok, sample.fans[index].rpm);
     }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.power_rail_count;
-    }
+    AppendCsvFieldIf(csv, ok, sample.power_rail_count);
     for (std::uint32_t index = 0u;
          index < static_cast<std::uint32_t>(kGpuEvidenceMaxPowerRails);
          ++index) {
-        csv << ',';
-        if (sample.available && index < sample.power_rail_count) {
-            csv << sample.power_rails[index].domain;
-        }
-        csv << ',';
-        if (sample.available && index < sample.power_rail_count) {
-            csv << sample.power_rails[index].power_mw;
-        }
+        const bool rail_ok = ok && index < sample.power_rail_count;
+        AppendCsvFieldIf(csv, rail_ok, sample.power_rails[index].domain);
+        AppendCsvFieldIf(csv, rail_ok, sample.power_rails[index].power_mw);
     }
-    csv << ',';
-    if (sample.available) {
-        csv << sample.thermal_slot_count;
-    }
+    AppendCsvFieldIf(csv, ok, sample.thermal_slot_count);
     for (std::uint32_t index = 0u;
          index < static_cast<std::uint32_t>(kGpuEvidenceMaxThermalSlots);
          ++index) {
-        csv << ',';
-        if (sample.available && index < sample.thermal_slot_count) {
-            csv << sample.thermal_slots[index];
-        }
+        const bool slot_ok = ok && index < sample.thermal_slot_count;
+        AppendCsvFieldIf(csv, slot_ok, sample.thermal_slots[index]);
     }
 }
 

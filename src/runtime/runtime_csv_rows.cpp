@@ -135,93 +135,52 @@ void BuildCommonCsvPrefix(std::ostringstream& csv,
                           std::string_view mode) {
     AppendCsvString(csv, FormatRuntimeLocalIso8601(
                              std::chrono::system_clock::now()));
-    csv << ',';
-    AppendCsvString(csv, mode);
-    csv << ',';
-    AppendCsvString(csv, snapshot.snapshot_time_iso);
+    AppendCsvFieldString(csv, mode);
+    AppendCsvFieldString(csv, snapshot.snapshot_time_iso);
     csv << ',';
     if (const auto parsed = ParseLocalIso8601(snapshot.snapshot_time_iso)) {
         const auto age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now() - *parsed).count();
         csv << age_ms;
     }
-    csv << ',' << snapshot.amd_sensors.size() << ',';
+    AppendCsvField(csv, snapshot.amd_sensors.size());
     thread_local std::string amd_summary;
     BuildAmdSensorSummary(snapshot, amd_summary);
-    AppendCsvString(csv, amd_summary);
-    csv << ',';
-    AppendCsvDouble(csv, FindRuntimeAmdSensorTemperature(snapshot, "Tctl/Tdie"));
-    csv << ',';
-    AppendCsvDouble(csv, FindMaxCpuTemperature(snapshot));
-    csv << ',';
-    AppendCsvBool(csv, snapshot.gpu.available);
-    csv << ',';
-    AppendCsvString(csv, snapshot.gpu.gpu_name);
-    csv << ',';
-    AppendCsvString(csv, snapshot.gpu.last_warning);
-    csv << ',';
-    AppendCsvDouble(csv, snapshot.gpu.core_c);
-    csv << ',';
-    AppendCsvDouble(csv, snapshot.gpu.memjn_c);
-    csv << ',';
-    AppendCsvDouble(csv, snapshot.gpu.hotspot_c);
-    csv << ',' << snapshot.fans.size() << ',';
-    AppendCsvBool(csv, snapshot.policy_writes_enabled_present);
-    csv << ',';
-    if (snapshot.policy_writes_enabled_present) {
-        AppendCsvBool(csv, snapshot.policy_writes_enabled);
-    }
+    AppendCsvFieldString(csv, amd_summary);
+    AppendCsvFieldDouble(csv,
+                         FindRuntimeAmdSensorTemperature(snapshot, "Tctl/Tdie"));
+    AppendCsvFieldDouble(csv, FindMaxCpuTemperature(snapshot));
+    AppendCsvFieldBool(csv, snapshot.gpu.available);
+    AppendCsvFieldString(csv, snapshot.gpu.gpu_name);
+    AppendCsvFieldString(csv, snapshot.gpu.last_warning);
+    AppendCsvFieldDouble(csv, snapshot.gpu.core_c);
+    AppendCsvFieldDouble(csv, snapshot.gpu.memjn_c);
+    AppendCsvFieldDouble(csv, snapshot.gpu.hotspot_c);
+    AppendCsvField(csv, snapshot.fans.size());
+    AppendCsvFieldBool(csv, snapshot.policy_writes_enabled_present);
+    AppendCsvFieldBoolIf(csv, snapshot.policy_writes_enabled_present,
+                         snapshot.policy_writes_enabled);
 
+    static const RuntimeFanSnapshot kEmptyFan{};
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
-        const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(snapshot, channel);
-        csv << ',';
-        AppendCsvBool(csv, fan != nullptr);
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvString(csv, fan->label);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            csv << fan->rpm;
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            csv << fan->tach_raw;
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvBool(csv, fan->tach_valid);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            csv << static_cast<unsigned int>(fan->duty_raw);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvDouble(csv, fan->duty_percent, 2);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            csv << static_cast<unsigned int>(fan->mode_raw);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvBool(csv, fan->manual_override);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvBool(csv, fan->write_allowed);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvBool(csv, fan->policy_blocked);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            AppendCsvBool(csv, fan->effective_write_allowed);
-        }
+        const RuntimeFanSnapshot* found =
+            FindRuntimeFanChannel(snapshot, channel);
+        const bool present = found != nullptr;
+        const RuntimeFanSnapshot& fan = present ? *found : kEmptyFan;
+        AppendCsvFieldBool(csv, present);
+        AppendCsvFieldStringIf(csv, present, fan.label);
+        AppendCsvFieldIf(csv, present, fan.rpm);
+        AppendCsvFieldIf(csv, present, fan.tach_raw);
+        AppendCsvFieldBoolIf(csv, present, fan.tach_valid);
+        AppendCsvFieldIf(csv, present, static_cast<unsigned int>(fan.duty_raw));
+        AppendCsvFieldDoubleIf(csv, present, fan.duty_percent, 2);
+        AppendCsvFieldIf(csv, present, static_cast<unsigned int>(fan.mode_raw));
+        AppendCsvFieldBoolIf(csv, present, fan.manual_override);
+        AppendCsvFieldBoolIf(csv, present, fan.write_allowed);
+        AppendCsvFieldBoolIf(csv, present, fan.policy_blocked);
+        AppendCsvFieldBoolIf(csv, present, fan.effective_write_allowed);
     }
 }
 
@@ -245,20 +204,14 @@ std::string BuildReadLoopCsvRow(const RuntimeSnapshot& snapshot,
                                 const RuntimeReadLoopLogState& state) {
     std::ostringstream csv;
     BuildCommonCsvPrefix(csv, snapshot, "read-loop");
-    csv << ',';
-    AppendCsvBool(csv, state.telemetry_available);
-    csv << ',';
-    AppendCsvBool(csv, state.runtime_home_published);
-    csv << ',';
-    AppendCsvBool(csv, state.snapshot_mirror_configured);
-    csv << ',';
-    AppendCsvBool(csv, state.snapshot_mirror_published);
-    csv << ',' << state.successful_polls
-        << ',' << state.skipped_polls
-        << ',';
-    AppendCsvBool(csv, state.stale);
-    csv << ',';
-    AppendCsvString(csv, state.status_detail);
+    AppendCsvFieldBool(csv, state.telemetry_available);
+    AppendCsvFieldBool(csv, state.runtime_home_published);
+    AppendCsvFieldBool(csv, state.snapshot_mirror_configured);
+    AppendCsvFieldBool(csv, state.snapshot_mirror_published);
+    AppendCsvField(csv, state.successful_polls);
+    AppendCsvField(csv, state.skipped_polls);
+    AppendCsvFieldBool(csv, state.stale);
+    AppendCsvFieldString(csv, state.status_detail);
     return csv.str();
 }
 
@@ -324,117 +277,81 @@ std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
                                    const RuntimeEvidenceLogState& state) {
     std::ostringstream csv;
     BuildCommonCsvPrefix(csv, snapshot, "evidence-log");
-    csv << ',';
-    AppendCsvBool(csv, state.telemetry_available);
-    csv << ',' << state.successful_polls
-        << ',' << state.skipped_polls
-        << ',';
-    AppendCsvBool(csv, state.stale);
-    csv << ',';
-    AppendCsvString(csv, state.status_detail);
-    csv << ',';
-    AppendCsvDouble(csv, state.evidence_poll_interval_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.evidence_sample_duration_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.runtime_snapshot_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.amd_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.gpu_thermal_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.fan_scan_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.fan_tach_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.sio_voltage_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.sio_temperature_read_ms);
-    csv << ',';
-    AppendCsvDouble(csv, state.gpu_evidence_read_ms);
-    csv << ',';
-    AppendCsvBool(csv, state.runtime_snapshot_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.amd_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.gpu_thermal_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.fan_state_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.fan_tach_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.sio_voltage_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.sio_temperature_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.gpu_evidence_changed);
-    csv << ',';
-    AppendCsvBool(csv, state.sio_evidence_available);
-    csv << ',';
-    AppendCsvString(csv, state.sio_evidence_detail);
-    csv << ',' << state.sio_voltages.size()
-        << ',' << state.sio_temperatures.size();
+    AppendCsvFieldBool(csv, state.telemetry_available);
+    AppendCsvField(csv, state.successful_polls);
+    AppendCsvField(csv, state.skipped_polls);
+    AppendCsvFieldBool(csv, state.stale);
+    AppendCsvFieldString(csv, state.status_detail);
+    AppendCsvFieldDouble(csv, state.evidence_poll_interval_ms);
+    AppendCsvFieldDouble(csv, state.evidence_sample_duration_ms);
+    AppendCsvFieldDouble(csv, state.runtime_snapshot_read_ms);
+    AppendCsvFieldDouble(csv, state.amd_read_ms);
+    AppendCsvFieldDouble(csv, state.gpu_thermal_read_ms);
+    AppendCsvFieldDouble(csv, state.fan_scan_read_ms);
+    AppendCsvFieldDouble(csv, state.fan_tach_read_ms);
+    AppendCsvFieldDouble(csv, state.sio_voltage_read_ms);
+    AppendCsvFieldDouble(csv, state.sio_temperature_read_ms);
+    AppendCsvFieldDouble(csv, state.gpu_evidence_read_ms);
+    AppendCsvFieldBool(csv, state.runtime_snapshot_changed);
+    AppendCsvFieldBool(csv, state.amd_changed);
+    AppendCsvFieldBool(csv, state.gpu_thermal_changed);
+    AppendCsvFieldBool(csv, state.fan_state_changed);
+    AppendCsvFieldBool(csv, state.fan_tach_changed);
+    AppendCsvFieldBool(csv, state.sio_voltage_changed);
+    AppendCsvFieldBool(csv, state.sio_temperature_changed);
+    AppendCsvFieldBool(csv, state.gpu_evidence_changed);
+    AppendCsvFieldBool(csv, state.sio_evidence_available);
+    AppendCsvFieldString(csv, state.sio_evidence_detail);
+    AppendCsvField(csv, state.sio_voltages.size());
+    AppendCsvField(csv, state.sio_temperatures.size());
+
+    static const RuntimeFanTachEvidenceLogState kEmptyTach{};
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
-        const RuntimeFanTachEvidenceLogState* fan =
+        const RuntimeFanTachEvidenceLogState* found =
             FindFanTachEvidenceState(state.fan_tach_evidence, channel);
-        csv << ',';
-        if (fan != nullptr) {
-            csv << static_cast<unsigned int>(fan->tach_hi_raw);
-        }
-        csv << ',';
-        if (fan != nullptr) {
-            csv << static_cast<unsigned int>(fan->tach_lo_raw);
-        }
+        const bool present = found != nullptr;
+        const RuntimeFanTachEvidenceLogState& fan =
+            present ? *found : kEmptyTach;
+        AppendCsvFieldIf(csv, present,
+                         static_cast<unsigned int>(fan.tach_hi_raw));
+        AppendCsvFieldIf(csv, present,
+                         static_cast<unsigned int>(fan.tach_lo_raw));
     }
+
+    static const RuntimeSioVoltageLogState kEmptyVoltage{};
     for (std::uint32_t index = 0u;
          index < static_cast<std::uint32_t>(kRuntimeLogSioVoltageCount);
          ++index) {
-        const RuntimeSioVoltageLogState* voltage =
+        const RuntimeSioVoltageLogState* found =
             FindSioVoltageState(state.sio_voltages, index);
-        csv << ',';
-        AppendCsvBool(csv, voltage != nullptr);
-        csv << ',';
-        if (voltage != nullptr) {
-            AppendCsvString(csv, voltage->label);
-        }
-        csv << ',';
-        if (voltage != nullptr) {
-            csv << static_cast<unsigned int>(voltage->raw);
-        }
-        csv << ',';
-        if (voltage != nullptr) {
-            AppendCsvDouble(csv, voltage->voltage_v, 4);
-        }
+        const bool present = found != nullptr;
+        const RuntimeSioVoltageLogState& voltage =
+            present ? *found : kEmptyVoltage;
+        AppendCsvFieldBool(csv, present);
+        AppendCsvFieldStringIf(csv, present, voltage.label);
+        AppendCsvFieldIf(csv, present, static_cast<unsigned int>(voltage.raw));
+        AppendCsvFieldDoubleIf(csv, present, voltage.voltage_v, 4);
     }
+
+    static const RuntimeSioTemperatureLogState kEmptyTemperature{};
     for (std::uint32_t index = 0u;
          index < static_cast<std::uint32_t>(kRuntimeLogSioTemperatureCount);
          ++index) {
-        const RuntimeSioTemperatureLogState* temperature =
+        const RuntimeSioTemperatureLogState* found =
             FindSioTemperatureState(state.sio_temperatures, index);
-        csv << ',';
-        AppendCsvBool(csv, temperature != nullptr);
-        csv << ',';
-        if (temperature != nullptr) {
-            AppendCsvString(csv, temperature->label);
-        }
-        csv << ',';
-        if (temperature != nullptr) {
-            csv << static_cast<unsigned int>(temperature->raw);
-        }
-        csv << ',';
-        if (temperature != nullptr) {
-            csv << static_cast<unsigned int>(temperature->half_raw);
-        }
-        csv << ',';
-        if (temperature != nullptr) {
-            AppendCsvBool(csv, temperature->valid);
-        }
-        csv << ',';
-        if (temperature != nullptr) {
-            AppendCsvDouble(csv, temperature->temperature_c);
-        }
+        const bool present = found != nullptr;
+        const RuntimeSioTemperatureLogState& temperature =
+            present ? *found : kEmptyTemperature;
+        AppendCsvFieldBool(csv, present);
+        AppendCsvFieldStringIf(csv, present, temperature.label);
+        AppendCsvFieldIf(csv, present,
+                         static_cast<unsigned int>(temperature.raw));
+        AppendCsvFieldIf(csv, present,
+                         static_cast<unsigned int>(temperature.half_raw));
+        AppendCsvFieldBoolIf(csv, present, temperature.valid);
+        AppendCsvFieldDoubleIf(csv, present, temperature.temperature_c);
     }
     AppendGpuEvidenceCsvRow(csv, state.gpu_evidence);
     return csv.str();
@@ -488,105 +405,52 @@ std::string BuildControlLoopCsvRow(
     const std::vector<RuntimeControlChannelLogState>& channels) {
     std::ostringstream csv;
     BuildCommonCsvPrefix(csv, snapshot, "control-loop");
-    csv << ',' << tick_count << ',';
-    AppendCsvString(csv, timing.loop_started_wall_clock);
-    csv << ',';
-    AppendCsvString(csv, timing.loop_finished_wall_clock);
-    csv << ',';
-    AppendCsvDouble(csv, timing.loop_work_duration_ms);
-    csv << ',' << timing.loop_intended_interval_ms << ',';
-    AppendCsvDouble(csv, timing.loop_achieved_interval_ms);
-    csv << ',';
-    AppendCsvDouble(csv, timing.loop_slip_ms);
-    csv << ',';
-    AppendCsvBool(csv, timing.loop_overrun);
-    csv << ',';
-    AppendCsvDouble(csv, timing.process_cpu_delta_ms);
-    csv << ',';
-    AppendCsvDouble(csv, timing.process_cpu_pct);
-    csv << ',' << timing.process_working_set_bytes
-        << ',' << timing.process_private_bytes;
-    csv << ',';
-    AppendCsvDouble(csv, timing.cadence_transient);
+    AppendCsvField(csv, tick_count);
+    AppendCsvFieldString(csv, timing.loop_started_wall_clock);
+    AppendCsvFieldString(csv, timing.loop_finished_wall_clock);
+    AppendCsvFieldDouble(csv, timing.loop_work_duration_ms);
+    AppendCsvField(csv, timing.loop_intended_interval_ms);
+    AppendCsvFieldDouble(csv, timing.loop_achieved_interval_ms);
+    AppendCsvFieldDouble(csv, timing.loop_slip_ms);
+    AppendCsvFieldBool(csv, timing.loop_overrun);
+    AppendCsvFieldDouble(csv, timing.process_cpu_delta_ms);
+    AppendCsvFieldDouble(csv, timing.process_cpu_pct);
+    AppendCsvField(csv, timing.process_working_set_bytes);
+    AppendCsvField(csv, timing.process_private_bytes);
+    AppendCsvFieldDouble(csv, timing.cadence_transient);
+
+    static const RuntimeControlChannelLogState kEmptyChannel{};
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
-        const RuntimeControlChannelLogState* state =
+        const RuntimeControlChannelLogState* found =
             FindChannelState(channels, channel);
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->observed_temp_c);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->setpoint_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->thermal_pressure_boost_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->midband_pressure_boost_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->gpu_airflow_boost_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->cpu_low_soak_boost_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->low_band_stage_boost_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->low_band_effective_boost_pct);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->low_band_debt);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->low_band_signal);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvBool(csv, state->low_band_stage_active);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvString(csv, state->response_source);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvString(csv, state->write_reason);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            csv << state->total_writes;
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvBool(csv, state->write_active);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvBool(csv, state->baseline_captured);
-        }
-        csv << ',';
-        if (state != nullptr) {
-            AppendCsvDouble(csv, state->feedforward_pct);
-        }
-        csv << ',';
-        if (state != nullptr &&
-            !std::isnan(state->setpoint_pct) &&
-            !std::isnan(state->feedforward_pct)) {
-            AppendCsvDouble(csv, state->setpoint_pct - state->feedforward_pct);
-        }
+        const bool present = found != nullptr;
+        const RuntimeControlChannelLogState& state =
+            present ? *found : kEmptyChannel;
+        AppendCsvFieldDoubleIf(csv, present, state.observed_temp_c);
+        AppendCsvFieldDoubleIf(csv, present, state.setpoint_pct);
+        AppendCsvFieldDoubleIf(csv, present, state.thermal_pressure_boost_pct);
+        AppendCsvFieldDoubleIf(csv, present, state.midband_pressure_boost_pct);
+        AppendCsvFieldDoubleIf(csv, present, state.gpu_airflow_boost_pct);
+        AppendCsvFieldDoubleIf(csv, present, state.cpu_low_soak_boost_pct);
+        AppendCsvFieldDoubleIf(csv, present, state.low_band_stage_boost_pct);
+        AppendCsvFieldDoubleIf(csv, present,
+                               state.low_band_effective_boost_pct);
+        AppendCsvFieldDoubleIf(csv, present, state.low_band_debt);
+        AppendCsvFieldDoubleIf(csv, present, state.low_band_signal);
+        AppendCsvFieldBoolIf(csv, present, state.low_band_stage_active);
+        AppendCsvFieldStringIf(csv, present, state.response_source);
+        AppendCsvFieldStringIf(csv, present, state.write_reason);
+        AppendCsvFieldIf(csv, present, state.total_writes);
+        AppendCsvFieldBoolIf(csv, present, state.write_active);
+        AppendCsvFieldBoolIf(csv, present, state.baseline_captured);
+        AppendCsvFieldDoubleIf(csv, present, state.feedforward_pct);
+        const bool correction_present = present &&
+                                        !std::isnan(state.setpoint_pct) &&
+                                        !std::isnan(state.feedforward_pct);
+        AppendCsvFieldDoubleIf(csv, correction_present,
+                               state.setpoint_pct - state.feedforward_pct);
     }
     return csv.str();
 }
