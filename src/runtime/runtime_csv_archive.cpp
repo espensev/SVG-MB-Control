@@ -74,8 +74,19 @@ std::string Sha256FileHex(const std::filesystem::path& path) {
         return {};
     }
 
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream.is_open()) {
+    // Open with FILE_SHARE_DELETE so this hash never blocks a concurrent
+    // rotate/replace of the config or runtime_policy targets. In practice
+    // those files are static, but matching the share semantics used
+    // elsewhere keeps the read pipeline uniformly non-blocking.
+    HANDLE file_handle = CreateFileW(
+        path.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (file_handle == INVALID_HANDLE_VALUE) {
         return {};
     }
 
@@ -88,6 +99,7 @@ std::string Sha256FileHex(const std::filesystem::path& path) {
         if (algorithm != nullptr) {
             BCryptCloseAlgorithmProvider(algorithm, 0);
         }
+        CloseHandle(file_handle);
     };
 
     NTSTATUS status = BCryptOpenAlgorithmProvider(
@@ -129,11 +141,17 @@ std::string Sha256FileHex(const std::filesystem::path& path) {
     }
 
     std::array<char, 64 * 1024> buffer{};
-    while (stream.good()) {
-        stream.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-        const std::streamsize bytes_read = stream.gcount();
-        if (bytes_read <= 0) {
-            continue;
+    for (;;) {
+        DWORD bytes_read = 0u;
+        const BOOL read_ok = ReadFile(
+            file_handle, buffer.data(),
+            static_cast<DWORD>(buffer.size()), &bytes_read, nullptr);
+        if (!read_ok) {
+            cleanup();
+            return {};
+        }
+        if (bytes_read == 0u) {
+            break;
         }
         status = BCryptHashData(
             hash, reinterpret_cast<PUCHAR>(buffer.data()),
@@ -142,10 +160,6 @@ std::string Sha256FileHex(const std::filesystem::path& path) {
             cleanup();
             return {};
         }
-    }
-    if (stream.bad()) {
-        cleanup();
-        return {};
     }
 
     status = BCryptFinishHash(

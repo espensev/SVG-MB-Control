@@ -42,7 +42,13 @@ std::filesystem::path CurrentExecutableDirectory() {
 
 bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
                             const ReadLoop::Status& status) {
+    // control_runtime.json is dual-schema: read-loop and control-loop both
+    // write the same path with different field sets and different
+    // schema_version numbers. The mode field is the discriminator at the
+    // semantic level; the explicit schema field makes that contract
+    // visible to consumers without dispatching on mode.
     nlohmann::json payload = MakeSchemaObject(1u);
+    payload["schema"] = "svg_mb_control.runtime_status.read_loop.v1";
     payload["status"] = status.status;
     payload["mode"] = "read-loop";
     payload["process_id"] = GetCurrentProcessId();

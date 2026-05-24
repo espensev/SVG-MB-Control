@@ -74,8 +74,17 @@ bool ResolveAnalyzeRuntimeHome(
             try {
                 resolved_config = svg_mb_control::LoadControlConfig(
                     absolute_config_path);
-            } catch (const std::exception&) {
+            } catch (const std::exception& error) {
                 resolved_config.reset();
+                // Analyzer continues without channel context, but an
+                // operator-supplied path that fails to parse is worth
+                // surfacing — silent fallback hides typos and schema drift.
+                if (config_path_explicit) {
+                    std::cerr << "Warning: failed to parse control config "
+                              << absolute_config_path.string() << ": "
+                              << error.what()
+                              << " (continuing with default runtime home)\n";
+                }
             }
         } else if (config_path_explicit) {
             std::cerr << "Error: control config not found: "

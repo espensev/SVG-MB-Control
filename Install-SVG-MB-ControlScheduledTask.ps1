@@ -45,6 +45,18 @@ function Resolve-ControlConfig {
     return (Resolve-Path -LiteralPath $configPath).ProviderPath
 }
 
+function Resolve-TaskRunner {
+    param([Parameter(Mandatory = $true)][string]$ExePath)
+
+    $exeDir = Split-Path -Parent $ExePath
+    $candidate = Join-Path $exeDir 'svg-mb-control-task-runner.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $candidate).ProviderPath
+    }
+
+    return $null
+}
+
 function Get-CurrentUserId {
     if (-not [string]::IsNullOrWhiteSpace($UserId)) {
         return $UserId
@@ -146,6 +158,7 @@ if ($Restart -and ($Start -or $Stop)) {
 $exePath = Resolve-ControlExe
 $configPath = Resolve-ControlConfig -ExePath $exePath
 $exeDir = Split-Path -Parent $exePath
+$taskRunnerPath = Resolve-TaskRunner -ExePath $exePath
 
 if ($Remove) {
     $existing = Get-ControlTask -Name $TaskName -Path $taskPathValue
@@ -161,8 +174,9 @@ if ($Remove) {
 if ($Install) {
     $effectiveUser = Get-CurrentUserId
     $arguments = "--start --config `"$configPath`""
+    $actionExe = if ($taskRunnerPath) { $taskRunnerPath } else { $exePath }
     $action = New-ScheduledTaskAction `
-        -Execute $exePath `
+        -Execute $actionExe `
         -Argument $arguments `
         -WorkingDirectory $exeDir
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $effectiveUser
@@ -189,7 +203,7 @@ if ($Install) {
 
     Write-Host "Registered scheduled task: $taskPathValue$TaskName"
     Write-Host "  user: $effectiveUser"
-    Write-Host "  action: $exePath $arguments"
+    Write-Host "  action: $actionExe $arguments"
 
     if (-not $NoStart) {
         $Start = $true

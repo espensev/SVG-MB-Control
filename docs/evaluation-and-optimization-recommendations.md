@@ -42,9 +42,9 @@ Use this table before acting on the detailed recommendations below.
 | 2.2 Epsilon for zero/negative curve span | Deferred | Low value. Config parsing sorts curves, and duplicate points are handled by the existing `span <= 0.0` path. Consider stricter duplicate-point validation instead. |
 | 2.3 Validate configuration ranges | Mostly done | `control_loop` validates percentages, alphas, non-empty primary curves, optional CPU overlay curves, rates, and thermal-pressure fields. Base config/runtime JSON helpers are still local and lighter-weight. |
 | 3.1 Replace custom JSON parser | Done for `control_loop` | `control_loop` uses vendored `nlohmann/json`, and the dead scanner helpers have been removed. Migrate other JSON readers only when a bug or schema change justifies it. |
-| 3.2 Extract channel update logic from `RunUntilStopped()` | Still useful | Best remaining code-quality refactor. Do it after tuning stabilizes, with behavior-preserving tests around write decisions and failure paths. |
+| 3.2 Extract channel update logic from `RunUntilStopped()` | Done | Per-tick body extracted to `tick_runner.cpp`; channel evaluation and write application live in `channel_evaluator.cpp` / `channel_write.cpp`. `ControlLoop::RunUntilStopped` is now the startup/shutdown choreography around the per-tick dispatch loop. |
 | 3.3 Make authority constants configurable | Deferred | Leave hardcoded until measured drift/reassert behavior proves a hardware-specific need. |
-| 3.4 Log silent exception catches | Mostly done | Control-loop sidecar warnings are now event-logged. Audit other best-effort catches opportunistically. |
+| 3.4 Log silent exception catches | Done | Control-loop sidecar warnings event-log. Bad `curve_shape`/`temp_blend` strings now fail config validation loudly; `analyze` warns on explicit-config parse failure; calibration surfaces sidecar-remove failures in plant-model notes. Remaining silent catches are env/`Try*` parse helpers (silent fallback is the contract). |
 | 4.1 Rate-limit status file writes | Done | Keep. `control_runtime.json` is status-view cadence; CSV is the per-tick source. |
 | 4.2 Add `fmt` / string formatting library | Defer / likely skip | Not worth a new dependency while loop CPU is low. Prefer `std::format` only if formatting becomes a proven hot spot or readability issue. |
 | 4.3 Reserve more log-string space | Minor / opportunistic | Some reserves exist. This is not a standalone task; adjust when editing JSON/CSV escaping code. |
@@ -60,32 +60,19 @@ Use this table before acting on the detailed recommendations below.
 
 Current short list:
 
-1. Refactor `RunUntilStopped()` after the analyzer/manifest path has produced a
-   behavior baseline, keeping channel write decisions and failure paths
-   unchanged.
-2. Add per-sensor-group timing only if measured cadence evidence requires it.
-3. Build dashboard or ingestion infrastructure only after the local
+1. Add per-sensor-group timing only if measured cadence evidence requires it.
+2. Build dashboard or ingestion infrastructure only after the local
    summary/manifest/decision-record path has produced enough tuning evidence.
 
-## RunUntilStopped Refactor Boundary
+## RunUntilStopped Refactor (Done)
 
-Do not split `RunUntilStopped()` around the live controller while tuning is
-still moving unless the change is behavior-neutral and covered by analyzer
-output. The next safe extraction order is:
-
-1. Extract channel status/detail formatting and leave JSON fields unchanged.
-2. Extract primary temperature/sensor-failure evaluation into a pure helper.
-3. Extract demand calculation: curve lookup, CPU overlay, demand smoothing, and
-   thermal-pressure boost.
-4. Extract write gating: deadband, cooldown, policy, authority reassertion, and
-   circuit-breaker skip.
-5. Extract write side effects only after the earlier helpers have tests around
-   policy refusal, write failure, breaker opening, and restore timeout.
-
-Before and after each phase, run the smoke tests plus a short analyzer-backed
-simulated control run and compare setpoints, write counts, failure fields, and
-event counts. This keeps the refactor tied to normal control-theory blocks
-without re-inventing the controller.
+The extraction landed across commits `c89f99f`, `f717207`, and `a4540a1`.
+`ControlLoop::RunUntilStopped` is now startup/shutdown choreography plus the
+per-tick dispatch loop; per-tick sampling/decision/write lives in
+`tick_runner.cpp`, channel evaluation in `channel_evaluator.cpp`, and write
+gating/side effects in `channel_write.cpp`. Future work in this area should
+target the extracted helpers directly rather than re-splitting
+`RunUntilStopped`.
 
 ---
 
@@ -814,17 +801,31 @@ graph TD
 
 ### Do Next
 
-1. **Refactor `RunUntilStopped()` after behavior stabilizes.** Extract channel
-   evaluation/write application with focused regression tests and
-   analyzer-backed before/after checks.
-2. **Add per-sensor-group timing only if cadence diagnosis needs it.** Current
-   loop work duration and achieved interval are enough for the observed 50 ms
-   profile.
-3. **Audit remaining best-effort catches opportunistically.** Either emit
-   structured runtime events or document why the catch must stay silent.
-4. **Dashboard/ingestion work stays behind local evidence.** Event
+1. **Per-sensor-group timing only if cadence diagnosis needs it.** Current loop
+   work duration and achieved interval are enough for the observed 50 ms
+   profile; revisit only if a measured cadence regression points at one
+   backend.
+2. **Dashboard/ingestion work stays behind local evidence.** Event
    severity/error codes and compact decision records are now implemented; keep
    using local summaries until they show a need for heavier infrastructure.
+
+### Done (recent)
+
+- `RunUntilStopped()` extraction (commits `c89f99f`, `f717207`, `a4540a1`):
+  the per-tick body lives in `tick_runner.cpp`; channel evaluation and write
+  application live in `channel_evaluator.cpp` / `channel_write.cpp`.
+  `ControlLoop::RunUntilStopped` is now the startup/shutdown choreography
+  plus the per-tick dispatch loop.
+- Best-effort catch audit: the substantive silent catches were either fixed
+  (bad `curve_shape` / `temp_blend` strings now fail config validation
+  loudly; `analyze` warns instead of silently dropping an explicit config
+  that fails to parse; calibration's pending-write removal failure now
+  surfaces in the plant-model capture's `note`) or annotated with a
+  one-line comment explaining why the silence is contractually correct
+  (`runtime_health` flag-as-signal, `TryReadJsonObject` empty body). The
+  env-var / `Try*` parse helper family (`gpu_reader`, `amd_reader`,
+  `simulated_fan_writer`, `json_io::TryWriteJsonFileAtomic`, etc.) is
+  documented by the canonical comment in `simulated_fan_writer.cpp:19-22`.
 
 ### Defer
 

@@ -659,6 +659,35 @@ Do not promote a controller tuning conclusion from this document alone. If no
 runtime CSV/status bundle is available, record that explicitly and treat the
 math check as code/config validation only.
 
+2026-05-24 Cinebench R23 response check:
+
+- Source run:
+  `release\runtime\logs\archive\svg_mb_control_control-loop_20260524_024240.csv`,
+  producer `svg-mb-control` `0.1.0`, git hash `94a1d4c6a34c`, config SHA256
+  `51a16ea6b673f6610bea59c28865b87458843188d4e17195a147c977718fbc78`.
+- Reported workload score was Cinebench R23 `42236`; this was used only as
+  evidence that a meaningful CPU heat load was present, not as the tuning
+  objective.
+- After filtering malformed rows and physically impossible telemetry, the
+  CPU-heavy segment (`cpu_tctl_c >= 80`) held CPU/Tctl at p50 `87.625 C`,
+  p90 `88.250 C`, p99 `88.976 C`, and max `89.250 C`. GPU memory stayed cool
+  in that segment (p90 `48 C`, max `50 C`), so the run validates CPU response
+  only, not combined CPU+GPU behavior.
+- Fan response during the CPU-heavy segment showed channel `2` p90/max
+  `94.40/95.11%`, channel `3` `90.40/91.11%`, and channel `4`
+  `92.03/92.20%`, while radiator exhaust candidates channel `1` and channel
+  `5` were much lower at `57.23/57.51%` and `59.71/60.09%`. The high-heat
+  response therefore over-relied on intake/front lanes relative to the
+  remaining exhaust headroom.
+- The release config was adjusted to shift high-CPU authority toward channels
+  `1` and `5` and reduce channel `4` high-heat dominance. The next validation
+  pass should compare the same CPU-heavy workload against this config and
+  inspect CPU p90/max, ch1/ch5 RPM, ch4 setpoint, subjective noise, and any
+  sidecar/logging errors.
+- The run also exposed logging-quality issues: malformed CSV rows, invalid
+  JSONL rows, and Windows error 5 sidecar/evidence write failures. Treat raw
+  analyzer maxima from this run as unreliable unless filtered.
+
 ### 13.2 Per-run checks to keep current
 
 For every real-data pass, use the active runtime manifest/status to identify

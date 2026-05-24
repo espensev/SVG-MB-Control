@@ -26,8 +26,9 @@ RunMode ParseRunMode(const wchar_t* value);
 RunMode ParseRunMode(std::string_view value);
 
 // Writes a stop request and waits up to 15s for the controller to report
-// stopped. Returns 0 on success, 1 if the stop request cannot be written,
-// 2 on a 15s timeout. quiet suppresses progress output (used by --restart).
+// stopped and for any supervisor singleton to be released. Returns 0 on
+// success, 1 if the stop request cannot be written, 2 on a 15s timeout.
+// quiet suppresses progress output (used by --restart).
 int RequestStopAndWait(const std::filesystem::path& runtime_home,
                         bool quiet = false);
 

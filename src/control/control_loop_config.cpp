@@ -482,14 +482,12 @@ ControlLoopConfig LoadControlLoopConfig(
         channel.control_hold_ms = ch_json.value("control_hold_ms",
                                                 channel.control_hold_ms);
 
-        // Parse curve shape
+        // Parse curve shape. ParseCurveShape throws on unknown strings; let
+        // that propagate so a typo fails config load loudly (consistent with
+        // the other channel validators in this file).
         if (ch_json.contains("curve_shape")) {
-            try {
-                channel.curve_shape = ParseCurveShape(
-                    ch_json["curve_shape"].get<std::string>());
-            } catch (const std::exception&) {
-                channel.curve_shape = CurveShape::Linear;
-            }
+            channel.curve_shape = ParseCurveShape(
+                ch_json["curve_shape"].get<std::string>());
         }
 
         // Parse rate limiting
@@ -627,14 +625,13 @@ ControlLoopConfig LoadControlLoopConfig(
                 ch_json["low_band_max_boost_pct"].get<double>();
         }
 
-        // Parse temp blend
+        // Parse temp blend. ParseTempBlend throws on unknown strings; let
+        // that propagate. Silent fallback to CpuOnly would defeat the GPU
+        // response lane on a typo, which is harder to diagnose than a config
+        // rejection.
         if (ch_json.contains("temp_blend")) {
-            try {
-                channel.temp_blend = ParseTempBlend(
-                    ch_json["temp_blend"].get<std::string>());
-            } catch (const std::exception&) {
-                channel.temp_blend = TempBlend::CpuOnly;
-            }
+            channel.temp_blend = ParseTempBlend(
+                ch_json["temp_blend"].get<std::string>());
         }
 
         // Parse curves

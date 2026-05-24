@@ -12,6 +12,7 @@
 #include "read_loop.h"
 #include "runtime_artifacts.h"
 #include "runtime_lifecycle.h"
+#include "runtime_singleton.h"
 #include "runtime_supervisor_state.h"
 #include "runtime_util.h"
 
@@ -133,24 +134,51 @@ HANDLE OpenInheritedFile(const std::filesystem::path& path,
 
 std::string ReadTextFileTail(const std::filesystem::path& path,
                              std::uintmax_t max_bytes) {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream.is_open()) {
+    // CreateFileW with FILE_SHARE_DELETE so we never block the inherited
+    // child stderr handle that the supervisor opened with the same share
+    // flags. The supervisor only calls this after WaitForSingleObject on
+    // the worker, but uniform share semantics avoid surprises if that
+    // ordering ever changes.
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
         return {};
     }
 
-    stream.seekg(0, std::ios::end);
-    const std::ifstream::pos_type end = stream.tellg();
-    if (end <= 0) {
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(handle, &size) || size.QuadPart <= 0) {
+        CloseHandle(handle);
         return {};
     }
 
-    const auto length = static_cast<std::uintmax_t>(end);
+    const auto length = static_cast<std::uintmax_t>(size.QuadPart);
     const auto start = length > max_bytes ? length - max_bytes : 0u;
-    stream.seekg(static_cast<std::streamoff>(start), std::ios::beg);
+    LARGE_INTEGER seek{};
+    seek.QuadPart = static_cast<LONGLONG>(start);
+    if (!SetFilePointerEx(handle, seek, nullptr, FILE_BEGIN)) {
+        CloseHandle(handle);
+        return {};
+    }
 
     std::string content;
-    content.assign(std::istreambuf_iterator<char>(stream),
-                   std::istreambuf_iterator<char>());
+    content.reserve(static_cast<std::size_t>(length - start));
+    constexpr DWORD kChunk = 64u * 1024u;
+    std::vector<char> buffer(kChunk);
+    for (;;) {
+        DWORD bytes_read = 0u;
+        if (!ReadFile(handle, buffer.data(), kChunk, &bytes_read, nullptr) ||
+            bytes_read == 0u) {
+            break;
+        }
+        content.append(buffer.data(), bytes_read);
+    }
+    CloseHandle(handle);
     return content;
 }
 
@@ -164,6 +192,9 @@ std::optional<nlohmann::json> TryReadJsonObject(
             return payload;
         }
     } catch (const std::exception&) {
+        // Try-named helper: missing/unreadable/malformed sidecars collapse
+        // to nullopt so the supervisor can boot before any worker has
+        // written its first status file.
     }
     return std::nullopt;
 }
@@ -183,8 +214,43 @@ bool RuntimeStatusLooksActive(const nlohmann::json& status) {
     return pid != 0u && IsProcessActive(pid);
 }
 
+bool SupervisorSingletonHeld(const std::filesystem::path& runtime_home) {
+    return ProbeRuntimeSingletonHeld(SingletonRole::kSupervisor, runtime_home);
+}
+
 bool PrintAlreadyRunningIfActive(RunMode mode,
                                  const std::filesystem::path& runtime_home) {
+    // Supervisor mutex is the authoritative signal: it is held continuously
+    // from supervisor start through any worker restart/backoff window, so the
+    // launcher can detect duplicates even when control_runtime.json is
+    // momentarily stale (worker crashed and supervisor is about to respawn).
+    const bool supervisor_held = SupervisorSingletonHeld(runtime_home);
+    if (supervisor_held) {
+        const auto supervisor_state = ReadSupervisorState(runtime_home);
+        const std::uint32_t supervisor_pid =
+            supervisor_state.has_value() ? supervisor_state->supervisor_pid
+                                         : 0u;
+        const auto worker_status = TryReadJsonObject(
+            RuntimeStatusPath(runtime_home), "runtime status");
+        const std::uint32_t worker_pid = worker_status.has_value()
+            ? JsonUInt32Or(*worker_status, "process_id")
+            : 0u;
+        const std::string active_mode = worker_status.has_value()
+            ? JsonStringOr(*worker_status, "mode", RunModeLabel(mode))
+            : std::string(RunModeLabel(mode));
+        std::cout << "svg-mb-control: " << active_mode
+                  << " is already running\n"
+                  << "  supervisor_pid: " << supervisor_pid << '\n'
+                  << "  worker_pid: " << worker_pid << '\n'
+                  << "  requested_mode: " << RunModeLabel(mode) << '\n'
+                  << "  status: " << RuntimeStatusPath(runtime_home).string()
+                  << '\n'
+                  << "  runtime_home: " << runtime_home.string() << '\n';
+        return true;
+    }
+
+    // Fallback for the rare case where a worker is somehow running without a
+    // supervisor (e.g., direct --run-foreground invocation in a dev workflow).
     const auto status = TryReadJsonObject(
         RuntimeStatusPath(runtime_home), "runtime status");
     if (!status.has_value() || !RuntimeStatusLooksActive(*status)) {
@@ -210,11 +276,14 @@ bool WaitForRuntimeStop(const std::filesystem::path& runtime_home,
     while (std::chrono::steady_clock::now() < deadline) {
         const auto status = TryReadJsonObject(
             RuntimeStatusPath(runtime_home), "runtime status");
-        if (!status.has_value() || !RuntimeStatusLooksActive(*status)) {
+        const bool worker_stopped =
+            !status.has_value() || !RuntimeStatusLooksActive(*status);
+        if (worker_stopped && !SupervisorSingletonHeld(runtime_home)) {
             return true;
         }
-        const std::string state = JsonStringOr(*status, "status");
-        if (state == "shutdown") {
+        const std::string state =
+            status.has_value() ? JsonStringOr(*status, "status") : "";
+        if (state == "shutdown" && !SupervisorSingletonHeld(runtime_home)) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -474,6 +543,17 @@ int LaunchDetachedLongRunningMode(RunMode mode,
         GetExitCodeProcess(supervisor.process_handle, &exit_code);
         CloseHandle(supervisor.process_handle);
 
+        // Exit code 2 from the supervisor means singleton acquisition
+        // refused (see RunSupervisedLongRunningMode). The race window:
+        // PrintAlreadyRunningIfActive above returned false, then a
+        // competing launcher acquired the supervisor mutex before our
+        // child reached CreateMutexW. Re-probe and surface the friendly
+        // already-running message instead of dumping the child's stderr.
+        if (exit_code == 2u &&
+            PrintAlreadyRunningIfActive(mode, runtime_home)) {
+            return 0;
+        }
+
         std::cerr << "Error: "
                   << RunModeLabel(mode)
                   << " background supervisor exited during startup"
@@ -524,6 +604,28 @@ int RunSupervisedLongRunningMode(RunMode mode,
         throw std::runtime_error("Could not create runtime home: " +
                                  ec.message());
     }
+
+    // Singleton: only one supervisor per runtime_home. Acquire before any
+    // sidecar write or stop-request mutation so a duplicate launch can never
+    // clobber the live supervisor's state.
+    SingletonAcquisition supervisor_singleton =
+        TryAcquireRuntimeSingleton(SingletonRole::kSupervisor, runtime_home);
+    if (!supervisor_singleton.acquired) {
+        const auto existing = ReadSupervisorState(runtime_home);
+        std::cerr << "Error: another svg-mb-control supervisor is already "
+                  << "running for runtime_home=" << runtime_home.string()
+                  << '\n';
+        if (existing.has_value() && existing->supervisor_pid != 0u) {
+            std::cerr << "  active_supervisor_pid: "
+                      << existing->supervisor_pid << '\n';
+        }
+        if (!supervisor_singleton.diagnostic.empty()) {
+            std::cerr << "  detail: " << supervisor_singleton.diagnostic
+                      << '\n';
+        }
+        return 2;
+    }
+
     svg_mb_control::ClearRuntimeStopRequest(runtime_home);
 
     const std::filesystem::path working_directory = exe_path.parent_path();
@@ -588,20 +690,16 @@ int RunSupervisedLongRunningMode(RunMode mode,
 
         const bool stop_requested =
             svg_mb_control::RuntimeStopRequested(runtime_home);
-        // On an intentional stop/restart a successor supervisor may already
-        // have published its fresh control_supervisor.json; this exiting
-        // supervisor must not clobber it with stale state. The JSONL event
-        // below still records the exit for history. Crash/backoff restarts
-        // (stop not requested) keep writing so repeated-crash visibility is
-        // preserved.
-        if (!stop_requested) {
-            supervisor_state.has_last_worker_exit_code = true;
-            supervisor_state.last_worker_exit_code =
-                static_cast<std::int64_t>(exit_code);
-            supervisor_state.last_worker_exit_time =
-                FormatLocalIso8601(std::chrono::system_clock::now());
-            WriteSupervisorState(runtime_home, supervisor_state);
-        }
+        // The supervisor singleton guarantees no successor supervisor can
+        // be writing control_supervisor.json concurrently, so it is safe to
+        // record the exit unconditionally; this preserves the last worker
+        // outcome even for graceful stops.
+        supervisor_state.has_last_worker_exit_code = true;
+        supervisor_state.last_worker_exit_code =
+            static_cast<std::int64_t>(exit_code);
+        supervisor_state.last_worker_exit_time =
+            FormatLocalIso8601(std::chrono::system_clock::now());
+        WriteSupervisorState(runtime_home, supervisor_state);
         {
             std::ostringstream detail;
             detail << "worker exited pid=" << worker.pid

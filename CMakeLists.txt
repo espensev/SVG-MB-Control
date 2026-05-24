@@ -151,6 +151,7 @@ add_library(svg_mb_control_core STATIC
     src/hardware/sio_fan_writer.cpp
     src/platform/direct_runtime_snapshot.cpp
     src/platform/env_util.cpp
+    src/platform/runtime_singleton.cpp
     src/platform/runtime_util.cpp
     src/platform/service_probe.cpp
     src/policy/control_policy.cpp
@@ -212,6 +213,18 @@ target_link_libraries(svg_mb_control PRIVATE svg_mb_control_core)
 set_target_properties(svg_mb_control PROPERTIES OUTPUT_NAME "svg-mb-control")
 
 configure_svg_mb_control_target(svg_mb_control)
+
+if(WIN32)
+    add_executable(svg_mb_control_task_runner WIN32
+        src/platform/task_runner.cpp
+        ${SVG_MB_CONTROL_RESOURCE_SOURCES}
+    )
+    set_target_properties(svg_mb_control_task_runner PROPERTIES
+        OUTPUT_NAME "svg-mb-control-task-runner")
+    target_link_libraries(svg_mb_control_task_runner PRIVATE
+        nlohmann_json::nlohmann_json)
+    configure_svg_mb_control_target(svg_mb_control_task_runner)
+endif()
 
 if(BUILD_TESTING)
     add_executable(svg_mb_control_core_tests

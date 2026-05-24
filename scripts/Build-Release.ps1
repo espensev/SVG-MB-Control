@@ -41,10 +41,13 @@ PIPELINE
 OUTPUT
     release/             Latest build (exe + build-info.json + docs/config)
     release/archive/     Timestamped zip archives
+    release/runtime/     Existing runtime state/logs are preserved on publish
 
 NOTES
     VCPKG_ROOT must point to a vcpkg checkout. The script resolves the
     vcpkg toolchain plus cmake.exe and ninja.exe from there when needed.
+    If step 0 stops a controller running from release/, cleanup restarts the
+    packaged controller through release/control.json.
     Use -NoPublish with -NoStopProcesses for local validation while a packaged
     controller is running from release/.
 "@
@@ -57,8 +60,8 @@ Set-StrictMode -Version Latest
 # ── Project Configuration ────────────────────────────────────────────
 $ProjectName         = 'svg-mb-control'
 $MainExeName         = "$ProjectName.exe"
-$SupportExeNames     = @()
-$ProcessNames        = @('svg-mb-control')
+$SupportExeNames     = @('svg-mb-control-task-runner.exe')
+$ProcessNames        = @('svg-mb-control', 'svg-mb-control-task-runner')
 $ReleaseDir          = 'release'
 $DistExtras          = @(
     'README.md'
@@ -66,6 +69,7 @@ $DistExtras          = @(
     'Install-SVG-MB-ControlShortcut.ps1'
     'Install-SVG-MB-ControlScheduledTask.ps1'
     'Install-SVG-MB-ControlWatchdogScheduledTask.ps1'
+    'Run-SVG-MB-ControlWatchdogHidden.vbs'
     'docs'
     'scripts\Start-EvalDashboard.ps1'
     'tools\eval_dashboard'
@@ -78,7 +82,7 @@ $SourceGlobs         = @(
     '*.bin',
     '*.cpp', '*.cc', '*.cxx',
     '*.h', '*.hpp', '*.hh', '*.inl',
-    '*.ps1', '*.py',
+    '*.ps1', '*.py', '*.vbs',
     '*.md', '*.json',
     '*.cmake', '*.rc', '*.rc.in',
     'CMakeLists.txt', 'CMakePresets.json',
@@ -116,6 +120,85 @@ function New-EmptyDirectory {
 
     Remove-DirectoryIfExists -Path $Path
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Test-PathUnderDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Directory
+    )
+
+    try {
+        $fullPath = [System.IO.Path]::GetFullPath($Path)
+        $fullDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd('\', '/')
+        return $fullPath.StartsWith($fullDirectory + '\', [System.StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
+}
+
+function Start-PackagedController {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ReleaseRoot,
+        [Parameter(Mandatory = $true)][string]$MainExeName
+    )
+
+    $exePath = Join-Path $ReleaseRoot $MainExeName
+    $configPath = Join-Path $ReleaseRoot 'control.json'
+    if (-not (Test-Path -LiteralPath $exePath)) {
+        Write-Warning "Packaged controller restart skipped; executable missing: $exePath"
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        Write-Warning "Packaged controller restart skipped; config missing: $configPath"
+        return $false
+    }
+
+    Write-Host "`n[cleanup] Restarting packaged controller..." -ForegroundColor Yellow
+    & $exePath --start --config $configPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Packaged controller restart failed with exit code $LASTEXITCODE."
+        return $false
+    }
+    return $true
+}
+
+function Suspend-ScheduledTaskIfEnabled {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$TaskName)
+
+    $queryOutput = & schtasks.exe /Query /TN $TaskName /FO LIST 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+    $wasEnabled = -not (($queryOutput -join "`n") -match '(?im)^\s*Scheduled Task State:\s*Disabled\s*$')
+    if ($wasEnabled) {
+        & schtasks.exe /Change /TN $TaskName /DISABLE | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Could not disable scheduled task: $TaskName"
+            return $false
+        }
+        & schtasks.exe /End /TN $TaskName 2>$null | Out-Null
+    }
+    return $wasEnabled
+}
+
+function Resume-ScheduledTaskIfNeeded {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$TaskName,
+        [Parameter(Mandatory = $true)][bool]$ShouldEnable
+    )
+
+    if (-not $ShouldEnable) {
+        return
+    }
+    & schtasks.exe /Change /TN $TaskName /ENABLE | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Could not re-enable scheduled task: $TaskName"
+    }
 }
 
 function Copy-DistExtra {
@@ -709,7 +792,7 @@ function New-ReleaseArchive {
                 $relativePath = $relativePath.Substring($releaseRootFull.Length).TrimStart('\','/')
             }
             $relativePath = $relativePath -replace '\\', '/'
-            if ($relativePath -like 'archive/*') {
+            if ($relativePath -like 'archive/*' -or $relativePath -like 'runtime/*') {
                 continue
             }
 
@@ -829,6 +912,9 @@ $buildInfoPath = $null
 $zipPath = $null
 $zipSize = 0
 $mainExeHash = $null
+$restartPackagedControllerAfterBuild = $false
+$watchdogTaskName = '\SVG-MB Control\SVG-MB Control Watchdog'
+$resumeWatchdogAfterBuild = $false
 
 Write-Host "--- Build pipeline: $ProjectName (Release) ---" -ForegroundColor Cyan
 Write-Host "Architecture: $Architecture"
@@ -844,9 +930,24 @@ try {
         Write-Host "`n[0/11] Skipping process stop (-NoStopProcesses)." -ForegroundColor Yellow
     } else {
         Write-Host "`n[0/11] Stopping running processes..." -ForegroundColor Yellow
+        $resumeWatchdogAfterBuild = Suspend-ScheduledTaskIfEnabled -TaskName $watchdogTaskName
+        if ($resumeWatchdogAfterBuild) {
+            Write-Host "Temporarily disabled watchdog task: $watchdogTaskName" -ForegroundColor Green
+        }
         foreach ($processName in $ProcessNames) {
             $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
             if ($proc) {
+                foreach ($item in $proc) {
+                    $processPath = $null
+                    try {
+                        $processPath = $item.Path
+                    } catch {
+                        $processPath = $null
+                    }
+                    if ($processPath -and (Test-PathUnderDirectory -Path $processPath -Directory $ReleaseRoot)) {
+                        $restartPackagedControllerAfterBuild = $true
+                    }
+                }
                 $proc | Stop-Process -Force
                 Write-Host "Stopped: $processName" -ForegroundColor Green
             } else {
@@ -1078,7 +1179,7 @@ try {
         Write-Host "`n[9/11] Publishing to release/..." -ForegroundColor Yellow
         if (Test-Path -LiteralPath $ReleaseRoot) {
             Get-ChildItem -LiteralPath $ReleaseRoot -Force | Where-Object {
-                -not ($_.PSIsContainer -and $_.Name -eq 'archive')
+                -not ($_.PSIsContainer -and ($_.Name -eq 'archive' -or $_.Name -eq 'runtime'))
             } | Remove-Item -Recurse -Force
         } else {
             New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
@@ -1086,6 +1187,7 @@ try {
 
         Copy-Item -Path (Join-Path $DistDir '*') -Destination $ReleaseRoot -Recurse -Force
         Write-Host "Copied dist/ contents to release/" -ForegroundColor Green
+        Write-Host "Preserved release/archive and release/runtime." -ForegroundColor DarkGray
 
         $buildInfoPath = New-BuildInfo `
             -ArtifactRoot $ReleaseRoot `
@@ -1143,6 +1245,11 @@ finally {
     } elseif (Test-Path -LiteralPath $BuildDir) {
         Write-Warning "Build did not complete successfully; keeping build directory at $BuildDir for inspection."
     }
+
+    if ($restartPackagedControllerAfterBuild) {
+        Start-PackagedController -ReleaseRoot $ReleaseRoot -MainExeName $MainExeName | Out-Null
+    }
+    Resume-ScheduledTaskIfNeeded -TaskName $watchdogTaskName -ShouldEnable $resumeWatchdogAfterBuild
 }
 
 $timer.Stop()

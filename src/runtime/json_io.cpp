@@ -7,6 +7,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 #include "windows_lean.h"
 
@@ -98,6 +99,60 @@ nlohmann::json MakeSchemaObject(std::uint32_t schema_version) {
 
 nlohmann::json ReadJsonFile(const std::filesystem::path& path,
                             std::string_view contract_name) {
+#ifdef _WIN32
+    // Open with FILE_SHARE_DELETE so a concurrent atomic-rename writer
+    // (WriteJsonFileAtomic + MoveFileExW with MOVEFILE_REPLACE_EXISTING) is
+    // never blocked by an in-flight reader. Without this, std::ifstream's
+    // default share mode (no SHARE_DELETE) made the writer fail with
+    // ERROR_ACCESS_DENIED (Windows error 5) any time --status / --health /
+    // ReadPendingWrites raced a worker tick.
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD err = GetLastError();
+        throw std::runtime_error("Could not open " +
+                                 std::string(contract_name) + ": " +
+                                 path.string() + " (Windows error " +
+                                 std::to_string(err) + ")");
+    }
+
+    std::string content;
+    {
+        constexpr DWORD kChunk = 64u * 1024u;
+        std::vector<char> buffer(kChunk);
+        for (;;) {
+            DWORD bytes_read = 0u;
+            if (!ReadFile(handle, buffer.data(), kChunk, &bytes_read,
+                          nullptr)) {
+                const DWORD err = GetLastError();
+                CloseHandle(handle);
+                throw std::runtime_error("Failed reading " +
+                                         std::string(contract_name) + ": " +
+                                         path.string() + " (Windows error " +
+                                         std::to_string(err) + ")");
+            }
+            if (bytes_read == 0u) {
+                break;
+            }
+            content.append(buffer.data(), bytes_read);
+        }
+    }
+    CloseHandle(handle);
+
+    try {
+        return nlohmann::json::parse(content);
+    } catch (const nlohmann::json::parse_error& error) {
+        throw std::runtime_error("JSON parse error in " +
+                                 std::string(contract_name) + " " +
+                                 path.string() + ": " + error.what());
+    }
+#else
     std::ifstream stream(path, std::ios::binary);
     if (!stream.is_open()) {
         throw std::runtime_error("Could not open " +
@@ -112,6 +167,7 @@ nlohmann::json ReadJsonFile(const std::filesystem::path& path,
                                  std::string(contract_name) + " " +
                                  path.string() + ": " + error.what());
     }
+#endif
 }
 
 void WriteJsonFileAtomic(const std::filesystem::path& target_path,

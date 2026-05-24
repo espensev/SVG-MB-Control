@@ -45,6 +45,18 @@ function Resolve-ControlConfig {
     return (Resolve-Path -LiteralPath $configPath).ProviderPath
 }
 
+function Resolve-TaskRunner {
+    param([Parameter(Mandatory = $true)][string]$ExePath)
+
+    $exeDir = Split-Path -Parent $ExePath
+    $candidate = Join-Path $exeDir 'svg-mb-control-task-runner.exe'
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $candidate).ProviderPath
+    }
+
+    return $null
+}
+
 function Get-CurrentUserId {
     if (-not [string]::IsNullOrWhiteSpace($UserId)) {
         return $UserId
@@ -205,6 +217,7 @@ if ($Remove -and ($Install -or $Run -or $Status)) {
 
 $exePath = Resolve-ControlExe
 $configPath = Resolve-ControlConfig -ExePath $exePath
+$taskRunnerPath = Resolve-TaskRunner -ExePath $exePath
 
 if ($Run) {
     exit (Invoke-WatchdogRun -ExePath $exePath -ConfigPath $configPath)
@@ -224,14 +237,29 @@ if ($Remove) {
 if ($Install) {
     $effectiveUser = Get-CurrentUserId
     $scriptPath = (Resolve-Path -LiteralPath $PSCommandPath).ProviderPath
-    $powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
-        $powerShellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+    if ($taskRunnerPath) {
+        $actionExe = $taskRunnerPath
+        $arguments = "--watchdog-run --config `"$configPath`""
+    } else {
+        $powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
+            $powerShellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+        }
+        $launcherPath = Join-Path (Split-Path -Parent $scriptPath) 'Run-SVG-MB-ControlWatchdogHidden.vbs'
+        if (Test-Path -LiteralPath $launcherPath -PathType Leaf) {
+            $actionExe = Join-Path $env:SystemRoot 'System32\wscript.exe'
+            if (-not (Test-Path -LiteralPath $actionExe -PathType Leaf)) {
+                $actionExe = (Get-Command wscript.exe -ErrorAction Stop).Source
+            }
+            $arguments = "//B //NoLogo `"$launcherPath`""
+        } else {
+            $actionExe = $powerShellExe
+            $arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -Run"
+        }
     }
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Run"
 
     $action = New-ScheduledTaskAction `
-        -Execute $powerShellExe `
+        -Execute $actionExe `
         -Argument $arguments `
         -WorkingDirectory (Split-Path -Parent $exePath)
     $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $effectiveUser
@@ -264,7 +292,7 @@ if ($Install) {
     Write-Host "Registered scheduled task: $taskPathValue$TaskName"
     Write-Host "  user: $effectiveUser"
     Write-Host "  interval_minutes: $IntervalMinutes"
-    Write-Host "  action: $powerShellExe $arguments"
+    Write-Host "  action: $actionExe $arguments"
 
     if (-not $NoStart) {
         Start-ScheduledTask -TaskName $TaskName -TaskPath $taskPathValue

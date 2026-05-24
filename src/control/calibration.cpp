@@ -377,7 +377,15 @@ int RunCalibration(const ControlConfig& base,
         }
         try {
             RemovePendingWrite(runtime_home, channel);
-        } catch (const std::exception&) {
+        } catch (const std::exception& e) {
+            // Restore already ran; the stale sidecar will be reconciled by
+            // the next write-once / reconcile pass. Surface the failure in
+            // the plant-model output so the operator sees it.
+            const std::string sidecar_note =
+                std::string("sidecar_remove_failed: ") + e.what();
+            entry.note = entry.note.empty()
+                ? sidecar_note
+                : entry.note + "; " + sidecar_note;
         }
 
         results.push_back(entry);

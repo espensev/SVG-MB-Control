@@ -66,7 +66,13 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::string& log_manifest_path,
                             const std::string& event_log_path,
                             const std::string& last_successful_restore_iso) {
+    // control_runtime.json is dual-schema: control-loop and read-loop both
+    // write the same path with different field sets and different
+    // schema_version numbers. The mode field is the discriminator at the
+    // semantic level; the explicit schema field makes that contract
+    // visible to consumers without dispatching on mode.
     nlohmann::json payload = MakeSchemaObject(4u);
+    payload["schema"] = "svg_mb_control.runtime_status.control_loop.v4";
     payload["mode"] = mode_label;
     payload["process_id"] = GetCurrentProcessId();
     payload["status"] = status;

@@ -66,6 +66,9 @@ void FillSidecarHealth(RuntimeHealthResult* result) {
                 entries.size(),
                 static_cast<std::size_t>(UINT32_MAX)));
     } catch (const std::exception&) {
+        // Health probe surfaces the unreadable state via the boolean flag;
+        // exception text is intentionally dropped because operators inspect
+        // pending_writes.json directly when this flag is set.
         result->pending_writes_unreadable = true;
     }
 

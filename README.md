@@ -97,6 +97,11 @@ Release-script outputs:
 - `release\VERSION_TABLE.json`
 - `release\archive\svg-mb-control-<timestamp>.zip`
 
+Publishing preserves existing `release\runtime\` state/logs and
+`release\archive\`; runtime files are not included in release archives. If the
+build script stops a controller that was running from `release\`, cleanup starts
+the packaged controller again through `release\control.json`.
+
 ## Run
 
 Zero-arg packaged launch:
@@ -142,8 +147,10 @@ cd .\release
 
 This registers an at-logon scheduled task named `SVG-MB Control` for the current
 user, runs it elevated, and starts the controller immediately. The task action
-uses `svg-mb-control.exe --start --config <release\control.json>`, so logon
-startup follows the same supervised launch path as the manual start command.
+uses `svg-mb-control-task-runner.exe --start --config <release\control.json>`
+when the native task runner is present, so Task Scheduler does not launch the
+console executable directly. The runner then starts `svg-mb-control.exe` through
+the same supervised launch path as the manual start command.
 
 Optional watchdog install:
 
@@ -152,9 +159,11 @@ cd .\release
 .\Install-SVG-MB-ControlWatchdogScheduledTask.ps1
 ```
 
-The watchdog runs `svg-mb-control.exe --health --json` at logon and every minute.
-It does nothing for `healthy` or `degraded`, restarts the controller for
-`stale` or `stopped`, and leaves `failed` untouched for operator review.
+The watchdog runs through `svg-mb-control-task-runner.exe --watchdog-run` when
+the native task runner is present. It evaluates `svg-mb-control.exe --health
+--json` at logon and every minute, does nothing for `healthy` or `degraded`,
+restarts the controller for `stale` or `stopped`, and leaves `failed` untouched
+for operator review.
 
 Task manager commands:
 

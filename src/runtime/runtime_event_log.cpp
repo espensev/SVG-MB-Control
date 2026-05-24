@@ -5,18 +5,68 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cwctype>
 #include <fstream>
 #include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <vector>
+
+#ifdef _WIN32
+#include "windows_lean.h"
+#endif
 
 namespace svg_mb_control {
 
 namespace {
 
 std::uint64_t CountNonEmptyLines(const std::filesystem::path& path) {
+#ifdef _WIN32
+    // Use CreateFileW with FILE_SHARE_DELETE so this read never blocks a
+    // concurrent rename or rotation of the event log. AppendRuntimeEvent
+    // opens the same file with FILE_SHARE_READ | FILE_SHARE_WRITE |
+    // FILE_SHARE_DELETE; without matching share flags here, the future
+    // rotator would hit ERROR_SHARING_VIOLATION mid-count.
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return 0u;
+    }
+    std::uint64_t count = 0u;
+    bool current_has_content = false;
+    constexpr DWORD kChunk = 64u * 1024u;
+    std::vector<char> buffer(kChunk);
+    for (;;) {
+        DWORD bytes_read = 0u;
+        if (!ReadFile(handle, buffer.data(), kChunk, &bytes_read, nullptr) ||
+            bytes_read == 0u) {
+            break;
+        }
+        for (DWORD i = 0u; i < bytes_read; ++i) {
+            if (buffer[i] == '\n') {
+                if (current_has_content) {
+                    ++count;
+                }
+                current_has_content = false;
+            } else {
+                current_has_content = true;
+            }
+        }
+    }
+    if (current_has_content) {
+        ++count;
+    }
+    CloseHandle(handle);
+    return count;
+#else
     std::ifstream stream(path, std::ios::binary);
     if (!stream.is_open()) {
         return 0u;
@@ -29,10 +79,21 @@ std::uint64_t CountNonEmptyLines(const std::filesystem::path& path) {
         }
     }
     return count;
+#endif
 }
 
 std::string EventCountKey(const std::filesystem::path& path) {
-    return path.lexically_normal().string();
+    // Lowercase the normalized path so case-different spellings of the same
+    // Windows path collapse to one cache entry. Matches the canonicalization
+    // used by the runtime singleton mutex name. POSIX paths are
+    // case-sensitive at the FS layer, but lowercasing here is harmless and
+    // keeps the keying rule single across platforms.
+    std::string key = path.lexically_normal().string();
+    for (char& ch : key) {
+        ch = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return key;
 }
 
 struct EventCountCache {
@@ -156,11 +217,6 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
         return false;
     }
 
-    std::ofstream stream(path, std::ios::binary | std::ios::app);
-    if (!stream.is_open()) {
-        return false;
-    }
-
     const std::string event_time = event.event_time_iso.empty()
         ? FormatRuntimeLocalIso8601(std::chrono::system_clock::now())
         : event.event_time_iso;
@@ -229,11 +285,51 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
         payload["snapshot_mirror_published"] =
             *event.snapshot_mirror_published;
     }
-    stream << payload.dump() << '\n';
+
+    // Serialize once so the line can be written in a single I/O call. With
+    // FILE_APPEND_DATA (and no FILE_WRITE_DATA), NTFS atomically updates
+    // the file pointer and writes the bytes, so concurrent appenders never
+    // interleave NDJSON lines. Without this, two CLIs that emit events
+    // (e.g. --write-once, --reconcile, plus the worker) could splice
+    // payloads together since none of them are under the worker singleton.
+    std::string line = payload.dump();
+    line.push_back('\n');
+
+#ifdef _WIN32
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        FILE_APPEND_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    DWORD written = 0u;
+    const BOOL ok = WriteFile(
+        handle,
+        line.data(),
+        static_cast<DWORD>(line.size()),
+        &written,
+        nullptr);
+    CloseHandle(handle);
+    if (!ok || written != line.size()) {
+        return false;
+    }
+#else
+    std::ofstream stream(path, std::ios::binary | std::ios::app);
+    if (!stream.is_open()) {
+        return false;
+    }
+    stream << line;
     stream.flush();
     if (!stream.good()) {
         return false;
     }
+#endif
+
     NoteEventAppended(path);
     return true;
 }
