@@ -182,23 +182,6 @@ std::string ReadTextFileTail(const std::filesystem::path& path,
     return content;
 }
 
-std::optional<nlohmann::json> TryReadJsonObject(
-    const std::filesystem::path& path,
-    std::string_view contract_name) {
-    try {
-        nlohmann::json payload = svg_mb_control::ReadJsonFile(
-            path, contract_name);
-        if (payload.is_object()) {
-            return payload;
-        }
-    } catch (const std::exception&) {
-        // Try-named helper: missing/unreadable/malformed sidecars collapse
-        // to nullopt so the supervisor can boot before any worker has
-        // written its first status file.
-    }
-    return std::nullopt;
-}
-
 std::filesystem::path RuntimeStatusPath(
     const std::filesystem::path& runtime_home) {
     return runtime_home / "control_runtime.json";

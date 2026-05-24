@@ -251,4 +251,19 @@ bool TryWriteJsonFileAtomic(const std::filesystem::path& target_path,
     }
 }
 
+std::optional<nlohmann::json> TryReadJsonObject(
+    const std::filesystem::path& path,
+    std::string_view contract_name) {
+    try {
+        nlohmann::json payload = ReadJsonFile(path, contract_name);
+        if (payload.is_object()) {
+            return payload;
+        }
+    } catch (const std::exception&) {
+        // Missing/unreadable/malformed sidecars collapse to nullopt so
+        // callers can boot before any writer has produced the file.
+    }
+    return std::nullopt;
+}
+
 }  // namespace svg_mb_control

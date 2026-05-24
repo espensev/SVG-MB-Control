@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -30,6 +31,14 @@ bool JsonBoolOr(const nlohmann::json& value,
 
 nlohmann::json ReadJsonFile(const std::filesystem::path& path,
                             std::string_view contract_name);
+
+// Reads `path` and returns the parsed object on success, or std::nullopt when
+// the file is missing, unreadable, not valid JSON, or not a JSON object.
+// Collapses the recurring try/catch + is_object() guard used by sidecar
+// readers that boot before any worker has produced their first file.
+std::optional<nlohmann::json> TryReadJsonObject(
+    const std::filesystem::path& path,
+    std::string_view contract_name);
 
 void WriteJsonFileAtomic(const std::filesystem::path& target_path,
                          const nlohmann::json& payload,
