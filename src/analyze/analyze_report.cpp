@@ -174,6 +174,221 @@ std::string OptToText(const std::optional<double>& v) {
     return os.str();
 }
 
+// Aggregated state assembled before output. Both emitters consume this; the
+// main function populates it from the SQLite queries.
+struct ReportData {
+    std::int64_t run_id = 0;
+    std::string session_start;
+    std::string mode;
+    std::string status;
+    std::vector<TickRow> ticks;
+    BandPercentiles idle;
+    BandPercentiles load;
+    BandPercentiles cool;
+    std::map<int, ChannelStats> channels;
+    std::optional<std::int64_t> onset_tick;
+    std::optional<std::int64_t> response_tick;
+    std::optional<double> response_delay_s;
+    int authority_reasserted = 0;
+    int write_failures = 0;
+    int restore_failures = 0;
+};
+
+struct TargetRun {
+    std::int64_t id = 0;
+    std::string session_start;
+    std::string mode;
+    std::string status;
+};
+
+// Resolves the target run row. Caller has already opened the DB and verified
+// the schema. Returns nullopt and prints a message when no row matches.
+std::optional<TargetRun> LookupTargetRun(Database& db,
+                                        const ReportOptions& options,
+                                        const std::filesystem::path& db_path) {
+    std::string sql = "SELECT id, session_start, mode, status FROM runs ";
+    if (options.run_id) {
+        sql += "WHERE id = ?1";
+    } else if (options.session_start) {
+        sql += "WHERE session_start = ?1 ORDER BY id DESC";
+    } else {
+        sql += "ORDER BY session_start DESC, id DESC";
+    }
+    sql += " LIMIT 1";
+    Statement stmt = db.Prepare(sql);
+    if (options.run_id) {
+        stmt.BindInt(1, *options.run_id);
+    } else if (options.session_start) {
+        stmt.BindText(1, *options.session_start);
+    }
+    if (!stmt.Step()) {
+        std::cerr << "Error: no matching run in " << db_path.string() << '\n';
+        return std::nullopt;
+    }
+    TargetRun run;
+    run.id = stmt.ColumnInt(0);
+    run.session_start = stmt.ColumnText(1);
+    run.mode = stmt.ColumnText(2);
+    run.status = stmt.ColumnText(3);
+    return run;
+}
+
+void EmitJsonReport(const ReportOptions& options,
+                    const ReportData& data,
+                    std::ostream& out) {
+    nlohmann::json doc;
+    doc["run"] = {
+        {"id", data.run_id},
+        {"session_start", data.session_start},
+        {"mode", data.mode},
+        {"status", data.status},
+        {"ticks", static_cast<std::int64_t>(data.ticks.size())},
+        {"elapsed_s", data.ticks.back().elapsed_s},
+    };
+    doc["params"] = {
+        {"idle_seconds", options.idle_seconds},
+        {"load_threshold_c", options.load_threshold_c},
+        {"percentile_method",
+         "nearest-rank on sorted ascending, p100=max"},
+    };
+    auto band_json = [](const BandPercentiles& b) {
+        return nlohmann::json{
+            {"n", b.n},
+            {"cpu_tctl_c",
+             {{"p50", OptToJson(b.cpu_tctl_p50)},
+              {"p90", OptToJson(b.cpu_tctl_p90)},
+              {"max", OptToJson(b.cpu_tctl_max)}}},
+            {"gpu_memjn_c",
+             {{"p50", OptToJson(b.gpu_memjn_p50)},
+              {"p90", OptToJson(b.gpu_memjn_p90)},
+              {"max", OptToJson(b.gpu_memjn_max)}}},
+            {"gpu_envelope_c",
+             {{"p50", OptToJson(b.gpu_env_p50)},
+              {"p90", OptToJson(b.gpu_env_p90)},
+              {"max", OptToJson(b.gpu_env_max)}}},
+        };
+    };
+    doc["bands"] = {
+        {"idle", band_json(data.idle)},
+        {"load", band_json(data.load)},
+        {"cooldown", band_json(data.cool)},
+    };
+    doc["channels"] = nlohmann::json::array();
+    for (const auto& [ch, cs] : data.channels) {
+        std::int64_t writes = 0;
+        if (cs.total_writes_min && cs.total_writes_max) {
+            writes = *cs.total_writes_max - *cs.total_writes_min;
+        }
+        doc["channels"].push_back({
+            {"channel", ch},
+            {"setpoint_pct",
+             {{"p50", OptToJson(Percentile(cs.setpoint_pct, 50.0))},
+              {"p90", OptToJson(Percentile(cs.setpoint_pct, 90.0))},
+              {"max", OptToJson(Percentile(cs.setpoint_pct, 100.0))}}},
+            {"duty_pct",
+             {{"p50", OptToJson(Percentile(cs.duty_pct, 50.0))},
+              {"p90", OptToJson(Percentile(cs.duty_pct, 90.0))},
+              {"max", OptToJson(Percentile(cs.duty_pct, 100.0))}}},
+            {"rpm",
+             {{"p50", OptToJson(Percentile(cs.rpm, 50.0))},
+              {"p90", OptToJson(Percentile(cs.rpm, 90.0))},
+              {"max", OptToJson(Percentile(cs.rpm, 100.0))}}},
+            {"max_thermal_pressure_boost_pct",
+             cs.max_thermal_pressure_boost_pct},
+            {"max_midband_pressure_boost_pct",
+             cs.max_midband_pressure_boost_pct},
+            {"max_gpu_airflow_boost_pct",
+             cs.max_gpu_airflow_boost_pct},
+            {"max_cpu_low_soak_boost_pct",
+             cs.max_cpu_low_soak_boost_pct},
+            {"writes", writes},
+            {"reversals", cs.reversals},
+            {"mode_leave_ticks", cs.mode_leave_ticks},
+        });
+    }
+    doc["response"] = {
+        {"load_onset_tick",
+         data.onset_tick ? nlohmann::json(*data.onset_tick)
+                         : nlohmann::json()},
+        {"first_setpoint_increase_tick",
+         data.response_tick ? nlohmann::json(*data.response_tick)
+                            : nlohmann::json()},
+        {"response_delay_s", OptToJson(data.response_delay_s)},
+    };
+    doc["robustness"] = {
+        {"authority_reasserted", data.authority_reasserted},
+        {"write_failures", data.write_failures},
+        {"restore_failures", data.restore_failures},
+    };
+    out << doc.dump(2) << '\n';
+}
+
+void EmitTextReport(const ReportOptions& options,
+                    const ReportData& data,
+                    std::ostream& out) {
+    std::ostringstream os;
+    os << "analyze report: run_id=" << data.run_id
+       << " session_start=" << data.session_start << " mode=" << data.mode
+       << " status=" << data.status << '\n';
+    os << "  ticks=" << data.ticks.size()
+       << " elapsed_s=" << data.ticks.back().elapsed_s
+       << " idle_seconds=" << options.idle_seconds
+       << " load_threshold_c=" << options.load_threshold_c << '\n';
+    os << "  band sample counts: idle=" << data.idle.n
+       << " load=" << data.load.n << " cooldown=" << data.cool.n << '\n';
+    os << "  percentile method: nearest-rank on sorted ascending, p100=max\n";
+    auto print_band = [&os](const char* name, const BandPercentiles& b) {
+        os << "[" << name << "] cpu_tctl_c p50=" << OptToText(b.cpu_tctl_p50)
+           << " p90=" << OptToText(b.cpu_tctl_p90)
+           << " max=" << OptToText(b.cpu_tctl_max)
+           << "  gpu_memjn_c p50=" << OptToText(b.gpu_memjn_p50)
+           << " p90=" << OptToText(b.gpu_memjn_p90)
+           << " max=" << OptToText(b.gpu_memjn_max)
+           << "  gpu_envelope_c p50=" << OptToText(b.gpu_env_p50)
+           << " p90=" << OptToText(b.gpu_env_p90)
+           << " max=" << OptToText(b.gpu_env_max) << '\n';
+    };
+    print_band("idle", data.idle);
+    print_band("load", data.load);
+    print_band("cooldown", data.cool);
+    os << "channels:\n";
+    for (const auto& [ch, cs] : data.channels) {
+        std::int64_t writes = 0;
+        if (cs.total_writes_min && cs.total_writes_max) {
+            writes = *cs.total_writes_max - *cs.total_writes_min;
+        }
+        os << "  ch" << ch << " setpoint_pct p50="
+           << OptToText(Percentile(cs.setpoint_pct, 50.0))
+           << " p90=" << OptToText(Percentile(cs.setpoint_pct, 90.0))
+           << " max=" << OptToText(Percentile(cs.setpoint_pct, 100.0))
+           << "  duty_pct p50=" << OptToText(Percentile(cs.duty_pct, 50.0))
+           << " p90=" << OptToText(Percentile(cs.duty_pct, 90.0))
+           << " max=" << OptToText(Percentile(cs.duty_pct, 100.0))
+           << "  rpm p50=" << OptToText(Percentile(cs.rpm, 50.0))
+           << " p90=" << OptToText(Percentile(cs.rpm, 90.0))
+           << " max=" << OptToText(Percentile(cs.rpm, 100.0)) << '\n';
+        os << "       thermal_pressure_boost_pct max="
+           << cs.max_thermal_pressure_boost_pct
+           << "  midband_pressure_boost_pct max="
+           << cs.max_midband_pressure_boost_pct
+           << "  gpu_airflow_boost_pct max="
+           << cs.max_gpu_airflow_boost_pct
+           << "  cpu_low_soak_boost_pct max="
+           << cs.max_cpu_low_soak_boost_pct << "  writes=" << writes
+           << "  reversals=" << cs.reversals
+           << "  mode_leave_ticks=" << cs.mode_leave_ticks << '\n';
+    }
+    os << "response: load_onset_tick="
+       << (data.onset_tick ? std::to_string(*data.onset_tick) : "n/a")
+       << " first_setpoint_increase_tick="
+       << (data.response_tick ? std::to_string(*data.response_tick) : "n/a")
+       << " response_delay_s=" << OptToText(data.response_delay_s) << '\n';
+    os << "robustness: authority_reasserted=" << data.authority_reasserted
+       << " write_failures=" << data.write_failures
+       << " restore_failures=" << data.restore_failures << '\n';
+    out << os.str();
+}
+
 }  // namespace
 
 int RunAnalyzeReport(const ReportOptions& options) {
@@ -200,41 +415,17 @@ int RunAnalyzeReport(const ReportOptions& options) {
         return 1;
     }
 
-    // Resolve the target run.
-    std::int64_t run_id = 0;
-    std::string session_start;
-    std::string mode;
-    std::string status;
+    std::optional<TargetRun> target;
     try {
-        std::string sql =
-            "SELECT id, session_start, mode, status FROM runs ";
-        if (options.run_id) {
-            sql += "WHERE id = ?1";
-        } else if (options.session_start) {
-            sql += "WHERE session_start = ?1 ORDER BY id DESC";
-        } else {
-            sql += "ORDER BY session_start DESC, id DESC";
-        }
-        sql += " LIMIT 1";
-        Statement stmt = db.Prepare(sql);
-        if (options.run_id) {
-            stmt.BindInt(1, *options.run_id);
-        } else if (options.session_start) {
-            stmt.BindText(1, *options.session_start);
-        }
-        if (!stmt.Step()) {
-            std::cerr << "Error: no matching run in " << db_path.string()
-                      << '\n';
-            return 1;
-        }
-        run_id = stmt.ColumnInt(0);
-        session_start = stmt.ColumnText(1);
-        mode = stmt.ColumnText(2);
-        status = stmt.ColumnText(3);
+        target = LookupTargetRun(db, options, db_path);
     } catch (const std::exception& ex) {
         std::cerr << "Error: run lookup failed: " << ex.what() << '\n';
         return 1;
     }
+    if (!target.has_value()) {
+        return 1;
+    }
+    const std::int64_t run_id = target->id;
 
     std::vector<TickRow> ticks;
     std::map<int, ChannelStats> channels;
@@ -521,158 +712,28 @@ int RunAnalyzeReport(const ReportOptions& options) {
         }
     }
 
-    const BandPercentiles idle = SummariseBand(ticks, Band::kIdle);
-    const BandPercentiles load = SummariseBand(ticks, Band::kLoad);
-    const BandPercentiles cool = SummariseBand(ticks, Band::kCooldown);
+    ReportData data;
+    data.run_id = run_id;
+    data.session_start = target->session_start;
+    data.mode = target->mode;
+    data.status = target->status;
+    data.ticks = std::move(ticks);
+    data.idle = SummariseBand(data.ticks, Band::kIdle);
+    data.load = SummariseBand(data.ticks, Band::kLoad);
+    data.cool = SummariseBand(data.ticks, Band::kCooldown);
+    data.channels = std::move(channels);
+    data.onset_tick = onset_tick;
+    data.response_tick = response_tick;
+    data.response_delay_s = response_delay_s;
+    data.authority_reasserted = authority_reasserted;
+    data.write_failures = write_failures;
+    data.restore_failures = restore_failures;
 
     if (options.as_json) {
-        nlohmann::json out;
-        out["run"] = {
-            {"id", run_id},
-            {"session_start", session_start},
-            {"mode", mode},
-            {"status", status},
-            {"ticks", static_cast<std::int64_t>(ticks.size())},
-            {"elapsed_s", ticks.back().elapsed_s},
-        };
-        out["params"] = {
-            {"idle_seconds", options.idle_seconds},
-            {"load_threshold_c", options.load_threshold_c},
-            {"percentile_method",
-             "nearest-rank on sorted ascending, p100=max"},
-        };
-        auto band_json = [](const BandPercentiles& b) {
-            return nlohmann::json{
-                {"n", b.n},
-                {"cpu_tctl_c",
-                 {{"p50", OptToJson(b.cpu_tctl_p50)},
-                  {"p90", OptToJson(b.cpu_tctl_p90)},
-                  {"max", OptToJson(b.cpu_tctl_max)}}},
-                {"gpu_memjn_c",
-                 {{"p50", OptToJson(b.gpu_memjn_p50)},
-                  {"p90", OptToJson(b.gpu_memjn_p90)},
-                  {"max", OptToJson(b.gpu_memjn_max)}}},
-                {"gpu_envelope_c",
-                 {{"p50", OptToJson(b.gpu_env_p50)},
-                  {"p90", OptToJson(b.gpu_env_p90)},
-                  {"max", OptToJson(b.gpu_env_max)}}},
-            };
-        };
-        out["bands"] = {
-            {"idle", band_json(idle)},
-            {"load", band_json(load)},
-            {"cooldown", band_json(cool)},
-        };
-        out["channels"] = nlohmann::json::array();
-        for (const auto& [ch, cs] : channels) {
-            std::int64_t writes = 0;
-            if (cs.total_writes_min && cs.total_writes_max) {
-                writes = *cs.total_writes_max - *cs.total_writes_min;
-            }
-            out["channels"].push_back({
-                {"channel", ch},
-                {"setpoint_pct",
-                 {{"p50", OptToJson(Percentile(cs.setpoint_pct, 50.0))},
-                  {"p90", OptToJson(Percentile(cs.setpoint_pct, 90.0))},
-                  {"max", OptToJson(Percentile(cs.setpoint_pct, 100.0))}}},
-                {"duty_pct",
-                 {{"p50", OptToJson(Percentile(cs.duty_pct, 50.0))},
-                  {"p90", OptToJson(Percentile(cs.duty_pct, 90.0))},
-                  {"max", OptToJson(Percentile(cs.duty_pct, 100.0))}}},
-                {"rpm",
-                 {{"p50", OptToJson(Percentile(cs.rpm, 50.0))},
-                  {"p90", OptToJson(Percentile(cs.rpm, 90.0))},
-                  {"max", OptToJson(Percentile(cs.rpm, 100.0))}}},
-                {"max_thermal_pressure_boost_pct",
-                 cs.max_thermal_pressure_boost_pct},
-                {"max_midband_pressure_boost_pct",
-                 cs.max_midband_pressure_boost_pct},
-                {"max_gpu_airflow_boost_pct",
-                 cs.max_gpu_airflow_boost_pct},
-                {"max_cpu_low_soak_boost_pct",
-                 cs.max_cpu_low_soak_boost_pct},
-                {"writes", writes},
-                {"reversals", cs.reversals},
-                {"mode_leave_ticks", cs.mode_leave_ticks},
-            });
-        }
-        out["response"] = {
-            {"load_onset_tick",
-             onset_tick ? nlohmann::json(*onset_tick) : nlohmann::json()},
-            {"first_setpoint_increase_tick",
-             response_tick ? nlohmann::json(*response_tick)
-                           : nlohmann::json()},
-            {"response_delay_s", OptToJson(response_delay_s)},
-        };
-        out["robustness"] = {
-            {"authority_reasserted", authority_reasserted},
-            {"write_failures", write_failures},
-            {"restore_failures", restore_failures},
-        };
-        std::cout << out.dump(2) << '\n';
-        return 0;
+        EmitJsonReport(options, data, std::cout);
+    } else {
+        EmitTextReport(options, data, std::cout);
     }
-
-    std::ostringstream os;
-    os << "analyze report: run_id=" << run_id
-       << " session_start=" << session_start << " mode=" << mode
-       << " status=" << status << '\n';
-    os << "  ticks=" << ticks.size() << " elapsed_s=" << ticks.back().elapsed_s
-       << " idle_seconds=" << options.idle_seconds
-       << " load_threshold_c=" << options.load_threshold_c << '\n';
-    os << "  band sample counts: idle=" << idle.n << " load=" << load.n
-       << " cooldown=" << cool.n << '\n';
-    os << "  percentile method: nearest-rank on sorted ascending, p100=max\n";
-    auto print_band = [&os](const char* name, const BandPercentiles& b) {
-        os << "[" << name << "] cpu_tctl_c p50=" << OptToText(b.cpu_tctl_p50)
-           << " p90=" << OptToText(b.cpu_tctl_p90)
-           << " max=" << OptToText(b.cpu_tctl_max)
-           << "  gpu_memjn_c p50=" << OptToText(b.gpu_memjn_p50)
-           << " p90=" << OptToText(b.gpu_memjn_p90)
-           << " max=" << OptToText(b.gpu_memjn_max)
-           << "  gpu_envelope_c p50=" << OptToText(b.gpu_env_p50)
-           << " p90=" << OptToText(b.gpu_env_p90)
-           << " max=" << OptToText(b.gpu_env_max) << '\n';
-    };
-    print_band("idle", idle);
-    print_band("load", load);
-    print_band("cooldown", cool);
-    os << "channels:\n";
-    for (const auto& [ch, cs] : channels) {
-        std::int64_t writes = 0;
-        if (cs.total_writes_min && cs.total_writes_max) {
-            writes = *cs.total_writes_max - *cs.total_writes_min;
-        }
-        os << "  ch" << ch << " setpoint_pct p50="
-           << OptToText(Percentile(cs.setpoint_pct, 50.0))
-           << " p90=" << OptToText(Percentile(cs.setpoint_pct, 90.0))
-           << " max=" << OptToText(Percentile(cs.setpoint_pct, 100.0))
-           << "  duty_pct p50=" << OptToText(Percentile(cs.duty_pct, 50.0))
-           << " p90=" << OptToText(Percentile(cs.duty_pct, 90.0))
-           << " max=" << OptToText(Percentile(cs.duty_pct, 100.0))
-           << "  rpm p50=" << OptToText(Percentile(cs.rpm, 50.0))
-           << " p90=" << OptToText(Percentile(cs.rpm, 90.0))
-           << " max=" << OptToText(Percentile(cs.rpm, 100.0)) << '\n';
-        os << "       thermal_pressure_boost_pct max="
-           << cs.max_thermal_pressure_boost_pct
-           << "  midband_pressure_boost_pct max="
-           << cs.max_midband_pressure_boost_pct
-           << "  gpu_airflow_boost_pct max="
-           << cs.max_gpu_airflow_boost_pct
-           << "  cpu_low_soak_boost_pct max="
-           << cs.max_cpu_low_soak_boost_pct << "  writes=" << writes
-           << "  reversals=" << cs.reversals
-           << "  mode_leave_ticks=" << cs.mode_leave_ticks << '\n';
-    }
-    os << "response: load_onset_tick="
-       << (onset_tick ? std::to_string(*onset_tick) : "n/a")
-       << " first_setpoint_increase_tick="
-       << (response_tick ? std::to_string(*response_tick) : "n/a")
-       << " response_delay_s=" << OptToText(response_delay_s) << '\n';
-    os << "robustness: authority_reasserted=" << authority_reasserted
-       << " write_failures=" << write_failures
-       << " restore_failures=" << restore_failures << '\n';
-    std::cout << os.str();
     return 0;
 }
 
