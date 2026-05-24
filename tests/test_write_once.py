@@ -10,6 +10,22 @@ class WriteOnceTests(unittest.TestCase):
             raise unittest.SkipTest("Windows-only repo")
         _ensure_release_build()
 
+    def test_malformed_numeric_cli_values_are_rejected(self) -> None:
+        cases = [
+            ("--write-channel", "-1"),
+            ("--write-channel", "1x"),
+            ("--write-channel", "4294967296"),
+            ("--write-hold-ms", "10ms"),
+            ("--write-pct", "50x"),
+            ("--write-pct", "nan"),
+            ("--write-pct", "101"),
+        ]
+        for flag, value in cases:
+            with self.subTest(flag=flag, value=value):
+                result = _run_control("--mode", "write-once", flag, value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"Invalid {flag} value", result.stderr)
+
     def test_write_once_happy_path(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

@@ -28,11 +28,13 @@
 #include <atomic>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -198,35 +200,44 @@ void PrintVersion() {
     std::cout << '\n';
 }
 
+std::uint32_t ParseUInt32Arg(const wchar_t* value, const char* flag_name);
+
+double ParseDoubleArg(const wchar_t* value, const char* flag_name);
+
 std::uint32_t ParseWriteChannel(const wchar_t* value) {
-    try {
-        const unsigned long parsed = std::stoul(std::wstring(value));
-        return static_cast<std::uint32_t>(parsed);
-    } catch (const std::exception&) {
-        throw std::runtime_error("Invalid --write-channel value.");
-    }
+    return ParseUInt32Arg(value, "--write-channel");
 }
 
 double ParseWritePct(const wchar_t* value) {
-    try {
-        return std::stod(std::wstring(value));
-    } catch (const std::exception&) {
+    const double parsed = ParseDoubleArg(value, "--write-pct");
+    if (parsed < 0.0 || parsed > 100.0) {
         throw std::runtime_error("Invalid --write-pct value.");
     }
+    return parsed;
 }
 
 std::uint32_t ParseWriteHoldMs(const wchar_t* value) {
-    try {
-        const unsigned long parsed = std::stoul(std::wstring(value));
-        return static_cast<std::uint32_t>(parsed);
-    } catch (const std::exception&) {
-        throw std::runtime_error("Invalid --write-hold-ms value.");
-    }
+    return ParseUInt32Arg(value, "--write-hold-ms");
 }
 
 std::uint32_t ParseUInt32Arg(const wchar_t* value, const char* flag_name) {
+    const std::wstring text(value == nullptr ? L"" : value);
+    if (text.empty()) {
+        throw std::runtime_error(std::string("Invalid ") + flag_name + " value.");
+    }
+    for (const wchar_t ch : text) {
+        if (ch < L'0' || ch > L'9') {
+            throw std::runtime_error(
+                std::string("Invalid ") + flag_name + " value.");
+        }
+    }
     try {
-        const unsigned long parsed = std::stoul(std::wstring(value));
+        const unsigned long long parsed = std::stoull(text);
+        if (parsed >
+            static_cast<unsigned long long>(
+                std::numeric_limits<std::uint32_t>::max())) {
+            throw std::out_of_range("uint32 overflow");
+        }
         return static_cast<std::uint32_t>(parsed);
     } catch (const std::exception&) {
         throw std::runtime_error(std::string("Invalid ") + flag_name + " value.");
@@ -234,8 +245,14 @@ std::uint32_t ParseUInt32Arg(const wchar_t* value, const char* flag_name) {
 }
 
 double ParseDoubleArg(const wchar_t* value, const char* flag_name) {
+    const std::wstring text(value == nullptr ? L"" : value);
+    std::size_t parsed_chars = 0u;
     try {
-        return std::stod(std::wstring(value));
+        const double parsed = std::stod(text, &parsed_chars);
+        if (parsed_chars != text.size() || !std::isfinite(parsed)) {
+            throw std::invalid_argument("trailing characters or non-finite");
+        }
+        return parsed;
     } catch (const std::exception&) {
         throw std::runtime_error(std::string("Invalid ") + flag_name + " value.");
     }

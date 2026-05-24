@@ -60,6 +60,18 @@ ok("degSecondsOver basic",
   D.degSecondsOver([70, 80, 90], [1, 1, 1], 75) === (5 + 15),
   String(D.degSecondsOver([70, 80, 90], [1, 1, 1], 75)));
 
+const largeStats = D.stats(Array.from({ length: 150000 }, (_, i) => i % 1000));
+ok("stats handles large arrays without spread overflow",
+  largeStats.count === 150000 && largeStats.min === 0 && largeStats.max === 999,
+  JSON.stringify(largeStats));
+
+D.state.live.cap = 3;
+const cappedRows = D.capLiveRows([{ i: 1 }, { i: 2 }, { i: 3 }, { i: 4 }]);
+ok("capLiveRows keeps the newest live rows",
+  cappedRows.length === 3 && cappedRows[0].i === 2 && cappedRows[2].i === 4,
+  JSON.stringify(cappedRows));
+D.state.live.cap = 2400;
+
 // Cross-correlation: b is a delayed by 5 samples => b follows a by +5.
 const N = 400;
 const a = Array.from({ length: N }, (_, i) => Math.sin(i / 9) + 0.3 * Math.sin(i / 3.1));

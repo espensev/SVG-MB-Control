@@ -21,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace svg_mb_control {
 
@@ -199,6 +200,22 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             .success = true,
         });
     bool restore_failure = false;
+    std::vector<std::uint32_t> queued_sidecar_removals;
+    const auto append_sidecar_remove_failure =
+        [&](std::uint32_t channel, const std::string& detail) {
+            restore_failure = true;
+            AppendRuntimeEvent(
+                context.runtime_home,
+                RuntimeLogEvent{
+                    .mode = "control-loop",
+                    .event_type =
+                        "control_loop.shutdown_sidecar_remove_failed",
+                    .detail = detail,
+                    .channel = channel,
+                    .tick_count = state.tick_count,
+                    .success = false,
+                });
+        };
     for (auto& channel : context.channels) {
         if (state.fatal_restore_timeout && channel.write_active) {
             restore_failure = true;
@@ -249,19 +266,25 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
         }
         try {
             pending_store.QueueRemove(channel.config.channel);
+            queued_sidecar_removals.push_back(channel.config.channel);
+        } catch (const std::exception& e) {
+            append_sidecar_remove_failure(
+                channel.config.channel,
+                std::string("sidecar removal during shutdown failed: ") +
+                    e.what());
+        }
+    }
+    if (!queued_sidecar_removals.empty()) {
+        try {
             pending_store.Flush();
         } catch (const std::exception& e) {
-            restore_failure = true;
-            AppendRuntimeEvent(
-                context.runtime_home,
-                RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type = "control_loop.shutdown_sidecar_remove_failed",
-                    .detail = std::string("sidecar removal during shutdown failed: ") + e.what(),
-                    .channel = channel.config.channel,
-                    .tick_count = state.tick_count,
-                    .success = false,
-                });
+            for (const std::uint32_t channel : queued_sidecar_removals) {
+                append_sidecar_remove_failure(
+                    channel,
+                    std::string(
+                        "sidecar removal flush during shutdown failed: ") +
+                        e.what());
+            }
         }
     }
     WriteControlLoopStatus(context.runtime_home, "control-loop", "shutdown",

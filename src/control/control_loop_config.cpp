@@ -90,6 +90,96 @@ void ValidateCurve(const std::vector<CurvePoint>& curve,
     }
 }
 
+struct PressureBoostMembers {
+    const char* name;
+    double ChannelControlConfig::*start_c;
+    double ChannelControlConfig::*full_c;
+    double ChannelControlConfig::*rise_pct_per_sec;
+    double ChannelControlConfig::*fall_pct_per_sec;
+    double ChannelControlConfig::*max_boost_pct;
+};
+
+constexpr PressureBoostMembers kPressureBoostMembers[] = {
+    {"thermal_pressure",
+     &ChannelControlConfig::thermal_pressure_start_c,
+     &ChannelControlConfig::thermal_pressure_full_c,
+     &ChannelControlConfig::thermal_pressure_rise_pct_per_sec,
+     &ChannelControlConfig::thermal_pressure_fall_pct_per_sec,
+     &ChannelControlConfig::thermal_pressure_max_boost_pct},
+    {"midband_pressure",
+     &ChannelControlConfig::midband_pressure_start_c,
+     &ChannelControlConfig::midband_pressure_full_c,
+     &ChannelControlConfig::midband_pressure_rise_pct_per_sec,
+     &ChannelControlConfig::midband_pressure_fall_pct_per_sec,
+     &ChannelControlConfig::midband_pressure_max_boost_pct},
+    {"gpu_airflow",
+     &ChannelControlConfig::gpu_airflow_start_c,
+     &ChannelControlConfig::gpu_airflow_full_c,
+     &ChannelControlConfig::gpu_airflow_rise_pct_per_sec,
+     &ChannelControlConfig::gpu_airflow_fall_pct_per_sec,
+     &ChannelControlConfig::gpu_airflow_max_boost_pct},
+};
+
+bool AnyPressureBoostFieldSet(const ChannelControlConfig& ch,
+                              const PressureBoostMembers& members) {
+    return !std::isnan(ch.*members.start_c) ||
+           !std::isnan(ch.*members.full_c) ||
+           !std::isnan(ch.*members.rise_pct_per_sec) ||
+           !std::isnan(ch.*members.fall_pct_per_sec) ||
+           !std::isnan(ch.*members.max_boost_pct);
+}
+
+void ValidatePressureBoostConfig(const ChannelControlConfig& ch,
+                                 const PressureBoostMembers& members,
+                                 const std::string& prefix) {
+    if (!AnyPressureBoostFieldSet(ch, members)) {
+        return;
+    }
+
+    const std::string stage = members.name;
+    if (std::isnan(ch.*members.start_c) ||
+        std::isnan(ch.*members.full_c)) {
+        throw std::runtime_error(
+            prefix + " " + stage + " requires both start_c and full_c");
+    }
+
+    ValidatePositive(ch.*members.rise_pct_per_sec,
+                     prefix + " " + stage + "_rise_pct_per_sec", true);
+    ValidatePositive(ch.*members.fall_pct_per_sec,
+                     prefix + " " + stage + "_fall_pct_per_sec", true);
+    ValidatePercentage(ch.*members.max_boost_pct,
+                       prefix + " " + stage + "_max_boost_pct", true);
+
+    if (ch.*members.full_c <= ch.*members.start_c) {
+        throw std::runtime_error(
+            prefix + " " + stage + "_full_c must be > start_c");
+    }
+}
+
+void ReadOptionalDouble(const nlohmann::json& json,
+                        const std::string& key,
+                        double& target) {
+    if (json.contains(key)) {
+        target = json[key].get<double>();
+    }
+}
+
+void LoadPressureBoostConfig(const nlohmann::json& json,
+                             ChannelControlConfig& channel,
+                             const PressureBoostMembers& members) {
+    const std::string stage = members.name;
+    ReadOptionalDouble(json, stage + "_start_c",
+                       channel.*members.start_c);
+    ReadOptionalDouble(json, stage + "_full_c",
+                       channel.*members.full_c);
+    ReadOptionalDouble(json, stage + "_rise_pct_per_sec",
+                       channel.*members.rise_pct_per_sec);
+    ReadOptionalDouble(json, stage + "_fall_pct_per_sec",
+                       channel.*members.fall_pct_per_sec);
+    ReadOptionalDouble(json, stage + "_max_boost_pct",
+                       channel.*members.max_boost_pct);
+}
+
 void ValidateChannelConfig(const ChannelControlConfig& ch,
                           std::uint32_t index) {
     const std::string prefix = "Channel " + std::to_string(ch.channel) +
@@ -115,78 +205,8 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
     ValidatePositive(ch.decay_latch_pct_per_min,
                     prefix + " decay_latch_pct_per_min", true);
 
-    // Validate thermal pressure parameters
-    if (!std::isnan(ch.thermal_pressure_start_c) ||
-        !std::isnan(ch.thermal_pressure_full_c) ||
-        !std::isnan(ch.thermal_pressure_rise_pct_per_sec) ||
-        !std::isnan(ch.thermal_pressure_fall_pct_per_sec) ||
-        !std::isnan(ch.thermal_pressure_max_boost_pct)) {
-
-        // If any thermal pressure param is set, validate the complete set
-        if (std::isnan(ch.thermal_pressure_start_c) ||
-            std::isnan(ch.thermal_pressure_full_c)) {
-            throw std::runtime_error(
-                prefix + " thermal_pressure requires both start_c and full_c");
-        }
-
-        ValidatePositive(ch.thermal_pressure_rise_pct_per_sec,
-                        prefix + " thermal_pressure_rise_pct_per_sec", true);
-        ValidatePositive(ch.thermal_pressure_fall_pct_per_sec,
-                        prefix + " thermal_pressure_fall_pct_per_sec", true);
-        ValidatePercentage(ch.thermal_pressure_max_boost_pct,
-                          prefix + " thermal_pressure_max_boost_pct", true);
-
-        if (ch.thermal_pressure_full_c <= ch.thermal_pressure_start_c) {
-            throw std::runtime_error(
-                prefix + " thermal_pressure_full_c must be > start_c");
-        }
-    }
-
-    // Mid-band pressure stage: same partial-set / ordering rules as thermal
-    // pressure. Inert when every field is NaN.
-    if (!std::isnan(ch.midband_pressure_start_c) ||
-        !std::isnan(ch.midband_pressure_full_c) ||
-        !std::isnan(ch.midband_pressure_rise_pct_per_sec) ||
-        !std::isnan(ch.midband_pressure_fall_pct_per_sec) ||
-        !std::isnan(ch.midband_pressure_max_boost_pct)) {
-        if (std::isnan(ch.midband_pressure_start_c) ||
-            std::isnan(ch.midband_pressure_full_c)) {
-            throw std::runtime_error(
-                prefix + " midband_pressure requires both start_c and full_c");
-        }
-        ValidatePositive(ch.midband_pressure_rise_pct_per_sec,
-                        prefix + " midband_pressure_rise_pct_per_sec", true);
-        ValidatePositive(ch.midband_pressure_fall_pct_per_sec,
-                        prefix + " midband_pressure_fall_pct_per_sec", true);
-        ValidatePercentage(ch.midband_pressure_max_boost_pct,
-                          prefix + " midband_pressure_max_boost_pct", true);
-        if (ch.midband_pressure_full_c <= ch.midband_pressure_start_c) {
-            throw std::runtime_error(
-                prefix + " midband_pressure_full_c must be > start_c");
-        }
-    }
-
-    // GPU early-airflow boost: same partial-set / ordering rules.
-    if (!std::isnan(ch.gpu_airflow_start_c) ||
-        !std::isnan(ch.gpu_airflow_full_c) ||
-        !std::isnan(ch.gpu_airflow_rise_pct_per_sec) ||
-        !std::isnan(ch.gpu_airflow_fall_pct_per_sec) ||
-        !std::isnan(ch.gpu_airflow_max_boost_pct)) {
-        if (std::isnan(ch.gpu_airflow_start_c) ||
-            std::isnan(ch.gpu_airflow_full_c)) {
-            throw std::runtime_error(
-                prefix + " gpu_airflow requires both start_c and full_c");
-        }
-        ValidatePositive(ch.gpu_airflow_rise_pct_per_sec,
-                        prefix + " gpu_airflow_rise_pct_per_sec", true);
-        ValidatePositive(ch.gpu_airflow_fall_pct_per_sec,
-                        prefix + " gpu_airflow_fall_pct_per_sec", true);
-        ValidatePercentage(ch.gpu_airflow_max_boost_pct,
-                          prefix + " gpu_airflow_max_boost_pct", true);
-        if (ch.gpu_airflow_full_c <= ch.gpu_airflow_start_c) {
-            throw std::runtime_error(
-                prefix + " gpu_airflow_full_c must be > start_c");
-        }
+    for (const auto& members : kPressureBoostMembers) {
+        ValidatePressureBoostConfig(ch, members, prefix);
     }
 
     if (!std::isnan(ch.cpu_low_soak_start_c) ||
@@ -521,70 +541,9 @@ ControlLoopConfig LoadControlLoopConfig(
                 ch_json["decay_latch_pct_per_min"].get<double>();
         }
 
-        // Parse thermal pressure parameters
-        if (ch_json.contains("thermal_pressure_start_c")) {
-            channel.thermal_pressure_start_c =
-                ch_json["thermal_pressure_start_c"].get<double>();
-        }
-        if (ch_json.contains("thermal_pressure_full_c")) {
-            channel.thermal_pressure_full_c =
-                ch_json["thermal_pressure_full_c"].get<double>();
-        }
-        if (ch_json.contains("thermal_pressure_rise_pct_per_sec")) {
-            channel.thermal_pressure_rise_pct_per_sec =
-                ch_json["thermal_pressure_rise_pct_per_sec"].get<double>();
-        }
-        if (ch_json.contains("thermal_pressure_fall_pct_per_sec")) {
-            channel.thermal_pressure_fall_pct_per_sec =
-                ch_json["thermal_pressure_fall_pct_per_sec"].get<double>();
-        }
-        if (ch_json.contains("thermal_pressure_max_boost_pct")) {
-            channel.thermal_pressure_max_boost_pct =
-                ch_json["thermal_pressure_max_boost_pct"].get<double>();
-        }
-
-        // Mid-band pressure stage (P1 high-load upward response).
-        if (ch_json.contains("midband_pressure_start_c")) {
-            channel.midband_pressure_start_c =
-                ch_json["midband_pressure_start_c"].get<double>();
-        }
-        if (ch_json.contains("midband_pressure_full_c")) {
-            channel.midband_pressure_full_c =
-                ch_json["midband_pressure_full_c"].get<double>();
-        }
-        if (ch_json.contains("midband_pressure_rise_pct_per_sec")) {
-            channel.midband_pressure_rise_pct_per_sec =
-                ch_json["midband_pressure_rise_pct_per_sec"].get<double>();
-        }
-        if (ch_json.contains("midband_pressure_fall_pct_per_sec")) {
-            channel.midband_pressure_fall_pct_per_sec =
-                ch_json["midband_pressure_fall_pct_per_sec"].get<double>();
-        }
-        if (ch_json.contains("midband_pressure_max_boost_pct")) {
-            channel.midband_pressure_max_boost_pct =
-                ch_json["midband_pressure_max_boost_pct"].get<double>();
-        }
-
-        // GPU early-airflow boost.
-        if (ch_json.contains("gpu_airflow_start_c")) {
-            channel.gpu_airflow_start_c =
-                ch_json["gpu_airflow_start_c"].get<double>();
-        }
-        if (ch_json.contains("gpu_airflow_full_c")) {
-            channel.gpu_airflow_full_c =
-                ch_json["gpu_airflow_full_c"].get<double>();
-        }
-        if (ch_json.contains("gpu_airflow_rise_pct_per_sec")) {
-            channel.gpu_airflow_rise_pct_per_sec =
-                ch_json["gpu_airflow_rise_pct_per_sec"].get<double>();
-        }
-        if (ch_json.contains("gpu_airflow_fall_pct_per_sec")) {
-            channel.gpu_airflow_fall_pct_per_sec =
-                ch_json["gpu_airflow_fall_pct_per_sec"].get<double>();
-        }
-        if (ch_json.contains("gpu_airflow_max_boost_pct")) {
-            channel.gpu_airflow_max_boost_pct =
-                ch_json["gpu_airflow_max_boost_pct"].get<double>();
+        // Parse the smootherstep pressure boost families.
+        for (const auto& members : kPressureBoostMembers) {
+            LoadPressureBoostConfig(ch_json, channel, members);
         }
 
         if (ch_json.contains("cpu_low_soak_start_c")) {

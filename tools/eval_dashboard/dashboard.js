@@ -193,7 +193,13 @@ function percentile(values, pct) {
   if (!values.length) {
     return null;
   }
-  const sorted = [...values].sort((a, b) => a - b);
+  return percentileSorted([...values].sort((a, b) => a - b), pct);
+}
+
+function percentileSorted(sorted, pct) {
+  if (!sorted.length) {
+    return null;
+  }
   if (sorted.length === 1) {
     return sorted[0];
   }
@@ -208,20 +214,36 @@ function percentile(values, pct) {
 }
 
 function stats(values) {
-  const clean = values.filter((value) => Number.isFinite(value));
+  const clean = [];
+  let sum = 0;
+  for (const value of values) {
+    if (Number.isFinite(value)) {
+      clean.push(value);
+      sum += value;
+    }
+  }
   if (!clean.length) {
     return { count: 0, min: null, p50: null, p90: null, p95: null, p99: null, max: null, avg: null };
   }
+  clean.sort((a, b) => a - b);
   return {
     count: clean.length,
-    min: Math.min(...clean),
-    p50: percentile(clean, 50),
-    p90: percentile(clean, 90),
-    p95: percentile(clean, 95),
-    p99: percentile(clean, 99),
-    max: Math.max(...clean),
-    avg: clean.reduce((sum, value) => sum + value, 0) / clean.length,
+    min: clean[0],
+    p50: percentileSorted(clean, 50),
+    p90: percentileSorted(clean, 90),
+    p95: percentileSorted(clean, 95),
+    p99: percentileSorted(clean, 99),
+    max: clean[clean.length - 1],
+    avg: sum / clean.length,
   };
+}
+
+function capLiveRows(rows) {
+  const cap = Math.floor(Number(state.live.cap));
+  if (!Number.isFinite(cap) || cap <= 0 || rows.length <= cap) {
+    return rows;
+  }
+  return rows.slice(-cap);
 }
 
 function gpuEnvelope(row) {
@@ -2899,7 +2921,7 @@ async function loadLiveRun(options = {}) {
   }
   try {
     const csvText = await fetchTextIfOk(LIVE_CSV_URL);
-    const rows = parseCsv(csvText);
+    const rows = capLiveRows(parseCsv(csvText));
     if (!rows.length) {
       throw new Error("CSV has no rows yet");
     }
@@ -3087,6 +3109,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseJsonl,
     stats,
     percentile,
+    capLiveRows,
     elapsedSeconds,
     detectChannels,
     finitePairs,
