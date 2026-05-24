@@ -164,6 +164,29 @@ void ReadOptionalDouble(const nlohmann::json& json,
     }
 }
 
+// Loads a curve array (each element {temp_c, duty_pct}) into `out`, sorted by
+// temp ascending. Matches the previous inline parse-and-sort pattern for the
+// "curve" and "cpu_override_curve" channel fields.
+void LoadCurveFromJson(const nlohmann::json& json,
+                       const std::string& key,
+                       std::vector<CurvePoint>& out) {
+    if (!json.contains(key) || !json[key].is_array()) {
+        return;
+    }
+    for (const auto& point_json : json[key]) {
+        if (point_json.contains("temp_c") && point_json.contains("duty_pct")) {
+            CurvePoint point;
+            point.temp_c = point_json["temp_c"].get<double>();
+            point.duty_pct = point_json["duty_pct"].get<double>();
+            out.push_back(point);
+        }
+    }
+    std::sort(out.begin(), out.end(),
+              [](const CurvePoint& a, const CurvePoint& b) {
+                  return a.temp_c < b.temp_c;
+              });
+}
+
 void LoadPressureBoostConfig(const nlohmann::json& json,
                              ChannelControlConfig& channel,
                              const PressureBoostMembers& members) {
@@ -495,9 +518,7 @@ ControlLoopConfig LoadControlLoopConfig(
         channel.write_cooldown_ms = ch_json.value("write_cooldown_ms",
                                                    channel.write_cooldown_ms);
 
-        if (ch_json.contains("deadband_pct")) {
-            channel.deadband_pct = ch_json["deadband_pct"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "deadband_pct", channel.deadband_pct);
 
         channel.control_hold_ms = ch_json.value("control_hold_ms",
                                                 channel.control_hold_ms);
@@ -510,79 +531,49 @@ ControlLoopConfig LoadControlLoopConfig(
                 ch_json["curve_shape"].get<std::string>());
         }
 
-        // Parse rate limiting
-        if (ch_json.contains("rise_rate_pct_per_min")) {
-            channel.rise_rate_pct_per_min = ch_json["rise_rate_pct_per_min"].get<double>();
-        }
-        if (ch_json.contains("fall_rate_pct_per_min")) {
-            channel.fall_rate_pct_per_min = ch_json["fall_rate_pct_per_min"].get<double>();
-        }
-        if (ch_json.contains("max_setpoint_step_pct")) {
-            channel.max_setpoint_step_pct =
-                ch_json["max_setpoint_step_pct"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "rise_rate_pct_per_min",
+                           channel.rise_rate_pct_per_min);
+        ReadOptionalDouble(ch_json, "fall_rate_pct_per_min",
+                           channel.fall_rate_pct_per_min);
+        ReadOptionalDouble(ch_json, "max_setpoint_step_pct",
+                           channel.max_setpoint_step_pct);
 
-        // Parse demand smoothing
-        if (ch_json.contains("demand_smoothing_rise_alpha")) {
-            channel.demand_smoothing_rise_alpha =
-                ch_json["demand_smoothing_rise_alpha"].get<double>();
-        }
-        if (ch_json.contains("demand_smoothing_fall_alpha")) {
-            channel.demand_smoothing_fall_alpha =
-                ch_json["demand_smoothing_fall_alpha"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "demand_smoothing_rise_alpha",
+                           channel.demand_smoothing_rise_alpha);
+        ReadOptionalDouble(ch_json, "demand_smoothing_fall_alpha",
+                           channel.demand_smoothing_fall_alpha);
 
-        // Parse decay latch
-        if (ch_json.contains("decay_latch_above_pct")) {
-            channel.decay_latch_above_pct = ch_json["decay_latch_above_pct"].get<double>();
-        }
-        if (ch_json.contains("decay_latch_pct_per_min")) {
-            channel.decay_latch_pct_per_min =
-                ch_json["decay_latch_pct_per_min"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "decay_latch_above_pct",
+                           channel.decay_latch_above_pct);
+        ReadOptionalDouble(ch_json, "decay_latch_pct_per_min",
+                           channel.decay_latch_pct_per_min);
 
         // Parse the smootherstep pressure boost families.
         for (const auto& members : kPressureBoostMembers) {
             LoadPressureBoostConfig(ch_json, channel, members);
         }
 
-        if (ch_json.contains("cpu_low_soak_start_c")) {
-            channel.cpu_low_soak_start_c =
-                ch_json["cpu_low_soak_start_c"].get<double>();
-        }
-        if (ch_json.contains("cpu_low_soak_full_c")) {
-            channel.cpu_low_soak_full_c =
-                ch_json["cpu_low_soak_full_c"].get<double>();
-        }
-        if (ch_json.contains("cpu_low_soak_release_c")) {
-            channel.cpu_low_soak_release_c =
-                ch_json["cpu_low_soak_release_c"].get<double>();
-        }
-        if (ch_json.contains("cpu_low_soak_rise_pct_per_min")) {
-            channel.cpu_low_soak_rise_pct_per_min =
-                ch_json["cpu_low_soak_rise_pct_per_min"].get<double>();
-        }
-        if (ch_json.contains("cpu_low_soak_fall_pct_per_min")) {
-            channel.cpu_low_soak_fall_pct_per_min =
-                ch_json["cpu_low_soak_fall_pct_per_min"].get<double>();
-        }
-        if (ch_json.contains("cpu_low_soak_max_boost_pct")) {
-            channel.cpu_low_soak_max_boost_pct =
-                ch_json["cpu_low_soak_max_boost_pct"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "cpu_low_soak_start_c",
+                           channel.cpu_low_soak_start_c);
+        ReadOptionalDouble(ch_json, "cpu_low_soak_full_c",
+                           channel.cpu_low_soak_full_c);
+        ReadOptionalDouble(ch_json, "cpu_low_soak_release_c",
+                           channel.cpu_low_soak_release_c);
+        ReadOptionalDouble(ch_json, "cpu_low_soak_rise_pct_per_min",
+                           channel.cpu_low_soak_rise_pct_per_min);
+        ReadOptionalDouble(ch_json, "cpu_low_soak_fall_pct_per_min",
+                           channel.cpu_low_soak_fall_pct_per_min);
+        ReadOptionalDouble(ch_json, "cpu_low_soak_max_boost_pct",
+                           channel.cpu_low_soak_max_boost_pct);
 
         channel.low_band_stage =
             ch_json.value("low_band_stage", channel.low_band_stage);
-        if (ch_json.contains("low_band_debt_threshold")) {
-            channel.low_band_debt_threshold =
-                ch_json["low_band_debt_threshold"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "low_band_debt_threshold",
+                           channel.low_band_debt_threshold);
         channel.low_band_hold_ms =
             ch_json.value("low_band_hold_ms", channel.low_band_hold_ms);
-        if (ch_json.contains("low_band_max_boost_pct")) {
-            channel.low_band_max_boost_pct =
-                ch_json["low_band_max_boost_pct"].get<double>();
-        }
+        ReadOptionalDouble(ch_json, "low_band_max_boost_pct",
+                           channel.low_band_max_boost_pct);
 
         // Parse temp blend. ParseTempBlend throws on unknown strings; let
         // that propagate. Silent fallback to CpuOnly would defeat the GPU
@@ -593,41 +584,9 @@ ControlLoopConfig LoadControlLoopConfig(
                 ch_json["temp_blend"].get<std::string>());
         }
 
-        // Parse curves
-        if (ch_json.contains("curve") && ch_json["curve"].is_array()) {
-            for (const auto& point_json : ch_json["curve"]) {
-                if (point_json.contains("temp_c") && point_json.contains("duty_pct")) {
-                    CurvePoint point;
-                    point.temp_c = point_json["temp_c"].get<double>();
-                    point.duty_pct = point_json["duty_pct"].get<double>();
-                    channel.curve.push_back(point);
-                }
-            }
-            // Sort by temperature
-            std::sort(channel.curve.begin(), channel.curve.end(),
-                     [](const CurvePoint& a, const CurvePoint& b) {
-                         return a.temp_c < b.temp_c;
-                     });
-        }
-
-        // Parse CPU override curve
-        if (ch_json.contains("cpu_override_curve") &&
-            ch_json["cpu_override_curve"].is_array()) {
-            for (const auto& point_json : ch_json["cpu_override_curve"]) {
-                if (point_json.contains("temp_c") && point_json.contains("duty_pct")) {
-                    CurvePoint point;
-                    point.temp_c = point_json["temp_c"].get<double>();
-                    point.duty_pct = point_json["duty_pct"].get<double>();
-                    channel.cpu_override_curve.push_back(point);
-                }
-            }
-            // Sort by temperature
-            std::sort(channel.cpu_override_curve.begin(),
-                     channel.cpu_override_curve.end(),
-                     [](const CurvePoint& a, const CurvePoint& b) {
-                         return a.temp_c < b.temp_c;
-                     });
-        }
+        LoadCurveFromJson(ch_json, "curve", channel.curve);
+        LoadCurveFromJson(ch_json, "cpu_override_curve",
+                          channel.cpu_override_curve);
 
         cfg.channels.push_back(std::move(channel));
     }
