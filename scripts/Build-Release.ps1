@@ -138,6 +138,24 @@ function Test-PathUnderDirectory {
     }
 }
 
+function Test-RelativePathContainsSegment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string[]]$Segments
+    )
+
+    $parts = $Path -split '[\\/]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($part in $parts) {
+        foreach ($segment in $Segments) {
+            if ([string]::Equals($part, $segment, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
 function Start-PackagedController {
     [CmdletBinding()]
     param(
@@ -792,7 +810,8 @@ function New-ReleaseArchive {
                 $relativePath = $relativePath.Substring($releaseRootFull.Length).TrimStart('\','/')
             }
             $relativePath = $relativePath -replace '\\', '/'
-            if ($relativePath -like 'archive/*' -or $relativePath -like 'runtime/*') {
+            if ($relativePath -like 'archive/*' -or
+                (Test-RelativePathContainsSegment -Path $relativePath -Segments @('runtime'))) {
                 continue
             }
 
@@ -811,14 +830,7 @@ function New-ReleaseArchive {
                 Sort-Object FullName
             foreach ($file in $matches) {
                 $relativePath = $file.FullName.Substring($ProjectRoot.Length).TrimStart([char[]]@('\', '/'))
-                $skip = $false
-                foreach ($excludeDir in $excludeDirs) {
-                    if ($relativePath -like "$excludeDir\\*" -or $relativePath -like "$excludeDir/*") {
-                        $skip = $true
-                        break
-                    }
-                }
-                if ($skip) { continue }
+                if (Test-RelativePathContainsSegment -Path $relativePath -Segments $excludeDirs) { continue }
 
                 $entryName = "$prefix/src/$($relativePath -replace '\\', '/')"
                 if ($seenEntries.ContainsKey($entryName)) { continue }

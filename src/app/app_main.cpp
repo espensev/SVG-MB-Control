@@ -592,6 +592,46 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 ? svg_mb_control::ResolveRuntimeHomePath(*config)
                 : svg_mb_control::ResolveRuntimeHomePath(
                       svg_mb_control::ControlConfig{});
+
+        std::optional<svg_mb_control::SingletonAcquisition> worker_singleton;
+        auto acquire_worker_singleton = [&]() -> int {
+            worker_singleton = svg_mb_control::TryAcquireRuntimeSingleton(
+                svg_mb_control::SingletonRole::kWorker,
+                reconcile_runtime_home);
+            if (worker_singleton->acquired) {
+                return 0;
+            }
+            std::cerr << "Error: another svg-mb-control worker is "
+                      << "already running for runtime_home="
+                      << reconcile_runtime_home.string() << '\n';
+            if (!worker_singleton->diagnostic.empty()) {
+                std::cerr << "  detail: " << worker_singleton->diagnostic
+                          << '\n';
+            }
+            return 2;
+        };
+
+        if (run_mode == RunMode::kControlLoop) {
+            if (!config.has_value()) {
+                throw std::runtime_error("--mode control-loop requires a control config.");
+            }
+            if (config_path.empty()) {
+                throw std::runtime_error("--mode control-loop requires a resolvable config path.");
+            }
+            const int singleton_result = acquire_worker_singleton();
+            if (singleton_result != 0) {
+                return singleton_result;
+            }
+        } else if (run_mode == RunMode::kReadLoop) {
+            if (!config.has_value()) {
+                throw std::runtime_error("--mode read-loop requires a control config.");
+            }
+            const int singleton_result = acquire_worker_singleton();
+            if (singleton_result != 0) {
+                return singleton_result;
+            }
+        }
+
         const int reconcile_result = svg_mb_control::ReconcilePendingWrites(
             reconcile_runtime_home,
             svg_mb_control::ResolveRuntimeWritePolicy(
@@ -633,28 +673,6 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
         }
 
         if (run_mode == RunMode::kControlLoop) {
-            if (!config.has_value()) {
-                throw std::runtime_error("--mode control-loop requires a control config.");
-            }
-            if (config_path.empty()) {
-                throw std::runtime_error("--mode control-loop requires a resolvable config path.");
-            }
-            // Singleton: only one worker writes to control_runtime.json per
-            // runtime_home. Acquire before any sidecar write happens.
-            svg_mb_control::SingletonAcquisition worker_singleton =
-                svg_mb_control::TryAcquireRuntimeSingleton(
-                    svg_mb_control::SingletonRole::kWorker,
-                    reconcile_runtime_home);
-            if (!worker_singleton.acquired) {
-                std::cerr << "Error: another svg-mb-control worker is "
-                          << "already running for runtime_home="
-                          << reconcile_runtime_home.string() << '\n';
-                if (!worker_singleton.diagnostic.empty()) {
-                    std::cerr << "  detail: " << worker_singleton.diagnostic
-                              << '\n';
-                }
-                return 2;
-            }
             const svg_mb_control::ControlLoopConfig loop_config =
                 svg_mb_control::LoadControlLoopConfig(
                     std::filesystem::absolute(config_path).lexically_normal());
@@ -717,32 +735,11 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
         }
 
         if (run_mode == RunMode::kReadLoop) {
-            if (!config.has_value()) {
-                throw std::runtime_error("--mode read-loop requires a control config.");
-            }
-
-            const std::filesystem::path runtime_home =
-                svg_mb_control::ResolveRuntimeHomePath(*config);
-            // Singleton: only one worker writes to control_runtime.json per
-            // runtime_home. Acquire before any sidecar write happens.
-            svg_mb_control::SingletonAcquisition worker_singleton =
-                svg_mb_control::TryAcquireRuntimeSingleton(
-                    svg_mb_control::SingletonRole::kWorker, runtime_home);
-            if (!worker_singleton.acquired) {
-                std::cerr << "Error: another svg-mb-control worker is "
-                          << "already running for runtime_home="
-                          << runtime_home.string() << '\n';
-                if (!worker_singleton.diagnostic.empty()) {
-                    std::cerr << "  detail: " << worker_singleton.diagnostic
-                              << '\n';
-                }
-                return 2;
-            }
             const svg_mb_control::RuntimeWritePolicy runtime_policy =
                 svg_mb_control::ResolveRuntimeWritePolicy(&*config);
-            PrintReadLoopStartup(*config, runtime_home, runtime_policy);
+            PrintReadLoopStartup(*config, reconcile_runtime_home, runtime_policy);
 
-            svg_mb_control::ReadLoop loop(*config, runtime_home);
+            svg_mb_control::ReadLoop loop(*config, reconcile_runtime_home);
             ActiveReadLoopScope active_loop(loop);
 
             const int loop_exit = loop.RunUntilStopped();
