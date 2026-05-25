@@ -214,6 +214,12 @@ Tune that model from data first:
 - Keep off-floor rise behavior intact unless a measured run proves it is too
   abrupt or too noisy.
 
+`docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` records the rationale, hardware basis,
+and re-validation procedure for the adopted low-load airflow floors in
+`config\control.release.json`. Treat that document as the worked example of a
+tuning decision record and update it (or write a sibling note) when the
+shipped floor profile is intentionally changed again.
+
 ## Next Actions
 
 1. Reuse ideas from the GPU programs where they fit: segment accounting and

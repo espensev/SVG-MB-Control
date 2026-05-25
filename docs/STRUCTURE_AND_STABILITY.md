@@ -77,7 +77,10 @@ A core library gives three stability benefits:
 - GPU reader,
 - fan writer,
 - simulation backends,
-- vendored backend adapters.
+- vendored backend adapters,
+- PawnIO module-binary resolver, loader, and SHA-256 verifier
+  (`pawnio_binary.{h,cpp}`); upstream provenance for the vendored bin is
+  recorded in `third_party\pawnio\README.md`.
 
 `platform/`
 
@@ -107,6 +110,10 @@ Completed:
    `cadence_score`, `low_band_integrator`, `channel_write`, and
    `tick_runner`. The residual `control_loop.cpp` (~283 lines) holds only
    the `ControlLoop` public surface and startup/shutdown choreography.
+7. Extracted PawnIO binary resolution, file load, and SHA-256 verification
+   from `amd_reader.cpp` into the standalone `hardware/pawnio_binary`
+   module, and registered a dedicated CTest target
+   (`svg_mb_control_pawnio_binary_tests`) for the pure helpers.
 
 Remaining polish:
 

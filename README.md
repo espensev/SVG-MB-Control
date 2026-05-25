@@ -91,7 +91,9 @@ Release-script outputs:
 - `release\control.json`
 - `release\runtime_policy_write_live.json`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
-- `release\resources\pawnio\AMDFamily17.bin`
+- `release\resources\pawnio\AMDFamily17.bin` (vendored from PawnIO.Modules
+  release 0.2.6; provenance and SHA-256 in
+  `third_party\pawnio\README.md`)
 - `release\resources\pawnio\LpcIO.bin`
 - `release\build-info.json`
 - `release\VERSION_TABLE.json`
@@ -465,6 +467,7 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 - `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
 - `docs\LOGGING_IMPROVEMENT_PLAN.md`
 - `docs\STRUCTURE_AND_STABILITY.md`
+- `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`
 - `docs\response-evaluation-tuning-plan.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
