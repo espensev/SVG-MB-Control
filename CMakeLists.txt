@@ -147,6 +147,7 @@ add_library(svg_mb_control_core STATIC
     src/hardware/amd_reader.cpp
     src/hardware/fan_writer.cpp
     src/hardware/gpu_reader.cpp
+    src/hardware/pawnio_binary.cpp
     src/hardware/simulated_fan_writer.cpp
     src/hardware/sio_fan_writer.cpp
     src/platform/direct_runtime_snapshot.cpp
@@ -236,4 +237,14 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_core_tests)
     add_test(NAME svg_mb_control_core_tests
              COMMAND svg_mb_control_core_tests)
+
+    add_executable(svg_mb_control_pawnio_binary_tests
+        tests/cpp/pawnio_binary_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_pawnio_binary_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_pawnio_binary_tests)
+    add_test(NAME svg_mb_control_pawnio_binary_tests
+             COMMAND svg_mb_control_pawnio_binary_tests)
 endif()

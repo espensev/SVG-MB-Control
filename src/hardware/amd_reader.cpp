@@ -5,8 +5,8 @@
 #include <intrin.h>
 
 #include "env_util.h"
+#include "pawnio_binary.h"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -15,7 +15,6 @@
 #include <filesystem>
 #include <optional>
 #include <string_view>
-#include <system_error>
 
 namespace svg_mb_control {
 
@@ -45,47 +44,10 @@ constexpr const char* kCcdSensorLabels[kMaxCcds] = {
 };
 
 constexpr const char kPawnIoDevicePath[] = "\\\\?\\GLOBALROOT\\Device\\PawnIO";
-constexpr std::uint32_t kPawnIoLoadBinary = (41394u << 16) | (0x821u << 2);
 constexpr std::uint32_t kPawnIoExecuteFn = (41394u << 16) | (0x841u << 2);
 constexpr std::size_t kPawnIoFnNameLength = 32u;
 constexpr DWORD kPciMutexTimeoutMs = 100u;
 constexpr DWORD kPciMutexAccess = SYNCHRONIZE | MUTEX_MODIFY_STATE;
-
-std::filesystem::path CurrentExecutableDirectory() {
-    std::array<char, MAX_PATH> buffer{};
-    const DWORD length = GetModuleFileNameA(nullptr, buffer.data(),
-                                            static_cast<DWORD>(buffer.size()));
-    if (length == 0u || length >= buffer.size()) {
-        return {};
-    }
-    return std::filesystem::path(
-               std::string(buffer.data(), buffer.data() + length))
-        .parent_path();
-}
-
-void AddUniquePath(std::vector<std::filesystem::path>& paths,
-                   const std::filesystem::path& candidate) {
-    if (candidate.empty()) {
-        return;
-    }
-    const std::filesystem::path normalized = candidate.lexically_normal();
-    if (std::find(paths.begin(), paths.end(), normalized) == paths.end()) {
-        paths.push_back(normalized);
-    }
-}
-
-void AddRootAndParents(std::vector<std::filesystem::path>& paths,
-                       std::filesystem::path root,
-                       std::size_t max_depth) {
-    for (std::size_t depth = 0u; depth < max_depth && !root.empty(); ++depth) {
-        AddUniquePath(paths, root);
-        const std::filesystem::path parent = root.parent_path();
-        if (parent == root) {
-            break;
-        }
-        root = parent;
-    }
-}
 
 std::optional<double> TryParseDoubleEnv(const char* name) {
     char* value = nullptr;
@@ -161,6 +123,19 @@ const char* StatusString(Status status) {
     }
 }
 
+Status MapPawnIoStatus(PawnIoStatus status) {
+    switch (status) {
+        case PawnIoStatus::ok: return Status::ok;
+        case PawnIoStatus::invalid_arg: return Status::invalid_arg;
+        case PawnIoStatus::not_supported: return Status::not_supported;
+        case PawnIoStatus::not_found: return Status::no_device;
+        case PawnIoStatus::access_denied: return Status::access_denied;
+        case PawnIoStatus::hash_mismatch: return Status::error;
+        case PawnIoStatus::error:
+        default: return Status::error;
+    }
+}
+
 HANDLE OpenOrCreatePciMutex() {
     HANDLE handle = OpenMutexA(kPciMutexAccess, FALSE, "Global\\Access_PCI");
     if (handle != nullptr) {
@@ -197,83 +172,6 @@ private:
     HANDLE handle_ = nullptr;
     bool acquired_ = false;
 };
-
-std::filesystem::path ResolvePawnIoBinaryPath() {
-    const std::array<const char*, 2> env_names = {
-        "SVG_MB_CONTROL_PAWNIO_BIN",
-        "SVG_MB_PAWNIO_BIN",
-    };
-    for (const char* env_name : env_names) {
-        const std::string env_value = GetEnvOrDefault(env_name, "");
-        if (env_value.empty()) {
-            continue;
-        }
-        const std::filesystem::path candidate(env_value);
-        std::error_code ec;
-        if (std::filesystem::exists(candidate, ec) &&
-            !std::filesystem::is_directory(candidate, ec)) {
-            return std::filesystem::absolute(candidate).lexically_normal();
-        }
-    }
-
-    std::vector<std::filesystem::path> search_roots;
-    AddRootAndParents(search_roots, CurrentExecutableDirectory(), 6u);
-
-    std::error_code cwd_ec;
-    AddRootAndParents(search_roots, std::filesystem::current_path(cwd_ec), 6u);
-
-    for (const auto& root : search_roots) {
-        for (const auto& candidate : std::array<std::filesystem::path, 3>{
-                 root / "resources" / "pawnio" / "AMDFamily17.bin",
-                 root / "release" / "resources" / "pawnio" / "AMDFamily17.bin",
-                 root / "dist" / "resources" / "pawnio" / "AMDFamily17.bin",
-             }) {
-            std::error_code exists_ec;
-            if (std::filesystem::exists(candidate, exists_ec) &&
-                !std::filesystem::is_directory(candidate, exists_ec)) {
-                return std::filesystem::absolute(candidate).lexically_normal();
-            }
-        }
-    }
-
-    return {};
-}
-
-Status LoadPawnIoBinary(HANDLE handle, const std::filesystem::path& bin_path) {
-    if (handle == nullptr || bin_path.empty()) {
-        return Status::invalid_arg;
-    }
-
-    HANDLE file_handle = CreateFileA(
-        bin_path.string().c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-        OPEN_EXISTING, 0, nullptr);
-    if (file_handle == INVALID_HANDLE_VALUE) {
-        return StatusFromWin32Error(GetLastError());
-    }
-
-    LARGE_INTEGER file_size{};
-    if (!GetFileSizeEx(file_handle, &file_size) || file_size.QuadPart <= 0 ||
-        file_size.QuadPart > 1024 * 1024) {
-        CloseHandle(file_handle);
-        return Status::error;
-    }
-
-    std::vector<std::uint8_t> buffer(static_cast<std::size_t>(file_size.QuadPart));
-    DWORD bytes_read = 0;
-    const BOOL read_ok = ReadFile(file_handle, buffer.data(),
-                                  static_cast<DWORD>(buffer.size()),
-                                  &bytes_read, nullptr);
-    CloseHandle(file_handle);
-    if (!read_ok || bytes_read != buffer.size()) {
-        return Status::error;
-    }
-
-    DWORD bytes_returned = 0;
-    const BOOL ioctl_ok = DeviceIoControl(handle, kPawnIoLoadBinary,
-                                          buffer.data(), bytes_read, nullptr, 0,
-                                          &bytes_returned, nullptr);
-    return ioctl_ok ? Status::ok : Status::error;
-}
 
 Status ExecutePawnIo(HANDLE handle,
                      const char* fn_name,
@@ -464,7 +362,8 @@ struct AmdReader::Impl {
             return Status::not_supported;
         }
 
-        const std::filesystem::path pawnio_bin = ResolvePawnIoBinaryPath();
+        const std::filesystem::path pawnio_bin =
+            ResolvePawnIoBinaryPath(kPawnIoSpecAmdFamily17V1);
         if (pawnio_bin.empty()) {
             if (warning_text != nullptr) {
                 *warning_text =
@@ -486,13 +385,18 @@ struct AmdReader::Impl {
             return StatusFromWin32Error(GetLastError());
         }
 
-        const Status load_status = LoadPawnIoBinary(pawnio_handle, pawnio_bin);
-        if (load_status != Status::ok) {
+        std::string load_warning;
+        const PawnIoStatus load_status = LoadPawnIoBinary(
+            pawnio_handle, kPawnIoSpecAmdFamily17V1, pawnio_bin, &load_warning);
+        if (load_status != PawnIoStatus::ok) {
             CloseHandle(pawnio_handle);
             if (warning_text != nullptr) {
-                *warning_text = "Failed to load AMDFamily17.bin into PawnIO.";
+                *warning_text = load_warning.empty()
+                    ? std::string("Failed to load AMDFamily17.bin into PawnIO (") +
+                          PawnIoStatusString(load_status) + ")"
+                    : load_warning;
             }
-            return load_status;
+            return MapPawnIoStatus(load_status);
         }
 
         handle = pawnio_handle;
@@ -503,7 +407,9 @@ struct AmdReader::Impl {
         ccd_count_hint = 0u;
         initialized = true;
         if (warning_text != nullptr) {
-            warning_text->clear();
+            // Preserve warn_only hash-mismatch text so AmdReader::init_warning
+            // surfaces it even when the load itself succeeded.
+            *warning_text = load_warning;
         }
         return Status::ok;
     }
@@ -558,7 +464,10 @@ AmdReader::AmdReader() : impl_(std::make_unique<Impl>()) {
             : warning;
         return;
     }
-    impl_->init_warning.clear();
+    // OpenReal may return ok with a non-empty warning (e.g. warn_only hash
+    // mismatch from the PawnIO loader); keep that text so init_warning()
+    // surfaces the diagnostic.
+    impl_->init_warning = warning;
 }
 
 AmdReader::~AmdReader() = default;
