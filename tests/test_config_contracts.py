@@ -44,7 +44,7 @@ class ConfigContractTests(unittest.TestCase):
                 for item in payload["control_loop"]["channels"]
             }
             self.assertLessEqual(by_channel[0]["min_duty_pct"], 16.0)
-            self.assertLessEqual(by_channel[1]["min_duty_pct"], 20.0)
+            self.assertLessEqual(by_channel[1]["min_duty_pct"], 22.0)
             self.assertGreaterEqual(by_channel[2]["min_duty_pct"], 54.0)
             self.assertGreaterEqual(by_channel[3]["min_duty_pct"], 50.0)
             self.assertGreaterEqual(
@@ -52,8 +52,8 @@ class ConfigContractTests(unittest.TestCase):
                 4.0,
                 msg=f"{rel_path} front 200mm channels should avoid same-rpm resonance",
             )
-            self.assertLessEqual(by_channel[4]["min_duty_pct"], 28.0)
-            self.assertLessEqual(by_channel[5]["min_duty_pct"], 18.0)
+            self.assertLessEqual(by_channel[4]["min_duty_pct"], 31.0)
+            self.assertLessEqual(by_channel[5]["min_duty_pct"], 20.0)
             for channel in by_channel.values():
                 self.assertIn("max_setpoint_step_pct", channel)
                 self.assertGreater(channel["max_setpoint_step_pct"], 0.0)

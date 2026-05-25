@@ -114,7 +114,7 @@
       {
         "channel": 4,
         "temp_blend": "max_cpu_gpu",
-        "min_duty_pct": 28.0,
+        "min_duty_pct": 31.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 60.0,
         "fall_rate_pct_per_min": 25.0,
@@ -151,7 +151,7 @@
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 28
+            "duty_pct": 31
           },
           {
             "temp_c": 82,
@@ -173,11 +173,11 @@
         "curve": [
           {
             "temp_c": 45,
-            "duty_pct": 28
+            "duty_pct": 31
           },
           {
             "temp_c": 62,
-            "duty_pct": 28
+            "duty_pct": 31
           },
           {
             "temp_c": 70,
@@ -204,7 +204,7 @@
       {
         "channel": 3,
         "temp_blend": "max_cpu_gpu",
-        "min_duty_pct": 50.0,
+        "min_duty_pct": 56.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 90.0,
         "fall_rate_pct_per_min": 45.0,
@@ -235,11 +235,11 @@
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 50
+            "duty_pct": 56
           },
           {
             "temp_c": 82,
-            "duty_pct": 50
+            "duty_pct": 56
           },
           {
             "temp_c": 86,
@@ -257,11 +257,11 @@
         "curve": [
           {
             "temp_c": 45,
-            "duty_pct": 50
+            "duty_pct": 56
           },
           {
             "temp_c": 58,
-            "duty_pct": 52
+            "duty_pct": 58
           },
           {
             "temp_c": 66,
@@ -288,7 +288,7 @@
       {
         "channel": 2,
         "temp_blend": "max_cpu_gpu",
-        "min_duty_pct": 54.0,
+        "min_duty_pct": 60.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 90.0,
         "fall_rate_pct_per_min": 45.0,
@@ -319,11 +319,11 @@
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 54
+            "duty_pct": 60
           },
           {
             "temp_c": 82,
-            "duty_pct": 54
+            "duty_pct": 60
           },
           {
             "temp_c": 86,
@@ -341,11 +341,11 @@
         "curve": [
           {
             "temp_c": 45,
-            "duty_pct": 54
+            "duty_pct": 60
           },
           {
             "temp_c": 58,
-            "duty_pct": 56
+            "duty_pct": 62
           },
           {
             "temp_c": 66,
@@ -372,7 +372,7 @@
       {
         "channel": 5,
         "temp_blend": "cpu_only",
-        "min_duty_pct": 18.0,
+        "min_duty_pct": 20.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 75.0,
         "fall_rate_pct_per_min": 25.0,
@@ -409,7 +409,7 @@
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 18
+            "duty_pct": 20
           },
           {
             "temp_c": 84,
@@ -435,11 +435,11 @@
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 18
+            "duty_pct": 20
           },
           {
             "temp_c": 64,
-            "duty_pct": 18
+            "duty_pct": 20
           },
           {
             "temp_c": 72,
@@ -462,7 +462,7 @@
       {
         "channel": 1,
         "temp_blend": "cpu_only",
-        "min_duty_pct": 20.0,
+        "min_duty_pct": 22.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 75.0,
         "fall_rate_pct_per_min": 25.0,
@@ -499,7 +499,7 @@
         "cpu_override_curve": [
           {
             "temp_c": 75,
-            "duty_pct": 20
+            "duty_pct": 22
           },
           {
             "temp_c": 84,
@@ -525,11 +525,11 @@
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 20
+            "duty_pct": 22
           },
           {
             "temp_c": 64,
-            "duty_pct": 20
+            "duty_pct": 22
           },
           {
             "temp_c": 72,
