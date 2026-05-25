@@ -128,14 +128,15 @@ PawnIoStatus ReadFileBytes(const std::filesystem::path& path,
 
 }  // namespace
 
-// SHA-256 of the SMN-only bin currently shipped under resources/pawnio/.
-// Computed via Get-FileHash -Algorithm SHA256 against the committed file. Keep
-// the hash here in sync with the bytes in resources/pawnio/AMDFamily17.bin;
-// CI verification of that pairing lives in the pawnio_binary tests.
+// Hash of the bin currently shipped at resources/pawnio/AMDFamily17.bin.
+// That file is bit-identical to the AMDFamily17.bin asset inside
+// PawnIO.Modules release 0.2.6; full upstream provenance and the procedure
+// for re-verifying or upgrading the vendored bin live in
+// third_party/pawnio/README.md.
 const PawnIoBinarySpec kPawnIoSpecAmdFamily17V1{
     "AMDFamily17.bin",
     "099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50",
-    "AMDFamily17 (SMN-only, v1)",
+    "AMDFamily17 (PawnIO.Modules 0.2.6)",
     PawnIoVerification::warn_only,
 };
 
