@@ -1,6 +1,7 @@
 /build/
 /dist/
 /.vs/
+/.claude/
 /runtime/
 /release/
 /control.json
