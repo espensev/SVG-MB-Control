@@ -49,10 +49,9 @@ void CaptureChannelBaselineIfAvailable(
     channel.baseline_captured = true;
     channel.last_issued_pct = fan->duty_percent;
     channel.last_setpoint_pct = fan->duty_percent;
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.baseline_captured",
             .detail = "captured baseline for control channel",
             .channel = channel.config.channel,
@@ -66,11 +65,10 @@ void AppendChannelSensorEvent(const ControlRuntimeContext& context,
                               const ChannelEvaluation& evaluation,
                               std::uint64_t tick_count) {
     if (evaluation.sensor_event == ChannelSensorEvent::FailureDetected) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.sensor_failure_detected",
+                    .event_type = "control_loop.sensor_failure_detected",
                 .detail = "sensor failure detected, entering safe mode (100% duty)",
                 .channel = channel.config.channel,
                 .tick_count = tick_count,
@@ -80,11 +78,10 @@ void AppendChannelSensorEvent(const ControlRuntimeContext& context,
     }
 
     if (evaluation.sensor_event == ChannelSensorEvent::Recovered) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.sensor_recovered",
+                    .event_type = "control_loop.sensor_recovered",
                 .detail = "sensor recovered, resuming normal control",
                 .channel = channel.config.channel,
                 .tick_count = tick_count,
@@ -120,11 +117,10 @@ bool HandleExpiredHoldRestore(
     if (restore_result) {
         last_successful_restore_iso =
             FormatLocalIso8601(std::chrono::system_clock::now());
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.restore_applied",
+                    .event_type = "control_loop.restore_applied",
                 .detail = "restored channel to captured baseline",
                 .channel = channel.config.channel,
                 .tick_count = tick_count,
@@ -135,11 +131,10 @@ bool HandleExpiredHoldRestore(
         try {
             pending_store.QueueRemove(channel.config.channel);
         } catch (const std::exception& e) {
-            AppendRuntimeEvent(
+            AppendControlLoopEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type = "control_loop.sidecar_remove_warning",
+                            .event_type = "control_loop.sidecar_remove_warning",
                     .detail = std::string(
                                   "best-effort sidecar removal after "
                                   "restore failed: ") +
@@ -152,10 +147,9 @@ bool HandleExpiredHoldRestore(
         return true;
     }
 
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.restore_failed",
             .detail = restore_result.detail,
             .channel = channel.config.channel,
@@ -226,11 +220,10 @@ void TryApplyChannelSetpoint(
     try {
         pending_store.Upsert(entry);
     } catch (const std::exception& e) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.sidecar_upsert_failed",
+                    .event_type = "control_loop.sidecar_upsert_failed",
                 .detail = std::string(
                               "failed to write sidecar entry before "
                               "fan write: ") +
@@ -251,11 +244,10 @@ void TryApplyChannelSetpoint(
             ChannelState::kMaxConsecutiveFailures) {
             if (!channel.circuit_breaker_open) {
                 channel.circuit_breaker_open = true;
-                AppendRuntimeEvent(
+                AppendControlLoopEvent(
                     context.runtime_home,
                     RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type =
+                                    .event_type =
                             "control_loop.circuit_breaker_opened",
                         .detail =
                             "circuit breaker opened after repeated write "
@@ -273,11 +265,10 @@ void TryApplyChannelSetpoint(
             try {
                 pending_store.QueueRemove(channel.config.channel);
             } catch (const std::exception& e) {
-                AppendRuntimeEvent(
+                AppendControlLoopEvent(
                     context.runtime_home,
                     RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type =
+                                    .event_type =
                             "control_loop.sidecar_remove_warning",
                         .detail = std::string(
                                       "best-effort sidecar removal after "
@@ -289,11 +280,10 @@ void TryApplyChannelSetpoint(
                     });
             }
         }
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.write_failed",
+                    .event_type = "control_loop.write_failed",
                 .detail = write_result.detail,
                 .channel = channel.config.channel,
                 .tick_count = tick_count,
@@ -307,11 +297,10 @@ void TryApplyChannelSetpoint(
     if (channel.consecutive_write_failures > 0 ||
         channel.circuit_breaker_open) {
         if (channel.circuit_breaker_open) {
-            AppendRuntimeEvent(
+            AppendControlLoopEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type = "control_loop.circuit_breaker_closed",
+                            .event_type = "control_loop.circuit_breaker_closed",
                     .detail =
                         "circuit breaker closed after successful write",
                     .channel = channel.config.channel,
@@ -325,11 +314,10 @@ void TryApplyChannelSetpoint(
         channel.circuit_breaker_open = false;
     }
     if (evaluation.authority_reassert) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.authority_reasserted",
+                    .event_type = "control_loop.authority_reasserted",
                 .detail = evaluation.authority_detail,
                 .channel = channel.config.channel,
                 .tick_count = tick_count,
@@ -348,10 +336,9 @@ void TryApplyChannelSetpoint(
     channel.last_write_time = now_steady;
     ++channel.total_writes;
     channel.last_write_reason = write_reason;
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.write_applied",
             .detail = "applied control-loop setpoint source=" +
                       evaluation.response_source +

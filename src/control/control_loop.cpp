@@ -89,11 +89,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     try {
         fan_writer = CreateFanWriter(context.runtime_policy);
     } catch (const std::exception& error) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.init_failed",
+                    .event_type = "control_loop.init_failed",
                 .detail = std::string("direct writer init failed: ") +
                           error.what(),
                 .success = false,
@@ -132,10 +131,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         state.last_timing, context.channels, state.log_csv_path,
                         state.log_manifest_path, event_log_path);
     }
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.start",
             .detail = "control-loop started",
             .success = true,
@@ -149,11 +147,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     try {
         pending_store.Load();
     } catch (const std::exception& e) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
-                .event_type = "control_loop.sidecar_load_failed",
+                    .event_type = "control_loop.sidecar_load_failed",
                 .detail = std::string(
                               "failed to load pending-writes sidecar; "
                               "continuing with empty cache: ") +
@@ -190,10 +187,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     state.last_timing, context.channels, state.log_csv_path,
                     state.log_manifest_path, event_log_path,
                     state.last_successful_restore_iso);
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.shutdown_requested",
             .detail = "stop requested",
             .tick_count = state.tick_count,
@@ -204,11 +200,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     const auto append_sidecar_remove_failure =
         [&](std::uint32_t channel, const std::string& detail) {
             restore_failure = true;
-            AppendRuntimeEvent(
+            AppendControlLoopEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type =
+                            .event_type =
                         "control_loop.shutdown_sidecar_remove_failed",
                     .detail = detail,
                     .channel = channel,
@@ -219,11 +214,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     for (auto& channel : context.channels) {
         if (state.fatal_restore_timeout && channel.write_active) {
             restore_failure = true;
-            AppendRuntimeEvent(
+            AppendControlLoopEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type = "control_loop.shutdown_restore_skipped",
+                            .event_type = "control_loop.shutdown_restore_skipped",
                     .detail = "skipped shutdown restore after earlier restore timeout",
                     .channel = channel.config.channel,
                     .tick_count = state.tick_count,
@@ -239,11 +233,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                                               context.base.restore_timeout_ms);
             if (!restore_result) {
                 restore_failure = true;
-                AppendRuntimeEvent(
+                AppendControlLoopEvent(
                     context.runtime_home,
                     RuntimeLogEvent{
-                        .mode = "control-loop",
-                        .event_type = "control_loop.shutdown_restore_failed",
+                                    .event_type = "control_loop.shutdown_restore_failed",
                         .detail = restore_result.detail,
                         .channel = channel.config.channel,
                         .tick_count = state.tick_count,
@@ -253,11 +246,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             }
             state.last_successful_restore_iso =
                 FormatLocalIso8601(std::chrono::system_clock::now());
-            AppendRuntimeEvent(
+            AppendControlLoopEvent(
                 context.runtime_home,
                 RuntimeLogEvent{
-                    .mode = "control-loop",
-                    .event_type = "control_loop.shutdown_restore_applied",
+                            .event_type = "control_loop.shutdown_restore_applied",
                     .detail = "restored channel during shutdown",
                     .channel = channel.config.channel,
                     .tick_count = state.tick_count,
@@ -298,10 +290,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     if (context.loop.low_band.enabled) {
         WriteLowBandEvidenceFile(context, state.tick_count);
     }
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.shutdown",
             .detail = restore_failure ? "restore failed"
                                       : "channels restored",

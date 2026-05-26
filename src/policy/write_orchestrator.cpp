@@ -7,6 +7,7 @@
 #include "gpu_reader.h"
 #include "pending_writes.h"
 #include "runtime_artifacts.h"
+#include "runtime_event_log.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 
@@ -25,26 +26,6 @@
 namespace svg_mb_control {
 
 namespace {
-
-// Builds and appends a runtime event for the write-once / reconcile flows.
-// Centralizing the RuntimeLogEvent construction here keeps the orchestrator
-// readable: every call site collapses from ~10 lines to a single statement.
-void LogOrchestratorEvent(const std::filesystem::path& runtime_home,
-                          std::string_view mode,
-                          std::string_view event_type,
-                          std::string detail,
-                          std::optional<std::uint32_t> channel,
-                          std::optional<double> target_pct,
-                          bool success) {
-    RuntimeLogEvent event;
-    event.mode = std::string(mode);
-    event.event_type = std::string(event_type);
-    event.detail = std::move(detail);
-    event.channel = channel;
-    event.target_pct = target_pct;
-    event.success = success;
-    AppendRuntimeEvent(runtime_home, event);
-}
 
 std::optional<std::chrono::system_clock::time_point> ParseSnapshotLocalTime(
     const std::string& iso_text) {

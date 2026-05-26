@@ -127,10 +127,9 @@ void UpdateLowBandState(ControlRuntimeContext& context,
                        << " threshold=" << threshold
                        << " cap_pct="
                        << channel.config.low_band_max_boost_pct;
-                AppendRuntimeEvent(
+                AppendControlLoopEvent(
                     context.runtime_home,
                     RuntimeLogEvent{
-                        .mode = "control-loop",
                         .event_type = "control_loop.low_band_stage_activated",
                         .detail = detail.str(),
                         .channel = channel.config.channel,

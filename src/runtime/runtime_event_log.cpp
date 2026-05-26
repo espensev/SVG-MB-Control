@@ -12,6 +12,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -332,6 +333,32 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
 
     NoteEventAppended(path);
     return true;
+}
+
+bool AppendControlLoopEvent(const std::filesystem::path& runtime_home,
+                            RuntimeLogEvent event,
+                            const RuntimeArtifactNaming& naming) {
+    if (event.mode.empty()) {
+        event.mode = "control-loop";
+    }
+    return AppendRuntimeEvent(runtime_home, event, naming);
+}
+
+void LogOrchestratorEvent(const std::filesystem::path& runtime_home,
+                          std::string_view mode,
+                          std::string_view event_type,
+                          std::string detail,
+                          std::optional<std::uint32_t> channel,
+                          std::optional<double> target_pct,
+                          bool success) {
+    RuntimeLogEvent event;
+    event.mode = std::string(mode);
+    event.event_type = std::string(event_type);
+    event.detail = std::move(detail);
+    event.channel = channel;
+    event.target_pct = target_pct;
+    event.success = success;
+    AppendRuntimeEvent(runtime_home, event);
 }
 
 }  // namespace svg_mb_control

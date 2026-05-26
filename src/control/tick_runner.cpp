@@ -44,10 +44,9 @@ void ProcessCircuitBreakerResetRequest(ControlRuntimeContext& context,
     state.force_status_write = true;
 
     if (!request->parse_error.empty()) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type =
                     "control_loop.circuit_breaker_reset_invalid",
                 .severity = "warning",
@@ -78,10 +77,9 @@ void ProcessCircuitBreakerResetRequest(ControlRuntimeContext& context,
         channel.consecutive_write_failures = 0u;
         channel.last_write_reason = "breaker_reset";
         ++reset_channels;
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type = "control_loop.circuit_breaker_reset",
                 .detail = "operator reset of channel circuit breaker",
                 .channel = channel.config.channel,
@@ -98,10 +96,9 @@ void ProcessCircuitBreakerResetRequest(ControlRuntimeContext& context,
     if (matching_channels == 0u && request->channel.has_value()) {
         detail << "operator reset requested for unknown channel "
                << *request->channel;
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type = "control_loop.circuit_breaker_reset_noop",
                 .severity = "warning",
                 .error_code =
@@ -118,10 +115,9 @@ void ProcessCircuitBreakerResetRequest(ControlRuntimeContext& context,
     if (request->channel.has_value()) {
         detail << " for channel " << *request->channel;
     }
-    AppendRuntimeEvent(
+    AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
-            .mode = "control-loop",
             .event_type = "control_loop.circuit_breaker_reset_noop",
             .detail = detail.str(),
             .channel = request->channel,
@@ -166,10 +162,9 @@ bool RunControlTick(ControlRuntimeContext& context,
     if (csv_logger.MaybeRotate()) {
         state.log_csv_path = csv_logger.active_archive_path().string();
         state.log_manifest_path = csv_logger.manifest_path().string();
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type = "control_loop.log_rotated",
                 .detail = "telemetry log rotated",
                 .tick_count = state.tick_count,
@@ -261,10 +256,9 @@ bool RunControlTick(ControlRuntimeContext& context,
     try {
         pending_store.Flush();
     } catch (const std::exception& e) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type = "control_loop.sidecar_flush_failed",
                 .detail =
                     std::string("end-of-tick sidecar flush failed: ") +
@@ -337,10 +331,9 @@ bool RunControlTick(ControlRuntimeContext& context,
     state.last_timing = tick_timing;
 
     if (state.fatal_restore_timeout) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type = "control_loop.abort",
                 .detail = "restore timed out; aborting control-loop",
                 .channel = state.fatal_restore_channel,

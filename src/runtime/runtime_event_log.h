@@ -42,6 +42,27 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
                         const RuntimeArtifactNaming& naming =
                             RuntimeArtifactNaming{});
 
+// Convenience wrapper that fills `mode = "control-loop"` when the caller
+// has left it empty, then appends. Lets per-tick call sites omit the mode
+// field and lets the "control-loop" literal live in exactly one place.
+bool AppendControlLoopEvent(const std::filesystem::path& runtime_home,
+                            RuntimeLogEvent event,
+                            const RuntimeArtifactNaming& naming =
+                                RuntimeArtifactNaming{});
+
+// Compact positional wrapper for the write-once / reconcile / one-shot
+// orchestrator events (where target_pct is the natural attribution and
+// the event shape is uniform). Builds the RuntimeLogEvent and forwards
+// to AppendRuntimeEvent so the orchestrator translation units do not
+// repeat the aggregate-init boilerplate.
+void LogOrchestratorEvent(const std::filesystem::path& runtime_home,
+                          std::string_view mode,
+                          std::string_view event_type,
+                          std::string detail,
+                          std::optional<std::uint32_t> channel,
+                          std::optional<double> target_pct,
+                          bool success);
+
 // Number of non-empty lines in the event log at `event_log_path`. Cached
 // per path; pass refresh_from_disk=true to re-read instead of using the
 // cached value. Exposed for the CSV manifest writer's event_count field.

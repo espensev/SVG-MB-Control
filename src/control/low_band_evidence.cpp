@@ -107,10 +107,9 @@ void WriteLowBandEvidenceFile(const ControlRuntimeContext& context,
 
     if (!TryWriteJsonFileAtomic(context.runtime_home / "low_band_evidence.json",
                                 payload)) {
-        AppendRuntimeEvent(
+        AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
-                .mode = "control-loop",
                 .event_type = "control_loop.low_band_evidence_write_failed",
                 .detail = "failed to write low_band_evidence.json",
                 .tick_count = tick_count,
