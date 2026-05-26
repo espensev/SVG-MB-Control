@@ -32,11 +32,10 @@ class RuntimeSingletonTests(unittest.TestCase):
                 poll_ms=100,
             )
 
-            first = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "read-loop", "--config", str(config_path)],
                 env=_sim_direct_env(),
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: _read_runtime_status(runtime_home),
                     timeout_s=5.0,
@@ -81,8 +80,6 @@ class RuntimeSingletonTests(unittest.TestCase):
                     first_pid,
                     msg="second worker overwrote control_runtime.json",
                 )
-            finally:
-                _stop_and_wait(first)
 
     def test_second_supervisor_against_same_runtime_home_refuses_to_start(
         self,

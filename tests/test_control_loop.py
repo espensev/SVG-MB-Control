@@ -23,11 +23,10 @@ class ControlLoopTests(unittest.TestCase):
                 deadband_pct=0.35,
                 control_hold_ms=800,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=75.0),
-            )
-            try:
+            ):
                 observed = _wait_for(
                     lambda: (_read_runtime_status(runtime_home) or {}).get(
                         "loop_tick_count", 0
@@ -134,8 +133,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertIsNotNone(write_event)
                 self.assertEqual(write_event["severity"], "info")
                 self.assertEqual(write_event["error_code"], "none")
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_limits_first_write_from_observed_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -157,11 +154,10 @@ class ControlLoopTests(unittest.TestCase):
                     "max_setpoint_step_pct": 0.5,
                 },
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=75.0, duty_raw=51),
-            )
-            try:
+            ):
                 write_event = _wait_for(
                     lambda: next(
                         (
@@ -177,8 +173,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(write_event["channel"], 0)
                 self.assertGreater(write_event["setpoint_pct"], 20.0)
                 self.assertLessEqual(write_event["setpoint_pct"], 20.55)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_current_state_prefers_direct_fan_telemetry(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -189,7 +183,7 @@ class ControlLoopTests(unittest.TestCase):
                 runtime_home=runtime_home,
                 channel=0,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(
                     channel=0,
@@ -200,8 +194,7 @@ class ControlLoopTests(unittest.TestCase):
                     read_duty_raw=222,
                     read_mode_raw=7,
                 ),
-            )
-            try:
+            ):
                 state = _wait_for(
                     lambda: _read_runtime_current_state(runtime_home),
                     timeout_s=5.0,
@@ -210,8 +203,6 @@ class ControlLoopTests(unittest.TestCase):
                 fan0 = next(fan for fan in state["fans"] if fan["channel"] == 0)
                 self.assertEqual(fan0["duty_raw"], 222)
                 self.assertEqual(fan0["mode_raw"], 7)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_cpu_override_can_drive_gpu_blend_channel(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -227,11 +218,10 @@ class ControlLoopTests(unittest.TestCase):
                 cpu_override_curve=[(75.0, 20.0), (85.0, 70.0)],
                 control_hold_ms=0,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=86.0),
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: (
                         status
@@ -246,8 +236,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertGreaterEqual(channel["last_setpoint_pct"], 69.0)
                 self.assertGreaterEqual(channel["total_writes"], 1)
                 self.assertEqual(channel["last_response_source"], "cpu_override")
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_thermal_pressure_boost_accumulates_under_sustained_heat(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -271,11 +259,10 @@ class ControlLoopTests(unittest.TestCase):
                     "thermal_pressure_max_boost_pct": 30.0,
                 },
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=86.0),
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: (
                         status
@@ -296,8 +283,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertIn("thermal_pressure", channel["last_response_source"])
                 self.assertGreaterEqual(channel["last_setpoint_pct"], 25.0)
                 self.assertGreaterEqual(channel["total_writes"], 2)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_midband_pressure_accumulates_in_mid_band(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -321,11 +306,10 @@ class ControlLoopTests(unittest.TestCase):
                     "midband_pressure_max_boost_pct": 12.0,
                 },
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=74.0),
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: (
                         status
@@ -359,8 +343,6 @@ class ControlLoopTests(unittest.TestCase):
                     float(latest_row["channel0_midband_pressure_boost_pct"]),
                     4.0,
                 )
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_gpu_airflow_starts_on_warm_gpu(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -394,11 +376,10 @@ class ControlLoopTests(unittest.TestCase):
                     "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "70.0",
                 }
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=env,
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: (
                         status
@@ -430,8 +411,6 @@ class ControlLoopTests(unittest.TestCase):
                     float(latest_row["channel0_gpu_airflow_boost_pct"]),
                     4.0,
                 )
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_cpu_low_soak_accumulates_under_sustained_mid_cpu(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -456,11 +435,10 @@ class ControlLoopTests(unittest.TestCase):
                     "cpu_low_soak_max_boost_pct": 5.0,
                 },
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=66.0),
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: (
                         status
@@ -484,8 +462,6 @@ class ControlLoopTests(unittest.TestCase):
                 latest_row = rows[-1]
                 self.assertIn("channel0_cpu_low_soak_boost_pct", latest_row)
                 self.assertIn("cpu_low_soak", latest_row["channel0_response_source"])
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_cpu_low_soak_stays_zero_below_release(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -510,11 +486,10 @@ class ControlLoopTests(unittest.TestCase):
                     "cpu_low_soak_max_boost_pct": 5.0,
                 },
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=59.0),
-            )
-            try:
+            ):
                 observed = _wait_for(
                     lambda: (
                         status
@@ -529,8 +504,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(channel["last_cpu_low_soak_boost_pct"], 0.0)
                 self.assertEqual(channel["last_response_source"], "primary_curve")
                 self.assertEqual(channel["last_setpoint_pct"], 20.0)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_low_band_stage_accumulates_smooth_trim_and_evidence(
         self,
@@ -573,11 +546,10 @@ class ControlLoopTests(unittest.TestCase):
                     "low_band_max_boost_pct": 3.0,
                 },
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=66.0),
-            )
-            try:
+            ):
                 status = _wait_for(
                     lambda: (
                         status
@@ -628,8 +600,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertGreaterEqual(
                     evidence["channels"][0]["activation_count"], 1
                 )
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_uses_local_runtime_policy_gate(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -655,11 +625,10 @@ class ControlLoopTests(unittest.TestCase):
                 channel=0,
                 runtime_policy_path=policy_path,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=82.0),
-            )
-            try:
+            ):
                 state = _wait_for(
                     lambda: _read_runtime_current_state(runtime_home),
                     timeout_s=5.0,
@@ -675,8 +644,6 @@ class ControlLoopTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(status)
                 self.assertEqual(status["controlled_channels"][0]["total_writes"], 0)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_empty_channels_fails(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -793,11 +760,10 @@ class ControlLoopTests(unittest.TestCase):
                 control_hold_ms=800,
                 channel_control_hold_ms=2222,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=75.0),
-            )
-            try:
+            ):
                 entry = _wait_for(
                     lambda: next(
                         (
@@ -811,8 +777,6 @@ class ControlLoopTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(entry, msg="pending write entry was not created")
                 self.assertEqual(entry["requested_hold_ms"], 2222)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_zero_hold_flows_to_pending_write(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -827,11 +791,10 @@ class ControlLoopTests(unittest.TestCase):
                 deadband_pct=2.0,
                 control_hold_ms=0,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=75.0),
-            )
-            try:
+            ):
                 entry = _wait_for(
                     lambda: next(
                         (
@@ -845,8 +808,6 @@ class ControlLoopTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(entry, msg="pending write entry was not created")
                 self.assertEqual(entry["requested_hold_ms"], 0)
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_policy_refusal_flushes_pending_write(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -861,14 +822,13 @@ class ControlLoopTests(unittest.TestCase):
                 deadband_pct=0.1,
                 control_hold_ms=800,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env={
                     **_sim_direct_env(channel=0, amd_temp_c=75.0),
                     "SVG_MB_CONTROL_SIM_WRITE_MODE": "policy_refused",
                 },
-            )
-            try:
+            ):
                 failed_event = _wait_for(
                     lambda: (
                         next(
@@ -893,8 +853,6 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertEqual(
                     failed_event["error_code"], "CONTROL_LOOP_WRITE_FAILED"
                 )
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_accepts_operator_breaker_reset(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -909,14 +867,13 @@ class ControlLoopTests(unittest.TestCase):
                 deadband_pct=0.1,
                 control_hold_ms=0,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
                 env={
                     **_sim_direct_env(channel=0, amd_temp_c=75.0),
                     "SVG_MB_CONTROL_SIM_WRITE_MODE": "fail_immediate",
                 },
-            )
-            try:
+            ):
                 opened = _wait_for(
                     lambda: next(
                         (
@@ -970,8 +927,6 @@ class ControlLoopTests(unittest.TestCase):
                         timeout_s=2.0,
                     )
                 )
-            finally:
-                _stop_and_wait(proc)
 
     def test_control_loop_restore_timeout_aborts_and_preserves_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -1059,7 +1014,7 @@ class ControlLoopTests(unittest.TestCase):
             control_hold_ms=0,
             extra_loop_fields=extra,
         )
-        proc = _spawn_control(
+        with RuntimeProbe(
             ["--mode", "control-loop", "--config", str(config_path)],
             env={
                 **_sim_direct_env(channel=0, amd_temp_c=50.0),
@@ -1069,8 +1024,7 @@ class ControlLoopTests(unittest.TestCase):
                 "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "50.0",
                 "SVG_MB_CONTROL_SIM_AMD_TCTL_SEQUENCE_C": tctl_sequence,
             },
-        )
-        try:
+        ):
             observed = _wait_for(
                 lambda: (_read_runtime_status(runtime_home) or {}).get(
                     "loop_tick_count", 0
@@ -1082,9 +1036,6 @@ class ControlLoopTests(unittest.TestCase):
                 observed, msg="control loop did not reach min_ticks"
             )
             status = _read_runtime_status(runtime_home)
-        finally:
-            if proc.poll() is None:
-                _stop_and_wait(proc)
         self.assertIsNotNone(status)
         rows = _read_runtime_csv_rows(Path(status["log_csv_path"]))
         self.assertTrue(rows, msg="cadence CSV rows missing")

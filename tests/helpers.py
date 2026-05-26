@@ -141,6 +141,53 @@ def _stop_and_wait(
     return proc.returncode, stdout or "", stderr or ""
 
 
+class RuntimeProbe:
+    def __init__(
+        self,
+        args: list[str],
+        *,
+        env: dict[str, str] | None = None,
+        cwd: Path = REPO_ROOT,
+        exe: Path = CONTROL_EXE,
+        graceful_timeout_s: float = 4.0,
+    ) -> None:
+        self.args = args
+        self.env = env
+        self.cwd = cwd
+        self.exe = exe
+        self.graceful_timeout_s = graceful_timeout_s
+        self.proc: subprocess.Popen[str] | None = None
+        self.stop_result: tuple[int, str, str] | None = None
+
+    def __enter__(self) -> RuntimeProbe:
+        self.proc = _spawn_control(
+            self.args,
+            env=self.env,
+            cwd=self.cwd,
+            exe=self.exe,
+        )
+        return self
+
+    @property
+    def process(self) -> subprocess.Popen[str]:
+        if self.proc is None:
+            raise RuntimeError("runtime probe has not been started")
+        return self.proc
+
+    def stop(self) -> tuple[int, str, str]:
+        if self.stop_result is None:
+            self.stop_result = _stop_and_wait(
+                self.process,
+                graceful_timeout_s=self.graceful_timeout_s,
+            )
+        return self.stop_result
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if self.proc is not None:
+            self.stop()
+        return False
+
+
 def _read_json(path: Path) -> dict | None:
     if not path.is_file():
         return None

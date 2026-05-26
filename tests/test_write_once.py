@@ -229,7 +229,7 @@ class WriteOnceTests(unittest.TestCase):
             td = Path(td_str)
             runtime_home = td / "runtime"
             config_path = _write_write_once_config(td, runtime_home=runtime_home)
-            proc = _spawn_control(
+            with RuntimeProbe(
                 [
                     "--mode",
                     "write-once",
@@ -243,15 +243,13 @@ class WriteOnceTests(unittest.TestCase):
                     "30000",
                 ],
                 env=_sim_direct_env(channel=0, amd_temp_c=76.0),
-            )
-            try:
+            ) as probe:
                 observed = _wait_for(
                     lambda: len(_read_pending_writes(runtime_home)) == 1,
                     timeout_s=5.0,
                 )
                 self.assertTrue(observed, msg="pending_writes.json was never created")
-            finally:
-                code, _, stderr = _stop_and_wait(proc)
+                code, _, stderr = probe.stop()
 
             self.assertEqual(code, 0, msg=stderr)
             self.assertEqual(_read_pending_writes(runtime_home), [])

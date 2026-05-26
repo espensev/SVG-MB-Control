@@ -21,7 +21,7 @@ class ReadLoopTests(unittest.TestCase):
                 snapshot_path=snapshot_path,
                 poll_ms=100,
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "read-loop", "--config", str(config_path)],
                 env=_sim_direct_env(
                     channel=0,
@@ -32,8 +32,7 @@ class ReadLoopTests(unittest.TestCase):
                     read_duty_raw=222,
                     read_mode_raw=7,
                 ),
-            )
-            try:
+            ):
                 state = _wait_for(
                     lambda: _read_runtime_current_state(runtime_home),
                     timeout_s=5.0,
@@ -114,8 +113,6 @@ class ReadLoopTests(unittest.TestCase):
                     start_events[-1]["event_log_path"], status["event_log_path"]
                 )
                 self.assertTrue(start_events[-1]["snapshot_mirror_configured"])
-            finally:
-                _stop_and_wait(proc)
 
     def test_read_loop_shutdown_updates_runtime_status(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -129,11 +126,10 @@ class ReadLoopTests(unittest.TestCase):
             config_payload = _read_json(config_path)
             config_payload["csv_flush_interval_rows"] = 2
             _write_json(config_path, config_payload)
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "read-loop", "--config", str(config_path)],
                 env=_sim_direct_env(channel=0, amd_temp_c=70.0),
-            )
-            try:
+            ) as probe:
                 observed = _wait_for(
                     lambda: (_read_runtime_status(runtime_home) or {}).get(
                         "successful_polls", 0
@@ -142,8 +138,7 @@ class ReadLoopTests(unittest.TestCase):
                     timeout_s=5.0,
                 )
                 self.assertTrue(observed)
-            finally:
-                code, _, stderr = _stop_and_wait(proc)
+                code, _, stderr = probe.stop()
 
             self.assertEqual(code, 0, msg=stderr)
             final_status = _read_runtime_status(runtime_home)

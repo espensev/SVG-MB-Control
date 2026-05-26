@@ -20,7 +20,7 @@ class EvidenceLogTests(unittest.TestCase):
                 poll_ms=100,
                 evidence_gpu_sample_mode="full",
             )
-            proc = _spawn_control(
+            with RuntimeProbe(
                 ["--mode", "evidence-log", "--config", str(config_path)],
                 env=_sim_direct_env(
                     channel=2,
@@ -48,8 +48,7 @@ class EvidenceLogTests(unittest.TestCase):
                     "SVG_MB_CONTROL_SIM_SIO_TEMPERATURE0_C": "61.5",
                     "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
                 },
-            )
-            try:
+            ) as probe:
                 evidence_csv = runtime_home / "logs" / "svg_mb_control_evidence.csv"
                 rows = _wait_for(
                     lambda: _read_runtime_csv_rows(evidence_csv),
@@ -204,8 +203,7 @@ class EvidenceLogTests(unittest.TestCase):
                     (runtime_home / "logs" / "svg_mb_control_events.jsonl").exists(),
                     msg="evidence-log should not overwrite default controller events",
                 )
-            finally:
-                code, _, stderr = _stop_and_wait(proc)
+                code, _, stderr = probe.stop()
 
             self.assertEqual(code, 0, msg=stderr)
             manifest = _read_json(
