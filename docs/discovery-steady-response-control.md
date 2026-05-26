@@ -1,9 +1,19 @@
 # Discovery - Steady Response Control
 
+> Status, 2026-05-26: historical snapshot. This file documents the 2026-05-14
+> steady-response pass against the **50 ms-era** controller profile and the
+> pre-adoption floors. Every "50 ms write profile" reference (notably
+> lines 37, 40, 102, 132) describes the prior shipped cadence; the current
+> shipped profile is `poll_tick_ms = 250 / write_cooldown_ms = 250` with
+> the adopted floors `15.5/22/60/56/31/20` (see
+> `config\control.release.json`, `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`,
+> and `docs\CONTROL_PIPELINE_MATH.md` §13.1). Use
+> `docs\response-evaluation-tuning-plan.md` for current tuning guidance.
+
 **Goal:** Evaluate the current usable fan response, sanity-check the control math,
 and plan data-based adjustments without large changes or slower off-floor rise.
 **Date:** 2026-05-14
-**Status:** complete
+**Status:** complete (superseded; see banner above)
 **Recommended next:** none - standalone tuning plan
 
 ---

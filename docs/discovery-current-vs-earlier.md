@@ -1,8 +1,16 @@
 # Discovery — Current State Vs Earlier
 
+> Status, 2026-05-26: historical snapshot. This 2026-04-17 review predates
+> the native logger, runtime sidecars (`control_runtime.json`,
+> `control_supervisor.json`, `control_health.json`), the rotated CSV /
+> JSONL event log under `runtime\logs\`, the manifest-driven analyzer
+> workflow, and the 250 ms shipped control profile. Use
+> `docs\RUNTIME_LOGGING_AND_EVALUATION.md` and `docs\RUNTIME_HOME.md` for
+> the current logging and runtime-home design.
+
 **Goal:** Evaluate the current state of the Control and Bench repos versus the earlier logger / native-first assessment.
 **Date:** 2026-04-17
-**Status:** complete
+**Status:** complete (superseded; see banner above)
 **Recommended next:** none — standalone research
 
 ---

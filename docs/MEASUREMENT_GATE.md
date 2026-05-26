@@ -57,10 +57,12 @@ has fixed-start-period loop timing fields and process-resource fields.
 ## Current Evidence
 
 - `docs\discovery-steady-response-control.md` covers the 2026-05-14 high-heat
-  response pass. The important historical result is that the prior 50 ms
-  profile was usable for channels `0-5`: no live overrun, process CPU around
-  `0.29%`, and radiator channels reaching meaningful setpoints during
-  sustained heat.
+  response pass against the prior 50 ms profile. That file is now
+  superseded (banner at top of the doc); the important historical result
+  is that the 50 ms profile was usable for channels `0-5`: no live
+  overrun, process CPU around `0.29%`, and radiator channels reaching
+  meaningful setpoints during sustained heat. Do not treat its cadence
+  numbers as current.
 - The later local-only `20260514_035931` run was lower heat and showed no
   overruns, `50.610 ms` average achieved interval, `58.150 ms` max achieved
   interval, and average process CPU around `0.207%`. Treat this as historical

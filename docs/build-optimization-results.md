@@ -1,5 +1,12 @@
 # Build Performance Optimization Results
 
+> Status, 2026-05-26: historical measurement note. The PCH and `/MP`
+> optimizations described here are adopted in the current
+> `CMakeLists.txt` and `cmake/...` presets; the build numbers below are
+> a 2026-05-14 snapshot and are not maintained as a current benchmark.
+> Use `scripts\Build-Release.ps1` and `.\scripts\Test-LocalCI.ps1`
+> outputs for current build timing.
+
 ## Date
 2026-05-14
 

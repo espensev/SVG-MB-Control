@@ -1,12 +1,22 @@
 # SVG-MB-Control: Code Evaluation & Optimization Recommendations
 
-> Status, 2026-05-14: this was a generated review snapshot and is now partly
-> stale. Several recommendations below are already implemented in the current
-> tree, including JSON-library config parsing, config validation,
-> thermal-pressure anti-windup/smoother scaling, sensor failure handling,
-> circuit-breaker events, sidecar warning events, and rate-limited status
-> publication. Use `docs\RUNTIME_LOGGING_AND_EVALUATION.md` for the current
-> data-driven tuning and logging plan before acting on any remaining item here.
+> Status, 2026-05-26: superseded snapshot. This file was a generated review
+> from the 50 ms-era controller and is kept for historical context only. Do
+> not treat any cadence or floor numbers in this document as current.
+> Concretely, the "stable 50 ms control cadence" claim in the Executive
+> Summary, the "running at 50 ms" line under Performance Impact Estimate,
+> and the `200ms tick` example code comments all describe an earlier
+> shipped profile; the current shipped profile is
+> `poll_tick_ms = 250 / write_cooldown_ms = 250` (see
+> `config\control.release.json` and `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`).
+> Most recommendations below are already implemented in the current tree
+> (JSON-library config parsing, config validation, thermal-pressure
+> anti-windup and smootherstep scaling, sensor failure handling,
+> circuit-breaker events, sidecar warning events, rate-limited status
+> publication). Use `docs\RUNTIME_LOGGING_AND_EVALUATION.md` and
+> `docs\CONTROL_PIPELINE_MATH.md` as the maintained references for the
+> current controller; use `docs\response-evaluation-tuning-plan.md` for
+> the current tuning workflow.
 
 **Evaluation Date:** 2025
 **Evaluator:** GitHub Copilot (Agentic Mode)

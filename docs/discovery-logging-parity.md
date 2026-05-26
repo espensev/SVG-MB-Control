@@ -1,8 +1,16 @@
 # Discovery — Logging Parity
 
+> Status, 2026-05-26: historical snapshot. This 2026-04-16 review describes
+> the runtime state plane before the native logging surface landed. The
+> later sections that recommend `runtime\logs\` and a JSONL event log are
+> now implemented (see `docs\RUNTIME_HOME.md` and
+> `docs\RUNTIME_LOGGING_AND_EVALUATION.md`); treat the recommendations
+> below as the design intent that has since shipped, not as outstanding
+> work.
+
 **Goal:** Evaluate the current `SVG-MB-Control` runtime state/logging surface, infer the intended direct-runtime plan, inspect `D:\Development\Thermals\TempControl-Nvidia\NVG_SmoothControl`, and determine what logging approach should be borrowed.
 **Date:** 2026-04-16
-**Status:** complete
+**Status:** complete (superseded; see banner above)
 **Recommended next:** none — standalone research; the logging change is scoped enough to implement directly without a larger campaign
 
 ---
