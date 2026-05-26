@@ -188,6 +188,187 @@ class RuntimeProbe:
         return False
 
 
+class StagedControlApp:
+    def __init__(
+        self,
+        *,
+        default_mode: str = "read-loop",
+        poll_ms: int = 100,
+    ) -> None:
+        self.default_mode = default_mode
+        self.poll_ms = poll_ms
+        self._tempdir: tempfile.TemporaryDirectory[str] | None = None
+        self.root: Path | None = None
+        self.exe: Path | None = None
+        self.runtime_home: Path | None = None
+        self.start_result: subprocess.CompletedProcess[str] | None = None
+        self.stop_result: subprocess.CompletedProcess[str] | None = None
+        self._started = False
+
+    def __enter__(self) -> StagedControlApp:
+        self._tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self._tempdir.name)
+        self.exe = self.root / "svg-mb-control.exe"
+        self.runtime_home = self.root / "runtime"
+        shutil.copy2(CONTROL_EXE, self.exe)
+        _write_read_loop_config(
+            self.root,
+            runtime_home=self.runtime_home,
+            default_mode=self.default_mode,
+            poll_ms=self.poll_ms,
+        )
+        return self
+
+    def start(
+        self,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        result = self.run(env=env)
+        self.start_result = result
+        self._started = result.returncode == 0
+        return result
+
+    def run(
+        self,
+        *args: str,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        return _run_control(
+            *args,
+            cwd=self._root,
+            exe=self._exe,
+            env=env,
+        )
+
+    def status(self) -> subprocess.CompletedProcess[str]:
+        return self.run("--status")
+
+    def restart(
+        self,
+        *,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        result = self.run("--restart", env=env)
+        if result.returncode == 0:
+            self._started = True
+            self.stop_result = None
+        return result
+
+    def stop(self) -> subprocess.CompletedProcess[str]:
+        process_ids = self._published_process_ids()
+        if self.stop_result is None:
+            self.stop_result = self.run("--stop")
+        self._wait_for_staged_processes_to_exit(process_ids)
+        self._started = False
+        return self.stop_result
+
+    @property
+    def _root(self) -> Path:
+        if self.root is None:
+            raise RuntimeError("staged control app has not been entered")
+        return self.root
+
+    @property
+    def _exe(self) -> Path:
+        if self.exe is None:
+            raise RuntimeError("staged control app has not been entered")
+        return self.exe
+
+    @property
+    def _runtime_home_path(self) -> Path:
+        if self.runtime_home is None:
+            raise RuntimeError("staged control app has not been entered")
+        return self.runtime_home
+
+    def _published_process_ids(self) -> set[int]:
+        process_ids: set[int] = set()
+        status = _read_runtime_status(self._runtime_home_path)
+        if status is not None:
+            self._add_process_id(process_ids, status.get("process_id"))
+
+        supervisor = _read_json(self._runtime_home_path / "control_supervisor.json")
+        if supervisor is not None:
+            self._add_process_id(process_ids, supervisor.get("supervisor_pid"))
+            self._add_process_id(process_ids, supervisor.get("last_worker_pid"))
+        return process_ids
+
+    @staticmethod
+    def _add_process_id(process_ids: set[int], value: object) -> None:
+        try:
+            pid = int(value)
+        except (TypeError, ValueError):
+            return
+        if pid > 0:
+            process_ids.add(pid)
+
+    def _wait_for_staged_processes_to_exit(
+        self,
+        process_ids: set[int],
+        *,
+        timeout_s: float = 5.0,
+    ) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            process_ids.update(self._published_process_ids())
+            if process_ids and not self._svg_processes_are_running(process_ids):
+                return
+            status = _read_runtime_status(self._runtime_home_path)
+            if not process_ids and status and status.get("status") == "shutdown":
+                return
+            time.sleep(0.05)
+
+        process_ids.update(self._published_process_ids())
+        self._terminate_svg_processes(process_ids)
+
+    @staticmethod
+    def _svg_processes_are_running(process_ids: set[int]) -> bool:
+        if not process_ids:
+            return False
+        return StagedControlApp._run_process_filter(
+            process_ids,
+            "exit @(Get-Process svg-mb-control -ErrorAction SilentlyContinue | "
+            "Where-Object { $ids -contains $_.Id }).Count",
+        ).returncode != 0
+
+    @staticmethod
+    def _terminate_svg_processes(process_ids: set[int]) -> None:
+        if not process_ids:
+            return
+        StagedControlApp._run_process_filter(
+            process_ids,
+            "Get-Process svg-mb-control -ErrorAction SilentlyContinue | "
+            "Where-Object { $ids -contains $_.Id } | "
+            "Stop-Process -Force -ErrorAction SilentlyContinue",
+        )
+
+    @staticmethod
+    def _run_process_filter(
+        process_ids: set[int],
+        command: str,
+    ) -> subprocess.CompletedProcess[str]:
+        ids = ",".join(str(pid) for pid in sorted(process_ids))
+        return subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"$ids=@({ids}); {command}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        try:
+            if self._started:
+                self.stop()
+        finally:
+            if self._tempdir is not None:
+                self._tempdir.cleanup()
+        return False
+
+
 def _read_json(path: Path) -> dict | None:
     if not path.is_file():
         return None

@@ -128,21 +128,8 @@ class SmokeTests(unittest.TestCase):
             )
 
     def test_zero_arg_staged_launch_uses_control_json_default_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            staged_exe = td / "svg-mb-control.exe"
-            runtime_home = td / "runtime"
-            shutil.copy2(CONTROL_EXE, staged_exe)
-            _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                default_mode="read-loop",
-                poll_ms=100,
-            )
-
-            result = _run_control(
-                cwd=td,
-                exe=staged_exe,
+        with StagedControlApp() as app:
+            result = app.start(
                 env=_sim_direct_env(channel=1, amd_temp_c=74.0),
             )
             self.assertEqual(
@@ -152,26 +139,26 @@ class SmokeTests(unittest.TestCase):
             )
             self.assertIn("launched read-loop in background", result.stdout)
             status = _wait_for(
-                lambda: _read_runtime_status(runtime_home),
+                lambda: _read_runtime_status(app.runtime_home),
                 timeout_s=5.0,
             )
             self.assertIsNotNone(status, msg="control_runtime.json never appeared")
             self.assertEqual(status["mode"], "read-loop")
             self.assertGreater(status["process_id"], 0)
             state = _wait_for(
-                lambda: _read_runtime_current_state(runtime_home),
+                lambda: _read_runtime_current_state(app.runtime_home),
                 timeout_s=5.0,
             )
             self.assertIsNotNone(state, msg="current_state.json never appeared")
             self.assertEqual(state["fans"][0]["channel"], 1)
             self.assertEqual(state["amd_sensors"][0]["temperature_c"], 74.0)
 
-            status_result = _run_control("--status", cwd=td, exe=staged_exe)
+            status_result = app.status()
             self.assertEqual(status_result.returncode, 0, msg=status_result.stderr)
             self.assertIn("svg-mb-control: running", status_result.stdout)
             self.assertIn("mode: read-loop", status_result.stdout)
 
-            stop_result = _run_control("--stop", cwd=td, exe=staged_exe)
+            stop_result = app.stop()
             self.assertEqual(
                 stop_result.returncode,
                 0,
@@ -181,7 +168,7 @@ class SmokeTests(unittest.TestCase):
             stopped = _wait_for(
                 lambda: (
                     s
-                    if (s := _read_runtime_status(runtime_home))
+                    if (s := _read_runtime_status(app.runtime_home))
                     and s.get("status") == "shutdown"
                     else None
                 ),
@@ -190,202 +177,154 @@ class SmokeTests(unittest.TestCase):
             self.assertIsNotNone(stopped, msg="read-loop did not publish shutdown")
 
     def test_supervised_launch_restarts_worker_after_crash(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            staged_exe = td / "svg-mb-control.exe"
-            runtime_home = td / "runtime"
-            shutil.copy2(CONTROL_EXE, staged_exe)
-            _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                default_mode="read-loop",
-                poll_ms=100,
+        with StagedControlApp() as app:
+            result = app.start(
+                env=_sim_direct_env(channel=2, amd_temp_c=71.0),
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"{result.stdout}\n{result.stderr}",
+            )
+            self.assertIn("launched read-loop in background", result.stdout)
+            first_status = _wait_for(
+                lambda: _read_runtime_status(app.runtime_home),
+                timeout_s=5.0,
+            )
+            self.assertIsNotNone(
+                first_status,
+                msg="control_runtime.json never appeared",
+            )
+            first_pid = first_status["process_id"]
+            self.assertGreater(first_pid, 0)
+
+            subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"Stop-Process -Id {first_pid} -Force -ErrorAction Stop",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
             )
 
-            try:
-                result = _run_control(
-                    cwd=td,
-                    exe=staged_exe,
-                    env=_sim_direct_env(channel=2, amd_temp_c=71.0),
-                )
-                self.assertEqual(
-                    result.returncode,
-                    0,
-                    msg=f"{result.stdout}\n{result.stderr}",
-                )
-                self.assertIn("launched read-loop in background", result.stdout)
-                first_status = _wait_for(
-                    lambda: _read_runtime_status(runtime_home),
-                    timeout_s=5.0,
-                )
-                self.assertIsNotNone(
-                    first_status,
-                    msg="control_runtime.json never appeared",
-                )
-                first_pid = first_status["process_id"]
-                self.assertGreater(first_pid, 0)
-
-                subprocess.run(
-                    [
-                        "powershell",
-                        "-NoProfile",
-                        "-Command",
-                        f"Stop-Process -Id {first_pid} -Force -ErrorAction Stop",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-
-                restarted = _wait_for(
-                    lambda: (
-                        s
-                        if (s := _read_runtime_status(runtime_home))
-                        and s.get("status") == "running"
-                        and s.get("process_id") != first_pid
-                        else None
-                    ),
-                    timeout_s=8.0,
-                    poll_s=0.1,
-                )
-                self.assertIsNotNone(restarted, msg="worker was not restarted")
-                self.assertGreater(restarted["process_id"], 0)
-                events = _read_runtime_events(runtime_home)
-                self.assertTrue(
-                    any(
-                        event.get("event_type")
-                        == "supervisor.worker_restart_scheduled"
-                        for event in events
-                    ),
-                    msg=events,
-                )
-            finally:
-                _run_control("--stop", cwd=td, exe=staged_exe)
+            restarted = _wait_for(
+                lambda: (
+                    s
+                    if (s := _read_runtime_status(app.runtime_home))
+                    and s.get("status") == "running"
+                    and s.get("process_id") != first_pid
+                    else None
+                ),
+                timeout_s=8.0,
+                poll_s=0.1,
+            )
+            self.assertIsNotNone(restarted, msg="worker was not restarted")
+            self.assertGreater(restarted["process_id"], 0)
+            events = _read_runtime_events(app.runtime_home)
+            self.assertTrue(
+                any(
+                    event.get("event_type")
+                    == "supervisor.worker_restart_scheduled"
+                    for event in events
+                ),
+                msg=events,
+            )
 
     def test_restart_stops_and_relaunches_background_worker(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            staged_exe = td / "svg-mb-control.exe"
-            runtime_home = td / "runtime"
-            shutil.copy2(CONTROL_EXE, staged_exe)
-            _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                default_mode="read-loop",
-                poll_ms=100,
+        with StagedControlApp() as app:
+            result = app.start(
+                env=_sim_direct_env(channel=3, amd_temp_c=70.0),
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"{result.stdout}\n{result.stderr}",
+            )
+            first_status = _wait_for(
+                lambda: _read_runtime_status(app.runtime_home),
+                timeout_s=5.0,
+            )
+            self.assertIsNotNone(first_status)
+            first_pid = first_status["process_id"]
+
+            restart_result = app.restart(
+                env=_sim_direct_env(channel=4, amd_temp_c=72.0),
+            )
+            self.assertEqual(
+                restart_result.returncode,
+                0,
+                msg=f"{restart_result.stdout}\n{restart_result.stderr}",
+            )
+            self.assertIn(
+                "launched read-loop in background",
+                restart_result.stdout,
             )
 
-            try:
-                result = _run_control(
-                    cwd=td,
-                    exe=staged_exe,
-                    env=_sim_direct_env(channel=3, amd_temp_c=70.0),
-                )
-                self.assertEqual(
-                    result.returncode,
-                    0,
-                    msg=f"{result.stdout}\n{result.stderr}",
-                )
-                first_status = _wait_for(
-                    lambda: _read_runtime_status(runtime_home),
-                    timeout_s=5.0,
-                )
-                self.assertIsNotNone(first_status)
-                first_pid = first_status["process_id"]
+            restarted = _wait_for(
+                lambda: (
+                    s
+                    if (s := _read_runtime_status(app.runtime_home))
+                    and s.get("status") == "running"
+                    and s.get("process_id") != first_pid
+                    else None
+                ),
+                timeout_s=8.0,
+                poll_s=0.1,
+            )
+            self.assertIsNotNone(restarted, msg="worker was not relaunched")
+            state = _wait_for(
+                lambda: (
+                    s
+                    if (s := _read_runtime_current_state(app.runtime_home))
+                    and s["fans"][0]["channel"] == 4
+                    else None
+                ),
+                timeout_s=5.0,
+            )
+            self.assertIsNotNone(state, msg="restarted worker did not refresh")
+            self.assertEqual(state["amd_sensors"][0]["temperature_c"], 72.0)
 
-                restart_result = _run_control(
-                    "--restart",
-                    cwd=td,
-                    exe=staged_exe,
-                    env=_sim_direct_env(channel=4, amd_temp_c=72.0),
-                )
-                self.assertEqual(
-                    restart_result.returncode,
-                    0,
-                    msg=f"{restart_result.stdout}\n{restart_result.stderr}",
-                )
-                self.assertIn(
-                    "launched read-loop in background",
-                    restart_result.stdout,
-                )
-
-                restarted = _wait_for(
-                    lambda: (
-                        s
-                        if (s := _read_runtime_status(runtime_home))
-                        and s.get("status") == "running"
-                        and s.get("process_id") != first_pid
-                        else None
-                    ),
-                    timeout_s=8.0,
-                    poll_s=0.1,
-                )
-                self.assertIsNotNone(restarted, msg="worker was not relaunched")
-                state = _wait_for(
-                    lambda: (
-                        s
-                        if (s := _read_runtime_current_state(runtime_home))
-                        and s["fans"][0]["channel"] == 4
-                        else None
-                    ),
-                    timeout_s=5.0,
-                )
-                self.assertIsNotNone(state, msg="restarted worker did not refresh")
-                self.assertEqual(state["amd_sensors"][0]["temperature_c"], 72.0)
-
-                # Regression: the exiting old supervisor must not clobber the
-                # successor's control_supervisor.json on an intentional
-                # restart. The sidecar must track the new worker, not the
-                # pre-restart pid.
-                restarted_pid = restarted["process_id"]
-                supervisor_state = _wait_for(
-                    lambda: (
-                        sv
-                        if (
-                            sv := _read_json(
-                                runtime_home / "control_supervisor.json"
-                            )
+            # Regression: the exiting old supervisor must not clobber the
+            # successor's control_supervisor.json on an intentional restart.
+            # The sidecar must track the new worker, not the pre-restart pid.
+            restarted_pid = restarted["process_id"]
+            supervisor_state = _wait_for(
+                lambda: (
+                    sv
+                    if (
+                        sv := _read_json(
+                            app.runtime_home / "control_supervisor.json"
                         )
-                        and sv.get("last_worker_pid") == restarted_pid
-                        else None
-                    ),
-                    timeout_s=5.0,
-                    poll_s=0.1,
-                )
-                self.assertIsNotNone(
-                    supervisor_state,
-                    msg="control_supervisor.json was clobbered by the exiting "
-                    "supervisor (stale last_worker_pid after --restart)",
-                )
-                self.assertNotEqual(
-                    supervisor_state["last_worker_pid"],
-                    first_pid,
-                    msg="supervisor sidecar still shows the pre-restart worker",
-                )
-            finally:
-                _run_control("--stop", cwd=td, exe=staged_exe)
+                    )
+                    and sv.get("last_worker_pid") == restarted_pid
+                    else None
+                ),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            self.assertIsNotNone(
+                supervisor_state,
+                msg="control_supervisor.json was clobbered by the exiting "
+                "supervisor (stale last_worker_pid after --restart)",
+            )
+            self.assertNotEqual(
+                supervisor_state["last_worker_pid"],
+                first_pid,
+                msg="supervisor sidecar still shows the pre-restart worker",
+            )
 
     def test_zero_arg_staged_launch_reports_startup_failure(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            staged_exe = td / "svg-mb-control.exe"
-            runtime_home = td / "runtime"
-            shutil.copy2(CONTROL_EXE, staged_exe)
-            _write_read_loop_config(
-                td,
-                runtime_home=runtime_home,
-                default_mode="read-loop",
-                poll_ms=100,
-            )
-            runtime_home.mkdir(parents=True, exist_ok=True)
-            (runtime_home / "pending_writes.json").write_text(
+        with StagedControlApp() as app:
+            app.runtime_home.mkdir(parents=True, exist_ok=True)
+            (app.runtime_home / "pending_writes.json").write_text(
                 '{"schema_version":1,"entries":[]} trailing',
                 encoding="utf-8",
             )
 
-            result = _run_control(
-                cwd=td,
-                exe=staged_exe,
+            result = app.start(
                 env=_sim_direct_env(channel=1, amd_temp_c=74.0),
             )
 
