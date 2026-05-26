@@ -141,54 +141,16 @@ std::vector<std::filesystem::path> CollectPlantModelPaths(
     return out;
 }
 
-}  // namespace
-
-int RunAnalyzeIngest(const IngestOptions& options) {
-    std::error_code ec;
-    if (!std::filesystem::is_directory(options.runtime_home, ec)) {
-        std::cerr << "Error: runtime_home is not a directory: "
-                  << options.runtime_home.string() << '\n';
-        return 1;
-    }
-
-    const std::filesystem::path db_path = options.db_path.empty()
-        ? options.runtime_home / "svg_mb_control.db"
-        : options.db_path;
-
-    if (!db_path.parent_path().empty()) {
-        std::filesystem::create_directories(db_path.parent_path(), ec);
-    }
-
-    Database db;
-    try {
-        db.Open(db_path);
-    } catch (const std::exception& error) {
-        std::cerr << "Error: failed to open database " << db_path.string()
-                  << ": " << error.what() << '\n';
-        return 1;
-    }
-
-    try {
-        BootstrapSchema(db);
-    } catch (const std::exception& error) {
-        std::cerr << "Error: schema bootstrap failed: " << error.what() << '\n';
-        return 1;
-    }
-
-    const int version = GetSchemaVersion(db);
-    if (version != kSchemaVersion) {
-        std::cerr << "Error: database schema version " << version
-                  << " is not supported (this build expects "
-                  << kSchemaVersion << ")\n";
-        return 1;
-    }
-
-    const std::string ingested_at =
-        FormatLocalIso8601(std::chrono::system_clock::now());
-
-    IngestSummary summary;
-    std::vector<RunWindow> run_windows;
-
+// Phase 1 of ingest: walk every manifest under runtime_home/logs, parse it,
+// dedupe vs existing runs (or force-replace), parse the paired CSV, and
+// insert one runs row + N tick_samples rows per manifest. Populates
+// run_windows with the (run_id, session_start, mode) tuples that were
+// inserted in this invocation; the events phase needs these for attribution.
+void IngestManifests(Database& db,
+                     const IngestOptions& options,
+                     const std::string& ingested_at,
+                     IngestSummary& summary,
+                     std::vector<RunWindow>& run_windows) {
     const auto manifests = CollectManifestPaths(options.runtime_home);
     for (const auto& manifest_path : manifests) {
         ManifestData manifest;
@@ -261,63 +223,83 @@ int RunAnalyzeIngest(const IngestOptions& options) {
                       << " ticks=" << parsed_csv.rows.size() << '\n';
         }
     }
+}
 
+// Phase 2 of ingest: parse svg_mb_control_events.jsonl and attribute each
+// event to the run whose (session_start, mode) window contains it. With
+// --force the events table is cleared and all runs in the DB are considered
+// for attribution; otherwise only run_windows from the current manifest pass.
+void IngestEvents(Database& db,
+                  const IngestOptions& options,
+                  const std::vector<RunWindow>& run_windows,
+                  IngestSummary& summary) {
     const std::filesystem::path events_path =
         options.runtime_home / "logs" / "svg_mb_control_events.jsonl";
-    if (std::filesystem::exists(events_path, ec)) {
-        std::vector<EventData> events;
-        try {
-            events = ParseEventsJsonl(events_path);
-        } catch (const std::exception& error) {
-            std::cerr << "Warning: failed to parse events: "
-                      << error.what() << '\n';
-        }
-
-        if (options.force) {
-            Transaction txn(db.handle());
-            db.Exec("DELETE FROM events");
-            txn.Commit();
-        }
-
-        std::vector<RunWindow> windows_for_attribution;
-        if (options.force) {
-            Statement query = db.Prepare(
-                "SELECT id, session_start, mode FROM runs ORDER BY id");
-            while (query.Step()) {
-                windows_for_attribution.push_back({
-                    query.ColumnInt(0),
-                    query.ColumnText(1),
-                    query.ColumnText(2),
-                });
-            }
-        } else {
-            windows_for_attribution = run_windows;
-        }
-
-        try {
-            Transaction txn(db.handle());
-            const int n = InsertEventsAttributed(
-                db, events, windows_for_attribution);
-            summary.events_ingested += n;
-
-            for (const auto& w : windows_for_attribution) {
-                Statement count = db.Prepare(
-                    "SELECT COUNT(*) FROM events WHERE run_id = ?1");
-                count.BindInt(1, w.run_id);
-                count.Step();
-                Statement update = db.Prepare(
-                    "UPDATE runs SET event_count_ingested = ?1 WHERE id = ?2");
-                update.BindInt(1, count.ColumnInt(0));
-                update.BindInt(2, w.run_id);
-                update.Step();
-            }
-            txn.Commit();
-        } catch (const std::exception& error) {
-            std::cerr << "Error: failed to insert events: " << error.what()
-                      << '\n';
-        }
+    std::error_code ec;
+    if (!std::filesystem::exists(events_path, ec)) {
+        return;
     }
 
+    std::vector<EventData> events;
+    try {
+        events = ParseEventsJsonl(events_path);
+    } catch (const std::exception& error) {
+        std::cerr << "Warning: failed to parse events: " << error.what()
+                  << '\n';
+    }
+
+    if (options.force) {
+        Transaction txn(db.handle());
+        db.Exec("DELETE FROM events");
+        txn.Commit();
+    }
+
+    std::vector<RunWindow> windows_for_attribution;
+    if (options.force) {
+        Statement query = db.Prepare(
+            "SELECT id, session_start, mode FROM runs ORDER BY id");
+        while (query.Step()) {
+            windows_for_attribution.push_back({
+                query.ColumnInt(0),
+                query.ColumnText(1),
+                query.ColumnText(2),
+            });
+        }
+    } else {
+        windows_for_attribution = run_windows;
+    }
+
+    try {
+        Transaction txn(db.handle());
+        const int n = InsertEventsAttributed(
+            db, events, windows_for_attribution);
+        summary.events_ingested += n;
+
+        for (const auto& w : windows_for_attribution) {
+            Statement count = db.Prepare(
+                "SELECT COUNT(*) FROM events WHERE run_id = ?1");
+            count.BindInt(1, w.run_id);
+            count.Step();
+            Statement update = db.Prepare(
+                "UPDATE runs SET event_count_ingested = ?1 WHERE id = ?2");
+            update.BindInt(1, count.ColumnInt(0));
+            update.BindInt(2, w.run_id);
+            update.Step();
+        }
+        txn.Commit();
+    } catch (const std::exception& error) {
+        std::cerr << "Error: failed to insert events: " << error.what()
+                  << '\n';
+    }
+}
+
+// Phase 3 of ingest: walk plant_model*.json captures, dedupe vs existing
+// rows (or force-replace), parse, and insert one plant_model_captures row
+// plus channels + steps per capture.
+void IngestPlantModels(Database& db,
+                       const IngestOptions& options,
+                       const std::string& ingested_at,
+                       IngestSummary& summary) {
     const auto plant_paths = CollectPlantModelPaths(options.runtime_home);
     for (const auto& pm_path : plant_paths) {
         const std::string canonical = Canonicalize(pm_path).string();
@@ -358,6 +340,59 @@ int RunAnalyzeIngest(const IngestOptions& options) {
                       << " channels=" << data.channels.size() << '\n';
         }
     }
+}
+
+}  // namespace
+
+int RunAnalyzeIngest(const IngestOptions& options) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(options.runtime_home, ec)) {
+        std::cerr << "Error: runtime_home is not a directory: "
+                  << options.runtime_home.string() << '\n';
+        return 1;
+    }
+
+    const std::filesystem::path db_path = options.db_path.empty()
+        ? options.runtime_home / "svg_mb_control.db"
+        : options.db_path;
+
+    if (!db_path.parent_path().empty()) {
+        std::filesystem::create_directories(db_path.parent_path(), ec);
+    }
+
+    Database db;
+    try {
+        db.Open(db_path);
+    } catch (const std::exception& error) {
+        std::cerr << "Error: failed to open database " << db_path.string()
+                  << ": " << error.what() << '\n';
+        return 1;
+    }
+
+    try {
+        BootstrapSchema(db);
+    } catch (const std::exception& error) {
+        std::cerr << "Error: schema bootstrap failed: " << error.what() << '\n';
+        return 1;
+    }
+
+    const int version = GetSchemaVersion(db);
+    if (version != kSchemaVersion) {
+        std::cerr << "Error: database schema version " << version
+                  << " is not supported (this build expects "
+                  << kSchemaVersion << ")\n";
+        return 1;
+    }
+
+    const std::string ingested_at =
+        FormatLocalIso8601(std::chrono::system_clock::now());
+
+    IngestSummary summary;
+    std::vector<RunWindow> run_windows;
+
+    IngestManifests(db, options, ingested_at, summary, run_windows);
+    IngestEvents(db, options, run_windows, summary);
+    IngestPlantModels(db, options, ingested_at, summary);
 
     std::cout << "analyze ingest: db=" << db_path.string()
               << " runs_ingested=" << summary.runs_ingested
