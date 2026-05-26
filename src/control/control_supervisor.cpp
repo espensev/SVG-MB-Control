@@ -554,68 +554,28 @@ int LaunchDetachedLongRunningMode(RunMode mode,
     return 0;
 }
 
-int RunSupervisedLongRunningMode(RunMode mode,
-                                 const svg_mb_control::ControlConfig& config) {
-    const std::filesystem::path exe_path = CurrentExecutablePath();
-    if (exe_path.empty()) {
-        throw std::runtime_error("Could not resolve current executable path.");
-    }
-    const std::filesystem::path runtime_home =
-        svg_mb_control::ResolveRuntimeHomePath(config);
-    std::error_code ec;
-    std::filesystem::create_directories(runtime_home, ec);
-    if (ec) {
-        throw std::runtime_error("Could not create runtime home: " +
-                                 ec.message());
-    }
+namespace {
 
-    // Singleton: only one supervisor per runtime_home. Acquire before any
-    // sidecar write or stop-request mutation so a duplicate launch can never
-    // clobber the live supervisor's state.
-    SingletonAcquisition supervisor_singleton =
-        TryAcquireRuntimeSingleton(SingletonRole::kSupervisor, runtime_home);
-    if (!supervisor_singleton.acquired) {
-        const auto existing = ReadSupervisorState(runtime_home);
-        std::cerr << "Error: another svg-mb-control supervisor is already "
-                  << "running for runtime_home=" << runtime_home.string()
-                  << '\n';
-        if (existing.has_value() && existing->supervisor_pid != 0u) {
-            std::cerr << "  active_supervisor_pid: "
-                      << existing->supervisor_pid << '\n';
-        }
-        if (!supervisor_singleton.diagnostic.empty()) {
-            std::cerr << "  detail: " << supervisor_singleton.diagnostic
-                      << '\n';
-        }
-        return 2;
-    }
-
-    svg_mb_control::ClearRuntimeStopRequest(runtime_home);
-
-    const std::filesystem::path working_directory = exe_path.parent_path();
-    const std::filesystem::path stdout_path =
-        runtime_home / "svg-mb-control.worker.stdout.log";
-    const std::filesystem::path stderr_path =
-        runtime_home / "svg-mb-control.worker.stderr.log";
+// Restart-backoff loop body for RunSupervisedLongRunningMode. Spawns the
+// worker, waits, records exit state, applies backoff, and repeats until
+// either a stop is requested or the worker exits cleanly. Returns 0 on
+// graceful exit; non-zero is the startup-failure exit code that the parent
+// surfaces to the caller (the shutdown event fires only on a 0 return).
+int RunSupervisorWorkerLoop(
+    RunMode mode,
+    const std::filesystem::path& exe_path,
+    const std::filesystem::path& config_source_path,
+    const std::filesystem::path& working_directory,
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& stdout_path,
+    const std::filesystem::path& stderr_path,
+    SupervisorState& supervisor_state) {
     std::uint32_t restart_count = 0u;
-
-    SupervisorState supervisor_state;
-    supervisor_state.supervisor_pid = GetCurrentProcessId();
-    WriteSupervisorState(runtime_home, supervisor_state);
-
-    svg_mb_control::AppendRuntimeEvent(
-        runtime_home,
-        svg_mb_control::RuntimeLogEvent{
-            .mode = std::string(RunModeLabel(mode)),
-            .event_type = "supervisor.start",
-            .detail = "background supervisor started",
-            .success = true,
-        });
 
     while (!svg_mb_control::RuntimeStopRequested(runtime_home)) {
         StartedProcess worker = StartHiddenProcess(
             exe_path,
-            BuildManagedCommandLine(exe_path, mode, config.source_path, false),
+            BuildManagedCommandLine(exe_path, mode, config_source_path, false),
             working_directory,
             stdout_path,
             stderr_path);
@@ -730,6 +690,74 @@ int RunSupervisedLongRunningMode(RunMode mode,
              ++elapsed) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+    }
+    return 0;
+}
+
+}  // namespace
+
+int RunSupervisedLongRunningMode(RunMode mode,
+                                 const svg_mb_control::ControlConfig& config) {
+    const std::filesystem::path exe_path = CurrentExecutablePath();
+    if (exe_path.empty()) {
+        throw std::runtime_error("Could not resolve current executable path.");
+    }
+    const std::filesystem::path runtime_home =
+        svg_mb_control::ResolveRuntimeHomePath(config);
+    std::error_code ec;
+    std::filesystem::create_directories(runtime_home, ec);
+    if (ec) {
+        throw std::runtime_error("Could not create runtime home: " +
+                                 ec.message());
+    }
+
+    // Singleton: only one supervisor per runtime_home. Acquire before any
+    // sidecar write or stop-request mutation so a duplicate launch can never
+    // clobber the live supervisor's state.
+    SingletonAcquisition supervisor_singleton =
+        TryAcquireRuntimeSingleton(SingletonRole::kSupervisor, runtime_home);
+    if (!supervisor_singleton.acquired) {
+        const auto existing = ReadSupervisorState(runtime_home);
+        std::cerr << "Error: another svg-mb-control supervisor is already "
+                  << "running for runtime_home=" << runtime_home.string()
+                  << '\n';
+        if (existing.has_value() && existing->supervisor_pid != 0u) {
+            std::cerr << "  active_supervisor_pid: "
+                      << existing->supervisor_pid << '\n';
+        }
+        if (!supervisor_singleton.diagnostic.empty()) {
+            std::cerr << "  detail: " << supervisor_singleton.diagnostic
+                      << '\n';
+        }
+        return 2;
+    }
+
+    svg_mb_control::ClearRuntimeStopRequest(runtime_home);
+
+    const std::filesystem::path working_directory = exe_path.parent_path();
+    const std::filesystem::path stdout_path =
+        runtime_home / "svg-mb-control.worker.stdout.log";
+    const std::filesystem::path stderr_path =
+        runtime_home / "svg-mb-control.worker.stderr.log";
+
+    SupervisorState supervisor_state;
+    supervisor_state.supervisor_pid = GetCurrentProcessId();
+    WriteSupervisorState(runtime_home, supervisor_state);
+
+    svg_mb_control::AppendRuntimeEvent(
+        runtime_home,
+        svg_mb_control::RuntimeLogEvent{
+            .mode = std::string(RunModeLabel(mode)),
+            .event_type = "supervisor.start",
+            .detail = "background supervisor started",
+            .success = true,
+        });
+
+    const int loop_exit = RunSupervisorWorkerLoop(
+        mode, exe_path, config.source_path, working_directory, runtime_home,
+        stdout_path, stderr_path, supervisor_state);
+    if (loop_exit != 0) {
+        return loop_exit;
     }
 
     svg_mb_control::AppendRuntimeEvent(
