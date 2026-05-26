@@ -1,10 +1,14 @@
 # Control Pipeline — Mathematical Reference
 
-Status: **draft**, last checked 2026-05-20. Describes the math implemented today in
-`src/control/control_loop.cpp`, `src/control/channel_evaluator.cpp`, and
-`src/control/cadence_score.cpp`, with low-band and write-gate pieces in
-`src/control/low_band_integrator.cpp` and `src/control/channel_write.cpp`,
-plus curve/blend helpers in `src/policy/control_policy.cpp`. Cross-cuts the
+Status: **current**, last verified 2026-05-26 against
+`src/control/tick_runner.cpp` (per-tick orchestration),
+`src/control/channel_evaluator.cpp` (curve, smoothing, integrators, rate
+limit, authority reassert), `src/control/low_band_integrator.cpp` (global
+signal, debt, per-channel stage), `src/control/cadence_score.cpp` (slew
+score, cadence target, generic rate-limit helper),
+`src/control/channel_write.cpp` (write gates),
+`src/control/control_scheduler.cpp` (sliced wait), and
+`src/policy/control_policy.cpp` (curve / blend helpers). Cross-cuts the
 prose in `CONTROL_LOOP.md` with the actual numerical operators.
 
 This document is normative for the **computation**, not for the lifecycle
@@ -214,7 +218,13 @@ $\Delta\tau = \Delta t_k / 60\,000$ (in minutes). Configured per channel:
 $\alpha_{\uparrow}$ (`demand_smoothing_rise_alpha`),
 $\alpha_{\downarrow}$ (`demand_smoothing_fall_alpha`),
 $\rho^{\downarrow}$ (`decay_latch_pct_per_min`),
-$L$ (`decay_latch_above_pct`).
+$L$ (`decay_latch_above_pct`). The implementation clamps both $\alpha$
+values to $[0, 1]$ at use, so out-of-range smoothing config silently
+saturates rather than overshooting or inverting the EMA direction. The
+*evaluation* interval $\Delta t_k$ used here is the channel's
+`elapsed_since_last_evaluation_ms` (time since the channel's previous
+`EvaluateChannel` call), not the write interval used by the rate limiter
+in §8.3.
 
 If $|\Delta| \le 10^{-4}$, $s^{(c)}_k = r^{(c)}_k$. Otherwise:
 
@@ -576,8 +586,15 @@ $$
 
 The downward (tightening) rate is effectively infinite, so $E_k$ snaps
 down on a fresh transient; the upward rate is `cadence_relax_per_s`
-per second. When $F = P$ (default), $E_k \equiv P$ and the cadence path
-is byte-identical to the pre-feature loop.
+per second. When $F = P$ (default, and the shipped profile), $E_k
+\equiv P$ and the cadence path is byte-identical to the pre-feature
+loop.
+
+The CSV / status field `loop_slip_ms` is
+$\Delta t_k - P$, i.e. the achieved interval minus the **base** poll
+period $P$, not minus the effective $E_k$. Slip is therefore a measure
+of overshoot against the configured base cadence and remains a valid
+budget indicator even when $F < P$.
 
 ### 10.3 Stop-latency interaction
 
@@ -688,6 +705,35 @@ math check as code/config validation only.
   JSONL rows, and Windows error 5 sidecar/evidence write failures. Treat raw
   analyzer maxima from this run as unreliable unless filtered.
 
+2026-05-26 low-load steady-state check (post airflow-floor adoption,
+commit `10ceaec`):
+
+- Source run: `release\runtime\logs\svg_mb_control_output.csv`
+  (session start `2026-05-26T10:14:00`, manifest config
+  `sha256=036cda22e65c7f06f64f865556cf18771c86caa715b34f00a7acca489c093f06`,
+  producer git hash `b396b53a94a9`).
+- Per-channel `last_setpoint_pct` matched the configured floors
+  within the PWM quantization step
+  (channels `0/1/2/3/4/5` at
+  `15.5/22.0/60.15/56.15/31.0/20.0`%).
+- `low_band_evidence.json` reported `activation_count = 0` and
+  `max_debt ≈ 8.7e-4`; the low-band path stayed below the per-channel
+  debt thresholds for the duration of the capture, so the floor uplift
+  kept the integrated signal below activation under the observed
+  Tctl/Tdie p50 of `~46.8 C` and GPU core p50 `~28 C`.
+- `control_runtime.json` reported no open circuit breakers, no
+  consecutive sensor or write failures, and
+  `loop_slip_ms ≤ ~1.1 ms` against a `poll_tick_ms = 250` budget.
+- No logging-quality regressions reproduced from the 2026-05-24 run
+  (no malformed CSV rows, no Windows error 5 sidecar failures
+  observed in `svg_mb_control_events.jsonl`).
+
+The 2026-05-26 capture validates the identities in §8.2 (clipped
+additive composition), §6 (integrator hold at zero with no rising
+input), and §7 (debt does not accrue when `signal ≈ 0`) against the
+adopted floors, and confirms `loop_slip_ms`/`loop_overrun` invariants
+for §10.
+
 ### 13.2 Per-run checks to keep current
 
 For every real-data pass, use the active runtime manifest/status to identify
@@ -716,8 +762,9 @@ changes enough that these checks are incomplete.
 
 | Section | Source |
 |---|---|
+| §2 (per-tick orchestration) | `tick_runner.cpp:RunControlTick` (calls `UpdateLowBandState` before the per-channel loop, then `EvaluateChannel` + `TryApplyChannelSetpoint` per channel, then `ComputeCadence`, then `WaitForNextControlTick`) |
 | §3   | `control_policy.cpp:BlendTemps`, `channel_evaluator.cpp:GpuControlEnvelopeC` |
-| §4   | `control_policy.cpp:LookupCurve` |
+| §4   | `control_policy.cpp:LookupCurve`, `control_policy.cpp:SmootherStep` |
 | §5   | `channel_evaluator.cpp:ApplyDemandSmoothing` |
 | §6.1–6.2 | `channel_evaluator.cpp:UpdatePressureBoost`, `UpdateThermalPressureBoost`, `UpdateMidbandPressureBoost`, `UpdateGpuAirflowBoost` |
 | §6.3 | `channel_evaluator.cpp:UpdateCpuLowSoakBoost` |
@@ -725,5 +772,5 @@ changes enough that these checks are incomplete.
 | §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `cadence_score.cpp:MoveTowardRateLimited` |
 | §8.2–8.3 | `channel_evaluator.cpp:EvaluateChannel` (final composition) |
 | §9   | `channel_write.cpp:TryApplyChannelSetpoint`, `channel_evaluator.cpp:FanNeedsAuthorityReassert`, `WriteCooldownForAuthorityReassert` |
-| §10  | `cadence_score.cpp:ComputeCadence`, `control_scheduler.cpp:WaitForNextControlTick` |
+| §10  | `cadence_score.cpp:ComputeCadence`, `control_scheduler.cpp:WaitForNextControlTick`, `tick_runner.cpp` (CSV `loop_slip_ms` derivation) |
 | §11  | `channel_evaluator.cpp:EvaluateChannel` (sensor safe-mode branch) |
