@@ -243,6 +243,82 @@ bool HoldAndSampleStep(AmdReader& amd_reader,
     return false;
 }
 
+// Pure assembly of the plant_model_capture JSON payload. No I/O and no
+// side-effects; extracted so RunCalibration's tail is one helper call plus
+// the file write. Mirrors BuildManifestPayload's pattern in runtime_csv_archive.
+nlohmann::json BuildCalibrationPayload(
+    const std::vector<ChannelCalibration>& results,
+    const CalibrationOptions& options,
+    const std::string& abort_reason) {
+    nlohmann::json payload;
+    payload["schema"] = "svg_mb_control.plant_model_capture.v1";
+    payload["schema_version"] = 1;
+    payload["captured_local"] =
+        FormatLocalIso8601(std::chrono::system_clock::now());
+    payload["abort_reason"] = abort_reason.empty()
+        ? nlohmann::json(nullptr)
+        : nlohmann::json(abort_reason);
+
+    nlohmann::json producer;
+    producer["tool"] = "svg-mb-control";
+#ifdef SVG_MB_CONTROL_VERSION
+    producer["version"] = SVG_MB_CONTROL_VERSION;
+#endif
+#ifdef SVG_MB_CONTROL_GIT_HASH
+    producer["git_hash"] = SVG_MB_CONTROL_GIT_HASH;
+#endif
+    payload["producer"] = producer;
+
+    nlohmann::json options_json;
+    options_json["settle_window_ms"] = options.settle_window_ms;
+    options_json["abort_temp_ceiling_c"] = options.abort_temp_ceiling_c;
+    options_json["sequence"] = nlohmann::json::array();
+    for (const auto& step : options.sequence) {
+        options_json["sequence"].push_back({
+            {"duty_pct", step.duty_pct},
+            {"hold_ms", step.hold_ms},
+        });
+    }
+    payload["options"] = options_json;
+
+    payload["channels"] = nlohmann::json::array();
+    for (const auto& entry : results) {
+        nlohmann::json channel_json;
+        channel_json["channel"] = entry.channel;
+        channel_json["baseline_captured"] = entry.baseline_captured;
+        channel_json["restored"] = entry.restored;
+        if (!entry.note.empty()) {
+            channel_json["note"] = entry.note;
+        }
+        nlohmann::json baseline_json;
+        baseline_json["duty_raw"] = entry.baseline_duty_raw;
+        baseline_json["mode_raw"] = entry.baseline_mode_raw;
+        EmitJsonNumber(baseline_json, "rpm", entry.baseline_rpm);
+        EmitJsonNumber(baseline_json, "tctl_c", entry.baseline_tctl_c);
+        EmitJsonNumber(baseline_json, "gpu_envelope_c",
+                       entry.baseline_gpu_envelope_c);
+        channel_json["baseline"] = baseline_json;
+        channel_json["steps"] = nlohmann::json::array();
+        for (const auto& step : entry.steps) {
+            nlohmann::json step_json;
+            step_json["duty_pct_target"] = step.duty_pct_target;
+            step_json["hold_ms"] = step.hold_ms;
+            step_json["settle_window_ms"] = step.settle_window_ms;
+            step_json["settle_sample_count"] = step.settle_sample_count;
+            EmitJsonNumber(step_json, "duty_pct_observed_mean",
+                           step.duty_pct_observed_mean);
+            EmitJsonNumber(step_json, "rpm_mean", step.rpm_mean);
+            EmitJsonNumber(step_json, "rpm_stddev", step.rpm_stddev);
+            EmitJsonNumber(step_json, "tctl_c_mean", step.tctl_c_mean);
+            EmitJsonNumber(step_json, "gpu_envelope_c_mean",
+                           step.gpu_envelope_c_mean);
+            channel_json["steps"].push_back(step_json);
+        }
+        payload["channels"].push_back(channel_json);
+    }
+    return payload;
+}
+
 }  // namespace
 
 int RunCalibration(const ControlConfig& base,
@@ -394,72 +470,8 @@ int RunCalibration(const ControlConfig& base,
         }
     }
 
-    nlohmann::json payload;
-    payload["schema"] = "svg_mb_control.plant_model_capture.v1";
-    payload["schema_version"] = 1;
-    payload["captured_local"] =
-        FormatLocalIso8601(std::chrono::system_clock::now());
-    payload["abort_reason"] = abort_reason.empty()
-        ? nlohmann::json(nullptr)
-        : nlohmann::json(abort_reason);
-
-    nlohmann::json producer;
-    producer["tool"] = "svg-mb-control";
-#ifdef SVG_MB_CONTROL_VERSION
-    producer["version"] = SVG_MB_CONTROL_VERSION;
-#endif
-#ifdef SVG_MB_CONTROL_GIT_HASH
-    producer["git_hash"] = SVG_MB_CONTROL_GIT_HASH;
-#endif
-    payload["producer"] = producer;
-
-    nlohmann::json options_json;
-    options_json["settle_window_ms"] = options.settle_window_ms;
-    options_json["abort_temp_ceiling_c"] = options.abort_temp_ceiling_c;
-    options_json["sequence"] = nlohmann::json::array();
-    for (const auto& step : options.sequence) {
-        options_json["sequence"].push_back({
-            {"duty_pct", step.duty_pct},
-            {"hold_ms", step.hold_ms},
-        });
-    }
-    payload["options"] = options_json;
-
-    payload["channels"] = nlohmann::json::array();
-    for (const auto& entry : results) {
-        nlohmann::json channel_json;
-        channel_json["channel"] = entry.channel;
-        channel_json["baseline_captured"] = entry.baseline_captured;
-        channel_json["restored"] = entry.restored;
-        if (!entry.note.empty()) {
-            channel_json["note"] = entry.note;
-        }
-        nlohmann::json baseline_json;
-        baseline_json["duty_raw"] = entry.baseline_duty_raw;
-        baseline_json["mode_raw"] = entry.baseline_mode_raw;
-        EmitJsonNumber(baseline_json, "rpm", entry.baseline_rpm);
-        EmitJsonNumber(baseline_json, "tctl_c", entry.baseline_tctl_c);
-        EmitJsonNumber(baseline_json, "gpu_envelope_c",
-                       entry.baseline_gpu_envelope_c);
-        channel_json["baseline"] = baseline_json;
-        channel_json["steps"] = nlohmann::json::array();
-        for (const auto& step : entry.steps) {
-            nlohmann::json step_json;
-            step_json["duty_pct_target"] = step.duty_pct_target;
-            step_json["hold_ms"] = step.hold_ms;
-            step_json["settle_window_ms"] = step.settle_window_ms;
-            step_json["settle_sample_count"] = step.settle_sample_count;
-            EmitJsonNumber(step_json, "duty_pct_observed_mean",
-                           step.duty_pct_observed_mean);
-            EmitJsonNumber(step_json, "rpm_mean", step.rpm_mean);
-            EmitJsonNumber(step_json, "rpm_stddev", step.rpm_stddev);
-            EmitJsonNumber(step_json, "tctl_c_mean", step.tctl_c_mean);
-            EmitJsonNumber(step_json, "gpu_envelope_c_mean",
-                           step.gpu_envelope_c_mean);
-            channel_json["steps"].push_back(step_json);
-        }
-        payload["channels"].push_back(channel_json);
-    }
+    const nlohmann::json payload =
+        BuildCalibrationPayload(results, options, abort_reason);
 
     const std::filesystem::path output =
         options.output_path.empty()
