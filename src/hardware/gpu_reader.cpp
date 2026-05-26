@@ -141,6 +141,115 @@ GpuTempSample MakeSimGpuTempSample() {
     return out;
 }
 
+// Category fillers for the simulated GPU evidence path. Each mutates the
+// fields it owns and reads its env-var defaults; together they collapse the
+// ~100 sequential env-var assignments in MakeSimGpuEvidenceSample into one
+// linear list of named groups so it is obvious which env vars feed which
+// field block.
+
+void FillSimGpuTemperatures(GpuEvidenceSample& out) {
+    out.core_c = GetDoubleEnvOrDefault("SVG_MB_CONTROL_SIM_GPU_CORE_C", 62.5);
+    out.memjn_c = GetDoubleEnvOrDefault("SVG_MB_CONTROL_SIM_GPU_MEMJN_C", 72.25);
+    out.hotspot_c = GetDoubleEnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C", 80.75);
+    out.nvml_temp_c = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_TEMP_C", 63u);
+}
+
+void FillSimGpuClocks(GpuEvidenceSample& out) {
+    out.clock_graphics_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CLOCK_GRAPHICS_MHZ", 2500u);
+    out.clock_memory_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CLOCK_MEMORY_MHZ", 10500u);
+    out.clock_video_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CLOCK_VIDEO_MHZ", 1800u);
+    out.clock_boost_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CLOCK_BOOST_MHZ", 2700u);
+    out.nvml_clock_graphics_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_CLOCK_GRAPHICS_MHZ", 2490u);
+    out.nvml_clock_memory_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_CLOCK_MEMORY_MHZ", 10490u);
+    out.nvml_clock_video_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_CLOCK_VIDEO_MHZ", 1790u);
+}
+
+void FillSimGpuUtilization(GpuEvidenceSample& out) {
+    out.pstate = GetInt32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_PSTATE", 0);
+    out.util_gpu_pct = GetInt32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_UTIL_GPU_PCT", 67);
+    out.util_fb_pct = GetInt32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_UTIL_FB_PCT", 21);
+    out.util_vid_pct = GetInt32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_UTIL_VID_PCT", 4);
+    out.nvml_util_gpu_pct = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_UTIL_GPU_PCT", 68u);
+    out.nvml_util_mem_pct = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_UTIL_MEM_PCT", 22u);
+    out.nvml_encoder_pct = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_ENCODER_PCT", 3u);
+    out.nvml_decoder_pct = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_DECODER_PCT", 2u);
+}
+
+void FillSimGpuMemoryAndPower(GpuEvidenceSample& out) {
+    out.vram_used_mb = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_VRAM_USED_MB", 8192u);
+    out.vram_free_mb = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_VRAM_FREE_MB", 8192u);
+    out.vram_total_mb = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_VRAM_TOTAL_MB", 16384u);
+    out.nvml_power_mw = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_POWER_MW", 275000u);
+    out.power_source = GetEnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_POWER_SOURCE", "nvml");
+    out.voltage_core_mv = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_VOLTAGE_CORE_MV", 975u);
+    out.pcie_tx_kb_s = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_PCIE_TX_KB_S", 1024u);
+    out.pcie_rx_kb_s = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_PCIE_RX_KB_S", 2048u);
+    out.pcie_link_gen = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_PCIE_LINK_GEN", 5u);
+    out.pcie_link_width = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_PCIE_LINK_WIDTH", 16u);
+    out.throttle_reasons = GetUint64EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_THROTTLE_REASONS", 8u);
+}
+
+void FillSimGpuDeviceCollections(GpuEvidenceSample& out) {
+    out.fan_count = std::min<std::uint32_t>(
+        GetUint32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_FAN_COUNT", 1u),
+        static_cast<std::uint32_t>(kGpuEvidenceMaxFans));
+    if (out.fan_count > 0u) {
+        out.fans[0].level_pct = GetUint32EnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_FAN0_LEVEL_PCT", 44u);
+        out.fans[0].rpm = GetUint32EnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_FAN0_RPM", 1550u);
+    }
+
+    out.power_rail_count = std::min<std::uint32_t>(
+        GetUint32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_POWER_RAIL_COUNT", 1u),
+        static_cast<std::uint32_t>(kGpuEvidenceMaxPowerRails));
+    if (out.power_rail_count > 0u) {
+        out.power_rails[0].domain = GetUint32EnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_POWER_RAIL0_DOMAIN", 0u);
+        out.power_rails[0].power_mw = GetUint32EnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_POWER_RAIL0_POWER_MW", 123000u);
+    }
+
+    out.thermal_slot_count = std::min<std::uint32_t>(
+        GetUint32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_THERMAL_SLOT_COUNT", 2u),
+        static_cast<std::uint32_t>(kGpuEvidenceMaxThermalSlots));
+    if (out.thermal_slot_count > 0u) {
+        out.thermal_slots[0] = GetInt32EnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_THERMAL_SLOT0_RAW", 16000);
+    }
+    if (out.thermal_slot_count > 1u) {
+        out.thermal_slots[1] = GetInt32EnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_THERMAL_SLOT1_RAW", 18496);
+    }
+}
+
 GpuEvidenceSample MakeSimGpuEvidenceSample(std::string_view mode_label) {
     std::string mode_warning;
     GpuEvidenceSample out;
@@ -157,99 +266,11 @@ GpuEvidenceSample MakeSimGpuEvidenceSample(std::string_view mode_label) {
     out.time_ms = GetInt64EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_TIME_MS", 1234);
     out.dt_ms = GetInt64EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_DT_MS", 16);
 
-    out.core_c = GetDoubleEnvOrDefault("SVG_MB_CONTROL_SIM_GPU_CORE_C", 62.5);
-    out.memjn_c = GetDoubleEnvOrDefault("SVG_MB_CONTROL_SIM_GPU_MEMJN_C", 72.25);
-    out.hotspot_c = GetDoubleEnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C", 80.75);
-    out.nvml_temp_c = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_TEMP_C", 63u);
-
-    out.clock_graphics_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_CLOCK_GRAPHICS_MHZ", 2500u);
-    out.clock_memory_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_CLOCK_MEMORY_MHZ", 10500u);
-    out.clock_video_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_CLOCK_VIDEO_MHZ", 1800u);
-    out.clock_boost_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_CLOCK_BOOST_MHZ", 2700u);
-    out.nvml_clock_graphics_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_CLOCK_GRAPHICS_MHZ", 2490u);
-    out.nvml_clock_memory_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_CLOCK_MEMORY_MHZ", 10490u);
-    out.nvml_clock_video_mhz = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_CLOCK_VIDEO_MHZ", 1790u);
-
-    out.pstate = GetInt32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_PSTATE", 0);
-    out.util_gpu_pct = GetInt32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_UTIL_GPU_PCT", 67);
-    out.util_fb_pct = GetInt32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_UTIL_FB_PCT", 21);
-    out.util_vid_pct = GetInt32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_UTIL_VID_PCT", 4);
-    out.nvml_util_gpu_pct = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_UTIL_GPU_PCT", 68u);
-    out.nvml_util_mem_pct = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_UTIL_MEM_PCT", 22u);
-    out.nvml_encoder_pct = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_ENCODER_PCT", 3u);
-    out.nvml_decoder_pct = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_DECODER_PCT", 2u);
-
-    out.vram_used_mb = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_VRAM_USED_MB", 8192u);
-    out.vram_free_mb = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_VRAM_FREE_MB", 8192u);
-    out.vram_total_mb = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_VRAM_TOTAL_MB", 16384u);
-
-    out.fan_count = std::min<std::uint32_t>(
-        GetUint32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_FAN_COUNT", 1u),
-        static_cast<std::uint32_t>(kGpuEvidenceMaxFans));
-    if (out.fan_count > 0u) {
-        out.fans[0].level_pct = GetUint32EnvOrDefault(
-            "SVG_MB_CONTROL_SIM_GPU_FAN0_LEVEL_PCT", 44u);
-        out.fans[0].rpm = GetUint32EnvOrDefault(
-            "SVG_MB_CONTROL_SIM_GPU_FAN0_RPM", 1550u);
-    }
-
-    out.nvml_power_mw = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_NVML_POWER_MW", 275000u);
-    out.power_source = GetEnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_POWER_SOURCE", "nvml");
-    out.power_rail_count = std::min<std::uint32_t>(
-        GetUint32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_POWER_RAIL_COUNT", 1u),
-        static_cast<std::uint32_t>(kGpuEvidenceMaxPowerRails));
-    if (out.power_rail_count > 0u) {
-        out.power_rails[0].domain = GetUint32EnvOrDefault(
-            "SVG_MB_CONTROL_SIM_GPU_POWER_RAIL0_DOMAIN", 0u);
-        out.power_rails[0].power_mw = GetUint32EnvOrDefault(
-            "SVG_MB_CONTROL_SIM_GPU_POWER_RAIL0_POWER_MW", 123000u);
-    }
-
-    out.voltage_core_mv = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_VOLTAGE_CORE_MV", 975u);
-    out.pcie_tx_kb_s = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_PCIE_TX_KB_S", 1024u);
-    out.pcie_rx_kb_s = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_PCIE_RX_KB_S", 2048u);
-    out.pcie_link_gen = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_PCIE_LINK_GEN", 5u);
-    out.pcie_link_width = GetUint32EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_PCIE_LINK_WIDTH", 16u);
-    out.throttle_reasons = GetUint64EnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_THROTTLE_REASONS", 8u);
-
-    out.thermal_slot_count = std::min<std::uint32_t>(
-        GetUint32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_THERMAL_SLOT_COUNT", 2u),
-        static_cast<std::uint32_t>(kGpuEvidenceMaxThermalSlots));
-    if (out.thermal_slot_count > 0u) {
-        out.thermal_slots[0] = GetInt32EnvOrDefault(
-            "SVG_MB_CONTROL_SIM_GPU_THERMAL_SLOT0_RAW", 16000);
-    }
-    if (out.thermal_slot_count > 1u) {
-        out.thermal_slots[1] = GetInt32EnvOrDefault(
-            "SVG_MB_CONTROL_SIM_GPU_THERMAL_SLOT1_RAW", 18496);
-    }
+    FillSimGpuTemperatures(out);
+    FillSimGpuClocks(out);
+    FillSimGpuUtilization(out);
+    FillSimGpuMemoryAndPower(out);
+    FillSimGpuDeviceCollections(out);
     return out;
 }
 
