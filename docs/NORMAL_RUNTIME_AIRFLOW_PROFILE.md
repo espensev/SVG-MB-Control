@@ -1,10 +1,12 @@
 # Normal Runtime Airflow Profile
 
-Updated: 2026-05-25
+Updated: 2026-05-26
 
 This note records the low-load airflow assumptions behind the normal-runtime
 fan profile. It is scoped to ordinary desktop/runtime operation, not short
-high-power/high-temperature bursts.
+high-power/high-temperature bursts. The floor uplift was promoted from a
+candidate profile to the shipped profile in commit `10ceaec` and is confirmed
+by the runtime observations recorded below.
 
 ## Scope
 
@@ -65,27 +67,42 @@ This is not a real CFM measurement. It ignores radiator restriction, fan curves,
 blade shape, and case impedance. It is still useful for avoiding the mistake of
 treating the 200 mm front fans and 140 mm radiator fans as identical channels.
 
-Observed low-load runtime before the change showed the controlled channels near:
+Observed low-load runtime before the change, paired with the corresponding
+post-adoption observation captured from
+`release\runtime\logs\svg_mb_control_output.csv` on 2026-05-26 at low CPU/GPU
+load (Tctl ~46.75 C, GPU core ~28 C):
 
-| Channel | Approx observed low-load RPM |
-|---:|---:|
-| 0 | 610 |
-| 1 | 428 |
-| 2 | 695 |
-| 3 | 666 |
-| 4 | 1003 |
-| 5 | 699 |
+| Channel | Prior approx RPM | Current approx RPM |
+|---:|---:|---:|
+| 0 | 610 | 609 |
+| 1 | 428 | 457 |
+| 2 | 695 | 730 |
+| 3 | 666 | 700 |
+| 4 | 1003 | 1081 |
+| 5 | 699 | 735 |
 
 With radiator channels modeled as 140 mm fans, the prior low-load profile was
 close to neutral before radiator restriction. The adopted profile intentionally
 raises the front 200 mm intake floors more than the radiator floors to keep the
-low-load profile intake-biased.
+low-load profile intake-biased; the post-adoption RPMs preserve that intake
+bias.
 
-## Re-Validation Check After Re-Tuning
+## Confirmation and Re-Validation Procedure
 
-Initial validation on the development host confirmed acceptable noise at the
-adopted floors. The same procedure applies if the profile is re-tuned: after
-the controller is intentionally restarted with the new config, validate with
+The adopted floors are confirmed on the development host by the steady-state
+runtime evidence above. At the time of the capture:
+
+- per-channel `last_setpoint_pct` matched the configured floors within the
+  PWM quantization step;
+- `low_band_evidence.json` reported `activation_count = 0` and
+  `max_debt < 1e-3` across the controlled channels, so the floor uplift kept
+  the integrated low-load signal below activation;
+- `control_runtime.json` reported no open circuit breakers, no consecutive
+  sensor or write failures, and `loop_slip_ms` under 1.2 ms against a 250 ms
+  tick budget.
+
+The same procedure must be re-run if the profile is re-tuned. After the
+controller is intentionally restarted with the new config, validate with
 `release\runtime\logs\svg_mb_control_output.csv`:
 
 - channels 2 and 3 should settle near the configured front-intake floors at
