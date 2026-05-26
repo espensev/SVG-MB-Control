@@ -384,6 +384,119 @@ void ValidateCadenceConfig(const ControlLoopConfig& cfg) {
     ValidatePositive(cfg.cadence_relax_per_s, "cadence_relax_per_s");
 }
 
+// Optional low_band sub-object parser. No-op when the parent JSON has no
+// low_band key or the value is not an object. All fields fall back to the
+// LowBandControlConfig defaults that the caller pre-populates.
+void LoadLowBandConfig(const nlohmann::json& loop_json,
+                       LowBandControlConfig& low) {
+    if (!loop_json.contains("low_band") ||
+        !loop_json["low_band"].is_object()) {
+        return;
+    }
+    const auto& low_json = loop_json["low_band"];
+    low.enabled = low_json.value("enabled", low.enabled);
+    low.cpu_start_c = low_json.value("cpu_start_c", low.cpu_start_c);
+    low.cpu_full_c = low_json.value("cpu_full_c", low.cpu_full_c);
+    low.cpu_release_c = low_json.value("cpu_release_c", low.cpu_release_c);
+    low.gpu_start_c = low_json.value("gpu_start_c", low.gpu_start_c);
+    low.gpu_full_c = low_json.value("gpu_full_c", low.gpu_full_c);
+    low.gpu_release_c = low_json.value("gpu_release_c", low.gpu_release_c);
+    low.cpu_weight = low_json.value("cpu_weight", low.cpu_weight);
+    low.gpu_weight = low_json.value("gpu_weight", low.gpu_weight);
+    low.rise_per_min = low_json.value("rise_per_min", low.rise_per_min);
+    low.fall_per_min = low_json.value("fall_per_min", low.fall_per_min);
+    low.stage_rise_pct_per_min =
+        low_json.value("stage_rise_pct_per_min", low.stage_rise_pct_per_min);
+    low.stage_fall_pct_per_min =
+        low_json.value("stage_fall_pct_per_min", low.stage_fall_pct_per_min);
+    low.stage_spacing_ms =
+        low_json.value("stage_spacing_ms", low.stage_spacing_ms);
+    low.evidence_write_interval_ms =
+        low_json.value("evidence_write_interval_ms",
+                       low.evidence_write_interval_ms);
+}
+
+// Builds one ChannelControlConfig from its JSON object. Assumes the caller
+// has already verified the "channel" field is present; the curve fields use
+// the LoadCurveFromJson helper, and pressure boosts iterate
+// kPressureBoostMembers.
+ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
+    ChannelControlConfig channel;
+    channel.channel = ch_json["channel"].get<std::uint32_t>();
+
+    channel.min_duty_pct = ch_json.value("min_duty_pct", channel.min_duty_pct);
+    channel.write_cooldown_ms =
+        ch_json.value("write_cooldown_ms", channel.write_cooldown_ms);
+    ReadOptionalDouble(ch_json, "deadband_pct", channel.deadband_pct);
+    channel.control_hold_ms =
+        ch_json.value("control_hold_ms", channel.control_hold_ms);
+
+    // Parse curve shape. ParseCurveShape throws on unknown strings; let that
+    // propagate so a typo fails config load loudly (consistent with the other
+    // channel validators in this file).
+    if (ch_json.contains("curve_shape")) {
+        channel.curve_shape = ParseCurveShape(
+            ch_json["curve_shape"].get<std::string>());
+    }
+
+    ReadOptionalDouble(ch_json, "rise_rate_pct_per_min",
+                       channel.rise_rate_pct_per_min);
+    ReadOptionalDouble(ch_json, "fall_rate_pct_per_min",
+                       channel.fall_rate_pct_per_min);
+    ReadOptionalDouble(ch_json, "max_setpoint_step_pct",
+                       channel.max_setpoint_step_pct);
+
+    ReadOptionalDouble(ch_json, "demand_smoothing_rise_alpha",
+                       channel.demand_smoothing_rise_alpha);
+    ReadOptionalDouble(ch_json, "demand_smoothing_fall_alpha",
+                       channel.demand_smoothing_fall_alpha);
+
+    ReadOptionalDouble(ch_json, "decay_latch_above_pct",
+                       channel.decay_latch_above_pct);
+    ReadOptionalDouble(ch_json, "decay_latch_pct_per_min",
+                       channel.decay_latch_pct_per_min);
+
+    for (const auto& members : kPressureBoostMembers) {
+        LoadPressureBoostConfig(ch_json, channel, members);
+    }
+
+    ReadOptionalDouble(ch_json, "cpu_low_soak_start_c",
+                       channel.cpu_low_soak_start_c);
+    ReadOptionalDouble(ch_json, "cpu_low_soak_full_c",
+                       channel.cpu_low_soak_full_c);
+    ReadOptionalDouble(ch_json, "cpu_low_soak_release_c",
+                       channel.cpu_low_soak_release_c);
+    ReadOptionalDouble(ch_json, "cpu_low_soak_rise_pct_per_min",
+                       channel.cpu_low_soak_rise_pct_per_min);
+    ReadOptionalDouble(ch_json, "cpu_low_soak_fall_pct_per_min",
+                       channel.cpu_low_soak_fall_pct_per_min);
+    ReadOptionalDouble(ch_json, "cpu_low_soak_max_boost_pct",
+                       channel.cpu_low_soak_max_boost_pct);
+
+    channel.low_band_stage =
+        ch_json.value("low_band_stage", channel.low_band_stage);
+    ReadOptionalDouble(ch_json, "low_band_debt_threshold",
+                       channel.low_band_debt_threshold);
+    channel.low_band_hold_ms =
+        ch_json.value("low_band_hold_ms", channel.low_band_hold_ms);
+    ReadOptionalDouble(ch_json, "low_band_max_boost_pct",
+                       channel.low_band_max_boost_pct);
+
+    // Parse temp blend. ParseTempBlend throws on unknown strings; let that
+    // propagate. Silent fallback to CpuOnly would defeat the GPU response
+    // lane on a typo, which is harder to diagnose than a config rejection.
+    if (ch_json.contains("temp_blend")) {
+        channel.temp_blend = ParseTempBlend(
+            ch_json["temp_blend"].get<std::string>());
+    }
+
+    LoadCurveFromJson(ch_json, "curve", channel.curve);
+    LoadCurveFromJson(ch_json, "cpu_override_curve",
+                      channel.cpu_override_curve);
+
+    return channel;
+}
+
 void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
                               const std::filesystem::path& config_path) {
     if (cfg.poll_tick_ms == 0u) {
@@ -451,47 +564,9 @@ ControlLoopConfig LoadControlLoopConfig(
         : (static_cast<double>(cfg.poll_tick_ms) -
            static_cast<double>(cfg.poll_tick_floor_ms)) / 3.0;
 
-    if (loop_json.contains("low_band_residual_cap_pct")) {
-        cfg.low_band_residual_cap_pct =
-            loop_json["low_band_residual_cap_pct"].get<double>();
-    }
-
-    if (loop_json.contains("low_band") && loop_json["low_band"].is_object()) {
-        const auto& low_json = loop_json["low_band"];
-        cfg.low_band.enabled =
-            low_json.value("enabled", cfg.low_band.enabled);
-        cfg.low_band.cpu_start_c =
-            low_json.value("cpu_start_c", cfg.low_band.cpu_start_c);
-        cfg.low_band.cpu_full_c =
-            low_json.value("cpu_full_c", cfg.low_band.cpu_full_c);
-        cfg.low_band.cpu_release_c =
-            low_json.value("cpu_release_c", cfg.low_band.cpu_release_c);
-        cfg.low_band.gpu_start_c =
-            low_json.value("gpu_start_c", cfg.low_band.gpu_start_c);
-        cfg.low_band.gpu_full_c =
-            low_json.value("gpu_full_c", cfg.low_band.gpu_full_c);
-        cfg.low_band.gpu_release_c =
-            low_json.value("gpu_release_c", cfg.low_band.gpu_release_c);
-        cfg.low_band.cpu_weight =
-            low_json.value("cpu_weight", cfg.low_band.cpu_weight);
-        cfg.low_band.gpu_weight =
-            low_json.value("gpu_weight", cfg.low_band.gpu_weight);
-        cfg.low_band.rise_per_min =
-            low_json.value("rise_per_min", cfg.low_band.rise_per_min);
-        cfg.low_band.fall_per_min =
-            low_json.value("fall_per_min", cfg.low_band.fall_per_min);
-        cfg.low_band.stage_rise_pct_per_min = low_json.value(
-            "stage_rise_pct_per_min",
-            cfg.low_band.stage_rise_pct_per_min);
-        cfg.low_band.stage_fall_pct_per_min = low_json.value(
-            "stage_fall_pct_per_min",
-            cfg.low_band.stage_fall_pct_per_min);
-        cfg.low_band.stage_spacing_ms =
-            low_json.value("stage_spacing_ms", cfg.low_band.stage_spacing_ms);
-        cfg.low_band.evidence_write_interval_ms = low_json.value(
-            "evidence_write_interval_ms",
-            cfg.low_band.evidence_write_interval_ms);
-    }
+    ReadOptionalDouble(loop_json, "low_band_residual_cap_pct",
+                       cfg.low_band_residual_cap_pct);
+    LoadLowBandConfig(loop_json, cfg.low_band);
 
     // Parse channels array
     if (!loop_json.contains("channels") || !loop_json["channels"].is_array()) {
@@ -509,86 +584,7 @@ ControlLoopConfig LoadControlLoopConfig(
         if (!ch_json.contains("channel")) {
             continue; // Skip channels without channel number
         }
-
-        ChannelControlConfig channel;
-        channel.channel = ch_json["channel"].get<std::uint32_t>();
-
-        // Optional fields with defaults
-        channel.min_duty_pct = ch_json.value("min_duty_pct", channel.min_duty_pct);
-        channel.write_cooldown_ms = ch_json.value("write_cooldown_ms",
-                                                   channel.write_cooldown_ms);
-
-        ReadOptionalDouble(ch_json, "deadband_pct", channel.deadband_pct);
-
-        channel.control_hold_ms = ch_json.value("control_hold_ms",
-                                                channel.control_hold_ms);
-
-        // Parse curve shape. ParseCurveShape throws on unknown strings; let
-        // that propagate so a typo fails config load loudly (consistent with
-        // the other channel validators in this file).
-        if (ch_json.contains("curve_shape")) {
-            channel.curve_shape = ParseCurveShape(
-                ch_json["curve_shape"].get<std::string>());
-        }
-
-        ReadOptionalDouble(ch_json, "rise_rate_pct_per_min",
-                           channel.rise_rate_pct_per_min);
-        ReadOptionalDouble(ch_json, "fall_rate_pct_per_min",
-                           channel.fall_rate_pct_per_min);
-        ReadOptionalDouble(ch_json, "max_setpoint_step_pct",
-                           channel.max_setpoint_step_pct);
-
-        ReadOptionalDouble(ch_json, "demand_smoothing_rise_alpha",
-                           channel.demand_smoothing_rise_alpha);
-        ReadOptionalDouble(ch_json, "demand_smoothing_fall_alpha",
-                           channel.demand_smoothing_fall_alpha);
-
-        ReadOptionalDouble(ch_json, "decay_latch_above_pct",
-                           channel.decay_latch_above_pct);
-        ReadOptionalDouble(ch_json, "decay_latch_pct_per_min",
-                           channel.decay_latch_pct_per_min);
-
-        // Parse the smootherstep pressure boost families.
-        for (const auto& members : kPressureBoostMembers) {
-            LoadPressureBoostConfig(ch_json, channel, members);
-        }
-
-        ReadOptionalDouble(ch_json, "cpu_low_soak_start_c",
-                           channel.cpu_low_soak_start_c);
-        ReadOptionalDouble(ch_json, "cpu_low_soak_full_c",
-                           channel.cpu_low_soak_full_c);
-        ReadOptionalDouble(ch_json, "cpu_low_soak_release_c",
-                           channel.cpu_low_soak_release_c);
-        ReadOptionalDouble(ch_json, "cpu_low_soak_rise_pct_per_min",
-                           channel.cpu_low_soak_rise_pct_per_min);
-        ReadOptionalDouble(ch_json, "cpu_low_soak_fall_pct_per_min",
-                           channel.cpu_low_soak_fall_pct_per_min);
-        ReadOptionalDouble(ch_json, "cpu_low_soak_max_boost_pct",
-                           channel.cpu_low_soak_max_boost_pct);
-
-        channel.low_band_stage =
-            ch_json.value("low_band_stage", channel.low_band_stage);
-        ReadOptionalDouble(ch_json, "low_band_debt_threshold",
-                           channel.low_band_debt_threshold);
-        channel.low_band_hold_ms =
-            ch_json.value("low_band_hold_ms", channel.low_band_hold_ms);
-        ReadOptionalDouble(ch_json, "low_band_max_boost_pct",
-                           channel.low_band_max_boost_pct);
-
-        // Parse temp blend. ParseTempBlend throws on unknown strings; let
-        // that propagate. Silent fallback to CpuOnly would defeat the GPU
-        // response lane on a typo, which is harder to diagnose than a config
-        // rejection.
-        if (ch_json.contains("temp_blend")) {
-            channel.temp_blend = ParseTempBlend(
-                ch_json["temp_blend"].get<std::string>());
-        }
-
-        LoadCurveFromJson(ch_json, "curve", channel.curve);
-        LoadCurveFromJson(ch_json, "cpu_override_curve",
-                          channel.cpu_override_curve);
-
-        cfg.channels.push_back(std::move(channel));
+        cfg.channels.push_back(LoadChannelConfig(ch_json));
     }
 
     // Validate the loaded configuration
