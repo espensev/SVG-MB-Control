@@ -179,6 +179,25 @@ std::string Sha256FileHex(const std::filesystem::path& path) {
     return hex.str();
 }
 
+struct ManifestPayloadInputs {
+    std::string_view status;
+    bool terminal_status;
+    const std::string& mode;
+    std::chrono::system_clock::time_point opened_at;
+    const std::string& now_iso;
+    std::uint64_t row_count;
+    std::uint64_t event_count;
+    const std::filesystem::path& active_archive_path;
+    const std::filesystem::path& active_manifest_path;
+    const std::filesystem::path& mirror_path;
+    const std::filesystem::path& manifest_path;
+    const std::filesystem::path& event_log_path;
+    const RuntimeCsvIdentity& identity;
+    const std::string& config_sha256;
+    const std::string& runtime_policy_sha256;
+    std::uint32_t csv_flush_interval_rows;
+};
+
 nlohmann::json IdentityFileJson(const std::filesystem::path& path,
                                 const std::string& sha256) {
     return {
@@ -186,6 +205,96 @@ nlohmann::json IdentityFileJson(const std::filesystem::path& path,
                               : nlohmann::json(path.string())},
         {"sha256", sha256.empty() ? nlohmann::json(nullptr)
                                   : nlohmann::json(sha256)},
+    };
+}
+
+// Pure assembly of the runtime manifest JSON payload. No I/O and no member
+// access; all state flows in via the inputs struct so WriteManifest can stay
+// focused on flush + the two atomic file writes.
+nlohmann::json BuildManifestPayload(const ManifestPayloadInputs& in) {
+    return {
+        {"schema", "svg_mb_control.runtime_log_manifest.v1"},
+        {"status", std::string(in.status)},
+        {"mode", in.mode},
+        {"session_start", FormatLocalIso8601(in.opened_at)},
+        {"session_stop",
+         in.terminal_status ? nlohmann::json(in.now_iso)
+                            : nlohmann::json(nullptr)},
+        {"last_update", in.now_iso},
+        {"row_count", in.row_count},
+        {"event_count", in.event_count},
+        {"rows_written",
+         in.terminal_status ? nlohmann::json(in.row_count)
+                            : nlohmann::json(nullptr)},
+        {"events_written",
+         in.terminal_status ? nlohmann::json(in.event_count)
+                            : nlohmann::json(nullptr)},
+        {"total_rows",
+         in.terminal_status ? nlohmann::json(in.row_count)
+                            : nlohmann::json(nullptr)},
+        {"producer",
+         {
+             {"tool", "svg-mb-control"},
+             {"version", SVG_MB_CONTROL_VERSION},
+             {"git_hash", SVG_MB_CONTROL_GIT_HASH},
+         }},
+        {"config", IdentityFileJson(in.identity.config_path, in.config_sha256)},
+        {"runtime_policy",
+         IdentityFileJson(in.identity.runtime_policy_path,
+                          in.runtime_policy_sha256)},
+        {"control_loop",
+         {
+             {"poll_tick_ms",
+              in.identity.control_poll_tick_ms
+                  ? nlohmann::json(*in.identity.control_poll_tick_ms)
+                  : nlohmann::json(nullptr)},
+             {"write_cooldown_ms",
+              in.identity.control_write_cooldown_ms
+                  ? nlohmann::json(*in.identity.control_write_cooldown_ms)
+                  : nlohmann::json(nullptr)},
+         }},
+        {"external_logging",
+         {
+             {"required", false},
+             {"preferred_source", "svg-mb-control runtime CSV/JSONL"},
+         }},
+        {"artifacts",
+         {
+             {"csv_archive",
+              {
+                  {"path", in.active_archive_path.string()},
+                  {"schema", "svg_mb_control.log.v1"},
+              }},
+             {"csv_latest",
+              {
+                  {"path", in.mirror_path.string()},
+                  {"schema", "svg_mb_control.log.v1"},
+              }},
+             {"events",
+              {
+                  {"path", in.event_log_path.string()},
+                  {"schema", "svg_mb_control.event.v1"},
+              }},
+             {"manifest_archive",
+              {
+                  {"path", in.active_manifest_path.string()},
+                  {"schema", "svg_mb_control.runtime_log_manifest.v1"},
+              }},
+             {"manifest_latest",
+              {
+                  {"path", in.manifest_path.string()},
+                  {"schema", "svg_mb_control.runtime_log_manifest.v1"},
+              }},
+         }},
+        {"writer",
+         {
+             {"csv_flush_policy",
+              in.csv_flush_interval_rows == 1u ? "per_row" : "row_interval"},
+             {"csv_flush_interval_rows", in.csv_flush_interval_rows},
+             {"mirror_mode",
+              in.csv_flush_interval_rows == 1u ? "write_through"
+                                                : "buffered_same_interval"},
+         }},
     };
 }
 
@@ -345,87 +454,24 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
     const std::string now_iso =
         FormatLocalIso8601(std::chrono::system_clock::now());
 
-    nlohmann::json payload = {
-        {"schema", "svg_mb_control.runtime_log_manifest.v1"},
-        {"status", std::string(status)},
-        {"mode", mode_},
-        {"session_start", FormatLocalIso8601(opened_at_)},
-        {"session_stop",
-         terminal_status ? nlohmann::json(now_iso) : nlohmann::json(nullptr)},
-        {"last_update", now_iso},
-        {"row_count", row_count_},
-        {"event_count", event_count},
-        {"rows_written",
-         terminal_status ? nlohmann::json(row_count_) : nlohmann::json(nullptr)},
-        {"events_written",
-         terminal_status ? nlohmann::json(event_count)
-                         : nlohmann::json(nullptr)},
-        {"total_rows",
-         terminal_status ? nlohmann::json(row_count_) : nlohmann::json(nullptr)},
-        {"producer",
-         {
-             {"tool", "svg-mb-control"},
-             {"version", SVG_MB_CONTROL_VERSION},
-             {"git_hash", SVG_MB_CONTROL_GIT_HASH},
-         }},
-        {"config", IdentityFileJson(identity_.config_path, config_sha256_)},
-        {"runtime_policy",
-         IdentityFileJson(identity_.runtime_policy_path,
-                          runtime_policy_sha256_)},
-        {"control_loop",
-         {
-             {"poll_tick_ms",
-              identity_.control_poll_tick_ms
-                  ? nlohmann::json(*identity_.control_poll_tick_ms)
-                  : nlohmann::json(nullptr)},
-             {"write_cooldown_ms",
-              identity_.control_write_cooldown_ms
-                  ? nlohmann::json(*identity_.control_write_cooldown_ms)
-                  : nlohmann::json(nullptr)},
-         }},
-        {"external_logging",
-         {
-             {"required", false},
-             {"preferred_source", "svg-mb-control runtime CSV/JSONL"},
-         }},
-        {"artifacts",
-         {
-             {"csv_archive",
-              {
-                  {"path", active_archive_path_.string()},
-                  {"schema", "svg_mb_control.log.v1"},
-              }},
-             {"csv_latest",
-              {
-                  {"path", mirror_path_.string()},
-                  {"schema", "svg_mb_control.log.v1"},
-              }},
-             {"events",
-              {
-                  {"path", event_log_path.string()},
-                  {"schema", "svg_mb_control.event.v1"},
-              }},
-             {"manifest_archive",
-              {
-                  {"path", active_manifest_path_.string()},
-                  {"schema", "svg_mb_control.runtime_log_manifest.v1"},
-              }},
-             {"manifest_latest",
-              {
-                  {"path", manifest_path_.string()},
-                  {"schema", "svg_mb_control.runtime_log_manifest.v1"},
-              }},
-         }},
-        {"writer",
-         {
-             {"csv_flush_policy",
-              csv_flush_interval_rows_ == 1u ? "per_row" : "row_interval"},
-             {"csv_flush_interval_rows", csv_flush_interval_rows_},
-             {"mirror_mode",
-              csv_flush_interval_rows_ == 1u ? "write_through"
-                                              : "buffered_same_interval"},
-         }},
-    };
+    const nlohmann::json payload = BuildManifestPayload({
+        .status = status,
+        .terminal_status = terminal_status,
+        .mode = mode_,
+        .opened_at = opened_at_,
+        .now_iso = now_iso,
+        .row_count = row_count_,
+        .event_count = event_count,
+        .active_archive_path = active_archive_path_,
+        .active_manifest_path = active_manifest_path_,
+        .mirror_path = mirror_path_,
+        .manifest_path = manifest_path_,
+        .event_log_path = event_log_path,
+        .identity = identity_,
+        .config_sha256 = config_sha256_,
+        .runtime_policy_sha256 = runtime_policy_sha256_,
+        .csv_flush_interval_rows = csv_flush_interval_rows_,
+    });
 
     const bool active_ok =
         TryWriteJsonFileAtomic(active_manifest_path_, payload);
