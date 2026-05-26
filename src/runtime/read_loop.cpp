@@ -49,6 +49,56 @@ std::uint32_t ResolveStalenessThresholdMs(const ControlConfig& config) {
     return poll * 3u;
 }
 
+// Outcome of one read-loop poll publish step: which sinks the freshly sampled
+// snapshot reached. wrote_outputs collapses the "runtime home + (no mirror or
+// mirror also wrote)" success guard so the parent can decide success/skipped
+// from a single field.
+struct ReadLoopSampleResult {
+    bool telemetry_available = false;
+    bool runtime_home_published = false;
+    bool snapshot_mirror_configured = false;
+    bool snapshot_mirror_published = false;
+    bool wrote_outputs = false;
+};
+
+ReadLoopSampleResult PublishSnapshot(
+    const RuntimeSnapshot& runtime_snapshot,
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& snapshot_mirror_path) {
+    ReadLoopSampleResult result;
+    result.telemetry_available = RuntimeSnapshotHasTelemetry(runtime_snapshot);
+    result.runtime_home_published =
+        WriteRuntimeSnapshotFile(runtime_home, runtime_snapshot);
+    result.snapshot_mirror_configured = !snapshot_mirror_path.empty();
+    if (result.snapshot_mirror_configured) {
+        result.snapshot_mirror_published = WriteRuntimeSnapshotJsonFile(
+            snapshot_mirror_path, runtime_snapshot);
+    }
+    result.wrote_outputs =
+        result.runtime_home_published &&
+        (!result.snapshot_mirror_configured ||
+         result.snapshot_mirror_published);
+    return result;
+}
+
+// Failure-case detail string for read-loop polls. Caller still owns the
+// success message because that branch also touches last_success_time and the
+// successful_polls counter.
+const char* DescribeReadLoopPollFailure(const ReadLoopSampleResult& result) {
+    if (!result.telemetry_available) {
+        return "direct sample had no telemetry";
+    }
+    if (!result.runtime_home_published &&
+        result.snapshot_mirror_configured &&
+        !result.snapshot_mirror_published) {
+        return "direct sample could not publish runtime home or snapshot mirror";
+    }
+    if (!result.runtime_home_published) {
+        return "direct sample could not publish runtime home";
+    }
+    return "direct sample could not publish snapshot mirror";
+}
+
 }  // namespace
 
 std::filesystem::path ResolveRuntimeHomePath(const ControlConfig& config) {
@@ -210,23 +260,11 @@ int ReadLoop::RunUntilStopped() {
                     });
             }
 
-            const bool telemetry_available =
-                RuntimeSnapshotHasTelemetry(runtime_snapshot);
-            const bool runtime_home_published = WriteRuntimeSnapshotFile(
-                impl_->runtime_home, runtime_snapshot);
-            const bool snapshot_mirror_configured =
-                !impl_->config.snapshot_path.empty();
-            bool snapshot_mirror_published = false;
-            if (!impl_->config.snapshot_path.empty()) {
-                snapshot_mirror_published = WriteRuntimeSnapshotJsonFile(
-                    impl_->config.snapshot_path,
-                    runtime_snapshot);
-            }
-            const bool wrote_outputs =
-                runtime_home_published &&
-                (!snapshot_mirror_configured || snapshot_mirror_published);
+            const ReadLoopSampleResult published = PublishSnapshot(
+                runtime_snapshot, impl_->runtime_home,
+                impl_->config.snapshot_path);
 
-            if (wrote_outputs && telemetry_available) {
+            if (published.wrote_outputs && published.telemetry_available) {
                 last_success_time = std::chrono::steady_clock::now();
                 ++status.successful_polls;
                 status.stale = false;
@@ -235,20 +273,7 @@ int ReadLoop::RunUntilStopped() {
                 status.status_detail = "direct sample refreshed";
             } else {
                 ++status.skipped_polls;
-                if (!telemetry_available) {
-                    status.status_detail = "direct sample had no telemetry";
-                } else if (!runtime_home_published &&
-                           snapshot_mirror_configured &&
-                           !snapshot_mirror_published) {
-                    status.status_detail =
-                        "direct sample could not publish runtime home or snapshot mirror";
-                } else if (!runtime_home_published) {
-                    status.status_detail =
-                        "direct sample could not publish runtime home";
-                } else {
-                    status.status_detail =
-                        "direct sample could not publish snapshot mirror";
-                }
+                status.status_detail = DescribeReadLoopPollFailure(published);
             }
 
             const auto now = std::chrono::steady_clock::now();
@@ -262,10 +287,13 @@ int ReadLoop::RunUntilStopped() {
                 csv_logger.WriteRow(BuildReadLoopCsvRow(
                     runtime_snapshot,
                     RuntimeReadLoopLogState{
-                        .telemetry_available = telemetry_available,
-                        .runtime_home_published = runtime_home_published,
-                        .snapshot_mirror_configured = snapshot_mirror_configured,
-                        .snapshot_mirror_published = snapshot_mirror_published,
+                        .telemetry_available = published.telemetry_available,
+                        .runtime_home_published =
+                            published.runtime_home_published,
+                        .snapshot_mirror_configured =
+                            published.snapshot_mirror_configured,
+                        .snapshot_mirror_published =
+                            published.snapshot_mirror_published,
                         .successful_polls = status.successful_polls,
                         .skipped_polls = status.skipped_polls,
                         .stale = status.stale,
@@ -273,7 +301,7 @@ int ReadLoop::RunUntilStopped() {
                     }));
             }
 
-            if (!telemetry_available || !wrote_outputs) {
+            if (!published.telemetry_available || !published.wrote_outputs) {
                 AppendRuntimeEvent(
                     impl_->runtime_home,
                     RuntimeLogEvent{
@@ -292,12 +320,13 @@ int ReadLoop::RunUntilStopped() {
                         .successful_polls = status.successful_polls,
                         .skipped_polls = status.skipped_polls,
                         .stale = status.stale,
-                        .telemetry_available = telemetry_available,
-                        .runtime_home_published = runtime_home_published,
+                        .telemetry_available = published.telemetry_available,
+                        .runtime_home_published =
+                            published.runtime_home_published,
                         .snapshot_mirror_configured =
-                            snapshot_mirror_configured,
+                            published.snapshot_mirror_configured,
                         .snapshot_mirror_published =
-                            snapshot_mirror_published,
+                            published.snapshot_mirror_published,
                     });
             }
         } catch (const std::exception& error) {
