@@ -10,6 +10,7 @@
 #include "runtime_csv_rows.h"
 #include "runtime_lifecycle.h"
 #include "runtime_snapshot.h"
+#include "runtime_status.h"
 #include "runtime_write_policy.h"
 
 #include "windows_lean.h"
@@ -38,32 +39,6 @@ std::filesystem::path CurrentExecutableDirectory() {
     }
     return std::filesystem::path(buffer.data(),
                                  buffer.data() + length).parent_path();
-}
-
-bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
-                            const ReadLoop::Status& status) {
-    // control_runtime.json is dual-schema: read-loop and control-loop both
-    // write the same path with different field sets and different
-    // schema_version numbers. The mode field is the discriminator at the
-    // semantic level; the explicit schema field makes that contract
-    // visible to consumers without dispatching on mode.
-    nlohmann::json payload = MakeSchemaObject(1u);
-    payload["schema"] = "svg_mb_control.runtime_status.read_loop.v1";
-    payload["status"] = status.status;
-    payload["mode"] = "read-loop";
-    payload["process_id"] = GetCurrentProcessId();
-    payload["status_detail"] = status.status_detail;
-    payload["last_refresh"] = status.last_refresh_iso;
-    payload["snapshot_source"] = status.snapshot_source;
-    payload["restart_count"] = status.restart_count;
-    payload["skipped_polls"] = status.skipped_polls;
-    payload["successful_polls"] = status.successful_polls;
-    payload["stale"] = status.stale;
-    payload["child_pid"] = status.child_pid;
-    payload["log_csv_path"] = status.log_csv_path;
-    payload["log_manifest_path"] = status.log_manifest_path;
-    payload["event_log_path"] = status.event_log_path;
-    return TryWriteJsonFileAtomic(RuntimeStatusPath(runtime_home), payload);
 }
 
 std::uint32_t ResolveStalenessThresholdMs(const ControlConfig& config) {
@@ -132,7 +107,7 @@ int ReadLoop::RunUntilStopped() {
                               const std::string& detail) {
         status.status = state;
         status.status_detail = detail;
-        WriteRuntimeStatusFile(impl_->runtime_home, status);
+        WriteReadLoopStatus(impl_->runtime_home, status);
     };
 
     RuntimeCsvLogger csv_logger(
@@ -349,7 +324,7 @@ int ReadLoop::RunUntilStopped() {
                 now - last_success_time).count();
         status.stale = static_cast<std::uint64_t>(since_success_ms) >
                        static_cast<std::uint64_t>(staleness_threshold_ms);
-        WriteRuntimeStatusFile(impl_->runtime_home, status);
+        WriteReadLoopStatus(impl_->runtime_home, status);
 
         std::unique_lock<std::mutex> lock(impl_->wake_mutex);
         impl_->wake_cv.wait_for(

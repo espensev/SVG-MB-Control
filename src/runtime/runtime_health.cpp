@@ -5,6 +5,7 @@
 #include "pending_writes.h"
 #include "runtime_lifecycle.h"
 #include "runtime_paths.h"
+#include "runtime_status.h"
 #include "runtime_supervisor_state.h"
 #include "runtime_util.h"
 
@@ -23,29 +24,6 @@
 namespace svg_mb_control {
 
 namespace {
-
-std::uint32_t CountDegradedChannels(const nlohmann::json& status) {
-    const auto channels = status.find("controlled_channels");
-    if (channels == status.end() || !channels->is_array()) {
-        return 0u;
-    }
-
-    std::uint32_t count = 0u;
-    for (const auto& channel : *channels) {
-        if (!channel.is_object()) {
-            continue;
-        }
-        const bool circuit_breaker_open =
-            JsonBoolOr(channel, "circuit_breaker_open");
-        const bool sensor_failed = JsonBoolOr(channel, "sensor_failed");
-        const std::uint32_t write_failures =
-            JsonUInt32Or(channel, "consecutive_write_failures");
-        if (circuit_breaker_open || sensor_failed || write_failures > 0u) {
-            ++count;
-        }
-    }
-    return count;
-}
 
 void FillSidecarHealth(RuntimeHealthResult* result) {
     if (result == nullptr) {
@@ -159,32 +137,24 @@ RuntimeHealthResult EvaluateRuntimeHealth(
         return result;
     }
 
-    nlohmann::json status;
-    try {
-        status = ReadJsonFile(result.status_path, "runtime status");
-    } catch (const std::exception& error) {
-        result.status_json_valid = false;
-        SetState(&result, RuntimeHealthState::kFailed, error.what());
-        return result;
-    }
-    if (!status.is_object()) {
+    const auto snapshot = ReadRuntimeStatus(runtime_home);
+    if (!snapshot.has_value()) {
         result.status_json_valid = false;
         SetState(&result, RuntimeHealthState::kFailed,
-                 "runtime status JSON is not an object");
+                 "runtime status JSON is not readable or not an object");
         return result;
     }
     result.status_json_valid = true;
 
-    result.mode = JsonStringOr(status, "mode", "(unknown)");
-    result.status = JsonStringOr(status, "status", "(unknown)");
-    result.status_detail = JsonStringOr(status, "status_detail");
-    result.last_update = JsonStringOr(
-        status, "loop_last_evaluation", JsonStringOr(status, "last_refresh"));
-    result.process_id = JsonUInt32Or(status, "process_id");
+    result.mode = snapshot->mode.empty() ? "(unknown)" : snapshot->mode;
+    result.status = snapshot->status.empty() ? "(unknown)" : snapshot->status;
+    result.status_detail = snapshot->status_detail;
+    result.last_update = snapshot->last_update_iso;
+    result.process_id = snapshot->process_id;
     result.process_active = IsProcessActive(result.process_id);
-    result.degraded_channel_count = CountDegradedChannels(status);
+    result.degraded_channel_count = snapshot->DegradedChannelCount();
     result.last_successful_restore_time =
-        JsonStringOr(status, "last_successful_restore_time");
+        snapshot->last_successful_restore_iso;
 
     if (result.pending_writes_unreadable) {
         SetState(&result, RuntimeHealthState::kFailed,
@@ -212,7 +182,7 @@ RuntimeHealthResult EvaluateRuntimeHealth(
         return result;
     }
 
-    if (JsonBoolOr(status, "stale")) {
+    if (snapshot->stale) {
         SetState(&result, RuntimeHealthState::kStale,
                  "runtime status reports stale telemetry");
         return result;
@@ -354,19 +324,8 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
 
 int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
     const std::filesystem::path status_path = RuntimeStatusPath(runtime_home);
-    std::optional<nlohmann::json> status;
-    std::string status_error;
-    try {
-        nlohmann::json payload = ReadJsonFile(status_path, "runtime status");
-        if (payload.is_object()) {
-            status = std::move(payload);
-        } else {
-            status_error = "status file is not a JSON object";
-        }
-    } catch (const std::exception& error) {
-        status_error = error.what();
-    }
-    if (!status.has_value()) {
+    const auto snapshot = ReadRuntimeStatus(runtime_home);
+    if (!snapshot.has_value()) {
         std::error_code exists_ec;
         const bool present =
             std::filesystem::exists(status_path, exists_ec) && !exists_ec;
@@ -379,50 +338,41 @@ int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
         }
         std::cerr << "svg-mb-control: status file present but unreadable\n"
                   << "  runtime_home: " << runtime_home.string() << '\n'
-                  << "  status: " << status_path.string() << '\n'
-                  << "  error: " << status_error << '\n';
+                  << "  status: " << status_path.string() << '\n';
         return 1;
     }
 
-    const std::string mode = JsonStringOr(*status, "mode", "(unknown)");
-    const std::string state = JsonStringOr(*status, "status", "(unknown)");
-    const std::string detail = JsonStringOr(*status, "status_detail");
-    const std::string last_eval =
-        JsonStringOr(*status, "loop_last_evaluation",
-                     JsonStringOr(*status, "last_refresh"));
-    const std::uint32_t pid = JsonUInt32Or(*status, "process_id");
-    const bool active = pid != 0u && IsProcessActive(pid) &&
-        state != "shutdown" && state != "failed" &&
-        state != "direct-read-failed";
+    const std::string mode =
+        snapshot->mode.empty() ? "(unknown)" : snapshot->mode;
+    const std::string state =
+        snapshot->status.empty() ? "(unknown)" : snapshot->status;
+    const bool active = snapshot->LooksActive();
 
     std::cout << "svg-mb-control: "
               << (active ? "running" : "not running") << '\n'
               << "  mode: " << mode << '\n'
               << "  status: " << state << '\n';
-    if (!detail.empty()) {
-        std::cout << "  detail: " << detail << '\n';
+    if (!snapshot->status_detail.empty()) {
+        std::cout << "  detail: " << snapshot->status_detail << '\n';
     }
-    if (pid != 0u) {
-        std::cout << "  pid: " << pid
+    if (snapshot->process_id != 0u) {
+        std::cout << "  pid: " << snapshot->process_id
                   << (active ? " (active)" : " (not active)") << '\n';
     }
-    if (!last_eval.empty()) {
-        std::cout << "  last_update: " << last_eval << '\n';
+    if (!snapshot->last_update_iso.empty()) {
+        std::cout << "  last_update: " << snapshot->last_update_iso << '\n';
     }
     std::cout << "  runtime_home: " << runtime_home.string() << '\n'
               << "  status_file: " << status_path.string() << '\n';
-    const std::string log_csv = JsonStringOr(*status, "log_csv_path");
-    const std::string event_log = JsonStringOr(*status, "event_log_path");
-    if (!log_csv.empty()) {
-        std::cout << "  csv: " << log_csv << '\n';
+    if (!snapshot->log_csv_path.empty()) {
+        std::cout << "  csv: " << snapshot->log_csv_path << '\n';
     }
-    if (!event_log.empty()) {
-        std::cout << "  events: " << event_log << '\n';
+    if (!snapshot->event_log_path.empty()) {
+        std::cout << "  events: " << snapshot->event_log_path << '\n';
     }
-    const std::string last_restore =
-        JsonStringOr(*status, "last_successful_restore_time");
-    if (!last_restore.empty()) {
-        std::cout << "  last_successful_restore: " << last_restore << '\n';
+    if (!snapshot->last_successful_restore_iso.empty()) {
+        std::cout << "  last_successful_restore: "
+                  << snapshot->last_successful_restore_iso << '\n';
     }
 
     const auto supervisor = ReadSupervisorState(runtime_home);

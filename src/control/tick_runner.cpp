@@ -4,6 +4,7 @@
 #include "channel_evaluator.h"
 #include "channel_write.h"
 #include "control_status_writer.h"
+#include "runtime_status.h"
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"

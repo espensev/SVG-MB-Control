@@ -13,6 +13,7 @@
 #include "runtime_artifacts.h"
 #include "runtime_lifecycle.h"
 #include "runtime_singleton.h"
+#include "runtime_status.h"
 #include "runtime_supervisor_state.h"
 #include "runtime_util.h"
 
@@ -182,16 +183,6 @@ std::string ReadTextFileTail(const std::filesystem::path& path,
     return content;
 }
 
-bool RuntimeStatusLooksActive(const nlohmann::json& status) {
-    const std::string state = JsonStringOr(status, "status");
-    if (state == "shutdown" || state == "failed" ||
-        state == "direct-read-failed") {
-        return false;
-    }
-    const std::uint32_t pid = JsonUInt32Or(status, "process_id");
-    return pid != 0u && IsProcessActive(pid);
-}
-
 bool SupervisorSingletonHeld(const std::filesystem::path& runtime_home) {
     return ProbeRuntimeSingletonHeld(SingletonRole::kSupervisor, runtime_home);
 }
@@ -208,14 +199,13 @@ bool PrintAlreadyRunningIfActive(RunMode mode,
         const std::uint32_t supervisor_pid =
             supervisor_state.has_value() ? supervisor_state->supervisor_pid
                                          : 0u;
-        const auto worker_status = TryReadJsonObject(
-            RuntimeStatusPath(runtime_home), "runtime status");
-        const std::uint32_t worker_pid = worker_status.has_value()
-            ? JsonUInt32Or(*worker_status, "process_id")
-            : 0u;
-        const std::string active_mode = worker_status.has_value()
-            ? JsonStringOr(*worker_status, "mode", RunModeLabel(mode))
-            : std::string(RunModeLabel(mode));
+        const auto worker_status = ReadRuntimeStatus(runtime_home);
+        const std::uint32_t worker_pid =
+            worker_status.has_value() ? worker_status->process_id : 0u;
+        const std::string active_mode =
+            (worker_status.has_value() && !worker_status->mode.empty())
+                ? worker_status->mode
+                : std::string(RunModeLabel(mode));
         std::cout << "svg-mb-control: " << active_mode
                   << " is already running\n"
                   << "  supervisor_pid: " << supervisor_pid << '\n'
@@ -229,18 +219,16 @@ bool PrintAlreadyRunningIfActive(RunMode mode,
 
     // Fallback for the rare case where a worker is somehow running without a
     // supervisor (e.g., direct --run-foreground invocation in a dev workflow).
-    const auto status = TryReadJsonObject(
-        RuntimeStatusPath(runtime_home), "runtime status");
-    if (!status.has_value() || !RuntimeStatusLooksActive(*status)) {
+    const auto status = ReadRuntimeStatus(runtime_home);
+    if (!status.has_value() || !status->LooksActive()) {
         return false;
     }
 
-    const std::uint32_t pid = JsonUInt32Or(*status, "process_id");
     const std::string active_mode =
-        JsonStringOr(*status, "mode", RunModeLabel(mode));
+        status->mode.empty() ? std::string(RunModeLabel(mode)) : status->mode;
     std::cout << "svg-mb-control: " << active_mode
               << " is already running\n"
-              << "  pid: " << pid << '\n'
+              << "  pid: " << status->process_id << '\n'
               << "  requested_mode: " << RunModeLabel(mode) << '\n'
               << "  status: " << RuntimeStatusPath(runtime_home).string()
               << '\n'
@@ -252,16 +240,14 @@ bool WaitForRuntimeStop(const std::filesystem::path& runtime_home,
                         std::chrono::milliseconds timeout) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
-        const auto status = TryReadJsonObject(
-            RuntimeStatusPath(runtime_home), "runtime status");
+        const auto status = ReadRuntimeStatus(runtime_home);
         const bool worker_stopped =
-            !status.has_value() || !RuntimeStatusLooksActive(*status);
+            !status.has_value() || !status->LooksActive();
         if (worker_stopped && !SupervisorSingletonHeld(runtime_home)) {
             return true;
         }
-        const std::string state =
-            status.has_value() ? JsonStringOr(*status, "status") : "";
-        if (state == "shutdown" && !SupervisorSingletonHeld(runtime_home)) {
+        if (status.has_value() && status->status == "shutdown" &&
+            !SupervisorSingletonHeld(runtime_home)) {
             return true;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));

@@ -171,6 +171,7 @@ add_library(svg_mb_control_core STATIC
     src/runtime/runtime_csv_rows.cpp
     src/runtime/runtime_lifecycle.cpp
     src/runtime/runtime_snapshot.cpp
+    src/runtime/runtime_status.cpp
     src/runtime/runtime_supervisor_state.cpp
     src/analyze/analyze_cli.cpp
     src/analyze/analyze_csv.cpp

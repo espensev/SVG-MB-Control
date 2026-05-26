@@ -4,6 +4,7 @@
 #include "control_runtime_context.h"
 #include "control_scheduler.h"
 #include "control_status_writer.h"
+#include "runtime_status.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
 #include "low_band_evidence.h"
