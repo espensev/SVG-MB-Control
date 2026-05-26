@@ -4,11 +4,10 @@
 #include "analyze_db.h"
 #include "analyze_ingest_db.h"
 #include "analyze_json_artifacts.h"
+#include "runtime_util.h"
 
 #include <algorithm>
 #include <chrono>
-#include <ctime>
-#include <iomanip>
 #include <iostream>
 #include <set>
 #include <sstream>
@@ -21,18 +20,7 @@ namespace svg_mb_control::analyze {
 
 namespace {
 
-std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
-    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
-    std::tm tm_local{};
-#if defined(_WIN32)
-    localtime_s(&tm_local, &tt);
-#else
-    localtime_r(&tt, &tm_local);
-#endif
-    std::ostringstream oss;
-    oss << std::put_time(&tm_local, "%FT%T");
-    return oss.str();
-}
+using svg_mb_control::FormatLocalIso8601;
 
 std::filesystem::path Canonicalize(const std::filesystem::path& path) {
     std::error_code ec;

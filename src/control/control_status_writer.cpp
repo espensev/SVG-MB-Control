@@ -1,6 +1,7 @@
 #include "control_status_writer.h"
 
 #include "json_io.h"
+#include "runtime_paths.h"
 
 #include "windows_lean.h"
 
@@ -107,8 +108,7 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
         payload["controlled_channels"].push_back(ChannelStatusToJson(channel));
     }
 
-    return TryWriteJsonFileAtomic(runtime_home / "control_runtime.json",
-                                  payload);
+    return TryWriteJsonFileAtomic(RuntimeStatusPath(runtime_home), payload);
 }
 
 void BuildChannelLogStates(

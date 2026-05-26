@@ -182,11 +182,6 @@ std::string ReadTextFileTail(const std::filesystem::path& path,
     return content;
 }
 
-std::filesystem::path RuntimeStatusPath(
-    const std::filesystem::path& runtime_home) {
-    return runtime_home / "control_runtime.json";
-}
-
 bool RuntimeStatusLooksActive(const nlohmann::json& status) {
     const std::string state = JsonStringOr(status, "status");
     if (state == "shutdown" || state == "failed" ||
@@ -560,7 +555,7 @@ int LaunchDetachedLongRunningMode(RunMode mode,
               << "  supervisor_pid: " << supervisor.pid << '\n'
               << "  config: " << config.source_path.string() << '\n'
               << "  runtime_home: " << runtime_home.string() << '\n'
-              << "  status: " << (runtime_home / "control_runtime.json").string()
+              << "  status: " << RuntimeStatusPath(runtime_home).string()
               << '\n'
               << "  supervisor_stdout: " << stdout_path.string() << '\n'
               << "  supervisor_stderr: " << stderr_path.string() << '\n'

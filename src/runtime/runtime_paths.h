@@ -1,6 +1,9 @@
 #pragma once
 
-#include <chrono>
+#include "runtime_util.h"  // FormatLocalIso8601 — re-exported for legacy
+                           // callers that previously used
+                           // FormatRuntimeLocalIso8601 from this header.
+
 #include <filesystem>
 #include <string>
 
@@ -12,9 +15,6 @@ struct RuntimeArtifactNaming {
     std::string latest_events_name = "svg_mb_control_events.jsonl";
     std::string latest_manifest_name = "svg_mb_control_manifest.json";
 };
-
-std::string FormatRuntimeLocalIso8601(
-    std::chrono::system_clock::time_point tp);
 
 std::filesystem::path ResolveRuntimeLogsDir(
     const std::filesystem::path& runtime_home);
@@ -35,5 +35,10 @@ std::filesystem::path ResolveRuntimeLogManifestPath(
 std::filesystem::path ResolveRuntimeLogManifestPath(
     const std::filesystem::path& runtime_home,
     const RuntimeArtifactNaming& naming);
+
+// runtime_home / "control_runtime.json" — the path of the dual-schema
+// (control-loop / read-loop) runtime status sidecar.
+std::filesystem::path RuntimeStatusPath(
+    const std::filesystem::path& runtime_home);
 
 }  // namespace svg_mb_control

@@ -1,5 +1,7 @@
 #include "startup_banner.h"
 
+#include "runtime_paths.h"
+
 #include "windows_lean.h"
 
 #include <cstdint>
@@ -32,7 +34,7 @@ void PrintCommonLoopStartup(const char* mode,
               << "  pid: " << GetCurrentProcessId() << '\n'
               << "  config: " << config.source_path.string() << '\n'
               << "  runtime_home: " << runtime_home.string() << '\n'
-              << "  status: " << (runtime_home / "control_runtime.json").string()
+              << "  status: " << RuntimeStatusPath(runtime_home).string()
               << '\n'
               << "  events: "
               << (runtime_home / "logs" / "svg_mb_control_events.jsonl").string()

@@ -2,6 +2,7 @@
 
 #include "control_runtime_context.h"
 #include "runtime_csv_rows.h"
+#include "runtime_util.h"  // FormatLocalIso8601 (re-exported for callers)
 
 #include <atomic>
 #include <chrono>
@@ -9,8 +10,6 @@
 #include <string>
 
 namespace svg_mb_control {
-
-std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp);
 
 double DurationMilliseconds(std::chrono::steady_clock::duration duration);
 

@@ -63,8 +63,7 @@ bool WriteRuntimeStatusFile(const std::filesystem::path& runtime_home,
     payload["log_csv_path"] = status.log_csv_path;
     payload["log_manifest_path"] = status.log_manifest_path;
     payload["event_log_path"] = status.event_log_path;
-    return TryWriteJsonFileAtomic(runtime_home / "control_runtime.json",
-                                  payload);
+    return TryWriteJsonFileAtomic(RuntimeStatusPath(runtime_home), payload);
 }
 
 std::uint32_t ResolveStalenessThresholdMs(const ControlConfig& config) {

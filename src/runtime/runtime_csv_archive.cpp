@@ -276,7 +276,7 @@ void RuntimeCsvLogger::WritePrologue() {
     if (!archive_stream_.is_open() || !mirror_stream_.is_open()) {
         return;
     }
-    const std::string opened_iso = FormatRuntimeLocalIso8601(opened_at_);
+    const std::string opened_iso = FormatLocalIso8601(opened_at_);
     for (std::ostream* stream : std::array<std::ostream*, 2>{
              &archive_stream_, &mirror_stream_}) {
         *stream << "# schema=svg_mb_control.log.v1\n";
@@ -343,13 +343,13 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
     const std::uint64_t event_count =
         CachedEventCount(event_log_path, terminal_status);
     const std::string now_iso =
-        FormatRuntimeLocalIso8601(std::chrono::system_clock::now());
+        FormatLocalIso8601(std::chrono::system_clock::now());
 
     nlohmann::json payload = {
         {"schema", "svg_mb_control.runtime_log_manifest.v1"},
         {"status", std::string(status)},
         {"mode", mode_},
-        {"session_start", FormatRuntimeLocalIso8601(opened_at_)},
+        {"session_start", FormatLocalIso8601(opened_at_)},
         {"session_stop",
          terminal_status ? nlohmann::json(now_iso) : nlohmann::json(nullptr)},
         {"last_update", now_iso},

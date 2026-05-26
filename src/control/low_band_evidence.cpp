@@ -41,7 +41,7 @@ void WriteLowBandEvidenceFile(const ControlRuntimeContext& context,
     payload["schema"] = "svg_mb_control.low_band_evidence.v1";
     payload["schema_version"] = 1;
     payload["captured_local"] =
-        FormatRuntimeLocalIso8601(std::chrono::system_clock::now());
+        FormatLocalIso8601(std::chrono::system_clock::now());
     payload["tick_count"] = tick_count;
     payload["enabled"] = cfg.enabled;
     payload["debt"] = state.debt;

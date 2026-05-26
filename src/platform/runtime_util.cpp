@@ -2,12 +2,25 @@
 
 #include "windows_lean.h"
 
+#include <array>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
 #include <string>
 
 namespace svg_mb_control {
+
+std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
+    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
+    std::tm local{};
+    if (localtime_s(&local, &tt) != 0) {
+        return {};
+    }
+    std::array<char, 32> buffer{};
+    const std::size_t written = std::strftime(buffer.data(), buffer.size(),
+                                              "%Y-%m-%dT%H:%M:%S", &local);
+    return written > 0u ? std::string(buffer.data(), written) : std::string();
+}
 
 bool IsProcessActive(std::uint32_t pid) {
     if (pid == 0u) {

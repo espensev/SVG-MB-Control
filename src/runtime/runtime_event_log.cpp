@@ -219,7 +219,7 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
     }
 
     const std::string event_time = event.event_time_iso.empty()
-        ? FormatRuntimeLocalIso8601(std::chrono::system_clock::now())
+        ? FormatLocalIso8601(std::chrono::system_clock::now())
         : event.event_time_iso;
     const std::string severity = InferSeverity(event);
     const std::string error_code = InferErrorCode(event, severity);

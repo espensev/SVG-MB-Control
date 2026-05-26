@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace svg_mb_control {
@@ -18,5 +19,9 @@ bool IsProcessActive(std::uint32_t pid);
 // tm_isdst reset and so misinterpreted DST-period timestamps).
 std::optional<std::chrono::system_clock::time_point> ParseLocalIso8601(
     std::string_view value);
+
+// Formats a time point as "%Y-%m-%dT%H:%M:%S" in local time. Returns an
+// empty string on conversion failure. Inverse of ParseLocalIso8601.
+std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp);
 
 }  // namespace svg_mb_control

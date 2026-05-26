@@ -4,6 +4,7 @@
 #include "json_io.h"
 #include "pending_writes.h"
 #include "runtime_lifecycle.h"
+#include "runtime_paths.h"
 #include "runtime_supervisor_state.h"
 #include "runtime_util.h"
 
@@ -22,11 +23,6 @@
 namespace svg_mb_control {
 
 namespace {
-
-std::filesystem::path RuntimeStatusPath(
-    const std::filesystem::path& runtime_home) {
-    return runtime_home / "control_runtime.json";
-}
 
 std::uint32_t CountDegradedChannels(const nlohmann::json& status) {
     const auto channels = status.find("controlled_channels");

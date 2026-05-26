@@ -133,7 +133,7 @@ std::string BuildCommonCsvHeader() {
 void BuildCommonCsvPrefix(std::ostringstream& csv,
                           const RuntimeSnapshot& snapshot,
                           std::string_view mode) {
-    AppendCsvString(csv, FormatRuntimeLocalIso8601(
+    AppendCsvString(csv, FormatLocalIso8601(
                              std::chrono::system_clock::now()));
     AppendCsvFieldString(csv, mode);
     AppendCsvFieldString(csv, snapshot.snapshot_time_iso);

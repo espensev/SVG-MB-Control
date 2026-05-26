@@ -7,23 +7,9 @@
 #include <psapi.h>
 
 #include <algorithm>
-#include <array>
-#include <ctime>
 #include <mutex>
 
 namespace svg_mb_control {
-
-std::string FormatLocalIso8601(std::chrono::system_clock::time_point tp) {
-    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
-    std::tm local{};
-    if (localtime_s(&local, &tt) != 0) {
-        return {};
-    }
-    std::array<char, 32> buffer{};
-    const std::size_t written = std::strftime(buffer.data(), buffer.size(),
-                                              "%Y-%m-%dT%H:%M:%S", &local);
-    return written > 0u ? std::string(buffer.data(), written) : std::string();
-}
 
 double DurationMilliseconds(std::chrono::steady_clock::duration duration) {
     return std::chrono::duration<double, std::milli>(duration).count();
