@@ -4,6 +4,7 @@
 #include "analyze/analyze_cli.h"
 #include "calibration.h"
 #include "control_config.h"
+#include "control_config_print.h"
 #include "control_loop.h"
 #include "control_supervisor.h"
 #include "direct_runtime_snapshot.h"
@@ -169,7 +170,7 @@ private:
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--start|--status|--health|--stop|--restart|--reset-breakers] [--json] [--config <path>]\n"
+        << "  svg-mb-control [--start|--status|--health|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>]\n"
         << "                 [--reset-breaker-channel <n>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate|evidence-log>] [--config <path>] "
            << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
@@ -331,6 +332,7 @@ struct CliOptions {
     bool status_requested = false;
     bool health_requested = false;
     bool service_probe_requested = false;
+    bool show_config_requested = false;
     bool json_output_requested = false;
     bool stop_requested = false;
     bool restart_requested = false;
@@ -385,6 +387,8 @@ CliOptions ParseCliOptions(int argc, wchar_t** argv) {
             options.health_requested = true;
         } else if (arg == L"--service-probe") {
             options.service_probe_requested = true;
+        } else if (arg == L"--show-config") {
+            options.show_config_requested = true;
         } else if (arg == L"--json") {
             options.json_output_requested = true;
         } else if (arg == L"--stop") {
@@ -521,9 +525,10 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 : 10000u;
 
         if (options.json_output_requested && !options.status_requested &&
-            !options.health_requested && !options.service_probe_requested) {
+            !options.health_requested && !options.service_probe_requested &&
+            !options.show_config_requested) {
             throw std::runtime_error(
-                "--json requires --status, --health, or --service-probe.");
+                "--json requires --status, --health, --service-probe, or --show-config.");
         }
 
         if (options.reset_breakers_requested &&
@@ -533,6 +538,26 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
              options.foreground_launch || options.supervisor_launch)) {
             throw std::runtime_error(
                 "--reset-breakers cannot be combined with another runtime command.");
+        }
+
+        if (options.show_config_requested) {
+            if (!config.has_value()) {
+                throw std::runtime_error(
+                    "--show-config requires a control config (set --config or "
+                    "SVG_MB_CONTROL_CONFIG).");
+            }
+            std::optional<svg_mb_control::ControlLoopConfig> loop_config;
+            try {
+                loop_config = svg_mb_control::LoadControlLoopConfig(
+                    config->source_path);
+            } catch (const std::exception&) {
+                // Config has no control_loop subtree (e.g. read-loop/write-once
+                // only). Fall through and print only the base summary.
+            }
+            svg_mb_control::PrintControlConfigSummary(
+                std::cout, *config, loop_config,
+                options.json_output_requested);
+            return 0;
         }
 
         if (options.service_probe_requested) {

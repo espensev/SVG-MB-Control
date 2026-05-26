@@ -135,6 +135,7 @@ add_library(svg_mb_control_core STATIC
     src/control/channel_evaluator.cpp
     src/control/channel_write.cpp
     src/control/control_config.cpp
+    src/control/control_config_print.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
     src/control/control_runtime_context.cpp

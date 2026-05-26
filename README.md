@@ -126,11 +126,21 @@ cd .\release
 .\svg-mb-control.exe --start
 .\svg-mb-control.exe --status
 .\svg-mb-control.exe --health --json
+.\svg-mb-control.exe --show-config
+.\svg-mb-control.exe --show-config --json
 .\svg-mb-control.exe --stop
 .\svg-mb-control.exe --restart
 .\svg-mb-control.exe --reset-breakers
 .\svg-mb-control.exe --reset-breakers --reset-breaker-channel 4
 ```
+
+`--show-config` prints an operator-facing summary of the loaded
+`control.json`: schema version, default mode, loop cadence, write timing,
+health/safety thresholds, low-band global state, and per-channel blend,
+rate limits, smoothing, boost stages, and curve endpoints. It does not
+require the controller to be running and reads the same config the worker
+would. `--show-config --json` emits the same fields as a structured JSON
+document for tooling.
 
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,

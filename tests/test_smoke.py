@@ -38,6 +38,54 @@ class SmokeTests(unittest.TestCase):
         self.assertIn('sample[0].label: "Tctl/Tdie"', result.stdout)
         self.assertIn("sample[0].temperature_c: 82.5", result.stdout)
 
+    def test_show_config_text_renders_example_config(self) -> None:
+        config_path = REPO_ROOT / "config" / "control.example.json"
+        result = _run_control("--show-config", "--config", str(config_path))
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        out = result.stdout
+        self.assertIn("svg-mb-control config:", out)
+        self.assertIn("Schema version:", out)
+        self.assertIn("Default mode:", out)
+        self.assertIn("Loop cadence:", out)
+        self.assertIn("Write timing", out)
+        self.assertIn("Health/safety:", out)
+        self.assertIn("Channels (", out)
+        self.assertIn("ch0", out)
+        self.assertIn("blend=", out)
+        self.assertIn("curve  ", out)
+
+    def test_show_config_json_renders_example_config(self) -> None:
+        config_path = REPO_ROOT / "config" / "control.example.json"
+        result = _run_control(
+            "--show-config", "--json", "--config", str(config_path)
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["schema_version"], 4)
+        self.assertEqual(data["default_mode"], "control-loop")
+        self.assertEqual(data["poll_ms"], 500)
+        loop = data["control_loop"]
+        self.assertIsNotNone(loop)
+        self.assertEqual(loop["poll_tick_ms"], 250)
+        self.assertEqual(loop["deadband_pct"], 0.25)
+        self.assertTrue(loop["low_band"]["enabled"])
+        channels = loop["channels"]
+        self.assertGreater(len(channels), 0)
+        ch0 = next(ch for ch in channels if ch["channel"] == 0)
+        self.assertEqual(ch0["temp_blend"], "max_cpu_gpu")
+        self.assertEqual(ch0["curve_shape"], "smootherstep")
+        self.assertGreater(len(ch0["curve"]), 0)
+        self.assertIn("thermal_pressure", ch0)
+        self.assertIn("midband_pressure", ch0)
+        self.assertIn("gpu_airflow", ch0)
+
+    def test_show_config_without_config_errors(self) -> None:
+        result = _run_control(
+            "--show-config", "--config", "Z:/does-not-exist.json"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Control config not found", result.stderr)
+
     def test_removed_bridge_flags_fail_clearly(self) -> None:
         result = _run_control("--bridge-exe-path", "legacy-bridge.exe")
         self.assertNotEqual(result.returncode, 0)
