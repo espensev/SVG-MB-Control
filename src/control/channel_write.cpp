@@ -27,6 +27,98 @@ bool RuntimeFanAllowsWrite(const RuntimeSnapshot& runtime_snapshot,
     return fan == nullptr || fan->effective_write_allowed;
 }
 
+// Bookkeeping + event emissions for a failed ApplyDuty. Bumps the consecutive
+// failure counter, opens the channel circuit breaker once the threshold is
+// crossed, removes the pending-write sidecar when the failure was a policy
+// refusal, and emits the write_failed event. Caller returns immediately
+// after; no further setpoint-related state is touched.
+void HandleChannelWriteFailure(ControlRuntimeContext& context,
+                               ChannelState& channel,
+                               PendingWritesStore& pending_store,
+                               const FanWriteResult& write_result,
+                               double observed_temp_c,
+                               double setpoint,
+                               std::uint64_t tick_count) {
+    channel.last_write_reason = "write_failed";
+    ++channel.consecutive_write_failures;
+    if (channel.consecutive_write_failures >=
+            ChannelState::kMaxConsecutiveFailures &&
+        !channel.circuit_breaker_open) {
+        channel.circuit_breaker_open = true;
+        AppendControlLoopEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .event_type = "control_loop.circuit_breaker_opened",
+                .detail =
+                    "circuit breaker opened after repeated write failures",
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .observed_temp_c = observed_temp_c,
+                .setpoint_pct = setpoint,
+                .success = false,
+            });
+    }
+
+    if (write_result.error == FanWriteError::kPolicyRefused) {
+        try {
+            pending_store.QueueRemove(channel.config.channel);
+        } catch (const std::exception& e) {
+            AppendControlLoopEvent(
+                context.runtime_home,
+                RuntimeLogEvent{
+                    .event_type = "control_loop.sidecar_remove_warning",
+                    .detail = std::string(
+                                  "best-effort sidecar removal after "
+                                  "policy refusal failed: ") +
+                              e.what(),
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .success = false,
+                });
+        }
+    }
+    AppendControlLoopEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .event_type = "control_loop.write_failed",
+            .detail = write_result.detail,
+            .channel = channel.config.channel,
+            .tick_count = tick_count,
+            .observed_temp_c = observed_temp_c,
+            .setpoint_pct = setpoint,
+            .success = false,
+        });
+}
+
+// Bookkeeping after a successful ApplyDuty: clear the consecutive-failure
+// counter and, if the breaker was open, close it and emit the recovery event.
+void NoteSuccessfulChannelWrite(ControlRuntimeContext& context,
+                                ChannelState& channel,
+                                double observed_temp_c,
+                                double setpoint,
+                                std::uint64_t tick_count) {
+    if (channel.consecutive_write_failures == 0u &&
+        !channel.circuit_breaker_open) {
+        return;
+    }
+    if (channel.circuit_breaker_open) {
+        AppendControlLoopEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .event_type = "control_loop.circuit_breaker_closed",
+                .detail =
+                    "circuit breaker closed after successful write",
+                .channel = channel.config.channel,
+                .tick_count = tick_count,
+                .observed_temp_c = observed_temp_c,
+                .setpoint_pct = setpoint,
+                .success = true,
+            });
+    }
+    channel.consecutive_write_failures = 0u;
+    channel.circuit_breaker_open = false;
+}
+
 }  // namespace
 
 void CaptureChannelBaselineIfAvailable(
@@ -238,81 +330,14 @@ void TryApplyChannelSetpoint(
     const FanWriteResult write_result =
         fan_writer.ApplyDuty(channel.config.channel, setpoint);
     if (!write_result) {
-        channel.last_write_reason = "write_failed";
-        ++channel.consecutive_write_failures;
-        if (channel.consecutive_write_failures >=
-            ChannelState::kMaxConsecutiveFailures) {
-            if (!channel.circuit_breaker_open) {
-                channel.circuit_breaker_open = true;
-                AppendControlLoopEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                                    .event_type =
-                            "control_loop.circuit_breaker_opened",
-                        .detail =
-                            "circuit breaker opened after repeated write "
-                            "failures",
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .observed_temp_c = observed_temp_c,
-                        .setpoint_pct = setpoint,
-                        .success = false,
-                    });
-            }
-        }
-
-        if (write_result.error == FanWriteError::kPolicyRefused) {
-            try {
-                pending_store.QueueRemove(channel.config.channel);
-            } catch (const std::exception& e) {
-                AppendControlLoopEvent(
-                    context.runtime_home,
-                    RuntimeLogEvent{
-                                    .event_type =
-                            "control_loop.sidecar_remove_warning",
-                        .detail = std::string(
-                                      "best-effort sidecar removal after "
-                                      "policy refusal failed: ") +
-                                  e.what(),
-                        .channel = channel.config.channel,
-                        .tick_count = tick_count,
-                        .success = false,
-                    });
-            }
-        }
-        AppendControlLoopEvent(
-            context.runtime_home,
-            RuntimeLogEvent{
-                    .event_type = "control_loop.write_failed",
-                .detail = write_result.detail,
-                .channel = channel.config.channel,
-                .tick_count = tick_count,
-                .observed_temp_c = observed_temp_c,
-                .setpoint_pct = setpoint,
-                .success = false,
-            });
+        HandleChannelWriteFailure(context, channel, pending_store,
+                                  write_result, observed_temp_c, setpoint,
+                                  tick_count);
         return;
     }
 
-    if (channel.consecutive_write_failures > 0 ||
-        channel.circuit_breaker_open) {
-        if (channel.circuit_breaker_open) {
-            AppendControlLoopEvent(
-                context.runtime_home,
-                RuntimeLogEvent{
-                            .event_type = "control_loop.circuit_breaker_closed",
-                    .detail =
-                        "circuit breaker closed after successful write",
-                    .channel = channel.config.channel,
-                    .tick_count = tick_count,
-                    .observed_temp_c = observed_temp_c,
-                    .setpoint_pct = setpoint,
-                    .success = true,
-                });
-        }
-        channel.consecutive_write_failures = 0u;
-        channel.circuit_breaker_open = false;
-    }
+    NoteSuccessfulChannelWrite(context, channel, observed_temp_c, setpoint,
+                               tick_count);
     if (evaluation.authority_reassert) {
         AppendControlLoopEvent(
             context.runtime_home,
