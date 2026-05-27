@@ -187,10 +187,14 @@ void PersistHealthAssessment(const RuntimeHealthResult& result) {
     payload["last_health_exit_code"] = RuntimeHealthExitCode(result.state);
     payload["last_health_time"] =
         FormatLocalIso8601(std::chrono::system_clock::now());
+    std::string write_error;
     if (!TryWriteJsonFileAtomic(result.runtime_home / "control_health.json",
-                                payload)) {
+                                payload, 2, &write_error)) {
         std::cerr << "warning: failed to write control_health.json to "
                   << result.runtime_home.string() << '\n';
+        if (!write_error.empty()) {
+            std::cerr << "  detail: " << write_error << '\n';
+        }
     }
 }
 

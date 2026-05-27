@@ -480,8 +480,12 @@ int RunCalibration(const ControlConfig& base,
     if (!output.parent_path().empty()) {
         std::filesystem::create_directories(output.parent_path(), ec);
     }
-    if (!TryWriteJsonFileAtomic(output, payload)) {
+    std::string write_error;
+    if (!TryWriteJsonFileAtomic(output, payload, 2, &write_error)) {
         std::cerr << "Error: failed to write " << output.string() << '\n';
+        if (!write_error.empty()) {
+            std::cerr << "  detail: " << write_error << '\n';
+        }
         return 1;
     }
     std::cout << "calibration: wrote " << output.string()

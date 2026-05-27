@@ -105,13 +105,19 @@ void WriteLowBandEvidenceFile(const ControlRuntimeContext& context,
         payload["channels"].push_back(std::move(channel_json));
     }
 
+    std::string write_error;
     if (!TryWriteJsonFileAtomic(context.runtime_home / "low_band_evidence.json",
-                                payload)) {
+                                payload, 2, &write_error)) {
+        std::string detail = "failed to write low_band_evidence.json";
+        if (!write_error.empty()) {
+            detail += ": ";
+            detail += write_error;
+        }
         AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
                 .event_type = "control_loop.low_band_evidence_write_failed",
-                .detail = "failed to write low_band_evidence.json",
+                .detail = detail,
                 .tick_count = tick_count,
                 .success = false,
             });
