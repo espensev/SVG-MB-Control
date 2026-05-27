@@ -41,38 +41,39 @@ namespace svg_mb_control {
 
 namespace {
 
+// One source of truth for the six runtime mode names. RunModeArgument /
+// RunModeLabel / both ParseRunMode overloads adapt this table for their own
+// caller direction; before this consolidation each function held its own
+// six-entry ladder, so adding a mode meant editing four parallel places.
+struct RunModeTableEntry {
+    RunMode mode;
+    std::string_view narrow;
+    std::wstring_view wide;
+};
+
+constexpr RunModeTableEntry kRunModeTable[] = {
+    {RunMode::kOneShot,     "one-shot",     L"one-shot"},
+    {RunMode::kReadLoop,    "read-loop",    L"read-loop"},
+    {RunMode::kWriteOnce,   "write-once",   L"write-once"},
+    {RunMode::kControlLoop, "control-loop", L"control-loop"},
+    {RunMode::kCalibrate,   "calibrate",    L"calibrate"},
+    {RunMode::kEvidenceLog, "evidence-log", L"evidence-log"},
+};
+
 std::wstring RunModeArgument(RunMode mode) {
-    switch (mode) {
-        case RunMode::kOneShot:
-            return L"one-shot";
-        case RunMode::kReadLoop:
-            return L"read-loop";
-        case RunMode::kWriteOnce:
-            return L"write-once";
-        case RunMode::kControlLoop:
-            return L"control-loop";
-        case RunMode::kCalibrate:
-            return L"calibrate";
-        case RunMode::kEvidenceLog:
-            return L"evidence-log";
+    for (const auto& entry : kRunModeTable) {
+        if (entry.mode == mode) {
+            return std::wstring(entry.wide);
+        }
     }
     throw std::runtime_error("Unknown run mode.");
 }
 
 std::string_view RunModeLabel(RunMode mode) {
-    switch (mode) {
-        case RunMode::kOneShot:
-            return "one-shot";
-        case RunMode::kReadLoop:
-            return "read-loop";
-        case RunMode::kWriteOnce:
-            return "write-once";
-        case RunMode::kControlLoop:
-            return "control-loop";
-        case RunMode::kCalibrate:
-            return "calibrate";
-        case RunMode::kEvidenceLog:
-            return "evidence-log";
+    for (const auto& entry : kRunModeTable) {
+        if (entry.mode == mode) {
+            return entry.narrow;
+        }
     }
     throw std::runtime_error("Unknown run mode.");
 }
@@ -377,46 +378,20 @@ bool IsLongRunningMode(RunMode mode) {
 }
 
 RunMode ParseRunMode(const wchar_t* value) {
-    const std::wstring raw(value);
-    if (raw == L"one-shot") {
-        return RunMode::kOneShot;
-    }
-    if (raw == L"read-loop") {
-        return RunMode::kReadLoop;
-    }
-    if (raw == L"write-once") {
-        return RunMode::kWriteOnce;
-    }
-    if (raw == L"control-loop") {
-        return RunMode::kControlLoop;
-    }
-    if (raw == L"calibrate") {
-        return RunMode::kCalibrate;
-    }
-    if (raw == L"evidence-log") {
-        return RunMode::kEvidenceLog;
+    const std::wstring_view raw(value);
+    for (const auto& entry : kRunModeTable) {
+        if (entry.wide == raw) {
+            return entry.mode;
+        }
     }
     throw std::runtime_error("Invalid --mode value.");
 }
 
 RunMode ParseRunMode(std::string_view value) {
-    if (value == "one-shot") {
-        return RunMode::kOneShot;
-    }
-    if (value == "read-loop") {
-        return RunMode::kReadLoop;
-    }
-    if (value == "write-once") {
-        return RunMode::kWriteOnce;
-    }
-    if (value == "control-loop") {
-        return RunMode::kControlLoop;
-    }
-    if (value == "calibrate") {
-        return RunMode::kCalibrate;
-    }
-    if (value == "evidence-log") {
-        return RunMode::kEvidenceLog;
+    for (const auto& entry : kRunModeTable) {
+        if (entry.narrow == value) {
+            return entry.mode;
+        }
     }
     throw std::runtime_error("Invalid default_mode in control config.");
 }
