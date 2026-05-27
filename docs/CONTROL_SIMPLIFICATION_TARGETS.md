@@ -286,15 +286,253 @@ Validation:
 - For any descriptor-list approach, add a test that compares expected columns
   with parsed row keys.
 
+## 7. Build Test CSV Fixtures From Field Descriptors
+
+Current shape:
+
+- `tests/test_analyze_ingest.py` owns `CSV_HEADER_PARTS`, `_write_fixture_csv`,
+  and `_write_ramp_csv` as manually aligned string/cell lists.
+- Adding a channel CSV field requires updating the header and every fixture row
+  in lockstep.
+- A missing cell shifts every later column while still producing parseable CSV,
+  so failures surface indirectly in analyzer assertions.
+
+Simplification:
+
+- Replace the hand-aligned fixture row lists with a small descriptor-driven
+  builder local to the test file.
+- Keep the fixture values explicit, but map them by field name:
+  - common row fields,
+  - fan fields,
+  - loop timing fields,
+  - channel fields.
+- Have the builder assert that every generated row has exactly the same field
+  count as the generated header before writing the CSV.
+
+Payoff:
+
+- Prevents header/row drift in analyzer fixtures.
+- Keeps schema additions from becoming brittle column-position surgery.
+- Gives tests clearer failure messages when a field is missing.
+
+Risk:
+
+- Low. This is test-only and does not touch runtime behavior.
+- Keep the generated header order identical to the current fixture header.
+
+Validation:
+
+- Run `python -m unittest tests.test_analyze_ingest -v`.
+- Run local CI when paired with runtime/analyzer schema changes.
+
+## 8. Add A Staged Background Runtime Test Helper
+
+Current shape:
+
+- `tests/test_smoke.py` repeats the same staged-executable setup:
+  - create temp dir,
+  - copy `svg-mb-control.exe`,
+  - write a read-loop config,
+  - launch with zero args,
+  - clean up with `--stop` in a `finally` block.
+- These are not the same as `RuntimeProbe`: they exercise the background
+  supervisor/worker launch path rather than a directly spawned foreground
+  process.
+
+Simplification:
+
+- Add a small helper or context manager, for example
+  `StagedControlApp`, that owns:
+  - staged executable path,
+  - runtime home,
+  - default read-loop config creation,
+  - `start`, `stop`, `status`, and `restart` helpers.
+- Keep the explicit test assertions in `test_smoke.py`; only centralize setup
+  and guaranteed stop cleanup.
+
+Payoff:
+
+- Removes repeated staging boilerplate from the longest smoke tests.
+- Makes background-process cleanup more reliable.
+- Keeps foreground `RuntimeProbe` and background supervisor tests distinct.
+
+Risk:
+
+- Low-medium. These tests intentionally exercise process lifetime, so the helper
+  must not hide failed start/stop return codes.
+- Preserve tests that deliberately corrupt startup state before launch.
+
+Validation:
+
+- Run `python -m unittest tests.test_smoke -v`.
+- Confirm no lingering `svg-mb-control.exe` test children remain afterward.
+
+## 9. Split `RunAnalyzeReport` Into Query And Assembly Helpers
+
+Current shape:
+
+- `src/analyze/analyze_report.cpp::RunAnalyzeReport` is a large pipeline that
+  opens the database, selects the run, loads ticks, assigns bands, loads
+  channel samples, loads fan samples, counts events, computes baselines, detects
+  response delay, and emits output.
+- The JSON and text emitters are already separate; the remaining complexity is
+  in data loading and report assembly.
+
+Simplification:
+
+- Extract behavior-preserving helpers:
+  - `LoadTicks(db, run_id)`.
+  - `AssignBands(ticks, options)`.
+  - `LoadChannelStats(db, run_id)`.
+  - `MergeFanStats(db, run_id, channels)`.
+  - `LoadRobustnessCounts(db, run_id)`.
+  - `DetectResponseDelay(db, run_id, ticks, options)`.
+- Keep `ReportData` as the handoff object to the existing emitters.
+
+Payoff:
+
+- Makes analyzer failures easier to localize.
+- Reduces positional SQL-column fragility by giving each query one narrow
+  mapping site.
+- Opens the door to focused tests around banding and response detection.
+
+Risk:
+
+- Medium-low. This is offline analysis, not live control.
+- Preserve current output fields and percentile behavior exactly.
+
+Validation:
+
+- Run `python -m unittest tests.test_analyze_ingest -v`.
+- Run local CI if the refactor touches schema, ingest, or report output.
+
+## 10. Centralize Analyzer Channel Sample Columns
+
+Current shape:
+
+- A channel CSV field can touch several analyzer layers:
+  - `src/analyze/analyze_csv.{h,cpp}`,
+  - `src/analyze/analyze_db.cpp` DDL and migrations,
+  - `src/analyze/analyze_ingest_db.cpp` insert SQL and bind positions,
+  - `src/analyze/analyze_report.cpp` query column positions,
+  - Python analyzer fixtures.
+- This is related to the runtime CSV mirroring target, but it is specifically
+  the ingestion/database side.
+
+Simplification:
+
+- Start with the `tick_channel_samples` column group only.
+- Introduce a small local descriptor or constants block for field names and
+  bind/query positions.
+- Prefer a narrow helper that binds a `ParsedChannelSample` to a prepared
+  statement over a broad ORM-like abstraction.
+
+Payoff:
+
+- Reduces schema addition risk.
+- Makes migrations and inserts easier to audit.
+- Prevents positional bind mistakes when optional fields are inserted in the
+  middle of the channel schema.
+
+Risk:
+
+- Medium. Database schema and migrations are durable contracts.
+- Keep migrations backward-compatible and do not rename existing columns.
+
+Validation:
+
+- Run analyzer ingest/report tests.
+- Verify migration tests or add one if an older schema fixture is introduced.
+
+## 11. Reuse Control Config Channel Descriptors In Text And JSON Output
+
+Current shape:
+
+- `src/control/control_config_print.cpp` renders channel configuration twice:
+  - operator text output,
+  - JSON summary output.
+- Pressure-style blocks are already descriptor-driven in config parsing, but
+  summary rendering repeats thermal, midband, GPU airflow, CPU low-soak, and
+  low-band output shapes by hand.
+
+Simplification:
+
+- Reuse a small descriptor list for staged channel response blocks:
+  - display label,
+  - JSON key,
+  - start/full/release fields where applicable,
+  - rise/fall/max fields.
+- Keep bespoke text wording where it helps operators, but centralize the field
+  selection and disabled/null logic.
+
+Payoff:
+
+- Keeps `--show-config` text and JSON aligned.
+- Makes new channel response fields less likely to be omitted from one output.
+- Builds on the existing `PressureBoostMembers` pattern from config parsing.
+
+Risk:
+
+- Low-medium. This is presentation-only, but smoke/config tests check output.
+- Preserve current JSON keys and important text labels.
+
+Validation:
+
+- Run `python -m unittest tests.test_smoke tests.test_config_contracts -v`.
+
+## 12. Split The Python Analysis Script Renderers Into Sections
+
+Current shape:
+
+- `scripts/analyze_control_run.py` is useful but has large renderer functions:
+  - `render_markdown`,
+  - `build_decision_record`,
+  - `build_diagnostic_flags`.
+- The script already has good summary objects; the rendering layer is the
+  densest remaining part.
+
+Simplification:
+
+- Extract section renderers:
+  - run identity,
+  - cadence/timing,
+  - channel response,
+  - event summary,
+  - diagnostic flags,
+  - decision-record recommendations.
+- Keep output text byte-for-byte where possible, or update tests deliberately if
+  wording changes.
+
+Payoff:
+
+- Makes analysis report changes reviewable in small units.
+- Reduces the chance of accidentally changing unrelated sections while tuning
+  one diagnostic.
+
+Risk:
+
+- Low. This is offline tooling.
+- Snapshot-style tests may need small expected-output updates if section
+  boundaries change.
+
+Validation:
+
+- Run `python -m unittest tests.test_analyzer -v`.
+
 ## Suggested Order
 
 1. Unify math primitives.
 2. Extract raw demand and final setpoint composition from `EvaluateChannel`.
 3. Name low-band gates.
 4. Make run-mode parsing table-driven.
-5. Reduce CSV schema/header mirroring.
-6. Reduce CLI parser ladder pressure.
+5. Build test CSV fixtures from field descriptors.
+6. Reduce CSV schema/header mirroring.
+7. Centralize analyzer channel sample columns.
+8. Add a staged background runtime test helper.
+9. Split `RunAnalyzeReport` into query and assembly helpers.
+10. Reuse control config channel descriptors in text and JSON output.
+11. Split the Python analysis script renderers into sections.
+12. Reduce CLI parser ladder pressure.
 
 The first three are controller-local and should make the math easier to review.
-The later three are broader maintainability work and can be done independently.
-
+The later items are broader maintainability work and can be done independently.
