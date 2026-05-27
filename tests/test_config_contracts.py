@@ -4,6 +4,22 @@ from tests.helpers import *
 
 
 class ConfigContractTests(unittest.TestCase):
+    def test_native_watchdog_recovery_uses_restart(self) -> None:
+        source = (REPO_ROOT / "src" / "platform" / "task_runner.cpp").read_text(
+            encoding="utf-8"
+        )
+        watchdog_block = source.split(
+            'if (HasFlag(argc, argv, L"--watchdog-run")) {', 1
+        )[1].split('if (HasFlag(argc, argv, L"--start")) {', 1)[0]
+        self.assertIn(
+            'RunHiddenAndWait(control_exe, {L"--restart"}, config_path)',
+            watchdog_block,
+        )
+        self.assertNotIn(
+            'RunHiddenAndWait(control_exe, {L"--start"}, config_path)',
+            watchdog_block,
+        )
+
     def test_shipped_configs_default_to_control_loop(self) -> None:
         for rel_path in (
             Path("config") / "control.example.json",

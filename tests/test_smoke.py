@@ -317,6 +317,55 @@ class SmokeTests(unittest.TestCase):
                 msg="supervisor sidecar still shows the pre-restart worker",
             )
 
+    def test_native_watchdog_run_starts_stopped_runtime(self) -> None:
+        with StagedControlApp() as app:
+            task_runner = app.root / "svg-mb-control-task-runner.exe"
+            shutil.copy2(CONTROL_TASK_RUNNER_EXE, task_runner)
+
+            result = subprocess.run(
+                [
+                    str(task_runner),
+                    "--watchdog-run",
+                    "--config",
+                    str(app.root / "control.json"),
+                ],
+                cwd=app.root,
+                capture_output=True,
+                text=True,
+                env=_merged_env(_sim_direct_env(channel=5, amd_temp_c=73.0)),
+            )
+            if result.returncode == 0:
+                app._started = True
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"{result.stdout}\n{result.stderr}",
+            )
+
+            status = _wait_for(
+                lambda: (
+                    s
+                    if (s := _read_runtime_status(app.runtime_home))
+                    and s.get("status") == "running"
+                    else None
+                ),
+                timeout_s=5.0,
+            )
+            self.assertIsNotNone(status, msg="watchdog did not start runtime")
+            self.assertGreater(status["process_id"], 0)
+
+            state = _wait_for(
+                lambda: (
+                    s
+                    if (s := _read_runtime_current_state(app.runtime_home))
+                    and s["fans"][0]["channel"] == 5
+                    else None
+                ),
+                timeout_s=5.0,
+            )
+            self.assertIsNotNone(state, msg="watchdog-started worker did not refresh")
+            self.assertEqual(state["amd_sensors"][0]["temperature_c"], 73.0)
+
     def test_zero_arg_staged_launch_reports_startup_failure(self) -> None:
         with StagedControlApp() as app:
             app.runtime_home.mkdir(parents=True, exist_ok=True)

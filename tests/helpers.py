@@ -17,14 +17,27 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = REPO_ROOT / "build" / "x64-release"
 _TEST_EXE_ENV = os.environ.get("SVG_MB_CONTROL_TEST_EXE")
 CONTROL_EXE = Path(_TEST_EXE_ENV) if _TEST_EXE_ENV else BUILD_DIR / "svg-mb-control.exe"
+_TEST_TASK_RUNNER_ENV = os.environ.get("SVG_MB_CONTROL_TEST_TASK_RUNNER_EXE")
+CONTROL_TASK_RUNNER_EXE = (
+    Path(_TEST_TASK_RUNNER_ENV)
+    if _TEST_TASK_RUNNER_ENV
+    else BUILD_DIR / "svg-mb-control-task-runner.exe"
+)
 BUILD_SCRIPT = REPO_ROOT / "build-release.ps1"
 
 
 def _ensure_release_build() -> None:
-    if CONTROL_EXE.is_file():
+    if CONTROL_EXE.is_file() and CONTROL_TASK_RUNNER_EXE.is_file():
         return
-    if _TEST_EXE_ENV:
-        raise unittest.SkipTest(f"configured test executable not found: {CONTROL_EXE}")
+    if _TEST_EXE_ENV or _TEST_TASK_RUNNER_ENV:
+        missing = [
+            str(path)
+            for path in (CONTROL_EXE, CONTROL_TASK_RUNNER_EXE)
+            if not path.is_file()
+        ]
+        raise unittest.SkipTest(
+            "configured test executable not found: " + ", ".join(missing)
+        )
 
     result = subprocess.run(
         [
