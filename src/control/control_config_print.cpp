@@ -55,6 +55,51 @@ void PrintCurveSummary(std::ostream& out, const std::vector<CurvePoint>& curve,
         << " pts)\n";
 }
 
+// Descriptor for the three pressure-style boost blocks that share the same
+// (start_c, full_c, rise_pct_per_sec, fall_pct_per_sec, max_boost_pct) shape:
+// thermal_pressure, midband_pressure, gpu_airflow. cpu_low_soak is similar
+// but uses per_min units and adds release_c, so it stays bespoke below.
+// Adding a same-shaped boost only requires extending this table.
+struct PressureBoostDescriptor {
+    const char* text_label;
+    const char* json_key;
+    double ChannelControlConfig::*start_c;
+    double ChannelControlConfig::*full_c;
+    double ChannelControlConfig::*rise_pct_per_sec;
+    double ChannelControlConfig::*fall_pct_per_sec;
+    double ChannelControlConfig::*max_boost_pct;
+};
+
+constexpr PressureBoostDescriptor kPressureBoostDescriptors[] = {
+    {"thermal", "thermal_pressure",
+     &ChannelControlConfig::thermal_pressure_start_c,
+     &ChannelControlConfig::thermal_pressure_full_c,
+     &ChannelControlConfig::thermal_pressure_rise_pct_per_sec,
+     &ChannelControlConfig::thermal_pressure_fall_pct_per_sec,
+     &ChannelControlConfig::thermal_pressure_max_boost_pct},
+    {"midband", "midband_pressure",
+     &ChannelControlConfig::midband_pressure_start_c,
+     &ChannelControlConfig::midband_pressure_full_c,
+     &ChannelControlConfig::midband_pressure_rise_pct_per_sec,
+     &ChannelControlConfig::midband_pressure_fall_pct_per_sec,
+     &ChannelControlConfig::midband_pressure_max_boost_pct},
+    {"gpu-air", "gpu_airflow",
+     &ChannelControlConfig::gpu_airflow_start_c,
+     &ChannelControlConfig::gpu_airflow_full_c,
+     &ChannelControlConfig::gpu_airflow_rise_pct_per_sec,
+     &ChannelControlConfig::gpu_airflow_fall_pct_per_sec,
+     &ChannelControlConfig::gpu_airflow_max_boost_pct},
+};
+
+void EmitPressureBoostText(std::ostream& out,
+                           const ChannelControlConfig& ch,
+                           const PressureBoostDescriptor& desc) {
+    out << "       " << desc.text_label << " "
+        << FormatPctRange(ch.*desc.start_c, ch.*desc.full_c,
+                          ch.*desc.max_boost_pct)
+        << '\n';
+}
+
 void PrintTextSummary(std::ostream& out, const ControlConfig& base,
                       const std::optional<ControlLoopConfig>& loop) {
     out << "svg-mb-control config: ";
@@ -182,18 +227,9 @@ void PrintTextSummary(std::ostream& out, const ControlConfig& base,
                     << FormatNumber(ch.decay_latch_above_pct, 1) << "%";
             }
             out << '\n';
-            out << "       thermal " << FormatPctRange(ch.thermal_pressure_start_c,
-                                                       ch.thermal_pressure_full_c,
-                                                       ch.thermal_pressure_max_boost_pct)
-                << '\n';
-            out << "       midband " << FormatPctRange(ch.midband_pressure_start_c,
-                                                       ch.midband_pressure_full_c,
-                                                       ch.midband_pressure_max_boost_pct)
-                << '\n';
-            out << "       gpu-air " << FormatPctRange(ch.gpu_airflow_start_c,
-                                                       ch.gpu_airflow_full_c,
-                                                       ch.gpu_airflow_max_boost_pct)
-                << '\n';
+            for (const auto& desc : kPressureBoostDescriptors) {
+                EmitPressureBoostText(out, ch, desc);
+            }
             if (IsKnown(ch.cpu_low_soak_start_c) ||
                 IsKnown(ch.cpu_low_soak_full_c) ||
                 IsKnown(ch.cpu_low_soak_max_boost_pct)) {
@@ -231,6 +267,19 @@ nlohmann::json OptionalDouble(double value) {
         return nullptr;
     }
     return value;
+}
+
+nlohmann::json BuildPressureBoostJson(const ChannelControlConfig& ch,
+                                      const PressureBoostDescriptor& desc) {
+    return {
+        {"start_c", OptionalDouble(ch.*desc.start_c)},
+        {"full_c", OptionalDouble(ch.*desc.full_c)},
+        {"rise_pct_per_sec",
+         OptionalDouble(ch.*desc.rise_pct_per_sec)},
+        {"fall_pct_per_sec",
+         OptionalDouble(ch.*desc.fall_pct_per_sec)},
+        {"max_boost_pct", OptionalDouble(ch.*desc.max_boost_pct)},
+    };
 }
 
 nlohmann::json BuildJsonSummary(const ControlConfig& base,
@@ -313,33 +362,9 @@ nlohmann::json BuildJsonSummary(const ControlConfig& base,
             OptionalDouble(ch.decay_latch_above_pct);
         channel_json["decay_latch_pct_per_min"] =
             OptionalDouble(ch.decay_latch_pct_per_min);
-        channel_json["thermal_pressure"] = {
-            {"start_c", OptionalDouble(ch.thermal_pressure_start_c)},
-            {"full_c", OptionalDouble(ch.thermal_pressure_full_c)},
-            {"rise_pct_per_sec",
-             OptionalDouble(ch.thermal_pressure_rise_pct_per_sec)},
-            {"fall_pct_per_sec",
-             OptionalDouble(ch.thermal_pressure_fall_pct_per_sec)},
-            {"max_boost_pct",
-             OptionalDouble(ch.thermal_pressure_max_boost_pct)},
-        };
-        channel_json["midband_pressure"] = {
-            {"start_c", OptionalDouble(ch.midband_pressure_start_c)},
-            {"full_c", OptionalDouble(ch.midband_pressure_full_c)},
-            {"rise_pct_per_sec",
-             OptionalDouble(ch.midband_pressure_rise_pct_per_sec)},
-            {"fall_pct_per_sec",
-             OptionalDouble(ch.midband_pressure_fall_pct_per_sec)},
-            {"max_boost_pct",
-             OptionalDouble(ch.midband_pressure_max_boost_pct)},
-        };
-        channel_json["gpu_airflow"] = {
-            {"start_c", OptionalDouble(ch.gpu_airflow_start_c)},
-            {"full_c", OptionalDouble(ch.gpu_airflow_full_c)},
-            {"rise_pct_per_sec", OptionalDouble(ch.gpu_airflow_rise_pct_per_sec)},
-            {"fall_pct_per_sec", OptionalDouble(ch.gpu_airflow_fall_pct_per_sec)},
-            {"max_boost_pct", OptionalDouble(ch.gpu_airflow_max_boost_pct)},
-        };
+        for (const auto& desc : kPressureBoostDescriptors) {
+            channel_json[desc.json_key] = BuildPressureBoostJson(ch, desc);
+        }
         channel_json["cpu_low_soak"] = {
             {"start_c", OptionalDouble(ch.cpu_low_soak_start_c)},
             {"full_c", OptionalDouble(ch.cpu_low_soak_full_c)},
