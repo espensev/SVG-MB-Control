@@ -46,6 +46,7 @@ void WriteJsonFileAtomic(const std::filesystem::path& target_path,
 
 bool TryWriteJsonFileAtomic(const std::filesystem::path& target_path,
                             const nlohmann::json& payload,
-                            int indent = 2);
+                            int indent = 2,
+                            std::string* error_message = nullptr);
 
 }  // namespace svg_mb_control

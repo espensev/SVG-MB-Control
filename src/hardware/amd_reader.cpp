@@ -8,13 +8,16 @@
 #include "pawnio_binary.h"
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <thread>
 
 namespace svg_mb_control {
 
@@ -48,6 +51,9 @@ constexpr std::uint32_t kPawnIoExecuteFn = (41394u << 16) | (0x841u << 2);
 constexpr std::size_t kPawnIoFnNameLength = 32u;
 constexpr DWORD kPciMutexTimeoutMs = 100u;
 constexpr DWORD kPciMutexAccess = SYNCHRONIZE | MUTEX_MODIFY_STATE;
+constexpr unsigned int kPawnIoOpenAttempts = 16u;
+constexpr unsigned int kPawnIoOpenInitialDelayMs = 25u;
+constexpr unsigned int kPawnIoOpenMaxDelayMs = 250u;
 
 std::optional<double> TryParseDoubleEnv(const char* name) {
     char* value = nullptr;
@@ -134,6 +140,36 @@ Status MapPawnIoStatus(PawnIoStatus status) {
         case PawnIoStatus::error:
         default: return Status::error;
     }
+}
+
+bool IsRetryablePawnIoOpenError(DWORD error) {
+    switch (error) {
+        case ERROR_ACCESS_DENIED:
+        case ERROR_BUSY:
+        case ERROR_DEV_NOT_EXIST:
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_LOCK_VIOLATION:
+        case ERROR_NOT_READY:
+        case ERROR_PATH_NOT_FOUND:
+        case ERROR_SHARING_VIOLATION:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsRetryablePawnIoLoadStatus(PawnIoStatus status) {
+    return status == PawnIoStatus::access_denied ||
+           status == PawnIoStatus::error ||
+           status == PawnIoStatus::not_found;
+}
+
+void SleepBeforePawnIoRetry(unsigned int attempt) {
+    unsigned int delay_ms = kPawnIoOpenInitialDelayMs << attempt;
+    if (delay_ms > kPawnIoOpenMaxDelayMs) {
+        delay_ms = kPawnIoOpenMaxDelayMs;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 }
 
 HANDLE OpenOrCreatePciMutex() {
@@ -374,29 +410,71 @@ struct AmdReader::Impl {
             return Status::not_supported;
         }
 
-        HANDLE pawnio_handle = CreateFileA(
-            kPawnIoDevicePath, GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0,
-            nullptr);
-        if (pawnio_handle == INVALID_HANDLE_VALUE) {
-            if (warning_text != nullptr) {
-                *warning_text = "PawnIO device is not available.";
+        HANDLE pawnio_handle = INVALID_HANDLE_VALUE;
+        std::string load_warning;
+        DWORD last_open_error = ERROR_SUCCESS;
+        PawnIoStatus last_load_status = PawnIoStatus::error;
+        Status last_status = Status::error;
+        bool failed_during_open = true;
+        unsigned int attempts = 0u;
+        for (unsigned int attempt = 0u; attempt < kPawnIoOpenAttempts;
+             ++attempt) {
+            attempts = attempt + 1u;
+            pawnio_handle = CreateFileA(
+                kPawnIoDevicePath, GENERIC_READ | GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0,
+                nullptr);
+            if (pawnio_handle == INVALID_HANDLE_VALUE) {
+                last_open_error = GetLastError();
+                last_status = StatusFromWin32Error(last_open_error);
+                failed_during_open = true;
+                if (attempt + 1u >= kPawnIoOpenAttempts ||
+                    !IsRetryablePawnIoOpenError(last_open_error)) {
+                    break;
+                }
+                SleepBeforePawnIoRetry(attempt);
+                continue;
             }
-            return StatusFromWin32Error(GetLastError());
+
+            load_warning.clear();
+            last_load_status = LoadPawnIoBinary(
+                pawnio_handle, kPawnIoSpecAmdFamily17V1, pawnio_bin,
+                &load_warning);
+            if (last_load_status == PawnIoStatus::ok) {
+                break;
+            }
+
+            CloseHandle(pawnio_handle);
+            pawnio_handle = INVALID_HANDLE_VALUE;
+            last_status = MapPawnIoStatus(last_load_status);
+            failed_during_open = false;
+            if (attempt + 1u >= kPawnIoOpenAttempts ||
+                !IsRetryablePawnIoLoadStatus(last_load_status)) {
+                break;
+            }
+            SleepBeforePawnIoRetry(attempt);
         }
 
-        std::string load_warning;
-        const PawnIoStatus load_status = LoadPawnIoBinary(
-            pawnio_handle, kPawnIoSpecAmdFamily17V1, pawnio_bin, &load_warning);
-        if (load_status != PawnIoStatus::ok) {
-            CloseHandle(pawnio_handle);
+        if (pawnio_handle == INVALID_HANDLE_VALUE) {
             if (warning_text != nullptr) {
-                *warning_text = load_warning.empty()
-                    ? std::string("Failed to load AMDFamily17.bin into PawnIO (") +
-                          PawnIoStatusString(load_status) + ")"
-                    : load_warning;
+                if (failed_during_open) {
+                    *warning_text =
+                        std::string("PawnIO device is not available: path=") +
+                        kPawnIoDevicePath + " win32_error=" +
+                        std::to_string(last_open_error) + " status=" +
+                        StatusString(last_status) + " attempts=" +
+                        std::to_string(attempts);
+                } else {
+                    *warning_text = load_warning.empty()
+                        ? std::string("Failed to load AMDFamily17.bin into PawnIO: path=") +
+                              pawnio_bin.string() + " status=" +
+                              PawnIoStatusString(last_load_status) +
+                              " attempts=" + std::to_string(attempts)
+                        : load_warning + " path=" + pawnio_bin.string() +
+                              " attempts=" + std::to_string(attempts);
+                }
             }
-            return MapPawnIoStatus(load_status);
+            return last_status;
         }
 
         handle = pawnio_handle;

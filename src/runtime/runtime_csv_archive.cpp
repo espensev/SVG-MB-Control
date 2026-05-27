@@ -473,12 +473,26 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
         .csv_flush_interval_rows = csv_flush_interval_rows_,
     });
 
+    std::string active_error;
+    std::string manifest_error;
     const bool active_ok =
-        TryWriteJsonFileAtomic(active_manifest_path_, payload);
-    const bool manifest_ok = TryWriteJsonFileAtomic(manifest_path_, payload);
+        TryWriteJsonFileAtomic(active_manifest_path_, payload, 2,
+                               &active_error);
+    const bool manifest_ok =
+        TryWriteJsonFileAtomic(manifest_path_, payload, 2, &manifest_error);
     if (!active_ok || !manifest_ok) {
         std::cerr << "warning: failed to write runtime log manifest under "
                   << runtime_home_.string() << '\n';
+        if (!active_ok) {
+            std::cerr << "  active_manifest: "
+                      << active_manifest_path_.string() << '\n'
+                      << "  detail: " << active_error << '\n';
+        }
+        if (!manifest_ok) {
+            std::cerr << "  latest_manifest: " << manifest_path_.string()
+                      << '\n'
+                      << "  detail: " << manifest_error << '\n';
+        }
     }
 }
 
