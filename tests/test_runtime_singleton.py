@@ -15,6 +15,25 @@ def _write_stop_request(runtime_home: Path) -> None:
     )
 
 
+def _runtime_archive_files_released(runtime_home: Path) -> bool:
+    archive = runtime_home / "logs" / "archive"
+    if not archive.is_dir():
+        return True
+    for path in archive.glob("*.csv"):
+        probe = path.with_name(path.name + ".probe")
+        try:
+            path.rename(probe)
+            probe.rename(path)
+        except OSError:
+            if probe.exists() and not path.exists():
+                try:
+                    probe.rename(path)
+                except OSError:
+                    pass
+            return False
+    return True
+
+
 class RuntimeSingletonTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -157,3 +176,25 @@ class RuntimeSingletonTests(unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     first.kill()
                     first.communicate()
+                status = _read_runtime_status(runtime_home)
+                if status and status.get("status") != "shutdown":
+                    worker_pid = int(status.get("process_id", 0))
+                    if worker_pid > 0:
+                        subprocess.run(
+                            [
+                                "powershell",
+                                "-NoProfile",
+                                "-Command",
+                                (
+                                    "Stop-Process -Id "
+                                    f"{worker_pid} -Force -ErrorAction SilentlyContinue"
+                                ),
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=10.0,
+                        )
+                _wait_for(
+                    lambda: _runtime_archive_files_released(runtime_home),
+                    timeout_s=5.0,
+                )

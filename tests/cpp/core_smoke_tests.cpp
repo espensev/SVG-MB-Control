@@ -86,8 +86,22 @@ void TestBlendTemps() {
                61.0,
                0.001,
                "max blend selects hotter source");
+    ExpectNear(
+        svg_mb_control::BlendTemps(
+            inputs,
+            svg_mb_control::TempBlend::MaxCpuGpuSourceAware),
+        55.0,
+        0.001,
+        "source-aware max blend selects GPU primary source");
 
     inputs.gpu_available = false;
+    ExpectNear(
+        svg_mb_control::BlendTemps(
+            inputs,
+            svg_mb_control::TempBlend::MaxCpuGpuSourceAware),
+        61.0,
+        0.001,
+        "source-aware max blend falls back to CPU when GPU is missing");
     ExpectNear(svg_mb_control::BlendTemps(inputs,
                                           svg_mb_control::TempBlend::GpuOnly),
                -273.15,

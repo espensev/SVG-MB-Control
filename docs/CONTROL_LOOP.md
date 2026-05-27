@@ -68,6 +68,11 @@ Optional channel overrides:
 - `cpu_override_curve`: optional CPU/Tctl curve evaluated separately from
   `temp_blend`; the loop commands the higher duty from `curve` and
   `cpu_override_curve`
+- `source_aware_cpu_hot_guard_c`: optional CPU/Tctl guard for
+  `max_cpu_gpu_source_aware`. Below this guard, the primary curve is evaluated
+  from the GPU envelope and the CPU can still win through `cpu_override_curve`.
+  At or above this guard, the channel falls back to legacy raw
+  `max_cpu_gpu` selection for high-CPU protection.
 - `demand_smoothing_rise_alpha`: optional pre-rate-limit setpoint EMA alpha
   for rising demand
 - `demand_smoothing_fall_alpha`: optional pre-rate-limit setpoint EMA alpha
@@ -128,7 +133,9 @@ evaluated in Horner form in the curve lookup path.
 4. Append the sampled row to the active CSV chunk and refresh the fixed live
    CSV mirror on the configured flush interval.
 5. Capture the baseline duty and mode for each configured channel.
-6. Blend temperatures according to `temp_blend`.
+6. Select the primary curve temperature according to `temp_blend`. For
+   `max_cpu_gpu_source_aware`, use the GPU envelope below the configured CPU
+   guard and legacy CPU/GPU max selection at or above the guard.
 7. Interpolate the configured curve and clamp with `min_duty_pct`.
 8. If `cpu_override_curve` is present and CPU telemetry is available,
    interpolate it against CPU/Tctl and use the higher duty.
@@ -204,11 +211,17 @@ The control-loop CSV also includes `channelN_feedforward_pct` and
 the control loop applies smoothing, thermal pressure, and rate limits;
 correction is the final setpoint minus that feedforward term.
 
+Primary temperature attribution is emitted as `last_primary_temp_source` in
+`control_runtime.json` and `channelN_primary_temp_source` in the CSV. Current
+sources are `cpu`, `gpu`, `cpu_fallback`, `cpu_guard`, `gpu_guard`, and
+`unavailable`. `cpu_fallback` means a source-aware channel used CPU because
+GPU telemetry was unavailable below the CPU guard.
+
 Response attribution is emitted as `last_response_source` in
 `control_runtime.json` and `channelN_response_source` in the CSV. Current
 sources are `primary_curve`, `cpu_override`, `sensor_safe_mode`, and optional
 modifiers such as `+thermal_pressure`, `+midband_pressure`, and
-`+gpu_airflow`. CSV rows also include
+`+gpu_airflow`, `+cpu_low_soak`, and `+low_band_stage`. CSV rows also include
 `channelN_write_reason`, which is `first_write`, `setpoint_delta`,
 `authority_reassert`, `write_failed`, or `none` for ticks without a write.
 

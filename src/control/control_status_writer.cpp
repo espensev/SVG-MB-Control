@@ -32,6 +32,7 @@ void BuildChannelLogStates(
         state.low_band_debt = channel.low_band_debt_snapshot;
         state.low_band_signal = channel.low_band_signal_snapshot;
         state.low_band_stage_active = channel.low_band_stage_active;
+        state.primary_temp_source = channel.last_primary_temp_source;
         state.response_source = channel.last_response_source;
         state.write_reason = channel.last_write_reason;
         state.total_writes = channel.total_writes;

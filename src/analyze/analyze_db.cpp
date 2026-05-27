@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS tick_channel_samples (
     midband_pressure_boost_pct REAL,
     gpu_airflow_boost_pct REAL,
     cpu_low_soak_boost_pct REAL,
+    primary_temp_source TEXT,
     response_source TEXT,
     write_reason TEXT,
     total_writes INTEGER,
@@ -572,6 +573,15 @@ void MigrateSchema(Database& db) {
             "CREATE INDEX IF NOT EXISTS idx_events_severity "
             "ON events(severity, error_code)");
         SetSchemaVersion(db, 6);
+    }
+    if (version <= 6) {
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "primary_temp_source")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN primary_temp_source TEXT");
+        }
+        SetSchemaVersion(db, 7);
     }
 }
 

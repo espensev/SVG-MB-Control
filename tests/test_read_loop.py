@@ -39,7 +39,12 @@ class ReadLoopTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(state, msg="current_state.json never appeared")
                 status = _wait_for(
-                    lambda: _read_runtime_status(runtime_home),
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status.get("successful_polls", 0) >= 1
+                        else None
+                    ),
                     timeout_s=5.0,
                 )
                 self.assertIsNotNone(status, msg="control_runtime.json never appeared")

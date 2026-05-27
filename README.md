@@ -137,7 +137,8 @@ cd .\release
 `--show-config` prints an operator-facing summary of the loaded
 `control.json`: schema version, default mode, loop cadence, write timing,
 health/safety thresholds, low-band global state, and per-channel blend,
-rate limits, smoothing, boost stages, and curve endpoints. It does not
+source-aware CPU guard, rate limits, smoothing, boost stages, and curve
+endpoints. It does not
 require the controller to be running and reads the same config the worker
 would. `--show-config --json` emits the same fields as a structured JSON
 document for tooling.
@@ -277,11 +278,13 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `6`). The schema
+- The DB schema is bootstrapped on first use (schema version `7`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
-  control envelope used by response analysis.
+  control envelope used by response analysis, and
+  `tick_channel_samples.primary_temp_source` preserves per-channel
+  CPU/GPU/guard attribution for the primary curve input.
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.
@@ -300,7 +303,8 @@ Behavior:
   `--run <id>` or `--session <ts>` is given). It reports idle/load/cooldown
   `p50`/`p90`/`max` for `cpu_tctl_c` and `gpu_memjn_c`/`gpu_envelope_c`,
   per-channel `setpoint_pct`/`duty_pct`/`rpm` plus max boosts, write count and
-  up/down setpoint reversals, the response delay from the first
+  up/down setpoint reversals, primary temperature source counts, the response
+  delay from the first
   `--load-threshold-c` crossing (default `75` C) to the first controlled-channel
   setpoint increase above its idle baseline, and authority/write/restore failure
   counts. The idle band is the ticks whose elapsed time is below

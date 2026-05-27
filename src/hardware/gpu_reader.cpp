@@ -16,11 +16,19 @@ namespace svg_mb_control {
 
 namespace {
 
+std::string SimGpuMode() {
+    return GetEnvOrDefault("SVG_MB_CONTROL_SIM_GPU_MODE", "disabled");
+}
+
 bool SimGpuEnabled() {
-    const std::string mode = GetEnvOrDefault(
-        "SVG_MB_CONTROL_SIM_GPU_MODE", "disabled");
+    const std::string mode = SimGpuMode();
     return mode == "enabled" || mode == "1" || mode == "true" ||
            mode == "TRUE" || mode == "True";
+}
+
+bool SimGpuUnavailable() {
+    const std::string mode = SimGpuMode();
+    return mode == "unavailable" || mode == "none" || mode == "off";
 }
 
 std::string NormalizeGpuSampleMode(std::string_view mode_label) {
@@ -423,6 +431,10 @@ const GpuTempSample& GpuReader::Sample() {
         out = MakeSimGpuTempSample();
         return out;
     }
+    if (SimGpuUnavailable()) {
+        out.last_warning = "GPU reader disabled by environment";
+        return out;
+    }
 
     if (!available()) {
         out.last_warning = impl_->init_warning.empty()
@@ -446,6 +458,14 @@ const GpuTempSample& GpuReader::Sample() {
 GpuEvidenceSample GpuReader::SampleEvidence(std::string_view mode_label) {
     if (SimGpuEnabled()) {
         return MakeSimGpuEvidenceSample(mode_label);
+    }
+    if (SimGpuUnavailable()) {
+        GpuEvidenceSample out;
+        out.available = false;
+        out.requested_sample_mode = EffectiveRequestedModeLabel(mode_label);
+        out.sample_mode = out.requested_sample_mode;
+        out.detail = "GPU reader disabled by environment";
+        return out;
     }
 
     std::string mode_warning;
@@ -506,6 +526,10 @@ const GpuTempSample& GpuReader::Sample() {
         out = MakeSimGpuTempSample();
         return out;
     }
+    if (SimGpuUnavailable()) {
+        out.last_warning = "GPU reader disabled by environment";
+        return out;
+    }
 
     out.last_warning = init_warning();
     return out;
@@ -514,6 +538,14 @@ const GpuTempSample& GpuReader::Sample() {
 GpuEvidenceSample GpuReader::SampleEvidence(std::string_view mode_label) {
     if (SimGpuEnabled()) {
         return MakeSimGpuEvidenceSample(mode_label);
+    }
+    if (SimGpuUnavailable()) {
+        GpuEvidenceSample out;
+        out.available = false;
+        out.requested_sample_mode = EffectiveRequestedModeLabel(mode_label);
+        out.sample_mode = out.requested_sample_mode;
+        out.detail = "GPU reader disabled by environment";
+        return out;
     }
 
     std::string mode_warning;

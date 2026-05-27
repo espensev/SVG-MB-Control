@@ -72,7 +72,8 @@ class SmokeTests(unittest.TestCase):
         channels = loop["channels"]
         self.assertGreater(len(channels), 0)
         ch0 = next(ch for ch in channels if ch["channel"] == 0)
-        self.assertEqual(ch0["temp_blend"], "max_cpu_gpu")
+        self.assertEqual(ch0["temp_blend"], "max_cpu_gpu_source_aware")
+        self.assertEqual(ch0["source_aware_cpu_hot_guard_c"], 75.0)
         self.assertEqual(ch0["curve_shape"], "smootherstep")
         self.assertGreater(len(ch0["curve"]), 0)
         self.assertIn("thermal_pressure", ch0)

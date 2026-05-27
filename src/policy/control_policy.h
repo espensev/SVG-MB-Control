@@ -12,13 +12,13 @@ struct CurvePoint {
     double duty_pct = 0.0;
 };
 
-// How a channel blends CPU and GPU temperature into a single control
-// input. Per-channel, so radiator fans can use cpu_only while case fans
-// use max_cpu_gpu.
+// How a channel selects the primary control temperature. Per-channel, so
+// radiator fans can use cpu_only while case fans use a GPU/CPU max variant.
 enum class TempBlend {
     CpuOnly,
     GpuOnly,
     MaxCpuGpu,
+    MaxCpuGpuSourceAware,
 };
 
 enum class CurveShape {

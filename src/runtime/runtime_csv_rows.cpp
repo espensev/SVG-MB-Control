@@ -387,6 +387,7 @@ std::string BuildControlLoopCsvHeader() {
                << ",channel" << channel << "_low_band_debt"
                << ",channel" << channel << "_low_band_signal"
                << ",channel" << channel << "_low_band_stage_active"
+               << ",channel" << channel << "_primary_temp_source"
                << ",channel" << channel << "_response_source"
                << ",channel" << channel << "_write_reason"
                << ",channel" << channel << "_total_writes"
@@ -440,6 +441,7 @@ std::string BuildControlLoopCsvRow(
         AppendCsvFieldDoubleIf(csv, present, state.low_band_debt);
         AppendCsvFieldDoubleIf(csv, present, state.low_band_signal);
         AppendCsvFieldBoolIf(csv, present, state.low_band_stage_active);
+        AppendCsvFieldStringIf(csv, present, state.primary_temp_source);
         AppendCsvFieldStringIf(csv, present, state.response_source);
         AppendCsvFieldStringIf(csv, present, state.write_reason);
         AppendCsvFieldIf(csv, present, state.total_writes);

@@ -50,6 +50,7 @@ struct ChannelState {
     std::uint64_t low_band_unboosted_rpm_count = 0u;
     double low_band_boosted_rpm_sum = 0.0;
     std::uint64_t low_band_boosted_rpm_count = 0u;
+    std::string last_primary_temp_source = "unavailable";
     std::string last_response_source = "unavailable";
     std::string last_write_reason = "none";
     std::chrono::steady_clock::time_point last_evaluation_time =

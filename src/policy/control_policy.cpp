@@ -9,6 +9,10 @@ TempBlend ParseTempBlend(const std::string& text) {
     if (text == "cpu_only" || text == "cpu") return TempBlend::CpuOnly;
     if (text == "gpu_only" || text == "gpu") return TempBlend::GpuOnly;
     if (text == "max_cpu_gpu" || text == "max") return TempBlend::MaxCpuGpu;
+    if (text == "max_cpu_gpu_source_aware" ||
+        text == "source_aware") {
+        return TempBlend::MaxCpuGpuSourceAware;
+    }
     throw std::runtime_error("Unknown temp blend: " + text);
 }
 
@@ -17,6 +21,8 @@ std::string TempBlendToString(TempBlend blend) {
         case TempBlend::CpuOnly: return "cpu_only";
         case TempBlend::GpuOnly: return "gpu_only";
         case TempBlend::MaxCpuGpu: return "max_cpu_gpu";
+        case TempBlend::MaxCpuGpuSourceAware:
+            return "max_cpu_gpu_source_aware";
     }
     return "cpu_only";
 }
@@ -49,6 +55,8 @@ double BlendTemps(const TempInputs& inputs, TempBlend mode) {
         case TempBlend::CpuOnly: return cpu;
         case TempBlend::GpuOnly: return gpu;
         case TempBlend::MaxCpuGpu: return (std::max)(cpu, gpu);
+        case TempBlend::MaxCpuGpuSourceAware:
+            return inputs.gpu_available ? gpu : cpu;
     }
     return cpu;
 }

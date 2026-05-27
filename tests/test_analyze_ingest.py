@@ -9,41 +9,254 @@ import time
 from tests.helpers import *
 
 
-CSV_HEADER_PARTS = [
-    "wall_clock,mode,snapshot_time,snapshot_age_ms,",
-    "amd_sensor_count,amd_sensor_summary,cpu_tctl_c,cpu_max_c,",
-    "gpu_available,gpu_name,gpu_last_warning,",
-    "gpu_core_c,gpu_memjn_c,gpu_hotspot_c,",
-    "fan_count,policy_writes_enabled_present,policy_writes_enabled,",
-    # 2 fans
-    "fan0_present,fan0_label,fan0_rpm,fan0_tach_raw,fan0_tach_valid,"
-    "fan0_duty_raw,fan0_duty_pct,fan0_mode_raw,fan0_manual_override,"
-    "fan0_write_allowed,fan0_policy_blocked,fan0_effective_write_allowed,",
-    "fan1_present,fan1_label,fan1_rpm,fan1_tach_raw,fan1_tach_valid,"
-    "fan1_duty_raw,fan1_duty_pct,fan1_mode_raw,fan1_manual_override,"
-    "fan1_write_allowed,fan1_policy_blocked,fan1_effective_write_allowed,",
-    "loop_tick_count,loop_started_wall_clock,loop_finished_wall_clock,",
-    "loop_work_duration_ms,loop_intended_interval_ms,loop_achieved_interval_ms,",
-    "loop_slip_ms,loop_overrun,",
-    "process_cpu_delta_ms,process_cpu_pct,",
-    "process_working_set_bytes,process_private_bytes,cadence_transient,",
-    # 2 channels
-    "channel0_observed_temp_c,channel0_setpoint_pct,"
-    "channel0_thermal_pressure_boost_pct,"
-    "channel0_midband_pressure_boost_pct,channel0_gpu_airflow_boost_pct,"
-    "channel0_cpu_low_soak_boost_pct,"
-    "channel0_response_source,channel0_write_reason,channel0_total_writes,"
-    "channel0_write_active,channel0_baseline_captured,"
-    "channel0_feedforward_pct,channel0_correction_pct,",
-    "channel1_observed_temp_c,channel1_setpoint_pct,"
-    "channel1_thermal_pressure_boost_pct,"
-    "channel1_midband_pressure_boost_pct,channel1_gpu_airflow_boost_pct,"
-    "channel1_cpu_low_soak_boost_pct,"
-    "channel1_response_source,channel1_write_reason,channel1_total_writes,"
-    "channel1_write_active,channel1_baseline_captured,"
-    "channel1_feedforward_pct,channel1_correction_pct",
+COMMON_FIELDS = [
+    "wall_clock",
+    "mode",
+    "snapshot_time",
+    "snapshot_age_ms",
+    "amd_sensor_count",
+    "amd_sensor_summary",
+    "cpu_tctl_c",
+    "cpu_max_c",
+    "gpu_available",
+    "gpu_name",
+    "gpu_last_warning",
+    "gpu_core_c",
+    "gpu_memjn_c",
+    "gpu_hotspot_c",
+    "fan_count",
+    "policy_writes_enabled_present",
+    "policy_writes_enabled",
 ]
-CSV_HEADER = "".join(CSV_HEADER_PARTS)
+
+FAN_FIELD_SUFFIXES = [
+    "present",
+    "label",
+    "rpm",
+    "tach_raw",
+    "tach_valid",
+    "duty_raw",
+    "duty_pct",
+    "mode_raw",
+    "manual_override",
+    "write_allowed",
+    "policy_blocked",
+    "effective_write_allowed",
+]
+
+LOOP_FIELDS = [
+    "loop_tick_count",
+    "loop_started_wall_clock",
+    "loop_finished_wall_clock",
+    "loop_work_duration_ms",
+    "loop_intended_interval_ms",
+    "loop_achieved_interval_ms",
+    "loop_slip_ms",
+    "loop_overrun",
+    "process_cpu_delta_ms",
+    "process_cpu_pct",
+    "process_working_set_bytes",
+    "process_private_bytes",
+    "cadence_transient",
+]
+
+CHANNEL_FIELD_SUFFIXES = [
+    "observed_temp_c",
+    "setpoint_pct",
+    "thermal_pressure_boost_pct",
+    "midband_pressure_boost_pct",
+    "gpu_airflow_boost_pct",
+    "cpu_low_soak_boost_pct",
+    "primary_temp_source",
+    "response_source",
+    "write_reason",
+    "total_writes",
+    "write_active",
+    "baseline_captured",
+    "feedforward_pct",
+    "correction_pct",
+]
+
+
+def _fan_fields(channel: int) -> list[str]:
+    return [f"fan{channel}_{suffix}" for suffix in FAN_FIELD_SUFFIXES]
+
+
+def _channel_fields(channel: int) -> list[str]:
+    return [f"channel{channel}_{suffix}" for suffix in CHANNEL_FIELD_SUFFIXES]
+
+
+CSV_FIELDS = (
+    COMMON_FIELDS
+    + _fan_fields(0)
+    + _fan_fields(1)
+    + LOOP_FIELDS
+    + _channel_fields(0)
+    + _channel_fields(1)
+)
+CSV_FIELD_SET = set(CSV_FIELDS)
+CSV_HEADER = ",".join(CSV_FIELDS)
+
+
+def _csv_row(values: dict[str, str]) -> str:
+    missing = [field for field in CSV_FIELDS if field not in values]
+    extra = sorted(set(values) - CSV_FIELD_SET)
+    if missing or extra:
+        raise AssertionError(
+            "CSV fixture field mismatch: "
+            f"missing={missing!r} extra={extra!r}"
+        )
+    return ",".join(values[field] for field in CSV_FIELDS)
+
+
+def _fan_values(
+    channel: int,
+    *,
+    label: str,
+    rpm: str,
+    tach_raw: str,
+    duty_raw: str,
+    duty_pct: str,
+) -> dict[str, str]:
+    prefix = f"fan{channel}_"
+    return {
+        prefix + "present": "true",
+        prefix + "label": f'"{label}"',
+        prefix + "rpm": rpm,
+        prefix + "tach_raw": tach_raw,
+        prefix + "tach_valid": "true",
+        prefix + "duty_raw": duty_raw,
+        prefix + "duty_pct": duty_pct,
+        prefix + "mode_raw": "0",
+        prefix + "manual_override": "false",
+        prefix + "write_allowed": "true",
+        prefix + "policy_blocked": "false",
+        prefix + "effective_write_allowed": "true",
+    }
+
+
+def _channel_values(
+    channel: int,
+    *,
+    observed_temp_c: str,
+    setpoint_pct: str,
+    write_reason: str,
+    total_writes: str,
+    midband_pressure_boost_pct: str = "0.000",
+    gpu_airflow_boost_pct: str = "0.000",
+    cpu_low_soak_boost_pct: str = "0.000",
+    response_source: str = "primary_curve",
+) -> dict[str, str]:
+    prefix = f"channel{channel}_"
+    return {
+        prefix + "observed_temp_c": observed_temp_c,
+        prefix + "setpoint_pct": setpoint_pct,
+        prefix + "thermal_pressure_boost_pct": "0.000",
+        prefix + "midband_pressure_boost_pct": midband_pressure_boost_pct,
+        prefix + "gpu_airflow_boost_pct": gpu_airflow_boost_pct,
+        prefix + "cpu_low_soak_boost_pct": cpu_low_soak_boost_pct,
+        prefix + "primary_temp_source": "cpu",
+        prefix + "response_source": response_source,
+        prefix + "write_reason": write_reason,
+        prefix + "total_writes": total_writes,
+        prefix + "write_active": "true",
+        prefix + "baseline_captured": "true",
+        prefix + "feedforward_pct": setpoint_pct,
+        prefix + "correction_pct": "0.000",
+    }
+
+
+def _control_loop_fixture_row(
+    *,
+    wall: str,
+    tick: int,
+    cpu_tctl_c: float,
+    fan0_duty_pct: str,
+    fan1_duty_pct: str,
+    channel0_setpoint_pct: str,
+    channel1_setpoint_pct: str,
+    channel0_midband_pressure_boost_pct: str,
+    channel0_gpu_airflow_boost_pct: str,
+    channel0_cpu_low_soak_boost_pct: str,
+    channel0_response_source: str,
+) -> str:
+    cpu = f"{cpu_tctl_c:.3f}"
+    write_reason = "first_write" if tick == 1 else "none"
+    values = {
+        "wall_clock": wall,
+        "mode": "control-loop",
+        "snapshot_time": wall,
+        "snapshot_age_ms": "100",
+        "amd_sensor_count": "1",
+        "amd_sensor_summary": f'"Tctl/Tdie={cpu}"',
+        "cpu_tctl_c": cpu,
+        "cpu_max_c": cpu,
+        "gpu_available": "true",
+        "gpu_name": '"NVIDIA Test GPU"',
+        "gpu_last_warning": "",
+        "gpu_core_c": "45.000",
+        "gpu_memjn_c": "55.000",
+        "gpu_hotspot_c": "0.000",
+        "fan_count": "2",
+        "policy_writes_enabled_present": "true",
+        "policy_writes_enabled": "true",
+        "loop_tick_count": str(tick),
+        "loop_started_wall_clock": wall,
+        "loop_finished_wall_clock": wall,
+        "loop_work_duration_ms": "10.0",
+        "loop_intended_interval_ms": "50",
+        "loop_achieved_interval_ms": "50.0",
+        "loop_slip_ms": "0.0",
+        "loop_overrun": "false",
+        "process_cpu_delta_ms": "0.0",
+        "process_cpu_pct": "0.0",
+        "process_working_set_bytes": "33000000",
+        "process_private_bytes": "20000000",
+        "cadence_transient": "0.0",
+    }
+    values.update(
+        _fan_values(
+            0,
+            label="Channel0",
+            rpm="1500",
+            tach_raw="873",
+            duty_raw="112",
+            duty_pct=fan0_duty_pct,
+        )
+    )
+    values.update(
+        _fan_values(
+            1,
+            label="Channel1",
+            rpm="1300",
+            tach_raw="1043",
+            duty_raw="166",
+            duty_pct=fan1_duty_pct,
+        )
+    )
+    values.update(
+        _channel_values(
+            0,
+            observed_temp_c=cpu,
+            setpoint_pct=channel0_setpoint_pct,
+            write_reason=write_reason,
+            total_writes=str(tick),
+            midband_pressure_boost_pct=channel0_midband_pressure_boost_pct,
+            gpu_airflow_boost_pct=channel0_gpu_airflow_boost_pct,
+            cpu_low_soak_boost_pct=channel0_cpu_low_soak_boost_pct,
+            response_source=channel0_response_source,
+        )
+    )
+    values.update(
+        _channel_values(
+            1,
+            observed_temp_c=cpu,
+            setpoint_pct=channel1_setpoint_pct,
+            write_reason=write_reason,
+            total_writes=str(tick),
+        )
+    )
+    return _csv_row(values)
 
 
 def _write_fixture_csv(path: Path, session_start: str, ticks: int = 3) -> None:
@@ -54,33 +267,23 @@ def _write_fixture_csv(path: Path, session_start: str, ticks: int = 3) -> None:
         CSV_HEADER,
     ]
     for tick in range(1, ticks + 1):
-        cells = [
-            session_start, "control-loop", session_start, "100",
-            "1", '"Tctl/Tdie=60.000"', "60.000", "60.000",
-            "true", '"NVIDIA Test GPU"', "",
-            "45.000", "55.000", "0.000",
-            "2", "true", "true",
-            # fan0
-            "true", '"Channel0"', "1500", "873", "true",
-            "112", "43.92", "0", "false", "true", "false", "true",
-            # fan1
-            "true", '"Channel1"', "1300", "1043", "true",
-            "166", "65.10", "0", "false", "true", "false", "true",
-            # loop
-            str(tick), session_start, session_start,
-            "10.0", "50", "50.0", "0.0", "false",
-            "0.0", "0.0", "33000000", "20000000", "0.0",
-            # channel0
-            "60.000", "30.000", "0.000", "0.500", "0.750", "0.250",
-            "primary_curve+midband_pressure+gpu_airflow+cpu_low_soak",
-            "first_write" if tick == 1 else "none",
-            str(tick), "true", "true", "30.000", "0.000",
-            # channel1
-            "60.000", "32.000", "0.000", "0.000", "0.000", "0.000",
-            "primary_curve", "first_write" if tick == 1 else "none",
-            str(tick), "true", "true", "32.000", "0.000",
-        ]
-        lines.append(",".join(cells))
+        lines.append(
+            _control_loop_fixture_row(
+                wall=session_start,
+                tick=tick,
+                cpu_tctl_c=60.0,
+                fan0_duty_pct="43.92",
+                fan1_duty_pct="65.10",
+                channel0_setpoint_pct="30.000",
+                channel1_setpoint_pct="32.000",
+                channel0_midband_pressure_boost_pct="0.500",
+                channel0_gpu_airflow_boost_pct="0.750",
+                channel0_cpu_low_soak_boost_pct="0.250",
+                channel0_response_source=(
+                    "primary_curve+midband_pressure+gpu_airflow+cpu_low_soak"
+                ),
+            )
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -354,7 +557,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "6")
+            self.assertEqual(schema[0], "7")
 
             run = _query_one(
                 db_path,
@@ -404,17 +607,19 @@ class AnalyzeIngestTests(unittest.TestCase):
             attribution = _query_one(
                 db_path,
                 "SELECT midband_pressure_boost_pct, gpu_airflow_boost_pct, "
-                "cpu_low_soak_boost_pct, response_source, write_reason "
+                "cpu_low_soak_boost_pct, primary_temp_source, "
+                "response_source, write_reason "
                 "FROM tick_channel_samples WHERE channel=0 AND tick_count=1",
             )
             self.assertEqual(attribution[0], 0.5)
             self.assertEqual(attribution[1], 0.75)
             self.assertEqual(attribution[2], 0.25)
+            self.assertEqual(attribution[3], "cpu")
             self.assertEqual(
-                attribution[3],
+                attribution[4],
                 "primary_curve+midband_pressure+gpu_airflow+cpu_low_soak",
             )
-            self.assertEqual(attribution[4], "first_write")
+            self.assertEqual(attribution[5], "first_write")
 
             fan_label = _query_one(
                 db_path,
@@ -635,33 +840,21 @@ def _write_ramp_csv(path: Path, session_start: str, ticks: int = 30) -> None:
         tick = i + 1
         wall = _ts(session_start, i)
         cpu, ch0, ch1 = _ramp_plan(i)
-        first = "first_write" if tick == 1 else "none"
-        cells = [
-            wall, "control-loop", wall, "100",
-            "1", f'"Tctl/Tdie={cpu:.3f}"', f"{cpu:.3f}", f"{cpu:.3f}",
-            "true", '"NVIDIA Test GPU"', "",
-            "45.000", "55.000", "0.000",
-            "2", "true", "true",
-            # fan0 -> channel 0 (duty tracks setpoint)
-            "true", '"Channel0"', "1500", "873", "true",
-            "112", f"{ch0:.2f}", "0", "false", "true", "false", "true",
-            # fan1 -> channel 1
-            "true", '"Channel1"', "1300", "1043", "true",
-            "166", f"{ch1:.2f}", "0", "false", "true", "false", "true",
-            # loop
-            str(tick), wall, wall,
-            "10.0", "50", "50.0", "0.0", "false",
-            "0.0", "0.0", "33000000", "20000000", "0.0",
-            # channel0 (total_writes cell carries the cumulative count)
-            f"{cpu:.3f}", f"{ch0:.3f}", "0.000", "1.500", "0.750", "0.000",
-            "primary_curve", first, str(tick), "true", "true",
-            f"{ch0:.3f}", "0.000",
-            # channel1
-            f"{cpu:.3f}", f"{ch1:.3f}", "0.000", "0.000", "0.000", "0.000",
-            "primary_curve", first, str(tick), "true", "true",
-            f"{ch1:.3f}", "0.000",
-        ]
-        lines.append(",".join(cells))
+        lines.append(
+            _control_loop_fixture_row(
+                wall=wall,
+                tick=tick,
+                cpu_tctl_c=cpu,
+                fan0_duty_pct=f"{ch0:.2f}",
+                fan1_duty_pct=f"{ch1:.2f}",
+                channel0_setpoint_pct=f"{ch0:.3f}",
+                channel1_setpoint_pct=f"{ch1:.3f}",
+                channel0_midband_pressure_boost_pct="1.500",
+                channel0_gpu_airflow_boost_pct="0.750",
+                channel0_cpu_low_soak_boost_pct="0.000",
+                channel0_response_source="primary_curve",
+            )
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -770,6 +963,7 @@ class AnalyzeReportTests(unittest.TestCase):
             self.assertIn("ch1 setpoint_pct", out)
             self.assertIn("midband_pressure_boost_pct max=1.5", out)
             self.assertIn("gpu_airflow_boost_pct max=0.75", out)
+            self.assertIn("primary_temp_source_counts cpu=30", out)
 
     def test_report_json_emits_structured_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -797,6 +991,9 @@ class AnalyzeReportTests(unittest.TestCase):
             self.assertGreaterEqual(channels[0]["reversals"], 1)
             self.assertEqual(channels[0]["mode_leave_ticks"], 0)
             self.assertEqual(channels[0]["writes"], 29)
+            self.assertEqual(
+                channels[0]["primary_temp_source_counts"]["cpu"], 30
+            )
             self.assertEqual(
                 channels[0]["max_midband_pressure_boost_pct"], 1.5
             )

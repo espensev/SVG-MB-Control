@@ -37,7 +37,7 @@ must update this reference and the cross-references in `CONTROL_LOOP.md`,
 | $c \in \mathcal{C}$ | channel index (configured channels) | `context.channels` |
 | $T^{\mathrm{cpu}}_k$ | CPU Tctl/Tdie, °C, or undefined | `temp_inputs.cpu_c` |
 | $T^{\mathrm{gpu}}_k$ | GPU control envelope, °C, or undefined | `temp_inputs.gpu_c` |
-| $T^{(c)}_k$ | blended observed temperature for channel $c$ | `BlendTemps(...)` |
+| $T^{(c)}_k$ | primary curve temperature for channel $c$ | `SelectPrimaryCurveInput(...)` |
 | $u^{(c)}_k$ | issued duty setpoint, % | `last_issued_pct` |
 | $r^{(c)}_k$ | raw curve demand, % | `last_raw_demand_pct` |
 | $s^{(c)}_k$ | smoothed demand, % | `smoothed_demand_pct` |
@@ -88,7 +88,7 @@ denote data dependencies, not control flow.
               │                                        │
               ▼                                        ▼
       low-band global state                  per-channel evaluation:
-      (signal, debt, stages)                  T(c) ← BlendTemps
+      (signal, debt, stages)                  T(c), src(c) ← primary input
               │                                r(c) ← curve(T(c))
               │                                r(c) ← max(r(c), curve_cpu(Tcpu))
               │                                s(c) ← EMA + bounded decay
@@ -137,7 +137,7 @@ Implemented in `GpuControlEnvelopeC()`. `hotspot` is only mixed in when
 the snapshot reports a strictly positive value. If `gpu.available` is
 false, $T^{\mathrm{gpu}}_k$ is undefined.
 
-### 3.3 Blended channel temperature
+### 3.3 Primary curve temperature
 
 For channel $c$ with configured `temp_blend`:
 
@@ -146,14 +146,26 @@ T^{(c)}_k =
 \begin{cases}
 T^{\mathrm{cpu}}_k & \text{`cpu_only`} \\
 T^{\mathrm{gpu}}_k & \text{`gpu_only`} \\
-\max(T^{\mathrm{cpu}}_k,\; T^{\mathrm{gpu}}_k) & \text{`max_cpu_gpu`}
+\max(T^{\mathrm{cpu}}_k,\; T^{\mathrm{gpu}}_k) & \text{`max_cpu_gpu`} \\
+T^{\mathrm{gpu}}_k & \text{`max_cpu_gpu_source_aware`, CPU below guard, GPU available} \\
+T^{\mathrm{cpu}}_k & \text{`max_cpu_gpu_source_aware`, CPU below guard, GPU unavailable} \\
+\max(T^{\mathrm{cpu}}_k,\; T^{\mathrm{gpu}}_k) & \text{`max_cpu_gpu_source_aware`, CPU at/above guard}
 \end{cases}
 $$
 
-Where a sensor is undefined the implementation substitutes
-$-273.15\,°\mathrm{C}$ before the `max` (see `BlendTemps`); the loop
-treats $T^{(c)}_k < -100$ as "primary input unavailable" and may enter
-sensor safe mode (§9).
+The source-aware guard is `source_aware_cpu_hot_guard_c`. If the guard is
+undefined or CPU is unavailable, `max_cpu_gpu_source_aware` uses the GPU
+envelope when available. If GPU telemetry is unavailable below the guard but
+CPU telemetry is available, the primary curve falls back to CPU instead of
+entering sensor-safe mode. At or above the guard, it deliberately reuses legacy
+`max_cpu_gpu` raw-temperature selection to retain high-CPU support.
+
+The policy helper `BlendTemps` exposes the simplified source-aware
+temperature preference for simple callers and C++ smoke tests: GPU when
+available, CPU fallback otherwise. The control loop itself uses
+`SelectPrimaryCurveInput`, which returns both the temperature and a source
+label: `cpu`, `gpu`, `cpu_fallback`, `cpu_guard`, `gpu_guard`, or
+`unavailable`.
 
 ---
 
@@ -607,7 +619,7 @@ latency is therefore $\min(50\,\mathrm{ms},\; E_k - (\text{now} - t_k))$.
 
 ## 11. Sensor-safe mode
 
-If the primary blended input $T^{(c)}_k$ is undefined for
+If the primary curve input $T^{(c)}_k$ is undefined for
 `kMaxConsecutiveSensorFailures` $= 3$ consecutive ticks, the channel
 enters safe mode and overrides the curve evaluation with
 
@@ -734,6 +746,23 @@ input), and §7 (debt does not accrue when `signal ≈ 0`) against the
 adopted floors, and confirms `loop_slip_ms`/`loop_overrun` invariants
 for §10.
 
+2026-05-26 source-aware blend counterfactual:
+
+- Decision record:
+  `docs\source-aware-blend-decision-2026-05-26.md`.
+- Existing current-config CSVs with config SHA256
+  `036cda22e65c7f06f64f865556cf18771c86caa715b34f00a7acca489c093f06`
+  were recomputed offline against `config\control.release.json`.
+- The recomputed current feedforward matched CSV feedforward exactly
+  (p95/max absolute error `0.000/0.000`), then compared guarded
+  `max_cpu_gpu_source_aware` alternatives.
+- A `75 C` CPU guard on channels `0`, `2`, `3`, and `4` had the best
+  risk-adjusted result: average current-config reduction
+  `1.93` total duty-points/tick, warm-row reduction `5.07`, and
+  CPU-hot/GPU-cool reduction `0.00`. Unguarded source-aware blending was
+  rejected because a historical CPU-heavy trace would have removed
+  `68.83` duty-points/tick in CPU-hot/GPU-cool rows.
+
 ### 13.2 Per-run checks to keep current
 
 For every real-data pass, use the active runtime manifest/status to identify
@@ -749,6 +778,9 @@ least these identities:
 - `loop_intended_interval_ms` is inside `[poll_tick_floor_ms, poll_tick_ms]`
   and `cadence_transient` is inside `[0, 1]`.
 - `channelN_setpoint_pct` stays inside `[0, 100]`.
+- `channelN_primary_temp_source` is present for controlled channels and
+  matches the configured blend path (`cpu`, `gpu`, `cpu_fallback`,
+  `cpu_guard`, `gpu_guard`, or `unavailable`).
 - Response sources in CSV/status match the active nonzero terms:
   `thermal_pressure`, `midband_pressure`, `gpu_airflow`, `cpu_low_soak`, and
   `low_band_stage`.
@@ -763,7 +795,7 @@ changes enough that these checks are incomplete.
 | Section | Source |
 |---|---|
 | §2 (per-tick orchestration) | `tick_runner.cpp:RunControlTick` (calls `UpdateLowBandState` before the per-channel loop, then `EvaluateChannel` + `TryApplyChannelSetpoint` per channel, then `ComputeCadence`, then `WaitForNextControlTick`) |
-| §3   | `control_policy.cpp:BlendTemps`, `channel_evaluator.cpp:GpuControlEnvelopeC` |
+| §3   | `channel_evaluator.cpp:SelectPrimaryCurveInput`, `control_policy.cpp:BlendTemps`, `channel_evaluator.cpp:GpuControlEnvelopeC` |
 | §4   | `control_policy.cpp:LookupCurve`, `control_policy.cpp:SmootherStep` |
 | §5   | `channel_evaluator.cpp:ApplyDemandSmoothing` |
 | §6.1–6.2 | `channel_evaluator.cpp:UpdatePressureBoost`, `UpdateThermalPressureBoost`, `UpdateMidbandPressureBoost`, `UpdateGpuAirflowBoost` |

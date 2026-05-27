@@ -43,6 +43,7 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
         {"low_band_eligible_ms", channel.low_band_eligible_ms},
         {"low_band_activation_count", channel.low_band_activation_count},
         {"last_response_source", channel.last_response_source},
+        {"last_primary_temp_source", channel.last_primary_temp_source},
         {"last_write_reason", channel.last_write_reason},
         {"last_observed_temp_c",
          JsonNumberOrZero(channel.last_observed_temp_c)},

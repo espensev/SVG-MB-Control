@@ -210,6 +210,8 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
 
     ValidatePercentage(ch.min_duty_pct, prefix + " min_duty_pct");
     ValidatePercentage(ch.deadband_pct, prefix + " deadband_pct", true);
+    ValidatePositive(ch.source_aware_cpu_hot_guard_c,
+                    prefix + " source_aware_cpu_hot_guard_c", true);
 
     ValidatePositive(ch.rise_rate_pct_per_min,
                     prefix + " rise_rate_pct_per_min", true);
@@ -425,6 +427,8 @@ ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
     channel.channel = ch_json["channel"].get<std::uint32_t>();
 
     channel.min_duty_pct = ch_json.value("min_duty_pct", channel.min_duty_pct);
+    ReadOptionalDouble(ch_json, "source_aware_cpu_hot_guard_c",
+                       channel.source_aware_cpu_hot_guard_c);
     channel.write_cooldown_ms =
         ch_json.value("write_cooldown_ms", channel.write_cooldown_ms);
     ReadOptionalDouble(ch_json, "deadband_pct", channel.deadband_pct);

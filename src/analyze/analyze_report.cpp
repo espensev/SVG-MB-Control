@@ -41,6 +41,7 @@ struct ChannelStats {
     double max_midband_pressure_boost_pct = 0.0;
     double max_gpu_airflow_boost_pct = 0.0;
     double max_cpu_low_soak_boost_pct = 0.0;
+    std::map<std::string, int> primary_source_counts;
     std::optional<std::int64_t> total_writes_min;
     std::optional<std::int64_t> total_writes_max;
     int reversals = 0;
@@ -174,6 +175,22 @@ std::string OptToText(const std::optional<double>& v) {
     return os.str();
 }
 
+std::string CountsToText(const std::map<std::string, int>& counts) {
+    if (counts.empty()) {
+        return "none";
+    }
+    std::ostringstream os;
+    bool first = true;
+    for (const auto& [name, count] : counts) {
+        if (!first) {
+            os << ' ';
+        }
+        first = false;
+        os << name << '=' << count;
+    }
+    return os.str();
+}
+
 // Aggregated state assembled before output. Both emitters consume this; the
 // main function populates it from the SQLite queries.
 struct ReportData {
@@ -301,6 +318,7 @@ void EmitJsonReport(const ReportOptions& options,
              cs.max_gpu_airflow_boost_pct},
             {"max_cpu_low_soak_boost_pct",
              cs.max_cpu_low_soak_boost_pct},
+            {"primary_temp_source_counts", cs.primary_source_counts},
             {"writes", writes},
             {"reversals", cs.reversals},
             {"mode_leave_ticks", cs.mode_leave_ticks},
@@ -377,6 +395,8 @@ void EmitTextReport(const ReportOptions& options,
            << cs.max_cpu_low_soak_boost_pct << "  writes=" << writes
            << "  reversals=" << cs.reversals
            << "  mode_leave_ticks=" << cs.mode_leave_ticks << '\n';
+        os << "       primary_temp_source_counts "
+           << CountsToText(cs.primary_source_counts) << '\n';
     }
     os << "response: load_onset_tick="
        << (data.onset_tick ? std::to_string(*data.onset_tick) : "n/a")
@@ -516,7 +536,8 @@ int RunAnalyzeReport(const ReportOptions& options) {
         Statement stmt = db.Prepare(
             "SELECT tick_count, channel, setpoint_pct, "
             "thermal_pressure_boost_pct, midband_pressure_boost_pct, "
-            "gpu_airflow_boost_pct, cpu_low_soak_boost_pct, total_writes "
+            "gpu_airflow_boost_pct, cpu_low_soak_boost_pct, "
+            "primary_temp_source, total_writes "
             "FROM tick_channel_samples WHERE run_id = ?1 "
             "ORDER BY channel ASC, tick_count ASC");
         stmt.BindInt(1, run_id);
@@ -528,7 +549,15 @@ int RunAnalyzeReport(const ReportOptions& options) {
             auto mid = ColumnOptionalDouble(stmt, 4);
             auto gpu = ColumnOptionalDouble(stmt, 5);
             auto soak = ColumnOptionalDouble(stmt, 6);
-            auto writes = ColumnOptionalInt(stmt, 7);
+            std::string primary_source = "unavailable";
+            if (!stmt.ColumnIsNull(7)) {
+                primary_source = stmt.ColumnText(7);
+                if (primary_source.empty()) {
+                    primary_source = "unavailable";
+                }
+            }
+            ++cs.primary_source_counts[primary_source];
+            auto writes = ColumnOptionalInt(stmt, 8);
             if (setpoint) {
                 cs.setpoint_pct.push_back(*setpoint);
                 if (cs.last_setpoint) {

@@ -37,7 +37,8 @@
     "channels": [
       {
         "channel": 0,
-        "temp_blend": "max_cpu_gpu",
+        "temp_blend": "max_cpu_gpu_source_aware",
+        "source_aware_cpu_hot_guard_c": 75.0,
         "min_duty_pct": 15.5,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 75.0,
@@ -113,7 +114,8 @@
       },
       {
         "channel": 4,
-        "temp_blend": "max_cpu_gpu",
+        "temp_blend": "max_cpu_gpu_source_aware",
+        "source_aware_cpu_hot_guard_c": 75.0,
         "min_duty_pct": 28.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 60.0,
@@ -203,7 +205,8 @@
       },
       {
         "channel": 3,
-        "temp_blend": "max_cpu_gpu",
+        "temp_blend": "max_cpu_gpu_source_aware",
+        "source_aware_cpu_hot_guard_c": 75.0,
         "min_duty_pct": 50.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 90.0,
@@ -287,7 +290,8 @@
       },
       {
         "channel": 2,
-        "temp_blend": "max_cpu_gpu",
+        "temp_blend": "max_cpu_gpu_source_aware",
+        "source_aware_cpu_hot_guard_c": 75.0,
         "min_duty_pct": 54.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 90.0,

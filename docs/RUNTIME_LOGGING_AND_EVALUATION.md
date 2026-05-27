@@ -2,7 +2,7 @@
 
 ## Status
 
-Current as of 2026-05-20.
+Current as of 2026-05-26.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
@@ -69,7 +69,8 @@ source. Use the CSV for timing and response analysis.
 - The logging plane is product-owned inside `SVG-MB-Control`; it does not need a
   sibling process or bridge helper.
 - Control logs per-tick telemetry, fan state, setpoints, feedforward/correction
-  split, thermal-pressure boost, timing quality, and process resource cost.
+  split, primary CPU/GPU/guard source attribution, thermal-pressure boost,
+  timing quality, and process resource cost.
 - The logging plane is observable enough for the shipped channel set under
   local testing. Treat the old `50 ms` captures above as historical unless a
   fresh run is collected with the current shipped config.
@@ -171,6 +172,8 @@ Use this loop for controller changes:
    - process CPU and memory ranges,
    - writes per minute by channel,
    - setpoint p50, p90, max by channel,
+   - primary source counts by channel (`cpu`, `gpu`, CPU telemetry fallback,
+     guard fallback, and unavailable),
    - max and saturation time for thermal-pressure boost,
    - downward setpoint steps above the configured deadband,
    - authority reassertions, policy refusals, write failures, sensor failures,

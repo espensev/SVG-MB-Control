@@ -17,6 +17,8 @@ namespace svg_mb_control {
 struct ChannelControlConfig {
     std::uint32_t channel = 0u;
     TempBlend temp_blend = TempBlend::CpuOnly;
+    double source_aware_cpu_hot_guard_c =
+        std::numeric_limits<double>::quiet_NaN();
     double min_duty_pct = 0.0;
     std::uint32_t write_cooldown_ms = 0u;
     double deadband_pct = std::numeric_limits<double>::quiet_NaN();

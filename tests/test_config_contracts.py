@@ -109,6 +109,32 @@ class ConfigContractTests(unittest.TestCase):
                     msg=f"{rel_path} channel {channel['channel']} CPU overlay too small",
                 )
 
+    def test_shipped_max_blend_channels_are_source_aware_with_cpu_guard(self) -> None:
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            by_channel = {
+                item["channel"]: item
+                for item in payload["control_loop"]["channels"]
+            }
+            for channel_id in (0, 2, 3, 4):
+                channel = by_channel[channel_id]
+                self.assertEqual(
+                    channel["temp_blend"],
+                    "max_cpu_gpu_source_aware",
+                    msg=f"{rel_path} channel {channel_id} blend drifted",
+                )
+                self.assertEqual(
+                    channel["source_aware_cpu_hot_guard_c"],
+                    75.0,
+                    msg=f"{rel_path} channel {channel_id} guard drifted",
+                )
+            for channel_id in (1, 5):
+                self.assertEqual(by_channel[channel_id]["temp_blend"], "cpu_only")
+
     def test_shipped_control_loop_configs_include_smooth_decay_controls(self) -> None:
         required = {
             "demand_smoothing_rise_alpha",

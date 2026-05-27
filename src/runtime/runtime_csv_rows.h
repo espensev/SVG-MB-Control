@@ -28,6 +28,7 @@ struct RuntimeControlChannelLogState {
     double low_band_debt = 0.0;
     double low_band_signal = 0.0;
     bool low_band_stage_active = false;
+    std::string primary_temp_source;
     std::string response_source;
     std::string write_reason;
     std::uint64_t total_writes = 0u;

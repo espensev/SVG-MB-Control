@@ -104,10 +104,12 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertIn("channel0_midband_pressure_boost_pct", latest_row)
                 self.assertIn("channel0_gpu_airflow_boost_pct", latest_row)
                 self.assertIn("channel0_low_band_effective_boost_pct", latest_row)
+                self.assertIn("channel0_primary_temp_source", latest_row)
                 self.assertIn("channel0_response_source", latest_row)
                 self.assertIn("channel0_write_reason", latest_row)
                 self.assertIn("channel0_feedforward_pct", latest_row)
                 self.assertIn("channel0_correction_pct", latest_row)
+                self.assertEqual(latest_row["channel0_primary_temp_source"], "cpu")
                 self.assertEqual(latest_row["channel0_response_source"], "primary_curve")
                 self.assertNotEqual(latest_row["channel0_write_reason"], "")
                 self.assertNotEqual(latest_row["channel0_feedforward_pct"], "")
@@ -236,6 +238,147 @@ class ControlLoopTests(unittest.TestCase):
                 self.assertGreaterEqual(channel["last_setpoint_pct"], 69.0)
                 self.assertGreaterEqual(channel["total_writes"], 1)
                 self.assertEqual(channel["last_response_source"], "cpu_override")
+
+    def test_control_loop_source_aware_blend_uses_gpu_below_cpu_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                temp_blend="max_cpu_gpu_source_aware",
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (90.0, 100.0)],
+                control_hold_ms=0,
+                extra_channel_fields={
+                    "source_aware_cpu_hot_guard_c": 75.0,
+                },
+            )
+            env = _sim_direct_env(channel=0, amd_temp_c=70.0)
+            env.update(
+                {
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "50.0",
+                }
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=env,
+            ):
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0]["total_writes"] >= 1
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertEqual(channel["last_primary_temp_source"], "gpu")
+                self.assertAlmostEqual(channel["last_raw_demand_pct"], 20.0, places=2)
+
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows)
+                self.assertEqual(rows[-1]["channel0_primary_temp_source"], "gpu")
+
+    def test_control_loop_source_aware_guard_preserves_cpu_hot_max_blend(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                temp_blend="max_cpu_gpu_source_aware",
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (90.0, 100.0)],
+                control_hold_ms=0,
+                extra_channel_fields={
+                    "source_aware_cpu_hot_guard_c": 75.0,
+                },
+            )
+            env = _sim_direct_env(channel=0, amd_temp_c=80.0)
+            env.update(
+                {
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "50.0",
+                }
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=env,
+            ):
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0]["total_writes"] >= 1
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertEqual(channel["last_primary_temp_source"], "cpu_guard")
+                self.assertAlmostEqual(channel["last_raw_demand_pct"], 80.0, places=2)
+
+    def test_control_loop_source_aware_missing_gpu_falls_back_to_cpu(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                temp_blend="max_cpu_gpu_source_aware",
+                min_duty_pct=20.0,
+                curve=[(50.0, 20.0), (90.0, 100.0)],
+                control_hold_ms=0,
+                extra_channel_fields={
+                    "source_aware_cpu_hot_guard_c": 75.0,
+                },
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=70.0),
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "unavailable",
+                },
+            ):
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status["controlled_channels"][0]["total_writes"] >= 1
+                        else None
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                channel = status["controlled_channels"][0]
+                self.assertEqual(channel["last_primary_temp_source"], "cpu_fallback")
+                self.assertFalse(channel["sensor_failed"])
+                self.assertEqual(channel["consecutive_sensor_failures"], 0)
+                self.assertAlmostEqual(channel["last_raw_demand_pct"], 60.0, places=2)
+
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows)
+                self.assertEqual(
+                    rows[-1]["channel0_primary_temp_source"], "cpu_fallback"
+                )
 
     def test_control_loop_thermal_pressure_boost_accumulates_under_sustained_heat(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:

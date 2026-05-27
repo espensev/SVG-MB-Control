@@ -284,6 +284,72 @@ std::string AddResponseModifier(std::string source, const char* modifier) {
     return source;
 }
 
+struct PrimaryCurveInput {
+    bool available = false;
+    double temp_c = std::numeric_limits<double>::quiet_NaN();
+    std::string source = "unavailable";
+};
+
+PrimaryCurveInput SelectLegacyMaxInput(const TempInputs& inputs,
+                                       bool guarded) {
+    PrimaryCurveInput out;
+    if (!inputs.cpu_available && !inputs.gpu_available) {
+        return out;
+    }
+    if (inputs.cpu_available &&
+        (!inputs.gpu_available || inputs.cpu_c >= inputs.gpu_c)) {
+        out.available = true;
+        out.temp_c = inputs.cpu_c;
+        out.source = guarded ? "cpu_guard" : "cpu";
+        return out;
+    }
+    out.available = true;
+    out.temp_c = inputs.gpu_c;
+    out.source = guarded ? "gpu_guard" : "gpu";
+    return out;
+}
+
+PrimaryCurveInput SelectPrimaryCurveInput(
+    const TempInputs& inputs,
+    const ChannelControlConfig& config) {
+    PrimaryCurveInput out;
+    switch (config.temp_blend) {
+        case TempBlend::CpuOnly:
+            if (inputs.cpu_available) {
+                out.available = true;
+                out.temp_c = inputs.cpu_c;
+                out.source = "cpu";
+            }
+            return out;
+        case TempBlend::GpuOnly:
+            if (inputs.gpu_available) {
+                out.available = true;
+                out.temp_c = inputs.gpu_c;
+                out.source = "gpu";
+            }
+            return out;
+        case TempBlend::MaxCpuGpu:
+            return SelectLegacyMaxInput(inputs, false);
+        case TempBlend::MaxCpuGpuSourceAware:
+            if (!std::isnan(config.source_aware_cpu_hot_guard_c) &&
+                inputs.cpu_available &&
+                inputs.cpu_c >= config.source_aware_cpu_hot_guard_c) {
+                return SelectLegacyMaxInput(inputs, true);
+            }
+            if (inputs.gpu_available) {
+                out.available = true;
+                out.temp_c = inputs.gpu_c;
+                out.source = "gpu";
+            } else if (inputs.cpu_available) {
+                out.available = true;
+                out.temp_c = inputs.cpu_c;
+                out.source = "cpu_fallback";
+            }
+            return out;
+    }
+    return out;
+}
+
 }  // namespace
 
 double GpuControlEnvelopeC(const RuntimeGpuSnapshot& gpu) {
@@ -334,13 +400,14 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     channel.last_evaluation_time = now;
     channel.last_write_reason = "none";
 
-    const double blended = BlendTemps(temp_inputs, channel.config.temp_blend);
-    const bool primary_available = blended >= -100.0;
+    const PrimaryCurveInput primary =
+        SelectPrimaryCurveInput(temp_inputs, channel.config);
     double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     std::string response_source = "unavailable";
+    std::string primary_temp_source = primary.source;
 
-    if (!primary_available) {
+    if (!primary.available) {
         ++channel.consecutive_sensor_failures;
         if (channel.consecutive_sensor_failures >=
             ChannelState::kMaxConsecutiveSensorFailures) {
@@ -357,16 +424,16 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
             channel.sensor_failed) {
             if (channel.sensor_failed) {
                 evaluation.sensor_event = ChannelSensorEvent::Recovered;
-                evaluation.sensor_event_observed_temp_c = blended;
+                evaluation.sensor_event_observed_temp_c = primary.temp_c;
             }
             channel.consecutive_sensor_failures = 0u;
             channel.sensor_failed = false;
         }
 
         raw_desired_setpoint = LookupCurve(
-            channel.config.curve, blended, channel.config.min_duty_pct,
+            channel.config.curve, primary.temp_c, channel.config.min_duty_pct,
             channel.config.curve_shape);
-        observed_temp_c = blended;
+        observed_temp_c = primary.temp_c;
         response_source = "primary_curve";
     }
 
@@ -385,6 +452,7 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
 
     channel.last_observed_temp_c = observed_temp_c;
     channel.last_raw_demand_pct = raw_desired_setpoint;
+    channel.last_primary_temp_source = primary_temp_source;
     evaluation.observed_temp_c = observed_temp_c;
     evaluation.response_source = response_source;
     if (std::isnan(raw_desired_setpoint)) {

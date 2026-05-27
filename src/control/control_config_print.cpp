@@ -158,6 +158,11 @@ void PrintTextSummary(std::ostream& out, const ControlConfig& base,
             out << "  ch" << ch.channel << "  blend=" << TempBlendToString(ch.temp_blend)
                 << "  shape=" << CurveShapeToString(ch.curve_shape)
                 << "  min=" << FormatNumber(ch.min_duty_pct, 1) << "%";
+            if (IsKnown(ch.source_aware_cpu_hot_guard_c)) {
+                out << "  source_guard="
+                    << FormatNumber(ch.source_aware_cpu_hot_guard_c, 1)
+                    << " C";
+            }
             if (ch.low_band_stage > 0u) {
                 out << "  low_band_stage=" << ch.low_band_stage;
             }
@@ -287,6 +292,8 @@ nlohmann::json BuildJsonSummary(const ControlConfig& base,
         nlohmann::json channel_json;
         channel_json["channel"] = ch.channel;
         channel_json["temp_blend"] = TempBlendToString(ch.temp_blend);
+        channel_json["source_aware_cpu_hot_guard_c"] =
+            OptionalDouble(ch.source_aware_cpu_hot_guard_c);
         channel_json["curve_shape"] = CurveShapeToString(ch.curve_shape);
         channel_json["min_duty_pct"] = ch.min_duty_pct;
         channel_json["write_cooldown_ms"] = ch.write_cooldown_ms;

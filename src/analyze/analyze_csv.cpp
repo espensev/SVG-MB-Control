@@ -277,6 +277,8 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
             GetField(fields, header, prefix + "gpu_airflow_boost_pct"));
         ch.cpu_low_soak_boost_pct = AsDouble(
             GetField(fields, header, prefix + "cpu_low_soak_boost_pct"));
+        ch.primary_temp_source = AsText(
+            GetField(fields, header, prefix + "primary_temp_source"));
         ch.response_source = AsText(
             GetField(fields, header, prefix + "response_source"));
         ch.write_reason = AsText(
