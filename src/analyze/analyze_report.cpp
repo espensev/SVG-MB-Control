@@ -409,50 +409,11 @@ void EmitTextReport(const ReportOptions& options,
     out << os.str();
 }
 
-}  // namespace
-
-int RunAnalyzeReport(const ReportOptions& options) {
-    const std::filesystem::path db_path = options.db_path.empty()
-        ? options.runtime_home / "svg_mb_control.db"
-        : options.db_path;
-
-    std::error_code ec;
-    if (!std::filesystem::exists(db_path, ec) || ec) {
-        std::cerr << "Error: database does not exist: " << db_path.string()
-                  << '\n';
-        return 1;
-    }
-
-    Database db;
-    try {
-        db.Open(db_path);
-        if (GetSchemaVersion(db) <= 0) {
-            std::cerr << "Error: database schema is missing.\n";
-            return 1;
-        }
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: cannot open database: " << ex.what() << '\n';
-        return 1;
-    }
-
-    std::optional<TargetRun> target;
-    try {
-        target = LookupTargetRun(db, options, db_path);
-    } catch (const std::exception& ex) {
-        std::cerr << "Error: run lookup failed: " << ex.what() << '\n';
-        return 1;
-    }
-    if (!target.has_value()) {
-        return 1;
-    }
-    const std::int64_t run_id = target->id;
-
-    std::vector<TickRow> ticks;
-    std::map<int, ChannelStats> channels;
-    int authority_reasserted = 0;
-    int write_failures = 0;
-    int restore_failures = 0;
-
+// Loads tick_samples for run_id into `out`, sorted ascending by tick_count.
+// Returns false on SQL failure (logs the same "tick query failed" prefix the
+// orchestrator used to emit inline).
+bool LoadTicks(Database& db, std::int64_t run_id,
+               std::vector<TickRow>& out) {
     try {
         Statement stmt = db.Prepare(
             "SELECT tick_count, wall_clock, cpu_tctl_c, gpu_memjn_c, "
@@ -466,20 +427,19 @@ int RunAnalyzeReport(const ReportOptions& options) {
             row.cpu_tctl_c = ColumnOptionalDouble(stmt, 2);
             row.gpu_memjn_c = ColumnOptionalDouble(stmt, 3);
             row.gpu_envelope_c = ColumnOptionalDouble(stmt, 4);
-            ticks.push_back(std::move(row));
+            out.push_back(std::move(row));
         }
     } catch (const std::exception& ex) {
         std::cerr << "Error: tick query failed: " << ex.what() << '\n';
-        return 1;
+        return false;
     }
+    return true;
+}
 
-    if (ticks.empty()) {
-        std::cerr << "Error: run " << run_id << " has no ingested ticks.\n";
-        return 1;
-    }
-
-    // Elapsed time. Prefer parsed wall_clock; if it never advances across the
-    // run, synthesize 50 ms per tick so the bands still segment.
+// Sets elapsed_s on each tick using parsed wall_clock when it advances; falls
+// back to a synthetic 50 ms/tick stride when the timestamp never moves, so
+// band assignment still has a usable time axis.
+void ComputeElapsedTime(std::vector<TickRow>& ticks) {
     std::optional<double> first_parsed;
     bool any_advance = false;
     {
@@ -502,13 +462,18 @@ int RunAnalyzeReport(const ReportOptions& options) {
         if (first_parsed && any_advance && parsed) {
             ticks[i].elapsed_s = *parsed - *first_parsed;
         } else {
-            ticks[i].elapsed_s = static_cast<double>(i) * kSyntheticTickSeconds;
+            ticks[i].elapsed_s =
+                static_cast<double>(i) * kSyntheticTickSeconds;
         }
     }
+}
 
-    // Band assignment. Idle: elapsed < idle_seconds. Cooldown: the trailing
-    // run of ticks after the last tick that reached the load threshold, as
-    // long as that hot tick is past the idle band. Load: everything else.
+// Assigns each tick a band:
+//   - kIdle:     elapsed_s < idle_seconds
+//   - kCooldown: trailing run after the last hot tick (only when that hot
+//                tick is past the idle band)
+//   - kLoad:     everything else
+void AssignBands(std::vector<TickRow>& ticks, const ReportOptions& options) {
     const double idle_cut = static_cast<double>(options.idle_seconds);
     std::optional<std::size_t> last_hot;
     for (std::size_t i = 0; i < ticks.size(); ++i) {
@@ -530,8 +495,14 @@ int RunAnalyzeReport(const ReportOptions& options) {
             ticks[i].band = Band::kLoad;
         }
     }
+}
 
-    // Per-channel control samples.
+// Loads tick_channel_samples for run_id and aggregates per-channel stats:
+// setpoint/boost maxima, reversal count via the kReversalDeadbandPct gate,
+// primary-source counts, and total_writes range. Channels are created
+// lazily on first sample.
+bool LoadChannelStats(Database& db, std::int64_t run_id,
+                      std::map<int, ChannelStats>& channels) {
     try {
         Statement stmt = db.Prepare(
             "SELECT tick_count, channel, setpoint_pct, "
@@ -600,11 +571,17 @@ int RunAnalyzeReport(const ReportOptions& options) {
         }
     } catch (const std::exception& ex) {
         std::cerr << "Error: channel query failed: " << ex.what() << '\n';
-        return 1;
+        return false;
     }
+    return true;
+}
 
-    // Per-channel fan samples (fan_index maps to the controlled channel
-    // index on this board: channels 0-5).
+// Merges fan-side samples (duty/rpm/mode_raw) into existing channel stats.
+// fan_index maps directly to the controlled channel index on this board
+// (channels 0-5); fans with no matching channel from LoadChannelStats are
+// skipped.
+bool MergeFanStats(Database& db, std::int64_t run_id,
+                   std::map<int, ChannelStats>& channels) {
     try {
         Statement stmt = db.Prepare(
             "SELECT fan_index, duty_pct, rpm, mode_raw FROM tick_fan_samples "
@@ -631,10 +608,21 @@ int RunAnalyzeReport(const ReportOptions& options) {
         }
     } catch (const std::exception& ex) {
         std::cerr << "Error: fan query failed: " << ex.what() << '\n';
-        return 1;
+        return false;
     }
+    return true;
+}
 
-    // Robustness events.
+struct RobustnessCounts {
+    int authority_reasserted = 0;
+    int write_failures = 0;
+    int restore_failures = 0;
+};
+
+// Counts robustness events for run_id: authority reasserts, write failures,
+// and restore failures via the existing event_type LIKE patterns.
+bool LoadRobustnessCounts(Database& db, std::int64_t run_id,
+                          RobustnessCounts& out) {
     try {
         Statement stmt = db.Prepare(
             "SELECT "
@@ -645,55 +633,74 @@ int RunAnalyzeReport(const ReportOptions& options) {
         stmt.BindInt(1, run_id);
         if (stmt.Step()) {
             if (!stmt.ColumnIsNull(0)) {
-                authority_reasserted = static_cast<int>(stmt.ColumnInt(0));
+                out.authority_reasserted =
+                    static_cast<int>(stmt.ColumnInt(0));
             }
             if (!stmt.ColumnIsNull(1)) {
-                write_failures = static_cast<int>(stmt.ColumnInt(1));
+                out.write_failures = static_cast<int>(stmt.ColumnInt(1));
             }
             if (!stmt.ColumnIsNull(2)) {
-                restore_failures = static_cast<int>(stmt.ColumnInt(2));
+                out.restore_failures = static_cast<int>(stmt.ColumnInt(2));
             }
         }
     } catch (const std::exception& ex) {
         std::cerr << "Error: event query failed: " << ex.what() << '\n';
-        return 1;
+        return false;
     }
+    return true;
+}
 
-    // Idle-band setpoint baseline per channel for response detection.
-    std::map<int, double> idle_setpoint_baseline;
-    {
-        std::map<int, std::vector<double>> idle_setpoints;
-        Statement stmt = db.Prepare(
-            "SELECT tick_count, channel, setpoint_pct FROM "
-            "tick_channel_samples WHERE run_id = ?1 ORDER BY tick_count ASC");
-        stmt.BindInt(1, run_id);
-        // Map tick_count -> band by lookup.
-        std::map<std::int64_t, Band> tick_band;
-        for (const auto& t : ticks) {
-            tick_band[t.tick] = t.band;
+// Per-channel median setpoint while in the idle band, used as the baseline
+// for response detection.
+std::map<int, double> ComputeIdleSetpointBaselines(
+    Database& db, std::int64_t run_id,
+    const std::vector<TickRow>& ticks) {
+    std::map<int, std::vector<double>> idle_setpoints;
+    Statement stmt = db.Prepare(
+        "SELECT tick_count, channel, setpoint_pct FROM "
+        "tick_channel_samples WHERE run_id = ?1 ORDER BY tick_count ASC");
+    stmt.BindInt(1, run_id);
+    std::map<std::int64_t, Band> tick_band;
+    for (const auto& t : ticks) {
+        tick_band[t.tick] = t.band;
+    }
+    while (stmt.Step()) {
+        const std::int64_t tick = stmt.ColumnInt(0);
+        const int channel = static_cast<int>(stmt.ColumnInt(1));
+        if (stmt.ColumnIsNull(2)) {
+            continue;
         }
-        while (stmt.Step()) {
-            const std::int64_t tick = stmt.ColumnInt(0);
-            const int channel = static_cast<int>(stmt.ColumnInt(1));
-            if (stmt.ColumnIsNull(2)) {
-                continue;
-            }
-            auto band_it = tick_band.find(tick);
-            if (band_it != tick_band.end() &&
-                band_it->second == Band::kIdle) {
-                idle_setpoints[channel].push_back(stmt.ColumnDouble(2));
-            }
-        }
-        for (auto& [ch, vals] : idle_setpoints) {
-            if (auto m = Median(vals)) {
-                idle_setpoint_baseline[ch] = *m;
-            }
+        auto band_it = tick_band.find(tick);
+        if (band_it != tick_band.end() &&
+            band_it->second == Band::kIdle) {
+            idle_setpoints[channel].push_back(stmt.ColumnDouble(2));
         }
     }
+    std::map<int, double> out;
+    for (auto& [ch, vals] : idle_setpoints) {
+        if (auto m = Median(vals)) {
+            out[ch] = *m;
+        }
+    }
+    return out;
+}
 
-    // Response delay: time from the first load-threshold crossing to the
-    // first controlled-channel setpoint increase above its idle baseline.
+struct ResponseDelay {
     std::optional<std::int64_t> onset_tick;
+    std::optional<std::int64_t> response_tick;
+    std::optional<double> response_delay_s;
+};
+
+// Wall-clock delay between the first hot tick and the first per-channel
+// setpoint increase above the channel's idle baseline. When no tick crosses
+// the load threshold the onset is nullopt; when no channel responds within
+// the run, response_tick / response_delay_s stay nullopt.
+ResponseDelay DetectResponseDelay(
+    Database& db, std::int64_t run_id,
+    const std::vector<TickRow>& ticks,
+    const std::map<int, double>& idle_baselines,
+    const ReportOptions& options) {
+    ResponseDelay result;
     std::optional<double> onset_elapsed;
     for (const auto& t : ticks) {
         const bool hot =
@@ -701,45 +708,114 @@ int RunAnalyzeReport(const ReportOptions& options) {
             (t.gpu_envelope_c &&
              *t.gpu_envelope_c >= options.load_threshold_c);
         if (hot) {
-            onset_tick = t.tick;
+            result.onset_tick = t.tick;
             onset_elapsed = t.elapsed_s;
             break;
         }
     }
-    std::optional<std::int64_t> response_tick;
-    std::optional<double> response_delay_s;
-    if (onset_tick) {
-        std::map<std::int64_t, double> tick_elapsed;
-        for (const auto& t : ticks) {
-            tick_elapsed[t.tick] = t.elapsed_s;
+    if (!result.onset_tick) {
+        return result;
+    }
+
+    std::map<std::int64_t, double> tick_elapsed;
+    for (const auto& t : ticks) {
+        tick_elapsed[t.tick] = t.elapsed_s;
+    }
+    Statement stmt = db.Prepare(
+        "SELECT tick_count, channel, setpoint_pct FROM "
+        "tick_channel_samples WHERE run_id = ?1 AND tick_count >= ?2 "
+        "ORDER BY tick_count ASC");
+    stmt.BindInt(1, run_id);
+    stmt.BindInt(2, *result.onset_tick);
+    while (stmt.Step()) {
+        if (stmt.ColumnIsNull(2)) {
+            continue;
         }
-        Statement stmt = db.Prepare(
-            "SELECT tick_count, channel, setpoint_pct FROM "
-            "tick_channel_samples WHERE run_id = ?1 AND tick_count >= ?2 "
-            "ORDER BY tick_count ASC");
-        stmt.BindInt(1, run_id);
-        stmt.BindInt(2, *onset_tick);
-        while (stmt.Step()) {
-            if (stmt.ColumnIsNull(2)) {
-                continue;
+        const std::int64_t tick = stmt.ColumnInt(0);
+        const int channel = static_cast<int>(stmt.ColumnInt(1));
+        const double setpoint = stmt.ColumnDouble(2);
+        auto base_it = idle_baselines.find(channel);
+        const double base = base_it != idle_baselines.end()
+            ? base_it->second
+            : setpoint;
+        if (setpoint > base + kReversalDeadbandPct) {
+            result.response_tick = tick;
+            auto te = tick_elapsed.find(tick);
+            if (te != tick_elapsed.end() && onset_elapsed) {
+                result.response_delay_s = te->second - *onset_elapsed;
             }
-            const std::int64_t tick = stmt.ColumnInt(0);
-            const int channel = static_cast<int>(stmt.ColumnInt(1));
-            const double setpoint = stmt.ColumnDouble(2);
-            auto base_it = idle_setpoint_baseline.find(channel);
-            const double base = base_it != idle_setpoint_baseline.end()
-                ? base_it->second
-                : setpoint;
-            if (setpoint > base + kReversalDeadbandPct) {
-                response_tick = tick;
-                auto te = tick_elapsed.find(tick);
-                if (te != tick_elapsed.end() && onset_elapsed) {
-                    response_delay_s = te->second - *onset_elapsed;
-                }
-                break;
-            }
+            break;
         }
     }
+    return result;
+}
+
+}  // namespace
+
+int RunAnalyzeReport(const ReportOptions& options) {
+    const std::filesystem::path db_path = options.db_path.empty()
+        ? options.runtime_home / "svg_mb_control.db"
+        : options.db_path;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(db_path, ec) || ec) {
+        std::cerr << "Error: database does not exist: " << db_path.string()
+                  << '\n';
+        return 1;
+    }
+
+    Database db;
+    try {
+        db.Open(db_path);
+        if (GetSchemaVersion(db) <= 0) {
+            std::cerr << "Error: database schema is missing.\n";
+            return 1;
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: cannot open database: " << ex.what() << '\n';
+        return 1;
+    }
+
+    std::optional<TargetRun> target;
+    try {
+        target = LookupTargetRun(db, options, db_path);
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: run lookup failed: " << ex.what() << '\n';
+        return 1;
+    }
+    if (!target.has_value()) {
+        return 1;
+    }
+    const std::int64_t run_id = target->id;
+
+    std::vector<TickRow> ticks;
+    if (!LoadTicks(db, run_id, ticks)) {
+        return 1;
+    }
+    if (ticks.empty()) {
+        std::cerr << "Error: run " << run_id << " has no ingested ticks.\n";
+        return 1;
+    }
+    ComputeElapsedTime(ticks);
+    AssignBands(ticks, options);
+
+    std::map<int, ChannelStats> channels;
+    if (!LoadChannelStats(db, run_id, channels)) {
+        return 1;
+    }
+    if (!MergeFanStats(db, run_id, channels)) {
+        return 1;
+    }
+
+    RobustnessCounts robustness;
+    if (!LoadRobustnessCounts(db, run_id, robustness)) {
+        return 1;
+    }
+
+    const auto idle_baselines =
+        ComputeIdleSetpointBaselines(db, run_id, ticks);
+    const ResponseDelay response =
+        DetectResponseDelay(db, run_id, ticks, idle_baselines, options);
 
     ReportData data;
     data.run_id = run_id;
@@ -751,12 +827,12 @@ int RunAnalyzeReport(const ReportOptions& options) {
     data.load = SummariseBand(data.ticks, Band::kLoad);
     data.cool = SummariseBand(data.ticks, Band::kCooldown);
     data.channels = std::move(channels);
-    data.onset_tick = onset_tick;
-    data.response_tick = response_tick;
-    data.response_delay_s = response_delay_s;
-    data.authority_reasserted = authority_reasserted;
-    data.write_failures = write_failures;
-    data.restore_failures = restore_failures;
+    data.onset_tick = response.onset_tick;
+    data.response_tick = response.response_tick;
+    data.response_delay_s = response.response_delay_s;
+    data.authority_reasserted = robustness.authority_reasserted;
+    data.write_failures = robustness.write_failures;
+    data.restore_failures = robustness.restore_failures;
 
     if (options.as_json) {
         EmitJsonReport(options, data, std::cout);
