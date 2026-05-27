@@ -89,6 +89,7 @@ Release-script outputs:
 
 - `release\svg-mb-control.exe`
 - `release\control.json`
+- `release\config\machines\snd-desk.cooling.policy.json`
 - `release\runtime_policy_write_live.json`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
 - `release\resources\pawnio\AMDFamily17.bin` (vendored from PawnIO.Modules
@@ -364,6 +365,9 @@ Canonical config files:
 - `config\control.example.json` for repo-local editing
 - `config\control.release.json` for packaging into `release\control.json`
 - `config\runtime_policy_write_live.json` for the packaged live-write policy
+- `config\machines\snd-desk.cooling.policy.json` for the machine-specific fan
+  topology, idle/low-load pressure strategy, and cooling-policy data behind the
+  shipped profile
 
 Common fields:
 
@@ -386,11 +390,15 @@ Field notes:
   when configured.
 - `runtime_policy_path` is read locally by direct write and control flows.
 - The shipped live policy controls airflow lanes `0,1,2,3,4,5`.
-  Lanes `2,3` are included for the higher-floor front-intake response and use
-  one-step rate-limited fan commands.
+  Machine-specific fan topology and cooling intent live in
+  `docs\COOLING_STRATEGY.md` and
+  `config\machines\snd-desk.cooling.policy.json`.
 - The packaged control loop uses GPU envelope curves plus per-channel
   `cpu_override_curve` overlays, commanding the higher duty so Cinebench plus
   max CUDA load has a CPU response path without raising idle floors.
+- The SND-DESK release config keeps positive pressure with lower intake hard
+  minima plus low/medium curve points on channels `2`, `3`, and `4`, rather
+  than holding the old `60% / 56% / 31%` intake floor at idle.
 - Response smoothing and bounded decay latching are applied before rate
   limiting so the loop emits intermediate PWM steps without chasing small
   high-temperature dips. The radiator Noctua lanes use staggered CPU overlay
@@ -481,6 +489,7 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 - `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
 - `docs\LOGGING_IMPROVEMENT_PLAN.md`
 - `docs\STRUCTURE_AND_STABILITY.md`
+- `docs\COOLING_STRATEGY.md`
 - `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`
 - `docs\response-evaluation-tuning-plan.md`
 

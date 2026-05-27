@@ -717,20 +717,20 @@ math check as code/config validation only.
   JSONL rows, and Windows error 5 sidecar/evidence write failures. Treat raw
   analyzer maxima from this run as unreliable unless filtered.
 
-2026-05-26 low-load steady-state check (post airflow-floor adoption,
+2026-05-26 low-load steady-state check (static-floor reference profile,
 commit `10ceaec`):
 
 - Source run: `release\runtime\logs\svg_mb_control_output.csv`
   (session start `2026-05-26T10:14:00`, manifest config
   `sha256=036cda22e65c7f06f64f865556cf18771c86caa715b34f00a7acca489c093f06`,
   producer git hash `b396b53a94a9`).
-- Per-channel `last_setpoint_pct` matched the configured floors
+- Per-channel `last_setpoint_pct` matched the then-configured floors
   within the PWM quantization step
   (channels `0/1/2/3/4/5` at
   `15.5/22.0/60.15/56.15/31.0/20.0`%).
 - `low_band_evidence.json` reported `activation_count = 0` and
   `max_debt ≈ 8.7e-4`; the low-band path stayed below the per-channel
-  debt thresholds for the duration of the capture, so the floor uplift
+  debt thresholds for the duration of the capture, so the static floor uplift
   kept the integrated signal below activation under the observed
   Tctl/Tdie p50 of `~46.8 C` and GPU core p50 `~28 C`.
 - `control_runtime.json` reported no open circuit breakers, no
@@ -742,9 +742,10 @@ commit `10ceaec`):
 
 The 2026-05-26 capture validates the identities in §8.2 (clipped
 additive composition), §6 (integrator hold at zero with no rising
-input), and §7 (debt does not accrue when `signal ≈ 0`) against the
-adopted floors, and confirms `loop_slip_ms`/`loop_overrun` invariants
-for §10.
+input), and §7 (debt does not accrue when `signal ≈ 0`) against that
+reference profile, and confirms `loop_slip_ms`/`loop_overrun` invariants
+for §10. The later dynamic low/medium intake profile changes config curve
+points but does not change the mathematical control identity in this file.
 
 2026-05-26 source-aware blend counterfactual:
 

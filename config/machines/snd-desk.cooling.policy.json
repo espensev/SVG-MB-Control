@@ -1,0 +1,215 @@
+{
+  "schema": "svg_mb_control.machine_cooling_policy.v1",
+  "schema_version": 2,
+  "machine": {
+    "id": "snd-desk",
+    "board": "rog-strix-x870-f",
+    "case": "asus-proart-pa602",
+    "source_doc": "docs/COOLING_STRATEGY.md",
+    "profile_doc": "docs/NORMAL_RUNTIME_AIRFLOW_PROFILE.md"
+  },
+  "strategy": {
+    "summary": "Maintain slight positive case pressure at idle and low load by keeping filtered intake airflow above exhaust airflow. Under higher CPU/GPU thermal demand, prioritize cooling performance over pressure balance.",
+    "idle_low_load": {
+      "priority": "positive_case_pressure",
+      "target_intake_to_exhaust_flow_index_ratio_min": 1.1,
+      "intake_channels": [2, 3, 4],
+      "exhaust_channels": [0, 1, 5],
+      "excluded_channels": [6],
+      "notes": [
+        "CHA2 and CHA3 are the PA602 stock 200 x 38 mm PWM filtered front intakes.",
+        "CHA4 is a Noctua NF-A14 industrialPPC-3000 configured as the front radiator intake.",
+        "Positive pressure is an idle and low-load bias, not a high-load constraint."
+      ]
+    },
+    "high_load": {
+      "priority": "thermal_performance",
+      "pressure_balance_may_relax": true,
+      "pressure_balance_may_relax_above": {
+        "cpu_tctl_c": 72.0,
+        "gpu_envelope_c": 68.0
+      }
+    },
+    "control_model": {
+      "avoid_static_high_hard_floors": true,
+      "hard_min_duty_pct_semantics": "physical electrical/mechanical minimum plus safety margin only",
+      "use_dynamic_soft_floor_for_low_medium_load": true,
+      "require_independent_fan_responses": true
+    }
+  },
+  "flow_model": {
+    "name": "area_rpm_proxy",
+    "formula": "flow_index = rpm / 1000 * (fan_diameter_mm / 120)^2",
+    "limitations": "Proxy only. It ignores radiator restriction, fan curves, blade shape, and case impedance."
+  },
+  "release_profile": {
+    "mode": "dynamic_low_medium_intake_floor",
+    "config_path": "config/control.release.json",
+    "soft_floor_channels": [2, 3, 4],
+    "reference_observation": "2026-05-26-static-floor-low-load",
+    "notes": [
+      "Intake hard minima are lower than the prior static low-load profile.",
+      "The first low-end curve segment is the current floor percentage; later points provide actual low/medium load control.",
+      "Reference RPMs below were captured before this dynamic low-end adoption and remain a baseline until a new live idle validation is recorded."
+    ]
+  },
+  "groups": {
+    "filtered_intake": {
+      "channels": [2, 3, 4],
+      "intent": "carry the idle and low-load positive-pressure bias"
+    },
+    "front_200mm_intake_pair": {
+      "channels": [2, 3],
+      "intent": "quiet high-flow filtered intake; keep responses offset to avoid same-rpm resonance",
+      "minimum_idle_spacing_pct": 4.0
+    },
+    "radiator_exhaust_pair": {
+      "channels": [1, 5],
+      "intent": "radiator exhaust lanes; keep slightly above the rear exhaust at low load but do not mirror their curves",
+      "allow_mirrored_response": false
+    },
+    "controlled_airflow": {
+      "channels": [0, 1, 2, 3, 4, 5]
+    },
+    "excluded_from_case_pressure": {
+      "channels": [6],
+      "reason": "AIO/pump scope"
+    }
+  },
+  "fans": [
+    {
+      "channel": 0,
+      "board_header": "CHA0",
+      "name": "rear_case_exhaust",
+      "role": "rear_case_exhaust",
+      "direction": "exhaust",
+      "fan_model": "Noctua NF-A14 industrialPPC-3000 PWM",
+      "diameter_mm": 140,
+      "release_min_duty_pct": 15.5,
+      "reference_static_low_load_duty_pct": 15.5,
+      "reference_static_low_load_rpm": 609,
+      "response_intent": {
+        "idle_bias": "lowest_exhaust",
+        "cpu_assist": "small"
+      }
+    },
+    {
+      "channel": 1,
+      "board_header": "CHA1",
+      "name": "radiator_exhaust_a",
+      "role": "radiator_exhaust",
+      "direction": "exhaust",
+      "fan_model": "Noctua NF-A14 industrialPPC PWM, 140 mm",
+      "diameter_mm": 140,
+      "release_min_duty_pct": 22.0,
+      "reference_static_low_load_duty_pct": 22.0,
+      "reference_static_low_load_rpm": 457,
+      "response_intent": {
+        "idle_bias": "slightly_above_rear_exhaust",
+        "cpu_assist": "strong",
+        "mirror_group": null
+      }
+    },
+    {
+      "channel": 2,
+      "board_header": "CHA2",
+      "name": "front_intake_left_200mm",
+      "role": "front_case_intake",
+      "direction": "intake",
+      "fan_model": "ASUS ProArt PA602 stock 200 x 38 mm PWM",
+      "diameter_mm": 200,
+      "release_min_duty_pct": 42.0,
+      "reference_static_low_load_duty_pct": 60.0,
+      "reference_static_low_load_rpm": 730,
+      "response_intent": {
+        "idle_low_load_leader": true,
+        "gpu_airflow": "strong",
+        "cpu_assist": "moderate",
+        "soft_floor_curve": [
+          {"temp_c": 35.0, "duty_pct": 42.0},
+          {"temp_c": 50.0, "duty_pct": 46.0},
+          {"temp_c": 62.0, "duty_pct": 54.0},
+          {"temp_c": 72.0, "duty_pct": 64.0}
+        ]
+      }
+    },
+    {
+      "channel": 3,
+      "board_header": "CHA3",
+      "name": "front_intake_right_200mm",
+      "role": "front_case_intake",
+      "direction": "intake",
+      "fan_model": "ASUS ProArt PA602 stock 200 x 38 mm PWM",
+      "diameter_mm": 200,
+      "release_min_duty_pct": 38.0,
+      "reference_static_low_load_duty_pct": 56.0,
+      "reference_static_low_load_rpm": 700,
+      "response_intent": {
+        "idle_low_load_leader": true,
+        "gpu_airflow": "strong",
+        "cpu_assist": "moderate",
+        "soft_floor_curve": [
+          {"temp_c": 35.0, "duty_pct": 38.0},
+          {"temp_c": 50.0, "duty_pct": 42.0},
+          {"temp_c": 62.0, "duty_pct": 50.0},
+          {"temp_c": 72.0, "duty_pct": 60.0}
+        ]
+      }
+    },
+    {
+      "channel": 4,
+      "board_header": "CHA4",
+      "name": "front_radiator_intake_noctua",
+      "role": "front_radiator_intake",
+      "direction": "intake",
+      "fan_model": "Noctua NF-A14 industrialPPC-3000 PWM",
+      "diameter_mm": 140,
+      "release_min_duty_pct": 24.0,
+      "reference_static_low_load_duty_pct": 31.0,
+      "reference_static_low_load_rpm": 1081,
+      "response_intent": {
+        "idle_low_load_support": true,
+        "gpu_airflow": "moderate",
+        "cpu_assist": "secondary_radiator_authority",
+        "soft_floor_curve": [
+          {"temp_c": 35.0, "duty_pct": 24.0},
+          {"temp_c": 50.0, "duty_pct": 27.0},
+          {"temp_c": 62.0, "duty_pct": 31.0},
+          {"temp_c": 72.0, "duty_pct": 38.0}
+        ]
+      }
+    },
+    {
+      "channel": 5,
+      "board_header": "CHA5",
+      "name": "radiator_exhaust_b",
+      "role": "radiator_exhaust",
+      "direction": "exhaust",
+      "fan_model": "Noctua NF-A14 industrialPPC PWM, 140 mm",
+      "diameter_mm": 140,
+      "release_min_duty_pct": 20.0,
+      "reference_static_low_load_duty_pct": 20.0,
+      "reference_static_low_load_rpm": 735,
+      "response_intent": {
+        "idle_bias": "slightly_above_rear_exhaust",
+        "cpu_assist": "strong",
+        "mirror_group": null
+      }
+    },
+    {
+      "channel": 6,
+      "board_header": "CHA6",
+      "name": "aio_or_pump_scope",
+      "role": "aio_pump_scope",
+      "direction": "excluded",
+      "fan_model": "AIO/pump scope",
+      "diameter_mm": null,
+      "release_min_duty_pct": null,
+      "reference_static_low_load_duty_pct": null,
+      "reference_static_low_load_rpm": null,
+      "response_intent": {
+        "controlled_by_svg_mb_control": false
+      }
+    }
+  ]
+}

@@ -74,6 +74,7 @@ $DistExtras          = @(
     'scripts\Start-EvalDashboard.ps1'
     'tools\eval_dashboard'
     'config\control.example.json'
+    'config\machines'
     'config\runtime_policy_write_live.json'
     'resources'
     'VERSION'

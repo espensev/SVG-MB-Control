@@ -287,11 +287,15 @@ current terminal and does not add supervisor restart behavior.
 - While `control-loop` runs, Control requests a 1 ms Windows timer period so the
   fixed-start-period loop is not stretched by the default scheduler
   quantum.
-- On this host, the radiator Noctua lanes inside that set are `1,4,5`. Excluding
-  Channel `6` does not mean "no radiator control"; it only keeps the separate
-  pump-like or still-ambiguous lane out of the shipped live loop.
-- Lanes `2,3` are treated as slow front-intake airflow lanes and use
-  higher floors plus rate-limited smootherstep response.
+- The SND-DESK fan topology and pressure strategy are maintained in
+  `docs\COOLING_STRATEGY.md` and
+  `config\machines\snd-desk.cooling.policy.json`. In brief, channels
+  `2,3` are the PA602 stock 200 mm front intakes, channel `4` is the
+  front radiator Noctua intake, and channel `6` remains out of the
+  shipped live loop.
+- Channels `2`, `3`, and `4` use lower hard minima plus low/medium curve
+  points through `72 C` for the positive-pressure intake bias. The curve and
+  CPU overlay carry this demand; the loop has no separate soft-floor operator.
 - The shipped curves use GPU envelope as the primary case-airflow signal and a
   mandatory CPU/Tctl overlay so Cinebench plus max CUDA load can raise channels
   even when the GPU curve alone would not.
@@ -306,8 +310,8 @@ current terminal and does not add supervisor restart behavior.
   turning the high-temperature CPU override into an always-on low-band curve.
 - Channel `6` remains explicitly blocked in the shipped live runtime policy.
 - Do not assume one identical curve shape or RPM target across the three
-  radiator Noctua lanes. Rear-radiator, front-radiator, and center-radiator
-  tuning are expected to diverge.
+  radiator Noctua lanes. Rear-radiator, front-radiator intake, and
+  center-radiator tuning are expected to diverge.
 
 ## Failure Behavior
 

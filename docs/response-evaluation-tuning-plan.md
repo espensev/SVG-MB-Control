@@ -1,8 +1,11 @@
 # Response Evaluation and Tuning Plan
 
-Status: current as of 2026-05-26. Maintained alongside
-`docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` (adopted airflow profile rationale)
-and `docs\CONTROL_PIPELINE_MATH.md` §13 (real-data validation history).
+Status: current as of 2026-05-27. Maintained alongside
+`docs\COOLING_STRATEGY.md` (strategy, fan inventory, floor philosophy,
+fan-relationship rules),
+`docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` (adopted airflow profile and
+validation evidence), and `docs\CONTROL_PIPELINE_MATH.md` §13 (real-data
+validation history).
 This document records the standing evaluation methodology — pass design,
 acceptance criteria, and tuning strategy — against the **currently shipped**
 control profile. Historical 50 ms-era evidence is kept in
@@ -17,15 +20,20 @@ Reference baseline for every pass (from `config\control.release.json` and
 - Control cadence: `poll_tick_ms = 250`, `write_cooldown_ms = 250`.
 - Deadband: `deadband_pct = 0.25`.
 - Live channels: `0, 1, 2, 3, 4, 5`. Channel `6` is blocked by live policy.
-- Adopted low-load floors (channels `0/1/2/3/4/5`):
-  `15.5% / 22% / 60% / 56% / 31% / 20%`. See
-  `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` for the hardware rationale and
-  for the ch2-ch3 ≥ 4% resonance guard in
-  `tests\test_config_contracts.py::test_shipped_control_loop_configs_use_smooth_step_cadence`.
+- Release hard minima (channels `0/1/2/3/4/5`):
+  `15.5% / 22% / 42% / 38% / 24% / 20%`. Intake channels `2`, `3`,
+  and `4` then use dynamic low/medium points through `72 C` instead of
+  the previous static `60% / 56% / 31%` low-load floor. See
+  `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` and
+  `tests\test_config_contracts.py::test_release_intake_low_end_curves_follow_machine_policy`.
+- Machine-level fan topology and cooling intent are captured in
+  `docs\COOLING_STRATEGY.md` and
+  `config\machines\snd-desk.cooling.policy.json`; this plan applies
+  those roles rather than redefining them.
 - Authority bias for high-CPU response:
   `thermal_pressure_max_boost_pct = 20.0` on channels `1` and `5`
   (`cpu_only` radiator lanes) versus `14.0` on channel `4`
-  (`max_cpu_gpu` front radiator Noctua). CPU override curves jump
+  (`max_cpu_gpu` front radiator Noctua intake). CPU override curves jump
   aggressively on channels `1` and `5` at `88-92 C` while channel `4`
   climbs more gradually.
 
@@ -38,9 +46,9 @@ Reference baseline for every pass (from `config\control.release.json` and
   and `5` and reduce channel `4` high-heat dominance. Full record in
   `docs\CONTROL_PIPELINE_MATH.md` §13.1 (config sha256
   `51a16ea6…fbc78`, git hash `94a1d4c6a34c`).
-- **2026-05-26 idle steady-state (post-adoption)**: confirmation of the
-  elevated floors. Per-channel `last_setpoint_pct` matched the configured
-  floors within the PWM quantization step
+- **2026-05-26 idle steady-state (static-floor reference)**: confirmation of
+  the previous elevated-floor profile. Per-channel `last_setpoint_pct`
+  matched the then-configured floors within the PWM quantization step
   (`15.5 / 22.0 / 60.15 / 56.15 / 31.0 / 20.0`%);
   `low_band_evidence.json` reported `activation_count = 0` and
   `max_debt < 1e-3`; `loop_slip_ms ≤ ~1.1 ms` against the 250 ms tick
@@ -48,17 +56,21 @@ Reference baseline for every pass (from `config\control.release.json` and
   Full record in `docs\CONTROL_PIPELINE_MATH.md` §13.1 (config sha256
   `036cda22…3f06`, git hash `b396b53a94a9`).
 
-The outstanding measurement is a Cinebench + max-CUDA combined pass
-against the post-adoption config to verify the new CPU + GPU response
-together.
+Outstanding measurements:
+
+- an idle hold against the dynamic low-end profile to record replacement
+  RPMs and subjective noise;
+- a Cinebench + max-CUDA combined pass against the current config to verify
+  the CPU + GPU response together.
 
 ## Goals
 
-1. Hold idle noise low by keeping the radiator/case lanes near the adopted
-   floors and respecting the documented ch2-ch3 resonance guard.
-2. Keep the front 200 mm pair (channels `2`, `3`) at the adopted
-   intake-bias floors (`60%` / `56%`). The front airflow is useful and the
-   noise cost at the desk is low.
+1. Hold idle noise low by keeping hard minima modest and letting the
+   low/medium curve points, not high static floors, provide pressure bias.
+2. Keep the PA602 stock front 200 mm intake pair (channels `2`, `3`) spaced
+   by at least `4%` through the low/medium curve. The front airflow is useful,
+   but it should now move with demand instead of staying pinned at
+   `60% / 56%`.
 3. During GPU load, prevent the GPU memory junction from sustaining above
    the low `70 C` range.
 4. During Cinebench together with max CUDA load, prevent CPU Tctl from
@@ -94,12 +106,11 @@ Acceptance:
 
 - Channels `0-5` remain `mode_raw = 0`.
 - No `control_loop.authority_reasserted` events after startup.
-- Per-channel `last_setpoint_pct` stays within one raw PWM step of
-  `15.5%, 22%, 60.15%, 56.15%, 31%, 20%`. The `60.15%` / `56.15%`
-  figures account for the configured low-temperature curve point at
-  `58 C` lifting channels `2` and `3` slightly above the floor at idle
-  Tctl, then held by the decay latch — see
-  `CONTROL_PIPELINE_MATH.md` §4 and §5.
+- Per-channel `last_setpoint_pct` follows the configured curve demand for
+  the observed CPU/GPU temperatures. At the prior idle reference point
+  (Tctl ~46.75 C, GPU core ~28 C), the expected intake demands are roughly
+  channel `2` `45.7%`, channel `3` `41.7%`, and channel `4` `26.8%`
+  before PWM quantization and rate-limit settling.
 - `low_band_evidence.json` shows `activation_count = 0` and
   `max_debt < 1e-3` over the window.
 - Subjective noise is acceptable at the desk.
@@ -167,23 +178,27 @@ whether CPU response exists; CPU response is part of the shipped policy.
 
 ## Tuning Strategy
 
-### Keep Current Idle Floors
+### Keep Current Low-End Policy
 
-The adopted floors are recorded in `config\control.release.json`. Do not
-lower any of them unless noise notes and Pass 1 / 2 / 3 evidence justify
-the change:
+The release minima and low/medium intake curves are recorded in
+`config\control.release.json`. Do not raise the hard intake minima back to
+the old static profile unless Pass 1 / 2 / 3 evidence proves the dynamic
+curve cannot maintain pressure bias:
 
 - channel `0` (rear exhaust): `15.5%`
 - channel `1` (radiator Noctua, `cpu_only`): `22%`
-- channel `2` (front 200 mm intake): `60%`
-- channel `3` (front 200 mm intake): `56%`
-- channel `4` (front radiator Noctua, `max_cpu_gpu`): `31%`
+- channel `2` (PA602 stock front 200 mm intake): min `42%`, then
+  `35C:42%`, `50C:46%`, `62C:54%`, `72C:64%`
+- channel `3` (PA602 stock front 200 mm intake): min `38%`, then
+  `35C:38%`, `50C:42%`, `62C:50%`, `72C:60%`
+- channel `4` (front radiator Noctua intake, `max_cpu_gpu`): min `24%`,
+  then `35C:24%`, `50C:27%`, `62C:31%`, `72C:38%`
 - channel `5` (mid radiator Noctua, `cpu_only`): `20%`
 
-The front 200 mm pair stays higher because their airflow is useful and
-the noise cost is low. The `≥ 4%` spacing between channels `2` and `3`
-is enforced by `test_shipped_control_loop_configs_use_smooth_step_cadence`
-and avoids same-rpm resonance between the two front fans.
+The front 200 mm pair keeps `≥ 4%` spacing between channels `2` and `3`
+at every low/medium point. This is enforced by
+`test_release_intake_low_end_curves_follow_machine_policy` and avoids
+same-rpm resonance between the two front fans.
 
 ### GPU Response
 
@@ -194,15 +209,15 @@ identified `68-72 C` GPU memory as the important load band.
 
 Tuning direction:
 
-- channels `2`, `3`: keep the elevated intake floor and let them lead
-  GPU response.
+- channels `2`, `3`: keep the dynamic low/medium intake curve and let them
+  lead GPU response.
 - channels `0`, `4`, `5`: add airflow later, only as GPU memory moves
   past the mid `60 C` range.
 - channel `1`: radiator lane can rise earlier than `0`, `4`, `5` if
   GPU load also warms coolant or case air.
 
-Do not lower channels `2` or `3` below their adopted floors for the
-next pass.
+Do not collapse channels `2` or `3` back into a shared curve or remove
+their `4%` low-end spacing for the next pass.
 
 ### CPU Override
 
@@ -218,13 +233,13 @@ CPU response is mandatory. Each controlled channel uses a separate
 - channel `0` carries a smaller rear-exhaust CPU assist — override
   climbs from `15.5%` floor to `18%` at `84 C`, `28%` at `88 C`, `42%`
   at `92 C`, and `58%` at `96 C`.
-- channel `4` (front radiator Noctua, `max_cpu_gpu`) carries the
+- channel `4` (front radiator Noctua intake, `max_cpu_gpu`) carries the
   secondary radiator authority — `thermal_pressure_max_boost_pct = 14.0`,
   override climbs more gradually (`32%` at `82 C`, `42%` at `86 C`,
   `54%` at `90 C`, `70%` at `95 C`). This is the deliberate "shift
   authority toward channels `1` and `5`, reduce channel `4` high-heat
   dominance" outcome recorded in `CONTROL_PIPELINE_MATH.md` §13.1.
-- channels `2`, `3` keep the 200 mm free-airflow baseline and add
+- channels `2`, `3` keep the 200 mm front-intake free-airflow baseline and add
   moderate CPU assist under high Tctl (override climbs from the floor
   at `75 C` to `86%` at `95 C` on channel `2`, `82%` at `95 C` on
   channel `3`).

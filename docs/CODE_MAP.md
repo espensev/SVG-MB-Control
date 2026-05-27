@@ -254,6 +254,9 @@ the same responsibility; otherwise they are listed separately.
   shipped with `release\`.
 - `config/runtime_policy_write_live.json` — Write-policy contract
   (writes enabled, restore-on-exit, blocked channels).
+- `config/machines/snd-desk.cooling.policy.json` — Machine-specific
+  fan topology, pressure-balance strategy, and cooling-policy data
+  behind the shipped profile.
 
 ## Tools
 
@@ -278,6 +281,8 @@ docs that are kept current):
 - `docs/WRITE_ORCHESTRATION.md` — Write-once and runtime write policy.
 - `docs/CONTROL_PIPELINE_MATH.md` — Maintained numerical reference
   for the control identity.
+- `docs/COOLING_STRATEGY.md` — SND-DESK fan topology, pressure strategy,
+  floor philosophy, and fan relationship rules.
 - `docs/RUNTIME_HOME.md` — Runtime sidecar, status, log, manifest,
   and archive layout.
 - `docs/RUNTIME_LOGGING_AND_EVALUATION.md` — Tuning, runtime

@@ -1,76 +1,63 @@
 # Normal Runtime Airflow Profile
 
-Updated: 2026-05-26
+Updated: 2026-05-27.
 
-This note records the low-load airflow assumptions behind the normal-runtime
-fan profile. It is scoped to ordinary desktop/runtime operation, not short
-high-power/high-temperature bursts. The floor uplift was promoted from a
-candidate profile to the shipped profile in commit `10ceaec` and is confirmed
-by the runtime observations recorded below.
+This note records the adopted low-load airflow profile and its validation
+evidence. It is scoped to ordinary desktop/runtime operation, not short
+high-power/high-temperature bursts.
 
-## Scope
+The fan inventory, fan types, pressure strategy, floor philosophy, and
+fan-relationship rules behind this profile live in
+`docs\COOLING_STRATEGY.md`. The machine-readable policy reference is
+`config\machines\snd-desk.cooling.policy.json`. This file keeps only the
+adopted low-load settings and the evidence that confirms them.
 
-- Count the six airflow fans controlled by this repo's policy: channels 0-5.
-- Exclude channel 6 from case pressure math. It is AIO/pump scope and is
-  controlled separately.
-- Prefer positive case pressure during low load and normal runtime.
-- Do not raise rear exhaust for this goal; use the quiet front 200 mm intakes
-  to preserve intake margin while modestly increasing radiator airflow.
-
-## Hardware Basis
-
-The shared hardware docs live outside this repo:
-
-- `D:\Development\Thermals\SVG-MB\docs\hardware-documentation\Fan-type-placement.md`
-- `D:\Development\Thermals\SVG-MB\docs\hardware-documentation\hardware.md`
-- `D:\Development\Thermals\SVG-MB\docs\hardware-documentation\noctua_nf_a14_industrialPCC_3000_pwm_infosheet_en.pdf`
-- `D:\Development\Thermals\SVG-MB\docs\hardware-documentation\noctua_nf_a14_industrialPCC_2000_pwm_infosheet_en.pdf`
-- `D:\Development\Thermals\SVG-MB\docs\hardware-documentation\Q27037_ProArt_PA602_WW_UM_V5_WEB.pdf`
-
-Relevant hardware facts:
-
-| Fan group | Model / source | Direction | Notes |
-|---|---|---|---|
-| Front case intake | 2 x ASUS ProArt PA602 stock 200 x 38 mm PWM fans | Intake | Quiet, high-flow front case fans, fan hub bypassed |
-| Radiator fans | Noctua NF-A14 industrialPPC 3000 PWM / 2000 PWM, 140 mm | Mixed radiator airflow | Use 140 mm fan math, not 120 mm |
-| Rear case fan | Noctua NF-A14 industrialPPC 3000 PWM, 140 mm | Exhaust | Keep low-load floor unchanged |
-| AIO / channel 6 | AIO/pump scope | Excluded | Do not include in case pressure ratios |
+The 2026-05-26 static-floor uplift remains the reference RPM observation.
+The current release profile adopts lower hard intake minima plus
+temperature-shaped low/medium curve points so the controller has real
+low-band authority without holding channels `2`/`3`/`4` at high static
+floors.
 
 ## Adopted Low-Load Settings
 
-The adopted profile is recorded in `config\control.release.json`. The packaged
-runtime copy is `release\control.json`. `config\control.example.json` keeps the
-prior floors as a reference starting point for other hardware.
+The adopted profile is recorded in `config\control.release.json`. The
+packaged runtime copy is `release\control.json`. `config\control.example.json`
+keeps the prior floors as a reference starting point for other hardware.
 
-| Channel | Role | Prior floor | Current floor |
-|---:|---|---:|---:|
-| 0 | Rear exhaust | 15.5% | 15.5% |
-| 1 | Radiator / slow Noctua | 20% | 22% |
-| 2 | Front 200 mm intake | 54% | 60% |
-| 3 | Front 200 mm intake | 50% | 56% |
-| 4 | Front radiator Noctua | 28% | 31% |
-| 5 | Mid radiator Noctua | 18% | 20% |
+| Channel | Role | Reference static low-load duty | Current release min | Current low/medium curve |
+|---:|---|---:|---:|---|
+| 0 | Rear exhaust | 15.5% | 15.5% | unchanged rear-exhaust curve |
+| 1 | Radiator exhaust A | 22% | 22% | unchanged CPU/radiator curve |
+| 2 | Front 200 mm intake | 60% | 42% | `35C:42%`, `50C:46%`, `62C:54%`, `72C:64%` |
+| 3 | Front 200 mm intake | 56% | 38% | `35C:38%`, `50C:42%`, `62C:50%`, `72C:60%` |
+| 4 | Front radiator Noctua intake | 31% | 24% | `35C:24%`, `50C:27%`, `62C:31%`, `72C:38%` |
+| 5 | Radiator exhaust B | 20% | 20% | unchanged CPU/radiator curve |
 
-Matching low-temperature curve points and low CPU override plateaus were raised
-with the same intent, so the floors are not contradicted by the first curve
-segments.
+For channels `2`, `3`, and `4`, the same low/medium points are present in
+both the primary `curve` and the `cpu_override_curve`. This preserves CPU
+and GPU low-band response while removing the old high static intake floor.
+The front 200 mm pair keeps the required `4%` spacing at every low/medium
+point. See `docs\COOLING_STRATEGY.md` "Floor Philosophy" for the
+heuristics.
 
 ## Pressure Model
 
-The quick estimate uses an area/RPM proxy:
+The quick estimate uses the area/RPM proxy defined in the machine
+policy:
 
 ```text
 flow_index = rpm / 1000 * (fan_diameter_mm / 120)^2
 ```
 
-This is not a real CFM measurement. It ignores radiator restriction, fan curves,
-blade shape, and case impedance. It is still useful for avoiding the mistake of
-treating the 200 mm front fans and 140 mm radiator fans as identical channels.
+This is not a real CFM measurement. It ignores radiator restriction, fan
+curves, blade shape, and case impedance. It is sufficient for avoiding
+the mistake of treating the 200 mm front fans and 140 mm radiator fans as
+equivalent channels.
 
-Observed low-load runtime before the change, paired with the corresponding
-post-adoption observation captured from
-`release\runtime\logs\svg_mb_control_output.csv` on 2026-05-26 at low CPU/GPU
-load (Tctl ~46.75 C, GPU core ~28 C):
+The reference low-load runtime before the dynamic low-end change, paired
+with the previous static-floor observation captured from
+`release\runtime\logs\svg_mb_control_output.csv` on 2026-05-26 at low
+CPU/GPU load (Tctl ~46.75 C, GPU core ~28 C):
 
 | Channel | Prior approx RPM | Current approx RPM |
 |---:|---:|---:|
@@ -81,42 +68,53 @@ load (Tctl ~46.75 C, GPU core ~28 C):
 | 4 | 1003 | 1081 |
 | 5 | 699 | 735 |
 
-With radiator channels modeled as 140 mm fans, the prior low-load profile was
-close to neutral before radiator restriction. The adopted profile intentionally
-raises the front 200 mm intake floors more than the radiator floors to keep the
-low-load profile intake-biased; the post-adoption RPMs preserve that intake
-bias.
+With radiator channels modeled as 140 mm fans, the earlier profile before
+the static-floor uplift was close to neutral before radiator restriction.
+The reference static-floor profile was intake-biased and remains the RPM
+baseline used by policy tests until the dynamic profile is re-validated
+live. The current curve shape should preserve the same direction by
+keeping the large 200 mm intakes ahead of exhaust at idle/low load while
+allowing lower idle duty than `60% / 56%`.
 
 ## Confirmation and Re-Validation Procedure
 
-The adopted floors are confirmed on the development host by the steady-state
-runtime evidence above. At the time of the capture:
+The reference static-floor profile was confirmed on the development host by
+the steady-state runtime evidence above. At the time of the capture:
 
-- per-channel `last_setpoint_pct` matched the configured floors within the
-  PWM quantization step;
+- per-channel `last_setpoint_pct` matched the then-configured floors within
+  the PWM quantization step;
 - `low_band_evidence.json` reported `activation_count = 0` and
-  `max_debt < 1e-3` across the controlled channels, so the floor uplift kept
-  the integrated low-load signal below activation;
-- `control_runtime.json` reported no open circuit breakers, no consecutive
-  sensor or write failures, and `loop_slip_ms` under 1.2 ms against a 250 ms
-  tick budget.
+  `max_debt < 1e-3` across the controlled channels, so the static floor
+  uplift kept the integrated low-load signal below activation;
+- `control_runtime.json` reported no open circuit breakers, no
+  consecutive sensor or write failures, and `loop_slip_ms` under 1.2 ms
+  against a 250 ms tick budget.
 
-The same procedure must be re-run if the profile is re-tuned. After the
-controller is intentionally restarted with the new config, validate with
+The same procedure must be re-run for the current dynamic low-end profile.
+After the controller is intentionally restarted with the new config,
+validate with
 `release\runtime\logs\svg_mb_control_output.csv`:
 
-- channels 2 and 3 should settle near the configured front-intake floors at
-  low load;
-- channels 1, 4, and 5 should settle near their configured radiator floors;
-- channel 0 should remain near its rear-exhaust floor;
-- channel 6 should not be used in case pressure calculations.
+- channels `2` and `3`, the PA602 stock 200 mm front intakes, should
+  settle near the low/medium curve demand for the observed CPU/GPU
+  temperatures, with channel `2` at least `4%` above channel `3`;
+- channel `4`, the front radiator Noctua intake, should settle near its
+  low/medium curve demand for the observed CPU/GPU temperatures;
+- channels `1` and `5` should settle near their configured radiator
+  floors;
+- channel `0` should remain near its rear-exhaust floor;
+- channel `6` should not be used in case pressure calculations.
 
-If normal-runtime noise becomes unacceptable, reduce radiator floors first or
-back off only the front 200 mm intake floors.
+If normal-runtime noise remains unacceptable, adjust the intake low/medium
+curve points before raising or lowering exhaust floors. Any change must also
+satisfy the tuning checklist in `docs\COOLING_STRATEGY.md` "How To Apply
+During Tuning".
 
 ## References
 
-- ASUS ProArt PA602 product page: <https://www.asus.com/us/motherboards-components/cases/proart/proart-pa602/>
-- ASUS PA602 press release, including front 200 mm fan airflow note: <https://press.asus.com/news/press-releases/asus-proart-pa602-chassis/>
-- Noctua NF-A14 industrialPPC-3000 PWM specifications: <https://www.noctua.at/en/products/nf-a14-industrialppc-3000-pwm/specification>
-- Noctua NF-A14 industrialPPC-2000 PWM specifications: <https://www.noctua.at/en/products/nf-a14-industrialppc-2000-pwm/specifications>
+- `docs\COOLING_STRATEGY.md` — strategy, fan inventory, floor
+  philosophy, and fan-relationship rules.
+- `config\machines\snd-desk.cooling.policy.json` — machine-readable
+  policy.
+- `docs\response-evaluation-tuning-plan.md` — pass design and
+  acceptance criteria used to re-validate this profile.
