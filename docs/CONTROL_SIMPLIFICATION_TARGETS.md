@@ -138,7 +138,18 @@ Validation:
 
 ## 3. Name Low-Band Gates
 
-Current shape:
+Status: **completed 2026-05-28**. `UpdateLowBandState` now reads
+through named predicates: `SensorReleased(available, temp_c,
+release_c)`, `PrimaryResponseActive(channels)` (carries the one-tick
+lag note in its docstring), `ShouldAccrueDebt(signal, primary_active)`,
+`ShouldReleaseDebt(cpu_released, gpu_released)`, and
+`StageSpacingSatisfied(state, spacing, now)`. The signal-active and
+primary-response-freeze thresholds are now named constexpr constants
+(`kSignalEpsilonPct`, `kPrimaryResponseFreezeThresholdPct`).
+`LowBandChannelConfigured` was already centralized. State mutation
+order and the deliberate one-tick lag are unchanged.
+
+Original analysis (kept for context):
 
 - `src/control/low_band_integrator.cpp::UpdateLowBandState` is compact, but key
   decisions are embedded as local predicates:
@@ -182,7 +193,13 @@ Validation:
 
 ## 4. Make Run-Mode Parsing Table-Driven
 
-Current shape:
+Status: **completed pre-2026-05-28** in commit "Drive run-mode
+label/argument/parse from a single table" (3bf3e38). `kRunModeTable` in
+`src/control/control_supervisor.cpp` is now the single source of truth
+for the six mode strings; both `ParseRunMode` overloads, `RunModeLabel`,
+and `RunModeArgument` adapt the same table.
+
+Original analysis (kept for context):
 
 - `src/control/control_supervisor.cpp` has two parallel `ParseRunMode`
   functions:
