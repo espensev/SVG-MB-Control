@@ -1,6 +1,7 @@
 # Control Simplification Targets
 
-Status: current planning note, 2026-05-26.
+Status: current planning note, 2026-05-26; partially closed by the
+2026-05-28 simplification pass (per-target Status lines below).
 
 This note records behavior-preserving simplification targets for the control
 runtime. The intent is to reduce expression complexity and duplicated control
@@ -24,7 +25,17 @@ attribution must update that reference and run the normal validation workflow.
 
 ## 1. Unify The Math Primitives
 
-Current shape:
+Status: **completed 2026-05-28**. `SmoothStep`, `SmoothScale`, and
+`MoveTowardRateLimited` now live in `src/control/control_math.{h,cpp}`;
+`cadence_score` and `low_band_integrator` include it. C++ coverage:
+`tests/cpp/control_math_tests.cpp` (svg_mb_control_math_tests target).
+`channel_evaluator::RateLimitSetpoint` stayed where it is: it has two
+semantics MoveTowardRateLimited does not (NaN-current → return target
+for the first-write contract, plus the additive `max_setpoint_step_pct`
+cap). `policy::control_policy.cpp` retains its own SmootherStep for the
+curve-shape interpolation only.
+
+Original analysis (kept for context):
 
 - `src/control/cadence_score.cpp` owns `SmoothStep`, `SmoothScale`, and
   `MoveTowardRateLimited`.
@@ -67,7 +78,15 @@ Validation:
 
 ## 2. Extract Raw Demand Resolution From `EvaluateChannel`
 
-Current shape:
+Status: **completed 2026-05-28**. `EvaluateChannel` is now a 30-line
+orchestrator threading partial state through a local `EvaluationScratch`
+shim across five private helpers: `EvaluatePrimarySetpoint`,
+`ApplyCpuOverride`, `UpdateDemandAndBoosts`, `ComputeFinalSetpoint`,
+`DetectAuthorityReassert`. The boost-sum operand order in
+`ComputeFinalSetpoint` is preserved bit-for-bit so FP associativity
+stays identical to the pre-refactor expression.
+
+Original analysis (kept for context):
 
 - `src/control/channel_evaluator.cpp::EvaluateChannel` handles:
   - effective timing computation,
@@ -201,7 +220,17 @@ Validation:
 
 ## 5. Reduce CLI Parser Ladder Pressure
 
-Current shape:
+Status: **partially completed 2026-05-28**. `src/app/app_main.cpp` was
+split into a thin `RunApp` orchestrator plus three sibling modules:
+`app/app_signals.{h,cpp}` (Win32 handler + RAII scopes,
+`StopSignaled()`), `app/app_args.{h,cpp}` (`CliOptions`,
+`ParseCliOptions`, the value parsers, `PrintUsage`, `PrintVersion`), and
+`app/app_diagnose.{h,cpp}` (`RunDiagnoseAmd`, `RunDiagnoseGpu`,
+`SampleDirectSnapshotJson`). The `ParseCliOptions` if/else-if ladder
+itself remains in `app_args.cpp`; grouped parse helpers are still
+deferred.
+
+Original analysis (kept for context):
 
 - `src/app/app_main.cpp::ParseCliOptions` is a long `if`/`else if` ladder that
   owns runtime commands, mode selection, write-once flags, calibration flags,
@@ -246,7 +275,16 @@ Validation:
 
 ## 6. Reduce CSV Schema/Header Mirroring
 
-Current shape:
+Status: **partially completed 2026-05-28**. The four boost-stage
+channel columns
+(`channelN_thermal_pressure_boost_pct`, `..._midband_pressure_...`,
+`..._gpu_airflow_...`, `..._cpu_low_soak_...`) are now generated in both
+the header builder and the row writer via the same `kBoostStageSpecs`
+loop. Fan-snapshot, SIO voltage/temperature, tach evidence, and the
+per-channel header/row blocks beyond the boost columns are still
+hand-aligned.
+
+Original analysis (kept for context):
 
 - `src/runtime/runtime_csv_rows.cpp` manually builds CSV headers and matching
   rows.
@@ -369,7 +407,22 @@ Validation:
 
 ## 9. Split `RunAnalyzeReport` Into Query And Assembly Helpers
 
-Current shape:
+Status: **completed 2026-05-28**. The 845-line `analyze_report.cpp`
+became a ~180-line `RunAnalyzeReport` orchestrator plus three sibling
+modules in the `svg_mb_control::analyze::report_detail` namespace:
+`analyze_report_data.{h,cpp}` (types + percentile/median/SummariseBand
+helpers), `analyze_report_queries.{h,cpp}` (`LoadTicks`,
+`ComputeElapsedTime`, `AssignBands`, `LoadChannelStats`, `MergeFanStats`,
+`LoadRobustnessCounts`, `LoadEventFieldCounts`,
+`ComputeIdleSetpointBaselines`, `DetectResponseDelay`,
+`LoadRuntimeManifestEvidence`), and `analyze_report_emit.{h,cpp}`
+(`EmitJsonReport`, `EmitTextReport`, `BuildDecisionRecord`,
+`WriteAnalysisManifest`, `BuildDiagnosticFlags`,
+`AutoDecisionRecordPath`, `WriteTextFile`). C++ coverage:
+`tests/cpp/analyze_report_tests.cpp` (svg_mb_control_analyze_report_tests
+target).
+
+Original analysis (kept for context):
 
 - `src/analyze/analyze_report.cpp::RunAnalyzeReport` is a large pipeline that
   opens the database, selects the run, loads ticks, assigns bands, loads
@@ -446,7 +499,16 @@ Validation:
 
 ## 11. Reuse Control Config Channel Descriptors In Text And JSON Output
 
-Current shape:
+Status: **partially completed 2026-05-28**. The three BelowStart
+pressure stages (thermal, midband, GPU airflow) now render their JSON
+sub-objects via a `kBoostStageSpecs` loop in `BuildJsonSummary`, with
+JSON keys coming straight from the spec table. The text summary uses a
+small `kPressureBoostTextLabels` table that maps display labels to
+`BoostStage`. The CPU low-soak block stays bespoke for text and JSON
+because of its different rate units, `release_c`, and operator-facing
+labels.
+
+Original analysis (kept for context):
 
 - `src/control/control_config_print.cpp` renders channel configuration twice:
   - operator text output,
