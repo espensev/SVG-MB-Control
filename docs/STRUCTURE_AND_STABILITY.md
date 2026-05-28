@@ -45,12 +45,17 @@ A core library gives three stability benefits:
 
 `app/`
 
-- thin `wmain` wrapper,
-- command-line parsing,
-- config path selection,
-- mode dispatch,
-- console control handling,
-- process startup output.
+- thin `wmain` wrapper (`main.cpp`),
+- mode dispatch orchestrator (`app_main.cpp`: `RunApp`),
+- command-line parsing (`app_args.{h,cpp}`: `CliOptions`,
+  `ParseCliOptions`, `PrintUsage`, `PrintVersion`),
+- Win32 console signal handler and RAII scopes
+  (`app_signals.{h,cpp}`: `ConsoleCtrlScope`, `ActiveControlLoopScope`,
+  `ActiveReadLoopScope`, `StopSignaled()`),
+- one-shot diagnostic modes
+  (`app_diagnose.{h,cpp}`: `RunDiagnoseAmd`, `RunDiagnoseGpu`,
+  `SampleDirectSnapshotJson`),
+- process startup banner output (`startup_banner.cpp`).
 
 `control/`
 
@@ -160,15 +165,20 @@ Completed:
     summary / band assignment / diagnostic flags), and
     `svg_mb_control_loop_config_tests` (boost-stage validator round
     trips through `LoadControlLoopConfig`).
+14. Split `src/app/app_main.cpp` (was 847 lines) into a thin `RunApp`
+    orchestrator plus three sibling modules: `app/app_signals.{h,cpp}`
+    (Win32 console handler + RAII scopes, exposes `StopSignaled()`),
+    `app/app_args.{h,cpp}` (`CliOptions` + `ParseCliOptions` + value
+    parsers + `PrintUsage`/`PrintVersion`), and `app/app_diagnose.{h,cpp}`
+    (`RunDiagnoseAmd`, `RunDiagnoseGpu`, `SampleDirectSnapshotJson`).
 
 Remaining polish:
 
-1. Split `src/app/app_main.cpp` further if CLI parsing or mode dispatch grows.
-2. Convert includes to module-qualified paths only if the team wants stricter
+1. Convert includes to module-qualified paths only if the team wants stricter
    include ownership; the current build keeps compatibility include roots.
-3. Split Python smoke tests by runtime mode if the single file becomes hard to
+2. Split Python smoke tests by runtime mode if the single file becomes hard to
    navigate.
-4. Separate build/package from live deploy/restart if local verification should
+3. Separate build/package from live deploy/restart if local verification should
    never stop the controller.
 
 ## Guardrails
