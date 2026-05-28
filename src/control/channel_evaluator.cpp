@@ -178,6 +178,23 @@ PrimaryCurveInput SelectLegacyMaxInput(const TempInputs& inputs,
     return out;
 }
 
+// Per-evaluation scratch state threaded through the EvaluateChannel
+// helpers. References capture the call inputs; the four in-progress
+// fields carry partial results between helpers. Pure scratch — does not
+// outlive the EvaluateChannel call.
+struct EvaluationScratch {
+    ChannelState& channel;
+    const ControlLoopConfig& loop;
+    const TempInputs& temp_inputs;
+    const RuntimeSnapshot& runtime_snapshot;
+    ChannelEvaluation& evaluation;
+
+    double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
+    double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
+    std::string response_source = "unavailable";
+    std::string primary_temp_source = "unavailable";
+};
+
 PrimaryCurveInput SelectPrimaryCurveInput(
     const TempInputs& inputs,
     const ChannelControlConfig& config) {
@@ -217,6 +234,155 @@ PrimaryCurveInput SelectPrimaryCurveInput(
             return out;
     }
     return out;
+}
+
+// Step 1 of EvaluateChannel: pick the primary curve input, drive the
+// sensor failure/recovery transitions, and seed raw_desired_setpoint
+// from the curve. Sets primary_temp_source even on the no-input path so
+// callers can record it in channel/evaluation.
+void EvaluatePrimarySetpoint(EvaluationScratch& s) {
+    const PrimaryCurveInput primary =
+        SelectPrimaryCurveInput(s.temp_inputs, s.channel.config);
+    s.primary_temp_source = primary.source;
+
+    if (!primary.available) {
+        ++s.channel.consecutive_sensor_failures;
+        if (s.channel.consecutive_sensor_failures >=
+            ChannelState::kMaxConsecutiveSensorFailures) {
+            if (!s.channel.sensor_failed) {
+                s.channel.sensor_failed = true;
+                s.evaluation.sensor_event =
+                    ChannelSensorEvent::FailureDetected;
+            }
+            s.raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
+            s.response_source = "sensor_safe_mode";
+        }
+        return;
+    }
+
+    if (s.channel.consecutive_sensor_failures > 0u ||
+        s.channel.sensor_failed) {
+        if (s.channel.sensor_failed) {
+            s.evaluation.sensor_event = ChannelSensorEvent::Recovered;
+            s.evaluation.sensor_event_observed_temp_c = primary.temp_c;
+        }
+        s.channel.consecutive_sensor_failures = 0u;
+        s.channel.sensor_failed = false;
+    }
+
+    s.raw_desired_setpoint = LookupCurve(
+        s.channel.config.curve, primary.temp_c,
+        s.channel.config.min_duty_pct, s.channel.config.curve_shape);
+    s.observed_temp_c = primary.temp_c;
+    s.response_source = "primary_curve";
+}
+
+// Step 2: merge the optional CPU override curve. Wins if no primary
+// input was available or if its curve commands a higher duty.
+void ApplyCpuOverride(EvaluationScratch& s) {
+    if (s.channel.config.cpu_override_curve.empty() ||
+        !s.temp_inputs.cpu_available) {
+        return;
+    }
+    const double cpu_setpoint = LookupCurve(
+        s.channel.config.cpu_override_curve, s.temp_inputs.cpu_c,
+        s.channel.config.min_duty_pct, s.channel.config.curve_shape);
+    if (std::isnan(s.raw_desired_setpoint) ||
+        cpu_setpoint > s.raw_desired_setpoint) {
+        s.raw_desired_setpoint = cpu_setpoint;
+        s.observed_temp_c = s.temp_inputs.cpu_c;
+        s.response_source = "cpu_override";
+    }
+}
+
+// Step 3: smooth the raw demand, integrate the four boost overlays, and
+// build the response_source modifier string. Returns the smoothed base
+// setpoint for the final clamp+rate-limit step. Writes the final
+// response_source onto channel and evaluation.
+double UpdateDemandAndBoosts(EvaluationScratch& s) {
+    const double smoothed_base_setpoint = ApplyDemandSmoothing(
+        s.raw_desired_setpoint, s.channel.smoothed_demand_pct,
+        s.evaluation.timing.elapsed_since_last_evaluation_ms,
+        s.channel.config);
+    s.channel.smoothed_demand_pct = smoothed_base_setpoint;
+
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        s.channel.boosts[i].boost_pct = UpdateBoostStage(
+            kBoostStageSpecs[i], s.channel.config.boosts[i],
+            s.channel.boosts[i].boost_pct,
+            s.evaluation.timing.elapsed_since_last_evaluation_ms,
+            s.temp_inputs, s.observed_temp_c);
+    }
+
+    constexpr double kBoostResponseTagThresholdPct = 0.0005;
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        if (s.channel.boosts[i].boost_pct > kBoostResponseTagThresholdPct) {
+            s.response_source = AddResponseModifier(
+                std::move(s.response_source),
+                kBoostStageSpecs[i].response_tag);
+        }
+    }
+    if (s.channel.low_band_stage_boost_pct > kBoostResponseTagThresholdPct) {
+        s.response_source =
+            AddResponseModifier(std::move(s.response_source), "low_band_stage");
+    }
+    s.channel.last_response_source = s.response_source;
+    s.evaluation.response_source = s.response_source;
+    return smoothed_base_setpoint;
+}
+
+// Step 4: apply the low-band residual cap, sum every contribution, clamp
+// to [0, 100], and apply the per-channel rate limiter. Returns the
+// rate-limited setpoint. Operand order in the boost-sum is load-bearing
+// (see CONTROL_PIPELINE_MATH.md §5): preserving left-to-right
+// associativity keeps the result bit-identical to pre-table builds.
+double ComputeFinalSetpoint(EvaluationScratch& s,
+                            double smoothed_base_setpoint) {
+    double low_band_contrib = s.channel.low_band_stage_boost_pct;
+    if (!std::isnan(s.loop.low_band_residual_cap_pct)) {
+        low_band_contrib =
+            (std::min)(low_band_contrib, s.loop.low_band_residual_cap_pct);
+    }
+    s.channel.low_band_effective_boost_pct = low_band_contrib;
+
+    const double desired_setpoint = std::clamp(
+        smoothed_base_setpoint +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::ThermalPressure)].boost_pct +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::MidbandPressure)].boost_pct +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::GpuAirflow)].boost_pct +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::CpuLowSoak)].boost_pct +
+            low_band_contrib,
+        0.0, 100.0);
+
+    return RateLimitSetpoint(
+        desired_setpoint, s.channel.last_issued_pct,
+        s.evaluation.timing.elapsed_since_last_write_ms,
+        s.channel.config.rise_rate_pct_per_min,
+        s.channel.config.fall_rate_pct_per_min,
+        s.channel.config.max_setpoint_step_pct);
+}
+
+// Step 5: when running in continuous-hold mode (effective_hold_ms == 0),
+// detect drift between the last issued setpoint and the observed fan
+// state and flag an authority-reassert. Leaves evaluation.authority_*
+// at their defaults when no fan snapshot is present for this channel.
+void DetectAuthorityReassert(EvaluationScratch& s) {
+    const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
+        s.runtime_snapshot, s.channel.config.channel);
+    if (fan == nullptr) {
+        return;
+    }
+    s.evaluation.authority_reassert =
+        s.evaluation.timing.effective_hold_ms == 0u &&
+        FanNeedsAuthorityReassert(
+            *fan, s.channel.last_issued_pct,
+            (std::max)(kAuthorityDutyTolerancePct,
+                       s.evaluation.timing.effective_deadband_pct),
+            &s.evaluation.authority_detail);
 }
 
 }  // namespace
@@ -269,134 +435,26 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
     channel.last_evaluation_time = now;
     channel.last_write_reason = "none";
 
-    const PrimaryCurveInput primary =
-        SelectPrimaryCurveInput(temp_inputs, channel.config);
-    double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
-    double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
-    std::string response_source = "unavailable";
-    std::string primary_temp_source = primary.source;
+    EvaluationScratch s{channel, loop, temp_inputs, runtime_snapshot,
+                        evaluation};
 
-    if (!primary.available) {
-        ++channel.consecutive_sensor_failures;
-        if (channel.consecutive_sensor_failures >=
-            ChannelState::kMaxConsecutiveSensorFailures) {
-            if (!channel.sensor_failed) {
-                channel.sensor_failed = true;
-                evaluation.sensor_event =
-                    ChannelSensorEvent::FailureDetected;
-            }
-            raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
-            response_source = "sensor_safe_mode";
-        }
-    } else {
-        if (channel.consecutive_sensor_failures > 0u ||
-            channel.sensor_failed) {
-            if (channel.sensor_failed) {
-                evaluation.sensor_event = ChannelSensorEvent::Recovered;
-                evaluation.sensor_event_observed_temp_c = primary.temp_c;
-            }
-            channel.consecutive_sensor_failures = 0u;
-            channel.sensor_failed = false;
-        }
+    EvaluatePrimarySetpoint(s);
+    ApplyCpuOverride(s);
 
-        raw_desired_setpoint = LookupCurve(
-            channel.config.curve, primary.temp_c, channel.config.min_duty_pct,
-            channel.config.curve_shape);
-        observed_temp_c = primary.temp_c;
-        response_source = "primary_curve";
-    }
-
-    if (!channel.config.cpu_override_curve.empty() &&
-        temp_inputs.cpu_available) {
-        const double cpu_setpoint = LookupCurve(
-            channel.config.cpu_override_curve, temp_inputs.cpu_c,
-            channel.config.min_duty_pct, channel.config.curve_shape);
-        if (std::isnan(raw_desired_setpoint) ||
-            cpu_setpoint > raw_desired_setpoint) {
-            raw_desired_setpoint = cpu_setpoint;
-            observed_temp_c = temp_inputs.cpu_c;
-            response_source = "cpu_override";
-        }
-    }
-
-    channel.last_observed_temp_c = observed_temp_c;
-    channel.last_raw_demand_pct = raw_desired_setpoint;
-    channel.last_primary_temp_source = primary_temp_source;
-    evaluation.observed_temp_c = observed_temp_c;
-    evaluation.response_source = response_source;
-    if (std::isnan(raw_desired_setpoint)) {
-        channel.last_response_source = response_source;
+    channel.last_observed_temp_c = s.observed_temp_c;
+    channel.last_raw_demand_pct = s.raw_desired_setpoint;
+    channel.last_primary_temp_source = s.primary_temp_source;
+    evaluation.observed_temp_c = s.observed_temp_c;
+    evaluation.response_source = s.response_source;
+    if (std::isnan(s.raw_desired_setpoint)) {
+        channel.last_response_source = s.response_source;
         return evaluation;
     }
 
-    const double smoothed_base_setpoint = ApplyDemandSmoothing(
-        raw_desired_setpoint, channel.smoothed_demand_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.smoothed_demand_pct = smoothed_base_setpoint;
-    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
-        channel.boosts[i].boost_pct = UpdateBoostStage(
-            kBoostStageSpecs[i], channel.config.boosts[i],
-            channel.boosts[i].boost_pct,
-            evaluation.timing.elapsed_since_last_evaluation_ms,
-            temp_inputs, observed_temp_c);
-    }
-    constexpr double kBoostResponseTagThresholdPct = 0.0005;
-    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
-        if (channel.boosts[i].boost_pct > kBoostResponseTagThresholdPct) {
-            response_source = AddResponseModifier(
-                std::move(response_source),
-                kBoostStageSpecs[i].response_tag);
-        }
-    }
-    if (channel.low_band_stage_boost_pct > kBoostResponseTagThresholdPct) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "low_band_stage");
-    }
-    channel.last_response_source = response_source;
-    evaluation.response_source = response_source;
-
-    // Low-band is second priority: hard-cap its contribution to the final
-    // setpoint at low_band_residual_cap_pct when configured. NaN preserves the
-    // pre-feature uncapped behavior.
-    double low_band_contrib = channel.low_band_stage_boost_pct;
-    if (!std::isnan(loop.low_band_residual_cap_pct)) {
-        low_band_contrib =
-            (std::min)(low_band_contrib, loop.low_band_residual_cap_pct);
-    }
-    channel.low_band_effective_boost_pct = low_band_contrib;
-    // Left-to-right operand order matches the pre-refactor sum so FP
-    // associativity is preserved bit-for-bit. kBoostStageSpecs enum order
-    // (Thermal, Midband, GpuAirflow, CpuLowSoak) is load-bearing here.
-    const double desired_setpoint = std::clamp(
-        smoothed_base_setpoint +
-            channel.boosts[static_cast<std::size_t>(
-                BoostStage::ThermalPressure)].boost_pct +
-            channel.boosts[static_cast<std::size_t>(
-                BoostStage::MidbandPressure)].boost_pct +
-            channel.boosts[static_cast<std::size_t>(
-                BoostStage::GpuAirflow)].boost_pct +
-            channel.boosts[static_cast<std::size_t>(
-                BoostStage::CpuLowSoak)].boost_pct +
-            low_band_contrib,
-        0.0, 100.0);
-    const double setpoint = RateLimitSetpoint(
-        desired_setpoint, channel.last_issued_pct,
-        evaluation.timing.elapsed_since_last_write_ms,
-        channel.config.rise_rate_pct_per_min,
-        channel.config.fall_rate_pct_per_min,
-        channel.config.max_setpoint_step_pct);
+    const double smoothed_base_setpoint = UpdateDemandAndBoosts(s);
+    const double setpoint = ComputeFinalSetpoint(s, smoothed_base_setpoint);
     channel.last_setpoint_pct = setpoint;
-
-    if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-            runtime_snapshot, channel.config.channel)) {
-        evaluation.authority_reassert =
-            evaluation.timing.effective_hold_ms == 0u &&
-            FanNeedsAuthorityReassert(
-                *fan, channel.last_issued_pct,
-                (std::max)(kAuthorityDutyTolerancePct,
-                           evaluation.timing.effective_deadband_pct),
-                &evaluation.authority_detail);
-    }
+    DetectAuthorityReassert(s);
 
     evaluation.has_setpoint = true;
     evaluation.setpoint_pct = setpoint;
