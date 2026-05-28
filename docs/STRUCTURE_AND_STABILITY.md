@@ -54,7 +54,8 @@ A core library gives three stability benefits:
 
 - control-loop lifecycle (`control_loop.cpp`: startup, shutdown, dispatch),
 - per-tick body (`tick_runner.cpp`: sampling, channel decisions, artifacts, wait),
-- channel evaluation (`channel_evaluator.cpp`: curve, smoothing, pressure terms),
+- channel evaluation (`channel_evaluator.cpp`: curve, smoothing, boost composition, rate limit),
+- boost overlays (`boost_stage.cpp`: per-stage smootherstep integrator shared by thermal_pressure, midband_pressure, gpu_airflow, cpu_low_soak),
 - channel-write gates (`channel_write.cpp`: deadband, cooldown, breaker, hold restore),
 - adaptive cadence (`cadence_score.cpp`: slew score, effective tick interval),
 - low-band integrator (`low_band_integrator.cpp`: signal, debt, stage activation),

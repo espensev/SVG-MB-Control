@@ -57,46 +57,27 @@ void PrintCurveSummary(std::ostream& out, const std::vector<CurvePoint>& curve,
 
 // Descriptor for the three pressure-style boost blocks that share the same
 // (start_c, full_c, rise_pct_per_sec, fall_pct_per_sec, max_boost_pct) shape:
-// thermal_pressure, midband_pressure, gpu_airflow. cpu_low_soak is similar
-// but uses per_min units and adds release_c, so it stays bespoke below.
-// Adding a same-shaped boost only requires extending this table.
-struct PressureBoostDescriptor {
+// Short text labels for the show-config text summary. JSON keys come from
+// kBoostStageSpecs[i].name. cpu_low_soak stays bespoke below because it
+// uses per_min rates and an explicit release_c.
+struct PressureBoostTextLabel {
     const char* text_label;
-    const char* json_key;
-    double ChannelControlConfig::*start_c;
-    double ChannelControlConfig::*full_c;
-    double ChannelControlConfig::*rise_pct_per_sec;
-    double ChannelControlConfig::*fall_pct_per_sec;
-    double ChannelControlConfig::*max_boost_pct;
+    BoostStage stage;
 };
 
-constexpr PressureBoostDescriptor kPressureBoostDescriptors[] = {
-    {"thermal", "thermal_pressure",
-     &ChannelControlConfig::thermal_pressure_start_c,
-     &ChannelControlConfig::thermal_pressure_full_c,
-     &ChannelControlConfig::thermal_pressure_rise_pct_per_sec,
-     &ChannelControlConfig::thermal_pressure_fall_pct_per_sec,
-     &ChannelControlConfig::thermal_pressure_max_boost_pct},
-    {"midband", "midband_pressure",
-     &ChannelControlConfig::midband_pressure_start_c,
-     &ChannelControlConfig::midband_pressure_full_c,
-     &ChannelControlConfig::midband_pressure_rise_pct_per_sec,
-     &ChannelControlConfig::midband_pressure_fall_pct_per_sec,
-     &ChannelControlConfig::midband_pressure_max_boost_pct},
-    {"gpu-air", "gpu_airflow",
-     &ChannelControlConfig::gpu_airflow_start_c,
-     &ChannelControlConfig::gpu_airflow_full_c,
-     &ChannelControlConfig::gpu_airflow_rise_pct_per_sec,
-     &ChannelControlConfig::gpu_airflow_fall_pct_per_sec,
-     &ChannelControlConfig::gpu_airflow_max_boost_pct},
+constexpr PressureBoostTextLabel kPressureBoostTextLabels[] = {
+    {"thermal", BoostStage::ThermalPressure},
+    {"midband", BoostStage::MidbandPressure},
+    {"gpu-air", BoostStage::GpuAirflow},
 };
 
 void EmitPressureBoostText(std::ostream& out,
                            const ChannelControlConfig& ch,
-                           const PressureBoostDescriptor& desc) {
-    out << "       " << desc.text_label << " "
-        << FormatPctRange(ch.*desc.start_c, ch.*desc.full_c,
-                          ch.*desc.max_boost_pct)
+                           const PressureBoostTextLabel& label) {
+    const auto& cfg =
+        ch.boosts[static_cast<std::size_t>(label.stage)];
+    out << "       " << label.text_label << " "
+        << FormatPctRange(cfg.start_c, cfg.full_c, cfg.max_boost_pct)
         << '\n';
 }
 
@@ -227,17 +208,18 @@ void PrintTextSummary(std::ostream& out, const ControlConfig& base,
                     << FormatNumber(ch.decay_latch_above_pct, 1) << "%";
             }
             out << '\n';
-            for (const auto& desc : kPressureBoostDescriptors) {
-                EmitPressureBoostText(out, ch, desc);
+            for (const auto& label : kPressureBoostTextLabels) {
+                EmitPressureBoostText(out, ch, label);
             }
-            if (IsKnown(ch.cpu_low_soak_start_c) ||
-                IsKnown(ch.cpu_low_soak_full_c) ||
-                IsKnown(ch.cpu_low_soak_max_boost_pct)) {
-                out << "       cpu-soak " << FormatPctRange(ch.cpu_low_soak_start_c,
-                                                            ch.cpu_low_soak_full_c,
-                                                            ch.cpu_low_soak_max_boost_pct);
-                if (IsKnown(ch.cpu_low_soak_release_c)) {
-                    out << " (release " << FormatNumber(ch.cpu_low_soak_release_c, 1)
+            const auto& soak = ch.boosts[
+                static_cast<std::size_t>(BoostStage::CpuLowSoak)];
+            if (IsKnown(soak.start_c) || IsKnown(soak.full_c) ||
+                IsKnown(soak.max_boost_pct)) {
+                out << "       cpu-soak "
+                    << FormatPctRange(soak.start_c, soak.full_c,
+                                      soak.max_boost_pct);
+                if (IsKnown(soak.release_c)) {
+                    out << " (release " << FormatNumber(soak.release_c, 1)
                         << " C)";
                 }
                 out << '\n';
@@ -269,16 +251,13 @@ nlohmann::json OptionalDouble(double value) {
     return value;
 }
 
-nlohmann::json BuildPressureBoostJson(const ChannelControlConfig& ch,
-                                      const PressureBoostDescriptor& desc) {
+nlohmann::json BuildPressureBoostJson(const BoostStageConfig& cfg) {
     return {
-        {"start_c", OptionalDouble(ch.*desc.start_c)},
-        {"full_c", OptionalDouble(ch.*desc.full_c)},
-        {"rise_pct_per_sec",
-         OptionalDouble(ch.*desc.rise_pct_per_sec)},
-        {"fall_pct_per_sec",
-         OptionalDouble(ch.*desc.fall_pct_per_sec)},
-        {"max_boost_pct", OptionalDouble(ch.*desc.max_boost_pct)},
+        {"start_c", OptionalDouble(cfg.start_c)},
+        {"full_c", OptionalDouble(cfg.full_c)},
+        {"rise_pct_per_sec", OptionalDouble(cfg.rise_per_unit)},
+        {"fall_pct_per_sec", OptionalDouble(cfg.fall_per_unit)},
+        {"max_boost_pct", OptionalDouble(cfg.max_boost_pct)},
     };
 }
 
@@ -362,18 +341,25 @@ nlohmann::json BuildJsonSummary(const ControlConfig& base,
             OptionalDouble(ch.decay_latch_above_pct);
         channel_json["decay_latch_pct_per_min"] =
             OptionalDouble(ch.decay_latch_pct_per_min);
-        for (const auto& desc : kPressureBoostDescriptors) {
-            channel_json[desc.json_key] = BuildPressureBoostJson(ch, desc);
+        // Pressure-shaped stages (BelowStart + per_sec). JSON keys come
+        // from kBoostStageSpecs[i].name.
+        for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+            const auto& spec = kBoostStageSpecs[i];
+            if (spec.release_mode != BoostReleaseMode::BelowStart) {
+                continue;
+            }
+            channel_json[std::string(spec.name)] =
+                BuildPressureBoostJson(ch.boosts[i]);
         }
+        const auto& soak = ch.boosts[
+            static_cast<std::size_t>(BoostStage::CpuLowSoak)];
         channel_json["cpu_low_soak"] = {
-            {"start_c", OptionalDouble(ch.cpu_low_soak_start_c)},
-            {"full_c", OptionalDouble(ch.cpu_low_soak_full_c)},
-            {"release_c", OptionalDouble(ch.cpu_low_soak_release_c)},
-            {"rise_pct_per_min",
-             OptionalDouble(ch.cpu_low_soak_rise_pct_per_min)},
-            {"fall_pct_per_min",
-             OptionalDouble(ch.cpu_low_soak_fall_pct_per_min)},
-            {"max_boost_pct", OptionalDouble(ch.cpu_low_soak_max_boost_pct)},
+            {"start_c", OptionalDouble(soak.start_c)},
+            {"full_c", OptionalDouble(soak.full_c)},
+            {"release_c", OptionalDouble(soak.release_c)},
+            {"rise_pct_per_min", OptionalDouble(soak.rise_per_unit)},
+            {"fall_pct_per_min", OptionalDouble(soak.fall_per_unit)},
+            {"max_boost_pct", OptionalDouble(soak.max_boost_pct)},
         };
         channel_json["low_band"] = {
             {"stage", ch.low_band_stage},

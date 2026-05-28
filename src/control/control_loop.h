@@ -36,57 +36,6 @@ struct ChannelControlConfig {
     double decay_latch_above_pct = std::numeric_limits<double>::quiet_NaN();
     double decay_latch_pct_per_min =
         std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_start_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_full_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_rise_pct_per_sec =
-        std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_fall_pct_per_sec =
-        std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_max_boost_pct =
-        std::numeric_limits<double>::quiet_NaN();
-    // Mid-band pressure stage. Same smootherstep boost shape as thermal
-    // pressure but configured for the ~64-84 C band so a rising-temperature
-    // high-load segment gets a proportional upward response before the
-    // high-temperature thermal-pressure stage (>=84 C) engages. Any field set
-    // requires start_c and full_c; absent (NaN) leaves the term inert.
-    double midband_pressure_start_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double midband_pressure_full_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double midband_pressure_rise_pct_per_sec =
-        std::numeric_limits<double>::quiet_NaN();
-    double midband_pressure_fall_pct_per_sec =
-        std::numeric_limits<double>::quiet_NaN();
-    double midband_pressure_max_boost_pct =
-        std::numeric_limits<double>::quiet_NaN();
-    // GPU early-airflow boost. Driven by the GPU control envelope
-    // (max core/memjn/hotspot) independent of temp_blend, so even cpu_only
-    // lanes can start airflow when the GPU warms. Same smootherstep shape;
-    // absent (NaN) leaves the term inert.
-    double gpu_airflow_start_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double gpu_airflow_full_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double gpu_airflow_rise_pct_per_sec =
-        std::numeric_limits<double>::quiet_NaN();
-    double gpu_airflow_fall_pct_per_sec =
-        std::numeric_limits<double>::quiet_NaN();
-    double gpu_airflow_max_boost_pct =
-        std::numeric_limits<double>::quiet_NaN();
-    double cpu_low_soak_start_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double cpu_low_soak_full_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double cpu_low_soak_release_c =
-        std::numeric_limits<double>::quiet_NaN();
-    double cpu_low_soak_rise_pct_per_min =
-        std::numeric_limits<double>::quiet_NaN();
-    double cpu_low_soak_fall_pct_per_min =
-        std::numeric_limits<double>::quiet_NaN();
-    double cpu_low_soak_max_boost_pct =
-        std::numeric_limits<double>::quiet_NaN();
     std::uint32_t low_band_stage = 0u;
     double low_band_debt_threshold =
         std::numeric_limits<double>::quiet_NaN();
@@ -95,11 +44,12 @@ struct ChannelControlConfig {
         std::numeric_limits<double>::quiet_NaN();
     std::vector<CurvePoint> curve;
     std::vector<CurvePoint> cpu_override_curve;
-    // Stage-table mirror of the per-boost fields above. Step 2 of the
-    // boost-stage refactor: the loader fills both this array and the legacy
-    // fields after parsing each channel; the control loop still reads the
-    // legacy fields. Step 3 will switch the evaluator to read this array,
-    // at which point the legacy fields can be removed.
+    // Per-stage boost overlay configs. Indexed by BoostStage; populated by
+    // LoadBoostStageConfig from the per-stage JSON keys
+    // (<spec.name>_start_c, _full_c, _release_c if ExplicitRelease,
+    // _rise_pct_per_{sec,min}, _fall_pct_per_{sec,min}, _max_boost_pct).
+    // The on-disk JSON schema is unchanged from when each stage had its
+    // own typed C++ fields.
     std::array<BoostStageConfig, kBoostStageCount> boosts{};
 };
 

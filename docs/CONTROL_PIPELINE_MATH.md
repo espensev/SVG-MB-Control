@@ -1,13 +1,15 @@
 # Control Pipeline — Mathematical Reference
 
-Status: **current**, last verified 2026-05-26 against
+Status: **current**, last verified 2026-05-28 against
 `src/control/tick_runner.cpp` (per-tick orchestration),
-`src/control/channel_evaluator.cpp` (curve, smoothing, integrators, rate
-limit, authority reassert), `src/control/low_band_integrator.cpp` (global
-signal, debt, per-channel stage), `src/control/cadence_score.cpp` (slew
-score, cadence target, generic rate-limit helper),
-`src/control/channel_write.cpp` (write gates),
-`src/control/control_scheduler.cpp` (sliced wait), and
+`src/control/channel_evaluator.cpp` (curve, smoothing, boost composition,
+rate limit, authority reassert),
+`src/control/boost_stage.cpp` (per-stage boost integrator shared by
+thermal_pressure, midband_pressure, gpu_airflow, and cpu_low_soak),
+`src/control/low_band_integrator.cpp` (global signal, debt, per-channel
+stage), `src/control/cadence_score.cpp` (slew score, cadence target,
+generic rate-limit helper), `src/control/channel_write.cpp` (write
+gates), `src/control/control_scheduler.cpp` (sliced wait), and
 `src/policy/control_policy.cpp` (curve / blend helpers). Cross-cuts the
 prose in `CONTROL_LOOP.md` with the actual numerical operators.
 
@@ -279,6 +281,14 @@ identical integrator with seconds-scale rates; the fourth (CPU low-soak)
 uses a minutes-scale rate. All four are clamped to a configured maximum
 and return to zero in their respective release conditions.
 
+Implementation: a single `UpdateBoostStage` in `src/control/boost_stage.cpp`
+covers all four, driven by `kBoostStageSpecs` which tags each stage with
+its input source (`ObservedTemp` / `GpuEnvelope` / `CpuTemp`), rate unit
+(`PerSec` / `PerMin`), and release semantics (`BelowStart` for the three
+seconds-scale stages, `ExplicitRelease` for the CPU low-soak band).
+Per-channel state is `ChannelState::boosts[BoostStage]` (configured side:
+`ChannelControlConfig::boosts[BoostStage]`).
+
 ### 6.1 Unified seconds-scale integrator
 
 Given a generic boost state $B$, observed temperature $T_{\mathrm{obs}}$,
@@ -311,10 +321,12 @@ Finally $B_k \leftarrow \mathrm{clip}(B_k, 0, B_{\max})$.
 
 The integrator is **disabled** (returns $0$) when any of the start, full,
 rise, fall, or max parameters is undefined, when the rise or max parameter is
-non-positive, or when the fall parameter is negative (`UpdatePressureBoost`
+non-positive, or when the fall parameter is negative (`UpdateBoostStage`
 guard clause). A zero fall rate is valid and means no decay. When
 $T_{\mathrm{obs}}$ is undefined the existing boost is held and no integration
-occurs.
+occurs (`BelowStart` release mode). For the `ExplicitRelease` stage (CPU
+low-soak) an undefined input causes decay instead, matching the pre-table
+behavior.
 
 Anti-windup is implicit: integration is gated on $B < B_{\max}$ on the
 rising path. Decay is unconditional on the falling path.
@@ -799,8 +811,8 @@ changes enough that these checks are incomplete.
 | §3   | `channel_evaluator.cpp:SelectPrimaryCurveInput`, `control_policy.cpp:BlendTemps`, `channel_evaluator.cpp:GpuControlEnvelopeC` |
 | §4   | `control_policy.cpp:LookupCurve`, `control_policy.cpp:SmootherStep` |
 | §5   | `channel_evaluator.cpp:ApplyDemandSmoothing` |
-| §6.1–6.2 | `channel_evaluator.cpp:UpdatePressureBoost`, `UpdateThermalPressureBoost`, `UpdateMidbandPressureBoost`, `UpdateGpuAirflowBoost` |
-| §6.3 | `channel_evaluator.cpp:UpdateCpuLowSoakBoost` |
+| §6.1–6.2 | `boost_stage.cpp:UpdateBoostStage` (BelowStart specs in `kBoostStageSpecs`: ThermalPressure, MidbandPressure, GpuAirflow) |
+| §6.3 | `boost_stage.cpp:UpdateBoostStage` (ExplicitRelease spec: CpuLowSoak) |
 | §7   | `low_band_integrator.cpp:UpdateLowBandState`, `cadence_score.cpp:SmoothScale` |
 | §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `cadence_score.cpp:MoveTowardRateLimited` |
 | §8.2–8.3 | `channel_evaluator.cpp:EvaluateChannel` (final composition) |

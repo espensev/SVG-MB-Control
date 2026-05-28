@@ -30,14 +30,8 @@ struct ChannelState {
     double last_setpoint_pct = std::numeric_limits<double>::quiet_NaN();
     double last_raw_demand_pct = std::numeric_limits<double>::quiet_NaN();
     double smoothed_demand_pct = std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_boost_pct = 0.0;
-    double midband_pressure_boost_pct = 0.0;
-    double gpu_airflow_boost_pct = 0.0;
-    double cpu_low_soak_boost_pct = 0.0;
-    // Stage-table mirror of the four legacy *_boost_pct doubles above.
-    // The channel evaluator drives this array via UpdateBoostStage; the
-    // legacy doubles are kept in sync as a transitional shim until the
-    // remaining external readers are switched off them.
+    // Per-stage boost contribution, indexed by BoostStage. Updated by
+    // UpdateBoostStage once per tick in EvaluateChannel.
     std::array<BoostStageState, kBoostStageCount> boosts{};
 
     // True when any spec marked is_primary in kBoostStageSpecs has a

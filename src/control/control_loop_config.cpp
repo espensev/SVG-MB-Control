@@ -90,77 +90,118 @@ void ValidateCurve(const std::vector<CurvePoint>& curve,
     }
 }
 
-struct PressureBoostMembers {
-    const char* name;
-    double ChannelControlConfig::*start_c;
-    double ChannelControlConfig::*full_c;
-    double ChannelControlConfig::*rise_pct_per_sec;
-    double ChannelControlConfig::*fall_pct_per_sec;
-    double ChannelControlConfig::*max_boost_pct;
-};
-
-constexpr PressureBoostMembers kPressureBoostMembers[] = {
-    {"thermal_pressure",
-     &ChannelControlConfig::thermal_pressure_start_c,
-     &ChannelControlConfig::thermal_pressure_full_c,
-     &ChannelControlConfig::thermal_pressure_rise_pct_per_sec,
-     &ChannelControlConfig::thermal_pressure_fall_pct_per_sec,
-     &ChannelControlConfig::thermal_pressure_max_boost_pct},
-    {"midband_pressure",
-     &ChannelControlConfig::midband_pressure_start_c,
-     &ChannelControlConfig::midband_pressure_full_c,
-     &ChannelControlConfig::midband_pressure_rise_pct_per_sec,
-     &ChannelControlConfig::midband_pressure_fall_pct_per_sec,
-     &ChannelControlConfig::midband_pressure_max_boost_pct},
-    {"gpu_airflow",
-     &ChannelControlConfig::gpu_airflow_start_c,
-     &ChannelControlConfig::gpu_airflow_full_c,
-     &ChannelControlConfig::gpu_airflow_rise_pct_per_sec,
-     &ChannelControlConfig::gpu_airflow_fall_pct_per_sec,
-     &ChannelControlConfig::gpu_airflow_max_boost_pct},
-};
-
-bool AnyPressureBoostFieldSet(const ChannelControlConfig& ch,
-                              const PressureBoostMembers& members) {
-    return !std::isnan(ch.*members.start_c) ||
-           !std::isnan(ch.*members.full_c) ||
-           !std::isnan(ch.*members.rise_pct_per_sec) ||
-           !std::isnan(ch.*members.fall_pct_per_sec) ||
-           !std::isnan(ch.*members.max_boost_pct);
-}
-
-void ValidatePressureBoostConfig(const ChannelControlConfig& ch,
-                                 const PressureBoostMembers& members,
-                                 const std::string& prefix) {
-    if (!AnyPressureBoostFieldSet(ch, members)) {
-        return;
-    }
-
-    const std::string stage = members.name;
-    if (std::isnan(ch.*members.start_c) ||
-        std::isnan(ch.*members.full_c)) {
-        throw std::runtime_error(
-            prefix + " " + stage + " requires both start_c and full_c");
-    }
-
-    ValidatePositive(ch.*members.rise_pct_per_sec,
-                     prefix + " " + stage + "_rise_pct_per_sec", true);
-    ValidatePositive(ch.*members.fall_pct_per_sec,
-                     prefix + " " + stage + "_fall_pct_per_sec", true);
-    ValidatePercentage(ch.*members.max_boost_pct,
-                       prefix + " " + stage + "_max_boost_pct", true);
-
-    if (ch.*members.full_c <= ch.*members.start_c) {
-        throw std::runtime_error(
-            prefix + " " + stage + "_full_c must be > start_c");
-    }
-}
-
 void ReadOptionalDouble(const nlohmann::json& json,
                         const std::string& key,
                         double& target) {
     if (json.contains(key)) {
         target = json[key].get<double>();
+    }
+}
+
+// JSON key suffix for the rise/fall rate fields. BelowStart stages use
+// percent-per-second (matches today's on-disk schema for thermal_pressure,
+// midband_pressure, gpu_airflow); ExplicitRelease stages use
+// percent-per-minute (cpu_low_soak).
+const char* RateRiseKeySuffix(const BoostStageSpec& spec) {
+    return spec.rate_unit == BoostRateUnit::PerSec
+        ? "_rise_pct_per_sec"
+        : "_rise_pct_per_min";
+}
+const char* RateFallKeySuffix(const BoostStageSpec& spec) {
+    return spec.rate_unit == BoostRateUnit::PerSec
+        ? "_fall_pct_per_sec"
+        : "_fall_pct_per_min";
+}
+
+void LoadBoostStageConfig(const nlohmann::json& json,
+                          const BoostStageSpec& spec,
+                          BoostStageConfig& cfg) {
+    const std::string prefix(spec.name);
+    ReadOptionalDouble(json, prefix + "_start_c", cfg.start_c);
+    ReadOptionalDouble(json, prefix + "_full_c", cfg.full_c);
+    if (spec.release_mode == BoostReleaseMode::ExplicitRelease) {
+        ReadOptionalDouble(json, prefix + "_release_c", cfg.release_c);
+    }
+    ReadOptionalDouble(json, prefix + RateRiseKeySuffix(spec),
+                       cfg.rise_per_unit);
+    ReadOptionalDouble(json, prefix + RateFallKeySuffix(spec),
+                       cfg.fall_per_unit);
+    ReadOptionalDouble(json, prefix + "_max_boost_pct", cfg.max_boost_pct);
+}
+
+bool AnyBoostStageFieldSet(const BoostStageConfig& cfg,
+                           const BoostStageSpec& spec) {
+    return !std::isnan(cfg.start_c) ||
+           !std::isnan(cfg.full_c) ||
+           (spec.release_mode == BoostReleaseMode::ExplicitRelease &&
+            !std::isnan(cfg.release_c)) ||
+           !std::isnan(cfg.rise_per_unit) ||
+           !std::isnan(cfg.fall_per_unit) ||
+           !std::isnan(cfg.max_boost_pct);
+}
+
+void ValidateBoostStageConfig(const BoostStageConfig& cfg,
+                              const BoostStageSpec& spec,
+                              const std::string& channel_prefix) {
+    if (!AnyBoostStageFieldSet(cfg, spec)) {
+        return;
+    }
+
+    const std::string stage(spec.name);
+    const std::string rise_key =
+        stage + RateRiseKeySuffix(spec);
+    const std::string fall_key =
+        stage + RateFallKeySuffix(spec);
+    const std::string max_key = stage + "_max_boost_pct";
+
+    if (spec.release_mode == BoostReleaseMode::ExplicitRelease) {
+        // Strict: any field set requires the complete set (matches the
+        // legacy cpu_low_soak contract).
+        if (std::isnan(cfg.start_c) || std::isnan(cfg.full_c) ||
+            std::isnan(cfg.release_c) ||
+            std::isnan(cfg.rise_per_unit) ||
+            std::isnan(cfg.fall_per_unit) ||
+            std::isnan(cfg.max_boost_pct)) {
+            throw std::runtime_error(
+                channel_prefix + " " + stage +
+                " requires the complete field set");
+        }
+        ValidatePositive(cfg.start_c, channel_prefix + " " + stage + "_start_c");
+        ValidatePositive(cfg.full_c, channel_prefix + " " + stage + "_full_c");
+        ValidatePositive(cfg.release_c,
+                         channel_prefix + " " + stage + "_release_c");
+        ValidatePositive(cfg.rise_per_unit, channel_prefix + " " + rise_key);
+        ValidatePositive(cfg.fall_per_unit, channel_prefix + " " + fall_key);
+        ValidatePercentage(cfg.max_boost_pct, channel_prefix + " " + max_key);
+        if (cfg.full_c <= cfg.start_c) {
+            throw std::runtime_error(
+                channel_prefix + " " + stage + "_full_c must be > start_c");
+        }
+        if (cfg.release_c > cfg.start_c) {
+            throw std::runtime_error(
+                channel_prefix + " " + stage +
+                "_release_c must be <= start_c");
+        }
+        if (cfg.max_boost_pct > 10.0) {
+            throw std::runtime_error(
+                channel_prefix + " " + stage + "_max_boost_pct must be <= 10");
+        }
+        return;
+    }
+
+    // BelowStart: lenient. Require start_c + full_c; rise/fall/max may
+    // stay NaN (UpdateBoostStage treats the spec as inert in that case).
+    if (std::isnan(cfg.start_c) || std::isnan(cfg.full_c)) {
+        throw std::runtime_error(
+            channel_prefix + " " + stage +
+            " requires both start_c and full_c");
+    }
+    ValidatePositive(cfg.rise_per_unit, channel_prefix + " " + rise_key, true);
+    ValidatePositive(cfg.fall_per_unit, channel_prefix + " " + fall_key, true);
+    ValidatePercentage(cfg.max_boost_pct, channel_prefix + " " + max_key, true);
+    if (cfg.full_c <= cfg.start_c) {
+        throw std::runtime_error(
+            channel_prefix + " " + stage + "_full_c must be > start_c");
     }
 }
 
@@ -185,62 +226,6 @@ void LoadCurveFromJson(const nlohmann::json& json,
               [](const CurvePoint& a, const CurvePoint& b) {
                   return a.temp_c < b.temp_c;
               });
-}
-
-void LoadPressureBoostConfig(const nlohmann::json& json,
-                             ChannelControlConfig& channel,
-                             const PressureBoostMembers& members) {
-    const std::string stage = members.name;
-    ReadOptionalDouble(json, stage + "_start_c",
-                       channel.*members.start_c);
-    ReadOptionalDouble(json, stage + "_full_c",
-                       channel.*members.full_c);
-    ReadOptionalDouble(json, stage + "_rise_pct_per_sec",
-                       channel.*members.rise_pct_per_sec);
-    ReadOptionalDouble(json, stage + "_fall_pct_per_sec",
-                       channel.*members.fall_pct_per_sec);
-    ReadOptionalDouble(json, stage + "_max_boost_pct",
-                       channel.*members.max_boost_pct);
-}
-
-// Copies the four parsed legacy boost-overlay field groups into the
-// stage-table array. Step 2 of the boost-stage refactor: both
-// representations are kept in sync so step 3 can switch the consumer
-// without changing the loader. release_c stays at NaN for BelowStart
-// stages (thermal/midband/gpu), which the integrator ignores.
-void SyncLegacyBoostFieldsToStageArray(ChannelControlConfig& ch) {
-    constexpr auto Index = [](BoostStage s) {
-        return static_cast<std::size_t>(s);
-    };
-
-    BoostStageConfig& thermal = ch.boosts[Index(BoostStage::ThermalPressure)];
-    thermal.start_c       = ch.thermal_pressure_start_c;
-    thermal.full_c        = ch.thermal_pressure_full_c;
-    thermal.rise_per_unit = ch.thermal_pressure_rise_pct_per_sec;
-    thermal.fall_per_unit = ch.thermal_pressure_fall_pct_per_sec;
-    thermal.max_boost_pct = ch.thermal_pressure_max_boost_pct;
-
-    BoostStageConfig& midband = ch.boosts[Index(BoostStage::MidbandPressure)];
-    midband.start_c       = ch.midband_pressure_start_c;
-    midband.full_c        = ch.midband_pressure_full_c;
-    midband.rise_per_unit = ch.midband_pressure_rise_pct_per_sec;
-    midband.fall_per_unit = ch.midband_pressure_fall_pct_per_sec;
-    midband.max_boost_pct = ch.midband_pressure_max_boost_pct;
-
-    BoostStageConfig& gpu = ch.boosts[Index(BoostStage::GpuAirflow)];
-    gpu.start_c       = ch.gpu_airflow_start_c;
-    gpu.full_c        = ch.gpu_airflow_full_c;
-    gpu.rise_per_unit = ch.gpu_airflow_rise_pct_per_sec;
-    gpu.fall_per_unit = ch.gpu_airflow_fall_pct_per_sec;
-    gpu.max_boost_pct = ch.gpu_airflow_max_boost_pct;
-
-    BoostStageConfig& soak = ch.boosts[Index(BoostStage::CpuLowSoak)];
-    soak.start_c       = ch.cpu_low_soak_start_c;
-    soak.full_c        = ch.cpu_low_soak_full_c;
-    soak.release_c     = ch.cpu_low_soak_release_c;
-    soak.rise_per_unit = ch.cpu_low_soak_rise_pct_per_min;
-    soak.fall_per_unit = ch.cpu_low_soak_fall_pct_per_min;
-    soak.max_boost_pct = ch.cpu_low_soak_max_boost_pct;
 }
 
 void ValidateChannelConfig(const ChannelControlConfig& ch,
@@ -270,51 +255,8 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
     ValidatePositive(ch.decay_latch_pct_per_min,
                     prefix + " decay_latch_pct_per_min", true);
 
-    for (const auto& members : kPressureBoostMembers) {
-        ValidatePressureBoostConfig(ch, members, prefix);
-    }
-
-    if (!std::isnan(ch.cpu_low_soak_start_c) ||
-        !std::isnan(ch.cpu_low_soak_full_c) ||
-        !std::isnan(ch.cpu_low_soak_release_c) ||
-        !std::isnan(ch.cpu_low_soak_rise_pct_per_min) ||
-        !std::isnan(ch.cpu_low_soak_fall_pct_per_min) ||
-        !std::isnan(ch.cpu_low_soak_max_boost_pct)) {
-        if (std::isnan(ch.cpu_low_soak_start_c) ||
-            std::isnan(ch.cpu_low_soak_full_c) ||
-            std::isnan(ch.cpu_low_soak_release_c) ||
-            std::isnan(ch.cpu_low_soak_rise_pct_per_min) ||
-            std::isnan(ch.cpu_low_soak_fall_pct_per_min) ||
-            std::isnan(ch.cpu_low_soak_max_boost_pct)) {
-            throw std::runtime_error(
-                prefix + " cpu_low_soak requires the complete field set");
-        }
-
-        ValidatePositive(ch.cpu_low_soak_start_c,
-                        prefix + " cpu_low_soak_start_c");
-        ValidatePositive(ch.cpu_low_soak_full_c,
-                        prefix + " cpu_low_soak_full_c");
-        ValidatePositive(ch.cpu_low_soak_release_c,
-                        prefix + " cpu_low_soak_release_c");
-        ValidatePositive(ch.cpu_low_soak_rise_pct_per_min,
-                        prefix + " cpu_low_soak_rise_pct_per_min");
-        ValidatePositive(ch.cpu_low_soak_fall_pct_per_min,
-                        prefix + " cpu_low_soak_fall_pct_per_min");
-        ValidatePercentage(ch.cpu_low_soak_max_boost_pct,
-                          prefix + " cpu_low_soak_max_boost_pct");
-
-        if (ch.cpu_low_soak_full_c <= ch.cpu_low_soak_start_c) {
-            throw std::runtime_error(
-                prefix + " cpu_low_soak_full_c must be > start_c");
-        }
-        if (ch.cpu_low_soak_release_c > ch.cpu_low_soak_start_c) {
-            throw std::runtime_error(
-                prefix + " cpu_low_soak_release_c must be <= start_c");
-        }
-        if (ch.cpu_low_soak_max_boost_pct > 10.0) {
-            throw std::runtime_error(
-                prefix + " cpu_low_soak_max_boost_pct must be <= 10");
-        }
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        ValidateBoostStageConfig(ch.boosts[i], kBoostStageSpecs[i], prefix);
     }
 
     if (ch.low_band_stage > 0u ||
@@ -459,9 +401,9 @@ void LoadLowBandConfig(const nlohmann::json& loop_json,
 }
 
 // Builds one ChannelControlConfig from its JSON object. Assumes the caller
-// has already verified the "channel" field is present; the curve fields use
-// the LoadCurveFromJson helper, and pressure boosts iterate
-// kPressureBoostMembers.
+// has already verified the "channel" field is present; the curve fields
+// use LoadCurveFromJson, and each boost overlay is parsed by
+// LoadBoostStageConfig driven by kBoostStageSpecs.
 ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
     ChannelControlConfig channel;
     channel.channel = ch_json["channel"].get<std::uint32_t>();
@@ -500,22 +442,10 @@ ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
     ReadOptionalDouble(ch_json, "decay_latch_pct_per_min",
                        channel.decay_latch_pct_per_min);
 
-    for (const auto& members : kPressureBoostMembers) {
-        LoadPressureBoostConfig(ch_json, channel, members);
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        LoadBoostStageConfig(ch_json, kBoostStageSpecs[i],
+                             channel.boosts[i]);
     }
-
-    ReadOptionalDouble(ch_json, "cpu_low_soak_start_c",
-                       channel.cpu_low_soak_start_c);
-    ReadOptionalDouble(ch_json, "cpu_low_soak_full_c",
-                       channel.cpu_low_soak_full_c);
-    ReadOptionalDouble(ch_json, "cpu_low_soak_release_c",
-                       channel.cpu_low_soak_release_c);
-    ReadOptionalDouble(ch_json, "cpu_low_soak_rise_pct_per_min",
-                       channel.cpu_low_soak_rise_pct_per_min);
-    ReadOptionalDouble(ch_json, "cpu_low_soak_fall_pct_per_min",
-                       channel.cpu_low_soak_fall_pct_per_min);
-    ReadOptionalDouble(ch_json, "cpu_low_soak_max_boost_pct",
-                       channel.cpu_low_soak_max_boost_pct);
 
     channel.low_band_stage =
         ch_json.value("low_band_stage", channel.low_band_stage);
@@ -537,8 +467,6 @@ ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
     LoadCurveFromJson(ch_json, "curve", channel.curve);
     LoadCurveFromJson(ch_json, "cpu_override_curve",
                       channel.cpu_override_curve);
-
-    SyncLegacyBoostFieldsToStageArray(channel);
 
     return channel;
 }
