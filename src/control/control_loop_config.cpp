@@ -203,6 +203,46 @@ void LoadPressureBoostConfig(const nlohmann::json& json,
                        channel.*members.max_boost_pct);
 }
 
+// Copies the four parsed legacy boost-overlay field groups into the
+// stage-table array. Step 2 of the boost-stage refactor: both
+// representations are kept in sync so step 3 can switch the consumer
+// without changing the loader. release_c stays at NaN for BelowStart
+// stages (thermal/midband/gpu), which the integrator ignores.
+void SyncLegacyBoostFieldsToStageArray(ChannelControlConfig& ch) {
+    constexpr auto Index = [](BoostStage s) {
+        return static_cast<std::size_t>(s);
+    };
+
+    BoostStageConfig& thermal = ch.boosts[Index(BoostStage::ThermalPressure)];
+    thermal.start_c       = ch.thermal_pressure_start_c;
+    thermal.full_c        = ch.thermal_pressure_full_c;
+    thermal.rise_per_unit = ch.thermal_pressure_rise_pct_per_sec;
+    thermal.fall_per_unit = ch.thermal_pressure_fall_pct_per_sec;
+    thermal.max_boost_pct = ch.thermal_pressure_max_boost_pct;
+
+    BoostStageConfig& midband = ch.boosts[Index(BoostStage::MidbandPressure)];
+    midband.start_c       = ch.midband_pressure_start_c;
+    midband.full_c        = ch.midband_pressure_full_c;
+    midband.rise_per_unit = ch.midband_pressure_rise_pct_per_sec;
+    midband.fall_per_unit = ch.midband_pressure_fall_pct_per_sec;
+    midband.max_boost_pct = ch.midband_pressure_max_boost_pct;
+
+    BoostStageConfig& gpu = ch.boosts[Index(BoostStage::GpuAirflow)];
+    gpu.start_c       = ch.gpu_airflow_start_c;
+    gpu.full_c        = ch.gpu_airflow_full_c;
+    gpu.rise_per_unit = ch.gpu_airflow_rise_pct_per_sec;
+    gpu.fall_per_unit = ch.gpu_airflow_fall_pct_per_sec;
+    gpu.max_boost_pct = ch.gpu_airflow_max_boost_pct;
+
+    BoostStageConfig& soak = ch.boosts[Index(BoostStage::CpuLowSoak)];
+    soak.start_c       = ch.cpu_low_soak_start_c;
+    soak.full_c        = ch.cpu_low_soak_full_c;
+    soak.release_c     = ch.cpu_low_soak_release_c;
+    soak.rise_per_unit = ch.cpu_low_soak_rise_pct_per_min;
+    soak.fall_per_unit = ch.cpu_low_soak_fall_pct_per_min;
+    soak.max_boost_pct = ch.cpu_low_soak_max_boost_pct;
+}
+
 void ValidateChannelConfig(const ChannelControlConfig& ch,
                           std::uint32_t index) {
     const std::string prefix = "Channel " + std::to_string(ch.channel) +
@@ -497,6 +537,8 @@ ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
     LoadCurveFromJson(ch_json, "curve", channel.curve);
     LoadCurveFromJson(ch_json, "cpu_override_curve",
                       channel.cpu_override_curve);
+
+    SyncLegacyBoostFieldsToStageArray(channel);
 
     return channel;
 }

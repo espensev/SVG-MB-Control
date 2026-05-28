@@ -2,6 +2,7 @@
 
 #include "control_loop.h"
 
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -33,6 +34,10 @@ struct ChannelState {
     double midband_pressure_boost_pct = 0.0;
     double gpu_airflow_boost_pct = 0.0;
     double cpu_low_soak_boost_pct = 0.0;
+    // Stage-table mirror of the four legacy *_boost_pct doubles above.
+    // Default-initialised (all 0.0) and unused in step 2 of the refactor;
+    // step 3 will switch the channel evaluator to update and read this array.
+    std::array<BoostStageState, kBoostStageCount> boosts{};
     double low_band_stage_boost_pct = 0.0;
     double low_band_effective_boost_pct = 0.0;
     double low_band_debt_snapshot = 0.0;

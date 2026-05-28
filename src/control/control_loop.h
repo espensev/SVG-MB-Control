@@ -1,9 +1,11 @@
 #pragma once
 
+#include "boost_stage.h"
 #include "control_config.h"
 #include "control_policy.h"
 #include "runtime_write_policy.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -93,6 +95,12 @@ struct ChannelControlConfig {
         std::numeric_limits<double>::quiet_NaN();
     std::vector<CurvePoint> curve;
     std::vector<CurvePoint> cpu_override_curve;
+    // Stage-table mirror of the per-boost fields above. Step 2 of the
+    // boost-stage refactor: the loader fills both this array and the legacy
+    // fields after parsing each channel; the control loop still reads the
+    // legacy fields. Step 3 will switch the evaluator to read this array,
+    // at which point the legacy fields can be removed.
+    std::array<BoostStageConfig, kBoostStageCount> boosts{};
 };
 
 struct LowBandControlConfig {
