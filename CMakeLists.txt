@@ -211,7 +211,10 @@ endif()
 configure_svg_mb_control_target(svg_mb_control_core)
 
 add_executable(svg_mb_control
+    src/app/app_args.cpp
+    src/app/app_diagnose.cpp
     src/app/app_main.cpp
+    src/app/app_signals.cpp
     src/app/startup_banner.cpp
     src/main.cpp
     ${SVG_MB_CONTROL_RESOURCE_SOURCES}
