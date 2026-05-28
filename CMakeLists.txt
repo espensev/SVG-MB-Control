@@ -155,6 +155,7 @@ add_library(svg_mb_control_core STATIC
     src/hardware/sio_fan_writer.cpp
     src/platform/direct_runtime_snapshot.cpp
     src/platform/env_util.cpp
+    src/platform/file_hash.cpp
     src/platform/runtime_singleton.cpp
     src/platform/runtime_util.cpp
     src/platform/service_probe.cpp
@@ -183,6 +184,9 @@ add_library(svg_mb_control_core STATIC
     src/analyze/analyze_ingest_db.cpp
     src/analyze/analyze_json_artifacts.cpp
     src/analyze/analyze_prune.cpp
+    src/analyze/analyze_report_data.cpp
+    src/analyze/analyze_report_emit.cpp
+    src/analyze/analyze_report_queries.cpp
     src/analyze/analyze_report.cpp
 )
 

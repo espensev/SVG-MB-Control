@@ -40,7 +40,11 @@ void PrintAnalyzeUsage() {
     std::cout
         << "  svg-mb-control analyze report [--runtime-home <path>] "
            << "[--db <path>] [--run <id>|--session <ts>] [--idle-seconds <s>] "
-           << "[--load-threshold-c <c>] [--json]\n"
+           << "[--load-threshold-c <c>] [--json] [--out <path>] "
+           << "[--manifest-out <path>] "
+           << "[--decision-record-out <path|auto>|--no-decision-record] "
+           << "[--profile <name>] [--hypothesis <text>] "
+           << "[--decision <text>] [--notes <text>]\n"
         << "    Summarizes one ingested run from the sqlite database. Selects "
            << "the most\n"
         << "    recent run unless --run or --session is given. Reports idle/"
@@ -50,7 +54,9 @@ void PrintAnalyzeUsage() {
         << "    duty/rpm and write reversals, response delay after the first "
            << "load-threshold\n"
         << "    crossing, and authority/write/restore failure counts. "
-           << "Read-only.\n";
+           << "Can write\n"
+        << "    report, analysis-manifest, and Markdown decision-record "
+           << "artifacts. Read-only.\n";
 }
 
 bool ResolveAnalyzeRuntimeHome(
@@ -235,6 +241,42 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
                 std::cerr << "Error: invalid --load-threshold-c value.\n";
                 return 1;
             }
+        } else if (arg == L"--out") {
+            if (!report_only("--out")) return 1;
+            report_options.out_path =
+                std::filesystem::path(require_value(index));
+        } else if (arg == L"--manifest-out") {
+            if (!report_only("--manifest-out")) return 1;
+            report_options.manifest_out_path =
+                std::filesystem::path(require_value(index));
+        } else if (arg == L"--decision-record-out") {
+            if (!report_only("--decision-record-out")) return 1;
+            const std::wstring value = require_value(index);
+            if (value == L"auto") {
+                report_options.decision_record_auto = true;
+            } else {
+                report_options.decision_record_out_path =
+                    std::filesystem::path(value);
+            }
+        } else if (arg == L"--no-decision-record") {
+            if (!report_only("--no-decision-record")) return 1;
+            report_options.no_decision_record = true;
+        } else if (arg == L"--profile") {
+            if (!report_only("--profile")) return 1;
+            report_options.profile =
+                std::filesystem::path(require_value(index)).string();
+        } else if (arg == L"--notes") {
+            if (!report_only("--notes")) return 1;
+            report_options.notes =
+                std::filesystem::path(require_value(index)).string();
+        } else if (arg == L"--hypothesis") {
+            if (!report_only("--hypothesis")) return 1;
+            report_options.hypothesis =
+                std::filesystem::path(require_value(index)).string();
+        } else if (arg == L"--decision") {
+            if (!report_only("--decision")) return 1;
+            report_options.decision =
+                std::filesystem::path(require_value(index)).string();
         } else if (arg == L"--json") {
             if (!report_only("--json")) return 1;
             report_options.as_json = true;

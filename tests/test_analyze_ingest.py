@@ -964,6 +964,9 @@ class AnalyzeReportTests(unittest.TestCase):
             self.assertIn("midband_pressure_boost_pct max=1.5", out)
             self.assertIn("gpu_airflow_boost_pct max=0.75", out)
             self.assertIn("primary_temp_source_counts cpu=30", out)
+            self.assertIn("response_source_counts primary_curve=30", out)
+            self.assertIn("write_reason_counts first_write=1 none=29", out)
+            self.assertIn("events: severity_counts=unknown=3", out)
 
     def test_report_json_emits_structured_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -995,9 +998,89 @@ class AnalyzeReportTests(unittest.TestCase):
                 channels[0]["primary_temp_source_counts"]["cpu"], 30
             )
             self.assertEqual(
+                channels[0]["response_source_counts"]["primary_curve"], 30
+            )
+            self.assertEqual(channels[0]["write_reason_counts"]["none"], 29)
+            self.assertEqual(
                 channels[0]["max_midband_pressure_boost_pct"], 1.5
             )
             self.assertEqual(channels[0]["max_gpu_airflow_boost_pct"], 0.75)
+            self.assertEqual(obj["events"]["severity_counts"]["unknown"], 3)
+            self.assertEqual(obj["events"]["error_code_counts"]["none"], 3)
+            self.assertEqual(
+                obj["diagnostic_flags"],
+                ["authority_reasserted_during_run"],
+            )
+
+    def test_report_writes_native_analysis_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_report_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            out_path = td / "analysis" / "combined-load-summary.txt"
+            manifest_path = td / "analysis" / "combined-load-manifest.json"
+            result = _run_report(
+                runtime_home,
+                db_path,
+                "--idle-seconds",
+                "10",
+                "--out",
+                str(out_path),
+                "--manifest-out",
+                str(manifest_path),
+                "--profile",
+                "combined-load",
+                "--hypothesis",
+                "fan response rises under load",
+                "--decision",
+                "keep",
+                "--notes",
+                "fixture notes",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+            decision_path = out_path.with_name(
+                out_path.stem + ".decision.md"
+            )
+            self.assertTrue(out_path.exists())
+            self.assertTrue(decision_path.exists())
+            self.assertTrue(manifest_path.exists())
+
+            report = out_path.read_text(encoding="utf-8")
+            self.assertIn("analyze report: run_id=", report)
+            self.assertIn("response_source_counts primary_curve=30", report)
+
+            decision_record = decision_path.read_text(encoding="utf-8")
+            self.assertIn("# Control Run Decision Record", decision_record)
+            self.assertIn("Profile: combined-load", decision_record)
+            self.assertIn("authority_reasserted_during_run", decision_record)
+            self.assertRegex(decision_record, r"CSV: .* sha256=[0-9a-f]{64}")
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                manifest["schema"],
+                "svg_mb_control.analysis_manifest.v1",
+            )
+            self.assertEqual(manifest["params"]["profile"], "combined-load")
+            self.assertEqual(manifest["run"]["row_count_ingested"], 30)
+            self.assertRegex(
+                manifest["source_artifacts"]["csv"]["sha256"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertRegex(
+                manifest["source_artifacts"]["runtime_manifest"]["sha256"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertRegex(
+                manifest["outputs"]["report"]["sha256"],
+                r"^[0-9a-f]{64}$",
+            )
+            self.assertRegex(
+                manifest["outputs"]["decision_record"]["sha256"],
+                r"^[0-9a-f]{64}$",
+            )
 
     def test_report_run_selection_and_errors(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
