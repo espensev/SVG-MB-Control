@@ -265,4 +265,34 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_boost_stage_tests)
     add_test(NAME svg_mb_control_boost_stage_tests
              COMMAND svg_mb_control_boost_stage_tests)
+
+    add_executable(svg_mb_control_math_tests
+        tests/cpp/control_math_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_math_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_math_tests)
+    add_test(NAME svg_mb_control_math_tests
+             COMMAND svg_mb_control_math_tests)
+
+    add_executable(svg_mb_control_analyze_report_tests
+        tests/cpp/analyze_report_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_analyze_report_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_analyze_report_tests)
+    add_test(NAME svg_mb_control_analyze_report_tests
+             COMMAND svg_mb_control_analyze_report_tests)
+
+    add_executable(svg_mb_control_loop_config_tests
+        tests/cpp/control_loop_config_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_loop_config_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_loop_config_tests)
+    add_test(NAME svg_mb_control_loop_config_tests
+             COMMAND svg_mb_control_loop_config_tests)
 endif()
