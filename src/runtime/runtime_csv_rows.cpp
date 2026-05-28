@@ -377,12 +377,12 @@ std::string BuildControlLoopCsvHeader() {
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
         header << ",channel" << channel << "_observed_temp_c"
-               << ",channel" << channel << "_setpoint_pct"
-               << ",channel" << channel << "_thermal_pressure_boost_pct"
-               << ",channel" << channel << "_midband_pressure_boost_pct"
-               << ",channel" << channel << "_gpu_airflow_boost_pct"
-               << ",channel" << channel << "_cpu_low_soak_boost_pct"
-               << ",channel" << channel << "_low_band_stage_boost_pct"
+               << ",channel" << channel << "_setpoint_pct";
+        for (std::size_t s = 0; s < kBoostStageCount; ++s) {
+            header << ",channel" << channel << "_"
+                   << kBoostStageSpecs[s].name << "_boost_pct";
+        }
+        header << ",channel" << channel << "_low_band_stage_boost_pct"
                << ",channel" << channel << "_low_band_effective_boost_pct"
                << ",channel" << channel << "_low_band_debt"
                << ",channel" << channel << "_low_band_signal"
@@ -431,10 +431,9 @@ std::string BuildControlLoopCsvRow(
             present ? *found : kEmptyChannel;
         AppendCsvFieldDoubleIf(csv, present, state.observed_temp_c);
         AppendCsvFieldDoubleIf(csv, present, state.setpoint_pct);
-        AppendCsvFieldDoubleIf(csv, present, state.thermal_pressure_boost_pct);
-        AppendCsvFieldDoubleIf(csv, present, state.midband_pressure_boost_pct);
-        AppendCsvFieldDoubleIf(csv, present, state.gpu_airflow_boost_pct);
-        AppendCsvFieldDoubleIf(csv, present, state.cpu_low_soak_boost_pct);
+        for (std::size_t s = 0; s < kBoostStageCount; ++s) {
+            AppendCsvFieldDoubleIf(csv, present, state.stage_boost_pct[s]);
+        }
         AppendCsvFieldDoubleIf(csv, present, state.low_band_stage_boost_pct);
         AppendCsvFieldDoubleIf(csv, present,
                                state.low_band_effective_boost_pct);

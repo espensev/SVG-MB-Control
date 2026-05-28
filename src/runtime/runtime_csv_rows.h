@@ -1,8 +1,10 @@
 #pragma once
 
+#include "boost_stage.h"
 #include "gpu_reader.h"
 #include "runtime_snapshot.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -19,10 +21,11 @@ struct RuntimeControlChannelLogState {
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double setpoint_pct = std::numeric_limits<double>::quiet_NaN();
     double feedforward_pct = std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_boost_pct = 0.0;
-    double midband_pressure_boost_pct = 0.0;
-    double gpu_airflow_boost_pct = 0.0;
-    double cpu_low_soak_boost_pct = 0.0;
+    // Per-stage boost contribution snapshot for this channel, indexed by
+    // BoostStage. The CSV column order and JSON status key order both
+    // come from kBoostStageSpecs, so do not reorder this without checking
+    // the existing field-name contract.
+    std::array<double, kBoostStageCount> stage_boost_pct{};
     double low_band_stage_boost_pct = 0.0;
     double low_band_effective_boost_pct = 0.0;
     double low_band_debt = 0.0;

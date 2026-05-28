@@ -340,25 +340,6 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
             evaluation.timing.elapsed_since_last_evaluation_ms,
             temp_inputs, observed_temp_c);
     }
-    // Step-3 transitional mirror: keep the legacy *_boost_pct doubles
-    // in lock-step with the stage-table array so downstream readers
-    // (low_band_integrator, control_status_writer, runtime_csv_rows,
-    // runtime_status) keep producing byte-identical output. Step 4 will
-    // switch those readers to the array; step 5 will delete the legacy
-    // fields and the mirror.
-    channel.thermal_pressure_boost_pct =
-        channel.boosts[static_cast<std::size_t>(
-            BoostStage::ThermalPressure)].boost_pct;
-    channel.midband_pressure_boost_pct =
-        channel.boosts[static_cast<std::size_t>(
-            BoostStage::MidbandPressure)].boost_pct;
-    channel.gpu_airflow_boost_pct =
-        channel.boosts[static_cast<std::size_t>(
-            BoostStage::GpuAirflow)].boost_pct;
-    channel.cpu_low_soak_boost_pct =
-        channel.boosts[static_cast<std::size_t>(
-            BoostStage::CpuLowSoak)].boost_pct;
-
     constexpr double kBoostResponseTagThresholdPct = 0.0005;
     for (std::size_t i = 0; i < kBoostStageCount; ++i) {
         if (channel.boosts[i].boost_pct > kBoostResponseTagThresholdPct) {
@@ -383,11 +364,19 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
             (std::min)(low_band_contrib, loop.low_band_residual_cap_pct);
     }
     channel.low_band_effective_boost_pct = low_band_contrib;
+    // Left-to-right operand order matches the pre-refactor sum so FP
+    // associativity is preserved bit-for-bit. kBoostStageSpecs enum order
+    // (Thermal, Midband, GpuAirflow, CpuLowSoak) is load-bearing here.
     const double desired_setpoint = std::clamp(
-        smoothed_base_setpoint + channel.thermal_pressure_boost_pct +
-            channel.midband_pressure_boost_pct +
-            channel.gpu_airflow_boost_pct +
-            channel.cpu_low_soak_boost_pct +
+        smoothed_base_setpoint +
+            channel.boosts[static_cast<std::size_t>(
+                BoostStage::ThermalPressure)].boost_pct +
+            channel.boosts[static_cast<std::size_t>(
+                BoostStage::MidbandPressure)].boost_pct +
+            channel.boosts[static_cast<std::size_t>(
+                BoostStage::GpuAirflow)].boost_pct +
+            channel.boosts[static_cast<std::size_t>(
+                BoostStage::CpuLowSoak)].boost_pct +
             low_band_contrib,
         0.0, 100.0);
     const double setpoint = RateLimitSetpoint(

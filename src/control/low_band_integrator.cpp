@@ -51,11 +51,10 @@ void UpdateLowBandState(ControlRuntimeContext& context,
     // boost fields reflect the previous tick (UpdateLowBandState runs before
     // per-channel evaluation); a one-tick lag is acceptable here. Decay still
     // runs once temperatures fall back into the released band.
+    constexpr double kPrimaryResponseFreezeThresholdPct = 0.05;
     bool primary_response_active = false;
     for (const auto& ch : context.channels) {
-        if (ch.midband_pressure_boost_pct > 0.05 ||
-            ch.gpu_airflow_boost_pct > 0.05 ||
-            ch.thermal_pressure_boost_pct > 0.05) {
+        if (ch.HasPrimaryResponseAbove(kPrimaryResponseFreezeThresholdPct)) {
             primary_response_active = true;
             break;
         }

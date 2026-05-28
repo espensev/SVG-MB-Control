@@ -35,9 +35,27 @@ struct ChannelState {
     double gpu_airflow_boost_pct = 0.0;
     double cpu_low_soak_boost_pct = 0.0;
     // Stage-table mirror of the four legacy *_boost_pct doubles above.
-    // Default-initialised (all 0.0) and unused in step 2 of the refactor;
-    // step 3 will switch the channel evaluator to update and read this array.
+    // The channel evaluator drives this array via UpdateBoostStage; the
+    // legacy doubles are kept in sync as a transitional shim until the
+    // remaining external readers are switched off them.
     std::array<BoostStageState, kBoostStageCount> boosts{};
+
+    // True when any spec marked is_primary in kBoostStageSpecs has a
+    // current boost above the supplied threshold. Used by the low-band
+    // integrator to freeze global debt accrual while a primary response
+    // (mid-band pressure, GPU airflow, or thermal pressure) is active so
+    // low-band does not pile on top of an already-active response.
+    bool HasPrimaryResponseAbove(double threshold_pct) const {
+        for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+            if (!kBoostStageSpecs[i].is_primary) {
+                continue;
+            }
+            if (boosts[i].boost_pct > threshold_pct) {
+                return true;
+            }
+        }
+        return false;
+    }
     double low_band_stage_boost_pct = 0.0;
     double low_band_effective_boost_pct = 0.0;
     double low_band_debt_snapshot = 0.0;
