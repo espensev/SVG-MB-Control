@@ -11,11 +11,13 @@ Current layout:
 ```text
 src/
   app/        thin executable entry, CLI parsing, mode dispatch
-  control/    loop orchestration, channel evaluator, status model
-  runtime/    runtime store, CSV logger, event log, JSON IO
+  control/    loop orchestration, channel evaluator, boost stages,
+              cadence, control math, status model
+  runtime/    runtime store, CSV logger, event log, JSON IO, runtime
+              write policy, read-loop + write-once mode entry points
   hardware/   AMD, GPU, SIO fan backends
   platform/   Windows timer, process metrics, HANDLE wrappers
-  policy/     curves, blending, rate limits, demand smoothing
+  policy/     curve lookup, temperature blending, curve shape
   analyze/    run ingestion, pruning, reporting
 ```
 
@@ -58,6 +60,7 @@ A core library gives three stability benefits:
 - boost overlays (`boost_stage.cpp`: per-stage smootherstep integrator shared by thermal_pressure, midband_pressure, gpu_airflow, cpu_low_soak),
 - channel-write gates (`channel_write.cpp`: deadband, cooldown, breaker, hold restore),
 - adaptive cadence (`cadence_score.cpp`: slew score, effective tick interval),
+- shared math primitives (`control_math.{h,cpp}`: smootherstep, scale, rate-limited approach — used by cadence + low-band),
 - low-band integrator (`low_band_integrator.cpp`: signal, debt, stage activation),
 - control status publication shape (`control_status_writer.cpp`),
 - supervisor and run-mode dispatch (`control_supervisor.cpp`),
@@ -70,7 +73,10 @@ A core library gives three stability benefits:
 - CSV logger,
 - event JSONL writer,
 - pending-write sidecars,
-- run summary/manifest plumbing.
+- run summary/manifest plumbing,
+- runtime write authorization policy (`runtime_write_policy.{h,cpp}`),
+- read-loop and write-once mode entry points
+  (`read_loop.cpp`, `write_orchestrator.cpp`).
 
 `hardware/`
 
@@ -94,9 +100,11 @@ A core library gives three stability benefits:
 
 - curve lookup,
 - temperature blending,
-- rate limiting,
-- demand smoothing,
-- thermal-pressure trim math.
+- curve shape parsing.
+
+Rate limiting, demand smoothing, and boost-stage trim math live in
+`control/` next to the channel evaluator they feed (see
+`control_math.{h,cpp}`, `boost_stage.{h,cpp}`, `channel_evaluator.cpp`).
 
 ## Migration Order
 

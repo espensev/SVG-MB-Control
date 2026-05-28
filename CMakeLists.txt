@@ -159,8 +159,6 @@ add_library(svg_mb_control_core STATIC
     src/platform/runtime_util.cpp
     src/platform/service_probe.cpp
     src/policy/control_policy.cpp
-    src/policy/runtime_write_policy.cpp
-    src/policy/write_orchestrator.cpp
     src/runtime/csv_util.cpp
     src/runtime/evidence_log.cpp
     src/runtime/gpu_evidence_csv.cpp
@@ -176,6 +174,8 @@ add_library(svg_mb_control_core STATIC
     src/runtime/runtime_snapshot.cpp
     src/runtime/runtime_status.cpp
     src/runtime/runtime_supervisor_state.cpp
+    src/runtime/runtime_write_policy.cpp
+    src/runtime/write_orchestrator.cpp
     src/analyze/analyze_cli.cpp
     src/analyze/analyze_csv.cpp
     src/analyze/analyze_db.cpp
