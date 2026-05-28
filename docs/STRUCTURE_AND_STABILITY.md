@@ -94,7 +94,9 @@ A core library gives three stability benefits:
 - Windows timer resolution,
 - process resource sampling,
 - Win32 handle wrappers,
-- mutex/driver-handle RAII.
+- mutex/driver-handle RAII,
+- shared streaming SHA-256 helper (`file_hash.{h,cpp}`,
+  `Sha256FileHex`) consumed by the analyze report and the CSV archive.
 
 `policy/`
 
@@ -123,6 +125,41 @@ Completed:
    from `amd_reader.cpp` into the standalone `hardware/pawnio_binary`
    module, and registered a dedicated CTest target
    (`svg_mb_control_pawnio_binary_tests`) for the pure helpers.
+8. Replaced four hand-rolled per-tick boost integrators with a
+   table-driven `UpdateBoostStage` in `control/boost_stage.{h,cpp}`
+   driven by `kBoostStageSpecs`. Deleted 21 legacy config fields from
+   `ChannelControlConfig` and four legacy state doubles from
+   `ChannelState`. CSV/JSON/banner output stayed byte-identical.
+   Trajectory equivalence is locked by
+   `svg_mb_control_boost_stage_tests`.
+9. Moved the shared math primitives (`SmoothStep`, `SmoothScale`,
+   `MoveTowardRateLimited`) from `cadence_score.cpp` into
+   `control/control_math.{h,cpp}`. `cadence_score` keeps just the
+   cadence logic; `low_band_integrator` consumes the primitives without
+   pulling in `cadence_score.h`.
+10. Re-homed `runtime_write_policy.{h,cpp}` and
+    `write_orchestrator.{h,cpp}` from `src/policy/` to `src/runtime/`.
+    `src/policy/` now contains only the curve/blend math the channel
+    evaluator consumes.
+11. Split `EvaluateChannel` into five single-purpose helpers
+    (`EvaluatePrimarySetpoint`, `ApplyCpuOverride`,
+    `UpdateDemandAndBoosts`, `ComputeFinalSetpoint`,
+    `DetectAuthorityReassert`) threaded through a local
+    `EvaluationScratch` shim. The orchestrator dropped from ~140 lines
+    to ~30.
+12. Split `src/analyze/analyze_report.cpp` (was 845 lines) into a
+    `RunAnalyzeReport` orchestrator plus three sibling modules in the
+    `svg_mb_control::analyze::report_detail` namespace:
+    `analyze_report_data.{h,cpp}`, `analyze_report_queries.{h,cpp}`,
+    `analyze_report_emit.{h,cpp}`. The new `analyze report` flow also
+    writes JSON analysis manifests and Markdown decision records via
+    the new `platform/file_hash` SHA-256 helper.
+13. Added three CTest targets covering pure helpers that recent
+    refactors exposed: `svg_mb_control_math_tests` (smootherstep + rate
+    limit), `svg_mb_control_analyze_report_tests` (percentile / band
+    summary / band assignment / diagnostic flags), and
+    `svg_mb_control_loop_config_tests` (boost-stage validator round
+    trips through `LoadControlLoopConfig`).
 
 Remaining polish:
 
