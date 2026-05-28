@@ -139,6 +139,7 @@ add_library(svg_mb_control_core STATIC
     src/control/control_config_print.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
+    src/control/control_math.cpp
     src/control/control_runtime_context.cpp
     src/control/control_scheduler.cpp
     src/control/control_status_writer.cpp

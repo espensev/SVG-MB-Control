@@ -1,6 +1,6 @@
 #include "low_band_integrator.h"
 
-#include "cadence_score.h"
+#include "control_math.h"
 #include "low_band_evidence.h"
 #include "runtime_event_log.h"
 
