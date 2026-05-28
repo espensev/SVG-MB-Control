@@ -130,6 +130,7 @@ endfunction()
 
 add_library(svg_mb_control_core STATIC
     src/pch.cpp
+    src/control/boost_stage.cpp
     src/control/cadence_score.cpp
     src/control/calibration.cpp
     src/control/channel_evaluator.cpp
@@ -249,4 +250,14 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_pawnio_binary_tests)
     add_test(NAME svg_mb_control_pawnio_binary_tests
              COMMAND svg_mb_control_pawnio_binary_tests)
+
+    add_executable(svg_mb_control_boost_stage_tests
+        tests/cpp/boost_stage_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_boost_stage_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_boost_stage_tests)
+    add_test(NAME svg_mb_control_boost_stage_tests
+             COMMAND svg_mb_control_boost_stage_tests)
 endif()
