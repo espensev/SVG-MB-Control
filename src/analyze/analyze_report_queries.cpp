@@ -1,5 +1,6 @@
 #include "analyze_report_queries.h"
 
+#include "analyze_channel_sample_columns.h"
 #include "analyze_db.h"
 
 #include <nlohmann/json.hpp>
@@ -289,47 +290,61 @@ bool LoadChannelStats(Database& db, std::int64_t run_id,
                       std::map<int, ChannelStats>& channels) {
     try {
         Statement stmt = db.Prepare(
-            "SELECT tick_count, channel, setpoint_pct, "
-            "thermal_pressure_boost_pct, midband_pressure_boost_pct, "
-            "gpu_airflow_boost_pct, cpu_low_soak_boost_pct, "
-            "primary_temp_source, response_source, write_reason, "
-            "total_writes "
-            "FROM tick_channel_samples WHERE run_id = ?1 "
-            "ORDER BY channel ASC, tick_count ASC");
+            TickChannelSampleSelectAllSql(
+                "WHERE run_id = ?1",
+                "ORDER BY channel ASC, tick_count ASC"));
         stmt.BindInt(1, run_id);
+        const int setpoint_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::SetpointPct);
+        const int thermal_pressure_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::ThermalPressureBoostPct);
+        const int midband_pressure_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::MidbandPressureBoostPct);
+        const int gpu_airflow_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::GpuAirflowBoostPct);
+        const int cpu_low_soak_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::CpuLowSoakBoostPct);
+        const int primary_source_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::PrimaryTempSource);
+        const int response_source_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::ResponseSource);
+        const int write_reason_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::WriteReason);
+        const int total_writes_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::TotalWrites);
         while (stmt.Step()) {
             const int channel = static_cast<int>(stmt.ColumnInt(1));
             ChannelStats& cs = channels[channel];
-            auto setpoint = ColumnOptionalDouble(stmt, 2);
-            auto tp = ColumnOptionalDouble(stmt, 3);
-            auto mid = ColumnOptionalDouble(stmt, 4);
-            auto gpu = ColumnOptionalDouble(stmt, 5);
-            auto soak = ColumnOptionalDouble(stmt, 6);
+            auto setpoint = ColumnOptionalDouble(stmt, setpoint_idx);
+            auto tp = ColumnOptionalDouble(stmt, thermal_pressure_idx);
+            auto mid = ColumnOptionalDouble(stmt, midband_pressure_idx);
+            auto gpu = ColumnOptionalDouble(stmt, gpu_airflow_idx);
+            auto soak = ColumnOptionalDouble(stmt, cpu_low_soak_idx);
             std::string primary_source = "unavailable";
-            if (!stmt.ColumnIsNull(7)) {
-                primary_source = stmt.ColumnText(7);
+            if (!stmt.ColumnIsNull(primary_source_idx)) {
+                primary_source = stmt.ColumnText(primary_source_idx);
                 if (primary_source.empty()) {
                     primary_source = "unavailable";
                 }
             }
             ++cs.primary_source_counts[primary_source];
             std::string response_source = "unavailable";
-            if (!stmt.ColumnIsNull(8)) {
-                response_source = stmt.ColumnText(8);
+            if (!stmt.ColumnIsNull(response_source_idx)) {
+                response_source = stmt.ColumnText(response_source_idx);
                 if (response_source.empty()) {
                     response_source = "unavailable";
                 }
             }
             ++cs.response_source_counts[response_source];
             std::string write_reason = "unavailable";
-            if (!stmt.ColumnIsNull(9)) {
-                write_reason = stmt.ColumnText(9);
+            if (!stmt.ColumnIsNull(write_reason_idx)) {
+                write_reason = stmt.ColumnText(write_reason_idx);
                 if (write_reason.empty()) {
                     write_reason = "unavailable";
                 }
             }
             ++cs.write_reason_counts[write_reason];
-            auto writes = ColumnOptionalInt(stmt, 10);
+            auto writes = ColumnOptionalInt(stmt, total_writes_idx);
             if (setpoint) {
                 cs.setpoint_pct.push_back(*setpoint);
                 if (cs.last_setpoint) {
@@ -477,9 +492,12 @@ std::map<int, double> ComputeIdleSetpointBaselines(
     const std::vector<TickRow>& ticks) {
     std::map<int, std::vector<double>> idle_setpoints;
     Statement stmt = db.Prepare(
-        "SELECT tick_count, channel, setpoint_pct FROM "
-        "tick_channel_samples WHERE run_id = ?1 ORDER BY tick_count ASC");
+        TickChannelSampleSelectAllSql(
+            "WHERE run_id = ?1",
+            "ORDER BY tick_count ASC"));
     stmt.BindInt(1, run_id);
+    const int setpoint_idx = TickChannelSampleSelectIndex(
+        TickChannelSampleColumn::SetpointPct);
     std::map<std::int64_t, Band> tick_band;
     for (const auto& t : ticks) {
         tick_band[t.tick] = t.band;
@@ -487,13 +505,14 @@ std::map<int, double> ComputeIdleSetpointBaselines(
     while (stmt.Step()) {
         const std::int64_t tick = stmt.ColumnInt(0);
         const int channel = static_cast<int>(stmt.ColumnInt(1));
-        if (stmt.ColumnIsNull(2)) {
+        if (stmt.ColumnIsNull(setpoint_idx)) {
             continue;
         }
         auto band_it = tick_band.find(tick);
         if (band_it != tick_band.end() &&
             band_it->second == Band::kIdle) {
-            idle_setpoints[channel].push_back(stmt.ColumnDouble(2));
+            idle_setpoints[channel].push_back(
+                stmt.ColumnDouble(setpoint_idx));
         }
     }
     std::map<int, double> out;
@@ -536,18 +555,20 @@ ResponseDelay DetectResponseDelay(
         tick_elapsed[t.tick] = t.elapsed_s;
     }
     Statement stmt = db.Prepare(
-        "SELECT tick_count, channel, setpoint_pct FROM "
-        "tick_channel_samples WHERE run_id = ?1 AND tick_count >= ?2 "
-        "ORDER BY tick_count ASC");
+        TickChannelSampleSelectAllSql(
+            "WHERE run_id = ?1 AND tick_count >= ?2",
+            "ORDER BY tick_count ASC"));
     stmt.BindInt(1, run_id);
     stmt.BindInt(2, *result.onset_tick);
+    const int setpoint_idx = TickChannelSampleSelectIndex(
+        TickChannelSampleColumn::SetpointPct);
     while (stmt.Step()) {
-        if (stmt.ColumnIsNull(2)) {
+        if (stmt.ColumnIsNull(setpoint_idx)) {
             continue;
         }
         const std::int64_t tick = stmt.ColumnInt(0);
         const int channel = static_cast<int>(stmt.ColumnInt(1));
-        const double setpoint = stmt.ColumnDouble(2);
+        const double setpoint = stmt.ColumnDouble(setpoint_idx);
         auto base_it = idle_baselines.find(channel);
         const double base = base_it != idle_baselines.end()
             ? base_it->second

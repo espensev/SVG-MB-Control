@@ -237,15 +237,17 @@ Validation:
 
 ## 5. Reduce CLI Parser Ladder Pressure
 
-Status: **partially completed 2026-05-28**. `src/app/app_main.cpp` was
-split into a thin `RunApp` orchestrator plus three sibling modules:
+Status: **closed 2026-05-28; no further action planned**. `src/app/app_main.cpp`
+was split into a thin `RunApp` orchestrator plus three sibling modules:
 `app/app_signals.{h,cpp}` (Win32 handler + RAII scopes,
 `StopSignaled()`), `app/app_args.{h,cpp}` (`CliOptions`,
 `ParseCliOptions`, the value parsers, `PrintUsage`, `PrintVersion`), and
 `app/app_diagnose.{h,cpp}` (`RunDiagnoseAmd`, `RunDiagnoseGpu`,
 `SampleDirectSnapshotJson`). The `ParseCliOptions` if/else-if ladder
-itself remains in `app_args.cpp`; grouped parse helpers are still
-deferred.
+itself remains in `app_args.cpp` intentionally: it is linear, explicit, and
+keeps value-taking options close to their validation. Grouped parse helpers
+would mostly move branches sideways without improving the operator-facing
+logic.
 
 Original analysis (kept for context):
 
@@ -343,7 +345,13 @@ Validation:
 
 ## 7. Build Test CSV Fixtures From Field Descriptors
 
-Current shape:
+Status: **completed 2026-05-28**. `tests/test_analyze_ingest.py` now builds
+fixture headers and rows from field lists (`COMMON_FIELDS`,
+`FAN_FIELD_SUFFIXES`, `LOOP_FIELDS`, `CHANNEL_FIELD_SUFFIXES`) and routes rows
+through `_csv_row`, which rejects missing or extra fields before writing the
+CSV.
+
+Original shape (kept for context):
 
 - `tests/test_analyze_ingest.py` owns `CSV_HEADER_PARTS`, `_write_fixture_csv`,
   and `_write_ramp_csv` as manually aligned string/cell lists.
@@ -382,7 +390,13 @@ Validation:
 
 ## 8. Add A Staged Background Runtime Test Helper
 
-Current shape:
+Status: **completed 2026-05-28**. `tests/helpers.py::StagedControlApp` now
+owns staged executable setup, read-loop config creation, runtime-home paths,
+start/status/restart/stop helpers, and guaranteed cleanup for background
+supervisor/worker tests. `tests/test_smoke.py` uses it for staged launch,
+restart, watchdog-start, and startup-failure coverage.
+
+Original shape (kept for context):
 
 - `tests/test_smoke.py` repeats the same staged-executable setup:
   - create temp dir,
@@ -478,13 +492,21 @@ Validation:
 
 ## 10. Centralize Analyzer Channel Sample Columns
 
-Current shape:
+Status: **completed 2026-05-28**. `src/analyze/analyze_channel_sample_columns`
+now owns the `tick_channel_samples` descriptor: column names, SQLite types,
+create-table SQL, insert SQL, select-all SQL, CSV field-name construction,
+select indexes, and `BindTickChannelSample`. `analyze_csv.cpp`,
+`analyze_db.cpp`, `analyze_ingest_db.cpp`, and
+`analyze_report_queries.cpp` consume that descriptor instead of hand-copying
+the channel field order.
+
+Original shape (kept for context):
 
 - A channel CSV field can touch several analyzer layers:
   - `src/analyze/analyze_csv.{h,cpp}`,
   - `src/analyze/analyze_db.cpp` DDL and migrations,
   - `src/analyze/analyze_ingest_db.cpp` insert SQL and bind positions,
-  - `src/analyze/analyze_report.cpp` query column positions,
+  - `src/analyze/analyze_report_queries.cpp` query column positions,
   - Python analyzer fixtures.
 - This is related to the runtime CSV mirroring target, but it is specifically
   the ingestion/database side.
@@ -516,14 +538,15 @@ Validation:
 
 ## 11. Reuse Control Config Channel Descriptors In Text And JSON Output
 
-Status: **partially completed 2026-05-28**. The three BelowStart
+Status: **closed 2026-05-28; no further action planned**. The three BelowStart
 pressure stages (thermal, midband, GPU airflow) now render their JSON
-sub-objects via a `kBoostStageSpecs` loop in `BuildJsonSummary`, with
-JSON keys coming straight from the spec table. The text summary uses a
-small `kPressureBoostTextLabels` table that maps display labels to
-`BoostStage`. The CPU low-soak block stays bespoke for text and JSON
-because of its different rate units, `release_c`, and operator-facing
-labels.
+sub-objects via a `kBoostStageSpecs` loop in `BuildJsonSummary`, with JSON keys
+coming straight from the spec table. The text summary uses a small
+`kPressureBoostTextLabels` table that maps display labels to `BoostStage`.
+The CPU low-soak block stays bespoke for text and JSON intentionally because
+its shape differs: explicit `release_c`, per-minute rates, and different
+operator-facing labels. Forcing it into the BelowStart descriptor would add
+branching without reducing schema risk.
 
 Original analysis (kept for context):
 
@@ -600,18 +623,26 @@ Validation:
 
 ## Suggested Order
 
+Completed or closed:
+
 1. Unify math primitives.
 2. Extract raw demand and final setpoint composition from `EvaluateChannel`.
 3. Name low-band gates.
 4. Make run-mode parsing table-driven.
 5. Build test CSV fixtures from field descriptors.
-6. Reduce CSV schema/header mirroring.
-7. Centralize analyzer channel sample columns.
-8. Add a staged background runtime test helper.
-9. Split `RunAnalyzeReport` into query and assembly helpers.
-10. Reuse control config channel descriptors in text and JSON output.
-11. Split the Python analysis script renderers into sections.
-12. Reduce CLI parser ladder pressure.
+6. Centralize analyzer channel sample columns.
+7. Add a staged background runtime test helper.
+8. Split `RunAnalyzeReport` into query and assembly helpers.
+9. Reuse control config channel descriptors in text and JSON output
+   (closed with CPU low-soak intentionally bespoke).
+10. Reduce CLI parser ladder pressure (closed with the residual ladder
+    intentionally explicit).
 
-The first three are controller-local and should make the math easier to review.
-The later items are broader maintainability work and can be done independently.
+Remaining:
+
+1. Reduce CSV schema/header mirroring, if future runtime CSV edits justify
+   touching the live-log format surface.
+2. Split the legacy Python analysis script renderers into sections.
+
+The remaining items are broader maintainability work and can be done
+independently.

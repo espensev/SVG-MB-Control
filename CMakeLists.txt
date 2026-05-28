@@ -177,6 +177,7 @@ add_library(svg_mb_control_core STATIC
     src/runtime/runtime_supervisor_state.cpp
     src/runtime/runtime_write_policy.cpp
     src/runtime/write_orchestrator.cpp
+    src/analyze/analyze_channel_sample_columns.cpp
     src/analyze/analyze_cli.cpp
     src/analyze/analyze_csv.cpp
     src/analyze/analyze_db.cpp

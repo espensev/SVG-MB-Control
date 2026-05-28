@@ -1,5 +1,7 @@
 #include "analyze_ingest_db.h"
 
+#include "analyze_channel_sample_columns.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -138,15 +140,7 @@ void InsertTickRows(Database& db,
         "write_allowed, policy_blocked, effective_write_allowed"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)");
 
-    Statement ch = db.Prepare(
-        "INSERT INTO tick_channel_samples("
-        "run_id, tick_count, channel, observed_temp_c, setpoint_pct,"
-        "thermal_pressure_boost_pct, midband_pressure_boost_pct,"
-        "gpu_airflow_boost_pct, cpu_low_soak_boost_pct,"
-        "primary_temp_source, response_source, write_reason, total_writes,"
-        "write_active,"
-        "baseline_captured, feedforward_pct, correction_pct"
-        ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)");
+    Statement ch = db.Prepare(TickChannelSampleInsertSql());
 
     for (const auto& row : rows) {
         tick.BindInt(1, run_id);
@@ -205,23 +199,7 @@ void InsertTickRows(Database& db,
         }
 
         for (const auto& c : row.channels) {
-            ch.BindInt(1, run_id);
-            ch.BindInt(2, row.tick_count);
-            ch.BindInt(3, c.channel);
-            ch.BindOptionalDouble(4, c.observed_temp_c);
-            ch.BindOptionalDouble(5, c.setpoint_pct);
-            ch.BindOptionalDouble(6, c.thermal_pressure_boost_pct);
-            ch.BindOptionalDouble(7, c.midband_pressure_boost_pct);
-            ch.BindOptionalDouble(8, c.gpu_airflow_boost_pct);
-            ch.BindOptionalDouble(9, c.cpu_low_soak_boost_pct);
-            ch.BindOptionalText(10, c.primary_temp_source);
-            ch.BindOptionalText(11, c.response_source);
-            ch.BindOptionalText(12, c.write_reason);
-            ch.BindOptionalInt(13, c.total_writes);
-            ch.BindOptionalInt(14, c.write_active);
-            ch.BindOptionalInt(15, c.baseline_captured);
-            ch.BindOptionalDouble(16, c.feedforward_pct);
-            ch.BindOptionalDouble(17, c.correction_pct);
+            BindTickChannelSample(ch, run_id, row.tick_count, c);
             ch.Step();
             ch.Reset();
         }
