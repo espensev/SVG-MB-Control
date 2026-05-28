@@ -1,9 +1,12 @@
 #include "channel_evaluator.h"
 
+#include "boost_stage.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace svg_mb_control {
@@ -113,141 +116,6 @@ double ApplyDemandSmoothing(double raw_desired_pct,
     return std::clamp(smoothed, 0.0, 100.0);
 }
 
-// Generic smootherstep pressure boost integrator shared by the
-// high-temperature thermal-pressure stage, the mid-band pressure stage, and
-// the GPU early-airflow boost. Returns 0.0 (inert) when the parameter set is
-// incomplete or non-positive, matching the original thermal-pressure
-// disabled-path contract.
-double UpdatePressureBoost(double temp_c,
-                           double current_boost_pct,
-                           std::uint64_t elapsed_ms,
-                           double start_c,
-                           double full_c,
-                           double rise_pct_per_sec,
-                           double fall_pct_per_sec,
-                           double max_boost_pct) {
-    if (std::isnan(start_c) || std::isnan(full_c) ||
-        std::isnan(rise_pct_per_sec) || std::isnan(fall_pct_per_sec) ||
-        std::isnan(max_boost_pct) ||
-        rise_pct_per_sec <= 0.0 ||
-        fall_pct_per_sec < 0.0 ||
-        max_boost_pct <= 0.0) {
-        return 0.0;
-    }
-
-    double boost = std::isnan(current_boost_pct)
-        ? 0.0
-        : std::clamp(current_boost_pct, 0.0, max_boost_pct);
-    if (elapsed_ms == 0u || std::isnan(temp_c)) {
-        return boost;
-    }
-
-    const double dt_seconds = static_cast<double>(elapsed_ms) / 1000.0;
-    if (temp_c >= start_c) {
-        double pressure_scale = 1.0;
-        if (full_c > start_c) {
-            double t = std::clamp(
-                (temp_c - start_c) / (full_c - start_c), 0.0, 1.0);
-            pressure_scale = t * t * t * ((6.0 * t - 15.0) * t + 10.0);
-        }
-
-        if (boost < max_boost_pct) {
-            boost += rise_pct_per_sec * pressure_scale * dt_seconds;
-        }
-    } else {
-        boost -= fall_pct_per_sec * dt_seconds;
-    }
-
-    return std::clamp(boost, 0.0, max_boost_pct);
-}
-
-double UpdateThermalPressureBoost(double observed_temp_c,
-                                  double current_boost_pct,
-                                  std::uint64_t elapsed_ms,
-                                  const ChannelControlConfig& config) {
-    return UpdatePressureBoost(
-        observed_temp_c, current_boost_pct, elapsed_ms,
-        config.thermal_pressure_start_c, config.thermal_pressure_full_c,
-        config.thermal_pressure_rise_pct_per_sec,
-        config.thermal_pressure_fall_pct_per_sec,
-        config.thermal_pressure_max_boost_pct);
-}
-
-double UpdateMidbandPressureBoost(double observed_temp_c,
-                                  double current_boost_pct,
-                                  std::uint64_t elapsed_ms,
-                                  const ChannelControlConfig& config) {
-    return UpdatePressureBoost(
-        observed_temp_c, current_boost_pct, elapsed_ms,
-        config.midband_pressure_start_c, config.midband_pressure_full_c,
-        config.midband_pressure_rise_pct_per_sec,
-        config.midband_pressure_fall_pct_per_sec,
-        config.midband_pressure_max_boost_pct);
-}
-
-double UpdateGpuAirflowBoost(double gpu_temp_c,
-                             bool gpu_available,
-                             double current_boost_pct,
-                             std::uint64_t elapsed_ms,
-                             const ChannelControlConfig& config) {
-    const double temp_c = gpu_available
-        ? gpu_temp_c
-        : std::numeric_limits<double>::quiet_NaN();
-    return UpdatePressureBoost(
-        temp_c, current_boost_pct, elapsed_ms,
-        config.gpu_airflow_start_c, config.gpu_airflow_full_c,
-        config.gpu_airflow_rise_pct_per_sec,
-        config.gpu_airflow_fall_pct_per_sec,
-        config.gpu_airflow_max_boost_pct);
-}
-
-double UpdateCpuLowSoakBoost(double cpu_temp_c,
-                             bool cpu_available,
-                             double current_boost_pct,
-                             std::uint64_t elapsed_ms,
-                             const ChannelControlConfig& config) {
-    if (std::isnan(config.cpu_low_soak_start_c) ||
-        std::isnan(config.cpu_low_soak_full_c) ||
-        std::isnan(config.cpu_low_soak_release_c) ||
-        std::isnan(config.cpu_low_soak_rise_pct_per_min) ||
-        std::isnan(config.cpu_low_soak_fall_pct_per_min) ||
-        std::isnan(config.cpu_low_soak_max_boost_pct) ||
-        config.cpu_low_soak_rise_pct_per_min <= 0.0 ||
-        config.cpu_low_soak_fall_pct_per_min < 0.0 ||
-        config.cpu_low_soak_max_boost_pct <= 0.0) {
-        return 0.0;
-    }
-
-    double boost = std::isnan(current_boost_pct)
-        ? 0.0
-        : std::clamp(
-              current_boost_pct, 0.0, config.cpu_low_soak_max_boost_pct);
-    if (elapsed_ms == 0u) {
-        return boost;
-    }
-
-    const double dt_minutes = static_cast<double>(elapsed_ms) / 60000.0;
-    if (cpu_available && !std::isnan(cpu_temp_c)) {
-        if (cpu_temp_c >= config.cpu_low_soak_start_c) {
-            const double t = std::clamp(
-                (cpu_temp_c - config.cpu_low_soak_start_c) /
-                    (config.cpu_low_soak_full_c -
-                     config.cpu_low_soak_start_c),
-                0.0, 1.0);
-            const double soak_scale =
-                t * t * t * ((6.0 * t - 15.0) * t + 10.0);
-            boost += config.cpu_low_soak_rise_pct_per_min *
-                     soak_scale * dt_minutes;
-        } else if (cpu_temp_c <= config.cpu_low_soak_release_c) {
-            boost -= config.cpu_low_soak_fall_pct_per_min * dt_minutes;
-        }
-    } else {
-        boost -= config.cpu_low_soak_fall_pct_per_min * dt_minutes;
-    }
-
-    return std::clamp(boost, 0.0, config.cpu_low_soak_max_boost_pct);
-}
-
 bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
                                double last_issued_pct,
                                double tolerance_pct,
@@ -275,12 +143,13 @@ bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
     return true;
 }
 
-std::string AddResponseModifier(std::string source, const char* modifier) {
+std::string AddResponseModifier(std::string source,
+                                std::string_view modifier) {
     if (source.empty() || source == "unavailable") {
-        return modifier;
+        return std::string(modifier);
     }
     source += '+';
-    source += modifier;
+    source.append(modifier);
     return source;
 }
 
@@ -464,37 +333,41 @@ ChannelEvaluation EvaluateChannel(ChannelState& channel,
         raw_desired_setpoint, channel.smoothed_demand_pct,
         evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
     channel.smoothed_demand_pct = smoothed_base_setpoint;
-    channel.thermal_pressure_boost_pct = UpdateThermalPressureBoost(
-        observed_temp_c, channel.thermal_pressure_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.midband_pressure_boost_pct = UpdateMidbandPressureBoost(
-        observed_temp_c, channel.midband_pressure_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.gpu_airflow_boost_pct = UpdateGpuAirflowBoost(
-        temp_inputs.gpu_c, temp_inputs.gpu_available,
-        channel.gpu_airflow_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.cpu_low_soak_boost_pct = UpdateCpuLowSoakBoost(
-        temp_inputs.cpu_c, temp_inputs.cpu_available,
-        channel.cpu_low_soak_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    if (channel.thermal_pressure_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "thermal_pressure");
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        channel.boosts[i].boost_pct = UpdateBoostStage(
+            kBoostStageSpecs[i], channel.config.boosts[i],
+            channel.boosts[i].boost_pct,
+            evaluation.timing.elapsed_since_last_evaluation_ms,
+            temp_inputs, observed_temp_c);
     }
-    if (channel.midband_pressure_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "midband_pressure");
+    // Step-3 transitional mirror: keep the legacy *_boost_pct doubles
+    // in lock-step with the stage-table array so downstream readers
+    // (low_band_integrator, control_status_writer, runtime_csv_rows,
+    // runtime_status) keep producing byte-identical output. Step 4 will
+    // switch those readers to the array; step 5 will delete the legacy
+    // fields and the mirror.
+    channel.thermal_pressure_boost_pct =
+        channel.boosts[static_cast<std::size_t>(
+            BoostStage::ThermalPressure)].boost_pct;
+    channel.midband_pressure_boost_pct =
+        channel.boosts[static_cast<std::size_t>(
+            BoostStage::MidbandPressure)].boost_pct;
+    channel.gpu_airflow_boost_pct =
+        channel.boosts[static_cast<std::size_t>(
+            BoostStage::GpuAirflow)].boost_pct;
+    channel.cpu_low_soak_boost_pct =
+        channel.boosts[static_cast<std::size_t>(
+            BoostStage::CpuLowSoak)].boost_pct;
+
+    constexpr double kBoostResponseTagThresholdPct = 0.0005;
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        if (channel.boosts[i].boost_pct > kBoostResponseTagThresholdPct) {
+            response_source = AddResponseModifier(
+                std::move(response_source),
+                kBoostStageSpecs[i].response_tag);
+        }
     }
-    if (channel.gpu_airflow_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "gpu_airflow");
-    }
-    if (channel.cpu_low_soak_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "cpu_low_soak");
-    }
-    if (channel.low_band_stage_boost_pct > 0.0005) {
+    if (channel.low_band_stage_boost_pct > kBoostResponseTagThresholdPct) {
         response_source =
             AddResponseModifier(std::move(response_source), "low_band_stage");
     }
