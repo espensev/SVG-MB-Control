@@ -30,6 +30,12 @@ void PrintAnalyzeUsage() {
            << "previously-seen artifacts\n"
         << "    unless --force is passed.\n";
     std::cout
+        << "  svg-mb-control analyze ingest --csv <path> [--events <path>] "
+           << "[--db <path>] [--force] [--quiet]\n"
+        << "    Ingests a single control-loop CSV (and optional events JSONL) "
+           << "with no runtime\n"
+        << "    manifest, synthesizing one run row keyed on the CSV path.\n";
+    std::cout
         << "  svg-mb-control analyze prune [--runtime-home <path>] "
            << "[--db <path>] [--retain-days <days>] [--dry-run|--apply] [--quiet]\n"
         << "    Finds old archive CSV/manifest bundles. Dry-run is the default; "
@@ -40,7 +46,8 @@ void PrintAnalyzeUsage() {
     std::cout
         << "  svg-mb-control analyze report [--runtime-home <path>] "
            << "[--db <path>] [--run <id>|--session <ts>] [--idle-seconds <s>] "
-           << "[--load-threshold-c <c>] [--json] [--out <path>] "
+           << "[--load-threshold-c <c>] [--gpu-load-threshold-c <c>] "
+           << "[--json] [--out <path>] "
            << "[--manifest-out <path>] "
            << "[--decision-record-out <path|auto>|--no-decision-record] "
            << "[--profile <name>] [--hypothesis <text>] "
@@ -184,6 +191,20 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
                 return 1;
             }
             options.force = true;
+        } else if (arg == L"--csv") {
+            if (verb != L"ingest") {
+                std::cerr << "Error: --csv is only valid for analyze ingest.\n";
+                PrintAnalyzeUsage();
+                return 1;
+            }
+            options.csv_path = std::filesystem::path(require_value(index));
+        } else if (arg == L"--events") {
+            if (verb != L"ingest") {
+                std::cerr << "Error: --events is only valid for analyze ingest.\n";
+                PrintAnalyzeUsage();
+                return 1;
+            }
+            options.events_path = std::filesystem::path(require_value(index));
         } else if (arg == L"--retain-days") {
             if (verb != L"prune") {
                 std::cerr << "Error: --retain-days is only valid for analyze prune.\n";
@@ -239,6 +260,15 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
                     std::stod(std::wstring(require_value(index)));
             } catch (const std::exception&) {
                 std::cerr << "Error: invalid --load-threshold-c value.\n";
+                return 1;
+            }
+        } else if (arg == L"--gpu-load-threshold-c") {
+            if (!report_only("--gpu-load-threshold-c")) return 1;
+            try {
+                report_options.gpu_load_threshold_c =
+                    std::stod(std::wstring(require_value(index)));
+            } catch (const std::exception&) {
+                std::cerr << "Error: invalid --gpu-load-threshold-c value.\n";
                 return 1;
             }
         } else if (arg == L"--out") {

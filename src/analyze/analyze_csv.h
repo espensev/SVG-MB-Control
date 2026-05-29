@@ -41,6 +41,8 @@ struct ParsedChannelSample {
     std::optional<std::int64_t> baseline_captured;
     std::optional<double> feedforward_pct;
     std::optional<double> correction_pct;
+    std::optional<double> low_band_stage_boost_pct;
+    std::optional<double> low_band_effective_boost_pct;
 };
 
 struct ParsedTickRow {
@@ -108,6 +110,9 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
 struct ParsedCsv {
     CsvHeader header;
     std::vector<ParsedTickRow> rows;
+    // Parsed "# key=value" comment-prologue fields (schema/mode/session_start/
+    // build_version/git_hash/...). Empty for CSVs without a prologue.
+    std::unordered_map<std::string, std::string> prologue;
 };
 
 ParsedCsv ParseControlLoopCsv(const std::filesystem::path& path);

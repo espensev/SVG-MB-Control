@@ -346,11 +346,11 @@ release\svg-mb-control.exe analyze report `
 
 The generated decision record includes run identity, artifact hashes, response
 metrics, channel attribution counts, event counts, and automatic flags for
-hot-but-low/no-response runs. `scripts\analyze_control_run.py` remains as a
-legacy direct-CSV compatibility analyzer for archived captures that have not
-been ingested yet; it emits only the raw run summary (decision records and
-analysis manifests are native-owned) and uses the same nearest-rank percentile
-method as the native report. Prefer native `analyze ingest` plus `analyze
+hot-but-low/no-response runs. `scripts\analyze_control_run.py` is a thin
+convenience wrapper for archived captures that have not been ingested yet: it
+shells the in-repo `svg-mb-control.exe` to `analyze ingest --csv` into a
+temporary database and forwards native `analyze report` output (text or JSON),
+so all analysis is native. Prefer native `analyze ingest` plus `analyze
 report` for new work.
 
 Local eval dashboard:

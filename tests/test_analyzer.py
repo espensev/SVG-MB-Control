@@ -1,176 +1,131 @@
 from __future__ import annotations
 
-import importlib.util
+import json
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
 
-from tests.helpers import *
+from tests.helpers import REPO_ROOT, _ensure_release_build
 
 ANALYZER = REPO_ROOT / "scripts" / "analyze_control_run.py"
 
-CSV_TEXT = (
-    "\n".join(
-        [
-            "# active_archive_path=test",
-            "cpu_tctl_c,cpu_max_c,gpu_core_c,gpu_memjn_c,gpu_hotspot_c,"
-            "loop_achieved_interval_ms,loop_work_duration_ms,loop_slip_ms,"
-            "loop_overrun,process_cpu_delta_ms,process_cpu_pct,"
-            "process_working_set_bytes,process_private_bytes,"
-            "channel0_setpoint_pct,channel0_thermal_pressure_boost_pct,"
-            "channel0_response_source,channel0_write_reason,"
-            "channel0_total_writes",
-            "70,72,50,60,65,50,4,0,false,2,0.1,1000,2000,50,0,"
-            "primary_curve,first_write,1",
-            "75,76,52,62,67,50,5,0,false,2,0.2,1100,2100,55,1,"
-            "primary_curve,setpoint_delta,2",
-            "74,75,51,61,66,60,6,10,false,2,0.2,1200,2200,54.4,1,"
-            "primary_curve,setpoint_delta,3",
-        ]
-    )
-    + "\n"
+# Minimal raw control-loop CSV: 3 ticks with a rising GPU envelope (derived
+# from gpu_core/memjn/hotspot) and a low-band boost on tick 2. ParseControlLoopCsv
+# requires wall_clock + loop_tick_count; other columns are optional.
+CSV_HEADER = ",".join(
+    [
+        "loop_tick_count",
+        "wall_clock",
+        "cpu_tctl_c",
+        "gpu_core_c",
+        "gpu_memjn_c",
+        "gpu_hotspot_c",
+        "loop_achieved_interval_ms",
+        "loop_work_duration_ms",
+        "loop_slip_ms",
+        "loop_overrun",
+        "process_cpu_pct",
+        "process_working_set_bytes",
+        "process_private_bytes",
+        "channel0_observed_temp_c",
+        "channel0_setpoint_pct",
+        "channel0_thermal_pressure_boost_pct",
+        "channel0_midband_pressure_boost_pct",
+        "channel0_gpu_airflow_boost_pct",
+        "channel0_cpu_low_soak_boost_pct",
+        "channel0_low_band_effective_boost_pct",
+        "channel0_response_source",
+        "channel0_write_reason",
+        "channel0_total_writes",
+    ]
 )
+CSV_ROWS = [
+    # envelope 65, no boosts
+    "1,2026-05-15T03:30:00,70,50,60,65,50,10,0,false,0.1,1000,2000,"
+    "70,50,0,0,0,0,0,primary_curve,first_write,1",
+    # envelope 67 (peak); boost total = midband 1.0 + low_band 2.0 = 3.0
+    "2,2026-05-15T03:30:01,75,52,62,67,50,10,0,false,0.2,1100,2100,"
+    "75,55,0,1.0,0,0,2.0,primary_curve,setpoint_delta,2",
+    # envelope 66
+    "3,2026-05-15T03:30:02,74,51,61,66,60,10,0,false,0.2,1200,2200,"
+    "74,54.4,0,0,0,0,0,primary_curve,setpoint_delta,3",
+]
+CSV_TEXT = CSV_HEADER + "\n" + "\n".join(CSV_ROWS) + "\n"
 
-EVENTS_TEXT = (
-    "\n".join(
-        [
-            json.dumps(
-                {
-                    "event_type": "control_loop.write_applied",
-                    "severity": "info",
-                    "error_code": "none",
-                }
-            ),
-            json.dumps(
-                {
-                    "event_type": "control_loop.circuit_breaker_opened",
-                    "severity": "warning",
-                    "error_code": "CONTROL_LOOP_CIRCUIT_BREAKER_OPENED",
-                }
-            ),
-        ]
+
+def _run_wrapper(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(ANALYZER), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
     )
-    + "\n"
-)
 
 
-def _load_analyzer():
-    spec = importlib.util.spec_from_file_location("analyze_control_run", ANALYZER)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+class AnalyzerWrapperTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        if sys.platform != "win32":
+            raise unittest.SkipTest("svg-mb-control.exe is Windows-only")
+        _ensure_release_build()
 
+    def _write_csv(self, td: Path) -> Path:
+        csv_path = td / "run.csv"
+        csv_path.write_text(CSV_TEXT, encoding="utf-8")
+        return csv_path
 
-class AnalyzerToolTests(unittest.TestCase):
-    def test_raw_csv_summary_markdown(self) -> None:
+    def test_json_report_via_wrapper(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            csv_path = td / "run.csv"
-            events_path = td / "events.jsonl"
-            summary_path = td / "summary.md"
-            # The narrowed analyzer no longer writes a decision record beside
-            # the Markdown summary; assert that path stays absent.
-            decision_path = td / "summary.decision.md"
-            csv_path.write_text(CSV_TEXT, encoding="utf-8")
-            events_path.write_text(EVENTS_TEXT, encoding="utf-8")
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(ANALYZER),
-                    "--csv",
-                    str(csv_path),
-                    "--events",
-                    str(events_path),
-                    "--out",
-                    str(summary_path),
-                    "--profile",
-                    "smoke",
-                    "--gpu-load-threshold-c",
-                    "66",
-                ],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
-            summary = summary_path.read_text(encoding="utf-8")
-            self.assertIn("SVG-MB-Control Run Summary", summary)
-            self.assertIn("Profile: smoke", summary)
-            self.assertIn("gpu_envelope_c", summary)
-            self.assertIn("GPU envelope peak: 67.00 C", summary)
-            self.assertIn("rows above/equal: 2", summary)
-            self.assertIn("control_loop.write_applied", summary)
-            self.assertIn("control_loop.circuit_breaker_opened", summary)
-            self.assertIn("Event severity: info:1, warning:1", summary)
-            self.assertIn("CONTROL_LOOP_CIRCUIT_BREAKER_OPENED:1", summary)
-            self.assertFalse(decision_path.exists())
-
-    def test_raw_csv_summary_json(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            csv_path = td / "run.csv"
-            json_path = td / "summary.json"
-            csv_path.write_text(CSV_TEXT, encoding="utf-8")
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(ANALYZER),
-                    "--csv",
-                    str(csv_path),
-                    "--format",
-                    "json",
-                    "--out",
-                    str(json_path),
-                    "--gpu-load-threshold-c",
-                    "66",
-                ],
-                cwd=REPO_ROOT,
-                capture_output=True,
-                text=True,
+            csv_path = self._write_csv(Path(td_str))
+            result = _run_wrapper(
+                "--csv", str(csv_path),
+                "--gpu-load-threshold-c", "66",
+                "--format", "json",
             )
             self.assertEqual(
                 result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}"
             )
-            summary_json = json.loads(json_path.read_text(encoding="utf-8"))
+            obj = json.loads(result.stdout)
+            gpu = obj["gpu_response"]
+            self.assertEqual(gpu["peak"]["value_c"], 67.0)
+            self.assertEqual(gpu["peak"]["row_number"], 2)
+            self.assertEqual(gpu["above_threshold_rows"], 2)
             self.assertEqual(
-                summary_json["temperatures"]["gpu_envelope_c"]["max"], 67.0
+                gpu["channels"]["0"]["setpoint_at_peak_pct"], 55.0
             )
-            self.assertEqual(summary_json["gpu_response"]["peak"]["row_number"], 2)
-            self.assertEqual(summary_json["gpu_response"]["above_threshold_rows"], 2)
+            channels = {c["channel"]: c for c in obj["channels"]}
+            self.assertEqual(channels[0]["response_boost_total_pct"], 3.0)
+            # Timing/resource sections are present and reflect the constant rows.
             self.assertEqual(
-                summary_json["gpu_response"]["channels"]["0"]["setpoint_at_peak_pct"],
-                55.0,
+                obj["timing"]["loop_achieved_interval_ms"]["max"], 60.0
             )
+            self.assertEqual(obj["timing"]["loop_work_duration_ms"]["max"], 10.0)
+            self.assertEqual(obj["timing"]["overrun_count"], 0)
 
-    def test_native_owned_flags_removed(self) -> None:
-        # The decision-record / manifest / diagnostic-threshold surface is now
-        # native-owned; assert those flags are gone from this raw-CSV fallback.
-        result = subprocess.run(
-            [sys.executable, str(ANALYZER), "--help"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
+    def test_markdown_report_via_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            csv_path = self._write_csv(Path(td_str))
+            result = _run_wrapper("--csv", str(csv_path))
+            self.assertEqual(
+                result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}"
+            )
+            self.assertIn("analyze report:", result.stdout)
+            self.assertIn("gpu_response:", result.stdout)
+            self.assertIn("timing:", result.stdout)
+            self.assertIn("resources:", result.stdout)
+
+    def test_wrapper_help_has_no_native_owned_flags(self) -> None:
+        result = _run_wrapper("--help")
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("--csv", result.stdout)
+        self.assertIn("--gpu-load-threshold-c", result.stdout)
         for removed in (
             "--manifest-out",
             "--decision-record-out",
-            "--no-decision-record",
-            "--decision ",
             "--hypothesis",
             "--cpu-load-threshold-c",
             "--low-response-setpoint-pct",
         ):
             self.assertNotIn(removed, result.stdout)
-
-    def test_percentile_is_nearest_rank(self) -> None:
-        # Matches the native report (src/analyze/analyze_report_data.cpp): p90
-        # of {1..5} is 5.0 (round(3.6) -> index 4), not the 4.6 a linear
-        # interpolation would give. Keeps the two reports byte-comparable.
-        analyzer = _load_analyzer()
-        self.assertEqual(analyzer.percentile([1, 2, 3, 4, 5], 90.0), 5.0)
-        self.assertEqual(analyzer.percentile([1, 2, 3, 4, 5], 50.0), 3.0)
-        self.assertEqual(analyzer.percentile([1, 2, 3, 4, 5], 100.0), 5.0)
-        self.assertEqual(analyzer.percentile([10.0], 90.0), 10.0)
-        self.assertIsNone(analyzer.percentile([], 90.0))

@@ -45,6 +45,12 @@ constexpr std::array<TickChannelSampleColumnSpec,
          "feedforward_pct", "REAL", TickChannelSampleValueKind::Real},
         {TickChannelSampleColumn::CorrectionPct,
          "correction_pct", "REAL", TickChannelSampleValueKind::Real},
+        {TickChannelSampleColumn::LowBandStageBoostPct,
+         "low_band_stage_boost_pct", "REAL",
+         TickChannelSampleValueKind::Real},
+        {TickChannelSampleColumn::LowBandEffectiveBoostPct,
+         "low_band_effective_boost_pct", "REAL",
+         TickChannelSampleValueKind::Real},
     }};
 
 std::size_t FindColumnOffset(TickChannelSampleColumn id) {
@@ -117,6 +123,12 @@ void BindDescriptorValue(Statement& stmt,
             break;
         case TickChannelSampleColumn::CorrectionPct:
             stmt.BindOptionalDouble(index, sample.correction_pct);
+            break;
+        case TickChannelSampleColumn::LowBandStageBoostPct:
+            stmt.BindOptionalDouble(index, sample.low_band_stage_boost_pct);
+            break;
+        case TickChannelSampleColumn::LowBandEffectiveBoostPct:
+            stmt.BindOptionalDouble(index, sample.low_band_effective_boost_pct);
             break;
     }
 }

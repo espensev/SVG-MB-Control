@@ -27,6 +27,17 @@ std::optional<double> Median(std::vector<double> values) {
     return Percentile(std::move(values), 50.0);
 }
 
+std::optional<double> Mean(const std::vector<double>& values) {
+    if (values.empty()) {
+        return std::nullopt;
+    }
+    double sum = 0.0;
+    for (double v : values) {
+        sum += v;
+    }
+    return sum / static_cast<double>(values.size());
+}
+
 BandPercentiles SummariseBand(const std::vector<TickRow>& ticks, Band band) {
     std::vector<double> cpu, mem, env;
     for (const auto& t : ticks) {

@@ -92,12 +92,15 @@ logging replacement.
 - Native `svg-mb-control analyze report` summarizes one ingested run and can
   write a report, compact Markdown decision record, and analysis manifest with
   artifact hashes. Use this as the default evidence path for new runs.
-- `scripts\analyze_control_run.py` remains as a legacy direct-CSV compatibility
-  analyzer for captures that have not been ingested. It emits only the raw run
-  summary (temperatures, GPU-envelope peak, loop-timing and process-resource
-  percentiles, per-channel and event stats); decision records and analysis
-  manifests are native-owned (`analyze report`), and its percentiles use the
-  same nearest-rank method as the native report.
+- Native `svg-mb-control analyze ingest --csv <path> [--events <path>]` ingests a
+  bare control-loop CSV with no runtime manifest, and `analyze report` adds a
+  GPU-envelope-peak block (`--gpu-load-threshold-c`), a loop-timing and
+  process-resource percentile section, and a per-channel low-band-inclusive
+  response-boost total.
+- `scripts\analyze_control_run.py` is a thin convenience wrapper for captures
+  that have not been ingested: it ingests the CSV into a temporary DB with the
+  in-repo `svg-mb-control.exe` and forwards native `analyze report` output. All
+  analysis is native; the script reimplements nothing.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live

@@ -259,6 +259,40 @@ int InsertEventsAttributed(Database& db,
     return inserted;
 }
 
+int InsertEventsForRun(Database& db,
+                       const std::vector<EventData>& events,
+                       std::int64_t run_id) {
+    Statement insert = db.Prepare(
+        "INSERT INTO events("
+        "run_id, event_time, event_type, severity, error_code, mode, success, "
+        "channel, setpoint_pct, observed_temp_c, tick_count, detail, extra_json"
+        ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)");
+    int inserted = 0;
+    for (const auto& e : events) {
+        insert.BindInt(1, run_id);
+        insert.BindText(2, e.event_time);
+        insert.BindText(3, e.event_type);
+        insert.BindOptionalText(4, e.severity);
+        insert.BindOptionalText(5, e.error_code);
+        insert.BindOptionalText(6, e.mode);
+        insert.BindOptionalInt(7, e.success);
+        insert.BindOptionalInt(8, e.channel);
+        insert.BindOptionalDouble(9, e.setpoint_pct);
+        insert.BindOptionalDouble(10, e.observed_temp_c);
+        insert.BindOptionalInt(11, e.tick_count);
+        insert.BindOptionalText(12, e.detail);
+        if (e.extra_json.empty()) {
+            insert.BindNull(13);
+        } else {
+            insert.BindText(13, e.extra_json);
+        }
+        insert.Step();
+        insert.Reset();
+        ++inserted;
+    }
+    return inserted;
+}
+
 std::int64_t InsertPlantModelCapture(Database& db,
                                      const std::string& path_canonical,
                                      const PlantModelData& data,

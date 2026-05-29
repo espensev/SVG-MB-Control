@@ -306,6 +306,7 @@ void EmitJsonReport(const ReportOptions& options,
              cs.max_gpu_airflow_boost_pct},
             {"max_cpu_low_soak_boost_pct",
              cs.max_cpu_low_soak_boost_pct},
+            {"response_boost_total_pct", cs.response_boost_total},
             {"primary_temp_source_counts", cs.primary_source_counts},
             {"response_source_counts", cs.response_source_counts},
             {"write_reason_counts", cs.write_reason_counts},
@@ -322,6 +323,57 @@ void EmitJsonReport(const ReportOptions& options,
          data.response_tick ? nlohmann::json(*data.response_tick)
                             : nlohmann::json()},
         {"response_delay_s", OptToJson(data.response_delay_s)},
+    };
+    auto stats_json = [](const PercentileSet& p) {
+        return nlohmann::json{
+            {"count", p.n},
+            {"avg", OptToJson(p.avg)},
+            {"p50", OptToJson(p.p50)},
+            {"p90", OptToJson(p.p90)},
+            {"p95", OptToJson(p.p95)},
+            {"p99", OptToJson(p.p99)},
+            {"max", OptToJson(p.max)},
+        };
+    };
+    const auto& gr = data.gpu_response;
+    nlohmann::json gpu_response;
+    gpu_response["threshold_c"] = OptToJson(gr.threshold_c);
+    gpu_response["peak"] = gr.has_peak
+        ? nlohmann::json{{"row_number", gr.peak_row_number},
+                         {"elapsed_seconds", gr.peak_elapsed_s},
+                         {"value_c", OptToJson(gr.peak_value_c)}}
+        : nlohmann::json();
+    gpu_response["above_threshold_rows"] =
+        OptIntToJson(gr.above_threshold_rows);
+    gpu_response["above_threshold_seconds"] =
+        OptToJson(gr.above_threshold_seconds);
+    gpu_response["time_to_threshold_seconds"] =
+        OptToJson(gr.time_to_threshold_s);
+    nlohmann::json gpu_channels = nlohmann::json::object();
+    for (const auto& ch : gr.channels) {
+        gpu_channels[std::to_string(ch.channel)] = {
+            {"setpoint_at_peak_pct", OptToJson(ch.setpoint_at_peak_pct)},
+            {"setpoint_during_load",
+             {{"p90", OptToJson(ch.setpoint_during_load_p90)},
+              {"max", OptToJson(ch.setpoint_during_load_max)}}},
+            {"load_row_count", ch.load_row_count},
+        };
+    }
+    gpu_response["channels"] = gpu_channels;
+    doc["gpu_response"] = gpu_response;
+    const auto& tr = data.timing_resources;
+    doc["timing"] = {
+        {"loop_achieved_interval_ms",
+         stats_json(tr.loop_achieved_interval_ms)},
+        {"loop_work_duration_ms", stats_json(tr.loop_work_duration_ms)},
+        {"loop_slip_ms", stats_json(tr.loop_slip_ms)},
+        {"overrun_count", tr.overrun_count},
+    };
+    doc["resources"] = {
+        {"process_cpu_pct", stats_json(tr.process_cpu_pct)},
+        {"process_working_set_bytes",
+         stats_json(tr.process_working_set_bytes)},
+        {"process_private_bytes", stats_json(tr.process_private_bytes)},
     };
     doc["robustness"] = {
         {"authority_reasserted", data.authority_reasserted},
@@ -394,7 +446,9 @@ void EmitTextReport(const ReportOptions& options,
            << "  gpu_airflow_boost_pct max="
            << cs.max_gpu_airflow_boost_pct
            << "  cpu_low_soak_boost_pct max="
-           << cs.max_cpu_low_soak_boost_pct << "  writes=" << writes
+           << cs.max_cpu_low_soak_boost_pct
+           << "  response_boost_total=" << cs.response_boost_total
+           << "  writes=" << writes
            << "  reversals=" << cs.reversals
            << "  mode_leave_ticks=" << cs.mode_leave_ticks << '\n';
         os << "       primary_temp_source_counts "
@@ -412,6 +466,44 @@ void EmitTextReport(const ReportOptions& options,
     os << "robustness: authority_reasserted=" << data.authority_reasserted
        << " write_failures=" << data.write_failures
        << " restore_failures=" << data.restore_failures << '\n';
+    const auto& gr = data.gpu_response;
+    os << "gpu_response: peak_value_c=" << OptToText(gr.peak_value_c)
+       << " peak_row="
+       << (gr.has_peak ? std::to_string(gr.peak_row_number) : std::string("n/a"))
+       << " peak_elapsed_s="
+       << (gr.has_peak ? OptToText(std::optional<double>(gr.peak_elapsed_s))
+                       : std::string("n/a"))
+       << " threshold_c=" << OptToText(gr.threshold_c)
+       << " above_threshold_rows="
+       << (gr.above_threshold_rows ? std::to_string(*gr.above_threshold_rows)
+                                   : std::string("n/a"))
+       << " above_threshold_seconds=" << OptToText(gr.above_threshold_seconds)
+       << " time_to_threshold_s=" << OptToText(gr.time_to_threshold_s) << '\n';
+    for (const auto& ch : gr.channels) {
+        os << "  gpu_channel " << ch.channel
+           << " setpoint_at_peak_pct=" << OptToText(ch.setpoint_at_peak_pct)
+           << " setpoint_during_load_p90="
+           << OptToText(ch.setpoint_during_load_p90)
+           << " setpoint_during_load_max="
+           << OptToText(ch.setpoint_during_load_max)
+           << " load_row_count=" << ch.load_row_count << '\n';
+    }
+    const auto& tr = data.timing_resources;
+    auto stats_text = [](std::ostream& s, const char* label,
+                         const PercentileSet& p) {
+        s << "  " << label << " p50=" << OptToText(p.p50)
+          << " p90=" << OptToText(p.p90) << " p95=" << OptToText(p.p95)
+          << " p99=" << OptToText(p.p99) << " max=" << OptToText(p.max)
+          << " avg=" << OptToText(p.avg) << " n=" << p.n << '\n';
+    };
+    os << "timing: overrun_count=" << tr.overrun_count << '\n';
+    stats_text(os, "loop_achieved_interval_ms", tr.loop_achieved_interval_ms);
+    stats_text(os, "loop_work_duration_ms", tr.loop_work_duration_ms);
+    stats_text(os, "loop_slip_ms", tr.loop_slip_ms);
+    os << "resources:" << '\n';
+    stats_text(os, "process_cpu_pct", tr.process_cpu_pct);
+    stats_text(os, "process_working_set_bytes", tr.process_working_set_bytes);
+    stats_text(os, "process_private_bytes", tr.process_private_bytes);
     os << "events: severity_counts="
        << CountsToText(data.event_severity_counts)
        << " error_code_counts="

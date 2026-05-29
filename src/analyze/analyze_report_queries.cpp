@@ -10,6 +10,7 @@
 #include <exception>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -202,8 +203,10 @@ bool LoadTicks(Database& db, std::int64_t run_id,
     try {
         Statement stmt = db.Prepare(
             "SELECT tick_count, wall_clock, cpu_tctl_c, gpu_memjn_c, "
-            "gpu_envelope_c FROM tick_samples WHERE run_id = ?1 "
-            "ORDER BY tick_count ASC");
+            "gpu_envelope_c, loop_achieved_interval_ms, loop_work_duration_ms, "
+            "loop_slip_ms, loop_overrun, process_cpu_pct, "
+            "process_working_set_bytes, process_private_bytes "
+            "FROM tick_samples WHERE run_id = ?1 ORDER BY tick_count ASC");
         stmt.BindInt(1, run_id);
         while (stmt.Step()) {
             TickRow row;
@@ -212,6 +215,13 @@ bool LoadTicks(Database& db, std::int64_t run_id,
             row.cpu_tctl_c = ColumnOptionalDouble(stmt, 2);
             row.gpu_memjn_c = ColumnOptionalDouble(stmt, 3);
             row.gpu_envelope_c = ColumnOptionalDouble(stmt, 4);
+            row.loop_achieved_interval_ms = ColumnOptionalDouble(stmt, 5);
+            row.loop_work_duration_ms = ColumnOptionalDouble(stmt, 6);
+            row.loop_slip_ms = ColumnOptionalDouble(stmt, 7);
+            row.loop_overrun = ColumnOptionalInt(stmt, 8);
+            row.process_cpu_pct = ColumnOptionalDouble(stmt, 9);
+            row.process_working_set_bytes = ColumnOptionalInt(stmt, 10);
+            row.process_private_bytes = ColumnOptionalInt(stmt, 11);
             out.push_back(std::move(row));
         }
     } catch (const std::exception& ex) {
@@ -282,6 +292,168 @@ void AssignBands(std::vector<TickRow>& ticks, const ReportOptions& options) {
     }
 }
 
+// Loop-timing and process-resource percentiles over all ticks. Operates on the
+// already-loaded ticks (LoadTicks reads the timing/resource columns); overrun
+// counts ticks with a non-zero loop_overrun, matching the Python analyzer.
+TimingResourceStats SummariseTimingResources(
+    const std::vector<TickRow>& ticks) {
+    std::vector<double> ai, wd, sl, cpu, ws, pb;
+    int overrun = 0;
+    for (const auto& t : ticks) {
+        if (t.loop_achieved_interval_ms) {
+            ai.push_back(*t.loop_achieved_interval_ms);
+        }
+        if (t.loop_work_duration_ms) {
+            wd.push_back(*t.loop_work_duration_ms);
+        }
+        if (t.loop_slip_ms) {
+            sl.push_back(*t.loop_slip_ms);
+        }
+        if (t.process_cpu_pct) {
+            cpu.push_back(*t.process_cpu_pct);
+        }
+        if (t.process_working_set_bytes) {
+            ws.push_back(static_cast<double>(*t.process_working_set_bytes));
+        }
+        if (t.process_private_bytes) {
+            pb.push_back(static_cast<double>(*t.process_private_bytes));
+        }
+        if (t.loop_overrun && *t.loop_overrun != 0) {
+            ++overrun;
+        }
+    }
+    auto fill = [](PercentileSet& p, const std::vector<double>& v) {
+        p.n = static_cast<int>(v.size());
+        p.p50 = Percentile(v, 50.0);
+        p.p90 = Percentile(v, 90.0);
+        p.p95 = Percentile(v, 95.0);
+        p.p99 = Percentile(v, 99.0);
+        p.max = Percentile(v, 100.0);
+        p.avg = Mean(v);
+    };
+    TimingResourceStats stats;
+    fill(stats.loop_achieved_interval_ms, ai);
+    fill(stats.loop_work_duration_ms, wd);
+    fill(stats.loop_slip_ms, sl);
+    fill(stats.process_cpu_pct, cpu);
+    fill(stats.process_working_set_bytes, ws);
+    fill(stats.process_private_bytes, pb);
+    stats.overrun_count = overrun;
+    return stats;
+}
+
+// GPU-envelope peak + (when a threshold is supplied) threshold-crossing
+// metrics, plus per-channel setpoint at the peak tick and during the load
+// window. Mirrors the Python analyzer's summarize_gpu_response using native
+// nearest-rank percentiles and native elapsed_s.
+GpuResponseSummary SummariseGpuResponse(
+    Database& db, std::int64_t run_id,
+    const std::vector<TickRow>& ticks,
+    const ReportOptions& options) {
+    GpuResponseSummary summary;
+
+    const TickRow* peak = nullptr;
+    std::int64_t peak_ordinal = 0;
+    for (std::size_t i = 0; i < ticks.size(); ++i) {
+        const auto& env = ticks[i].gpu_envelope_c;
+        if (!env) {
+            continue;
+        }
+        if (!summary.peak_value_c || *env > *summary.peak_value_c) {
+            summary.peak_value_c = env;
+            peak = &ticks[i];
+            peak_ordinal = static_cast<std::int64_t>(i) + 1;
+        }
+    }
+    if (peak) {
+        summary.has_peak = true;
+        summary.peak_row_number = peak_ordinal;
+        summary.peak_elapsed_s = peak->elapsed_s;
+    }
+
+    std::set<std::int64_t> hot_ticks;
+    if (options.gpu_load_threshold_c) {
+        const double threshold = *options.gpu_load_threshold_c;
+        summary.threshold_c = threshold;
+        std::int64_t rows = 0;
+        double seconds = 0.0;
+        std::optional<double> first_elapsed;
+        for (const auto& t : ticks) {
+            if (t.gpu_envelope_c && *t.gpu_envelope_c >= threshold) {
+                ++rows;
+                hot_ticks.insert(t.tick);
+                if (!first_elapsed) {
+                    first_elapsed = t.elapsed_s;
+                }
+                if (t.loop_achieved_interval_ms &&
+                    *t.loop_achieved_interval_ms >= 0.0) {
+                    seconds += *t.loop_achieved_interval_ms / 1000.0;
+                }
+            }
+        }
+        summary.above_threshold_rows = rows;
+        summary.above_threshold_seconds = seconds;
+        summary.time_to_threshold_s = first_elapsed;
+    }
+
+    if (!peak && hot_ticks.empty()) {
+        return summary;
+    }
+
+    const std::int64_t peak_tick = peak ? peak->tick : -1;
+    const int setpoint_idx =
+        TickChannelSampleSelectIndex(TickChannelSampleColumn::SetpointPct);
+    std::map<int, std::optional<double>> at_peak;
+    std::map<int, std::vector<double>> load_setpoints;
+    try {
+        Statement stmt = db.Prepare(TickChannelSampleSelectAllSql(
+            "WHERE run_id = ?1", "ORDER BY channel ASC, tick_count ASC"));
+        stmt.BindInt(1, run_id);
+        while (stmt.Step()) {
+            const std::int64_t tick = stmt.ColumnInt(0);
+            const int channel = static_cast<int>(stmt.ColumnInt(1));
+            if (stmt.ColumnIsNull(setpoint_idx)) {
+                continue;
+            }
+            const double setpoint = stmt.ColumnDouble(setpoint_idx);
+            if (peak && tick == peak_tick) {
+                at_peak[channel] = setpoint;
+            }
+            if (hot_ticks.count(tick) != 0u) {
+                load_setpoints[channel].push_back(setpoint);
+            }
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: gpu-response channel query failed: " << ex.what()
+                  << '\n';
+        return summary;
+    }
+
+    std::set<int> channels_seen;
+    for (const auto& entry : at_peak) {
+        channels_seen.insert(entry.first);
+    }
+    for (const auto& entry : load_setpoints) {
+        channels_seen.insert(entry.first);
+    }
+    for (int channel : channels_seen) {
+        GpuChannelAtPeak entry;
+        entry.channel = channel;
+        auto ap = at_peak.find(channel);
+        if (ap != at_peak.end()) {
+            entry.setpoint_at_peak_pct = ap->second;
+        }
+        auto load = load_setpoints.find(channel);
+        if (load != load_setpoints.end()) {
+            entry.setpoint_during_load_p90 = Percentile(load->second, 90.0);
+            entry.setpoint_during_load_max = Percentile(load->second, 100.0);
+            entry.load_row_count = static_cast<int>(load->second.size());
+        }
+        summary.channels.push_back(entry);
+    }
+    return summary;
+}
+
 // Loads tick_channel_samples for run_id and aggregates per-channel stats:
 // setpoint/boost maxima, reversal count via the kReversalDeadbandPct gate,
 // primary-source counts, and total_writes range. Channels are created
@@ -304,6 +476,10 @@ bool LoadChannelStats(Database& db, std::int64_t run_id,
             TickChannelSampleColumn::GpuAirflowBoostPct);
         const int cpu_low_soak_idx = TickChannelSampleSelectIndex(
             TickChannelSampleColumn::CpuLowSoakBoostPct);
+        const int low_band_stage_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::LowBandStageBoostPct);
+        const int low_band_effective_idx = TickChannelSampleSelectIndex(
+            TickChannelSampleColumn::LowBandEffectiveBoostPct);
         const int primary_source_idx = TickChannelSampleSelectIndex(
             TickChannelSampleColumn::PrimaryTempSource);
         const int response_source_idx = TickChannelSampleSelectIndex(
@@ -375,6 +551,28 @@ bool LoadChannelStats(Database& db, std::int64_t run_id,
             if (soak) {
                 cs.max_cpu_low_soak_boost_pct =
                     std::max(cs.max_cpu_low_soak_boost_pct, *soak);
+            }
+            // Low-band-inclusive response-boost total (matches the Python
+            // analyzer's row_response_boost): sum the present stage boosts plus
+            // low_band_effective (fallback low_band_stage), track the max.
+            auto lb_stage = ColumnOptionalDouble(stmt, low_band_stage_idx);
+            auto lb_eff = ColumnOptionalDouble(stmt, low_band_effective_idx);
+            double boost_total = 0.0;
+            bool boost_seen = false;
+            for (const auto& term : {tp, mid, gpu, soak}) {
+                if (term) {
+                    boost_total += *term;
+                    boost_seen = true;
+                }
+            }
+            const std::optional<double> low_band = lb_eff ? lb_eff : lb_stage;
+            if (low_band) {
+                boost_total += *low_band;
+                boost_seen = true;
+            }
+            if (boost_seen) {
+                cs.response_boost_total =
+                    std::max(cs.response_boost_total, boost_total);
             }
             if (writes) {
                 if (!cs.total_writes_min || *writes < *cs.total_writes_min) {

@@ -562,6 +562,21 @@ void MigrateSchema(Database& db) {
         }
         SetSchemaVersion(db, 7);
     }
+    if (version <= 7) {
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "low_band_stage_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN low_band_stage_boost_pct REAL");
+        }
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "low_band_effective_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN low_band_effective_boost_pct REAL");
+        }
+        SetSchemaVersion(db, 8);
+    }
 }
 
 }  // namespace svg_mb_control::analyze

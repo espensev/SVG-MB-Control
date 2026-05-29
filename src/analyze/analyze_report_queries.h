@@ -76,6 +76,12 @@ ResponseDelay DetectResponseDelay(
     const std::vector<TickRow>& ticks,
     const std::map<int, double>& idle_baselines,
     const ReportOptions& options);
+TimingResourceStats SummariseTimingResources(
+    const std::vector<TickRow>& ticks);
+GpuResponseSummary SummariseGpuResponse(
+    Database& db, std::int64_t run_id,
+    const std::vector<TickRow>& ticks,
+    const ReportOptions& options);
 
 }  // namespace report_detail
 }  // namespace svg_mb_control::analyze

@@ -137,6 +137,12 @@ void SetChannelSampleField(ParsedChannelSample& ch,
         case TickChannelSampleColumn::CorrectionPct:
             ch.correction_pct = AsDouble(value);
             break;
+        case TickChannelSampleColumn::LowBandStageBoostPct:
+            ch.low_band_stage_boost_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::LowBandEffectiveBoostPct:
+            ch.low_band_effective_boost_pct = AsDouble(value);
+            break;
     }
 }
 
@@ -349,6 +355,15 @@ ParsedCsv ParseControlLoopCsv(const std::filesystem::path& path) {
             continue;
         }
         if (line[0] == '#') {
+            std::string body = line.substr(1);
+            if (!body.empty() && body.front() == ' ') {
+                body.erase(0, 1);
+            }
+            const auto eq = body.find('=');
+            if (eq != std::string::npos) {
+                result.prologue.emplace(body.substr(0, eq),
+                                        body.substr(eq + 1));
+            }
             continue;
         }
         if (!header_parsed) {

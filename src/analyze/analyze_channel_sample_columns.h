@@ -26,6 +26,8 @@ enum class TickChannelSampleColumn {
     BaselineCaptured,
     FeedforwardPct,
     CorrectionPct,
+    LowBandStageBoostPct,
+    LowBandEffectiveBoostPct,
 };
 
 enum class TickChannelSampleValueKind {
@@ -41,7 +43,7 @@ struct TickChannelSampleColumnSpec {
     TickChannelSampleValueKind value_kind;
 };
 
-constexpr std::size_t kTickChannelSampleColumnCount = 14u;
+constexpr std::size_t kTickChannelSampleColumnCount = 16u;
 
 const std::array<TickChannelSampleColumnSpec,
                  kTickChannelSampleColumnCount>&

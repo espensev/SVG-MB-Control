@@ -557,7 +557,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "7")
+            self.assertEqual(schema[0], "8")
 
             run = _query_one(
                 db_path,
@@ -1005,6 +1005,21 @@ class AnalyzeReportTests(unittest.TestCase):
                 channels[0]["max_midband_pressure_boost_pct"], 1.5
             )
             self.assertEqual(channels[0]["max_gpu_airflow_boost_pct"], 0.75)
+            # Phase B report sections: GPU-envelope peak, loop-timing and
+            # process-resource percentiles, and the low-band-inclusive
+            # response-boost total (the ramp fixture holds these constant).
+            self.assertIn("response_boost_total_pct", channels[0])
+            self.assertEqual(obj["gpu_response"]["peak"]["value_c"], 55.0)
+            self.assertEqual(
+                obj["timing"]["loop_achieved_interval_ms"]["p50"], 50.0
+            )
+            self.assertEqual(
+                obj["timing"]["loop_achieved_interval_ms"]["max"], 50.0
+            )
+            self.assertEqual(obj["timing"]["overrun_count"], 0)
+            self.assertEqual(
+                obj["resources"]["process_working_set_bytes"]["max"], 33000000
+            )
             self.assertEqual(obj["events"]["severity_counts"]["unknown"], 3)
             self.assertEqual(obj["events"]["error_code_counts"]["none"], 3)
             self.assertEqual(

@@ -142,8 +142,10 @@ raw-CSV fallback now; defer the thin-wrapper conversion until native `analyze`
 is a superset. A wrapper today would drop four capabilities native does not yet
 emit, so narrowing first is the lower-risk step.
 
-Status: Phase A landed 2026-05-29 (see the implemented list below). Phase B
-remains deferred.
+Status: Phase A landed 2026-05-29. Phase B landed 2026-05-29 — native `analyze`
+is now a superset and `scripts/analyze_control_run.py` is a thin wrapper that
+ingests a raw CSV into a temporary DB and forwards native `analyze report`
+output (see "Phase B — landed" below).
 
 Native already owns these for any run that can be ingested (so they are the
 deletable, duplicated surface in the Python script):
@@ -219,13 +221,34 @@ Phase A — narrow now (landed 2026-05-29):
    are gone, and that `percentile` is nearest-rank. Native paths stay gated by
    `tests/test_analyze_ingest.py` `AnalyzeReportTests`.
 
-Phase B — convert to a wrapper later (effort L, risk medium; only if desired):
-add `analyze ingest --csv` that synthesizes a run row without a manifest; add
-`low_band_*` to `kTickChannelSampleColumns` plus a response-boost total; add a
-GPU-envelope-peak block and a timing/resource percentile section to the native
-report; extend `AnalyzeReportTests` to cover all of these; then replace the
-Python body with `subprocess.run` of the in-repo `svg-mb-control.exe` (keep the
-repo standalone — shell the in-repo exe, never a sibling repo).
+Phase B — landed 2026-05-29 (native superset + thin wrapper):
+
+1. `analyze ingest --csv <path> [--events <path>]` ingests a bare control-loop
+   CSV with no runtime manifest, synthesizing one `runs` row (status `raw_csv`,
+   identity from the CSV `# key=value` prologue when present) keyed on the CSV
+   path. Reuses `InsertRun`/`InsertTickRows`; events attach via a new
+   `InsertEventsForRun`.
+2. `low_band_stage_boost_pct`/`low_band_effective_boost_pct` added to the
+   `tick_channel_samples` descriptor (schema v7→v8 with migration); the report's
+   per-channel `response_boost_total_pct` is the max over rows of the four stage
+   boosts plus low-band, matching the Python rule.
+3. The native report gained a GPU-envelope-peak / threshold-crossing block
+   (`--gpu-load-threshold-c`) and a loop-timing + process-resource percentile
+   section (data was already ingested; this is emit-side) in both text and JSON.
+4. `scripts/analyze_control_run.py` is now a thin wrapper: it shells the in-repo
+   `svg-mb-control.exe` to `analyze ingest --csv` into a temporary DB and
+   forwards native `analyze report` output (text or JSON), with arg translation
+   for `--events`/`--gpu-load-threshold-c`/`--format`/`--out`. All duplicated
+   analysis (percentile/stats/gpu-envelope/decision-record/manifest) is gone;
+   the script dropped from ~790 to ~120 lines. Its output is now the native
+   report shape (not the old `svg_mb_control.run_summary.v1`), since native
+   reports per-band temperature stats where the script reported overall — a
+   faithful v1 reshape was not feasible without further native work, and the
+   wrapper goal is to delegate analysis, not preserve the legacy schema.
+5. Tests: `tests/test_analyzer.py` is now a wrapper integration test (raw CSV →
+   native report via the exe); `tests/test_analyze_ingest.py` `AnalyzeReportTests`
+   gained assertions for the GPU-peak block, timing/resource percentiles, and
+   `response_boost_total_pct`. Validated by `scripts/Test-LocalCI.ps1`.
 
 ## Deeper Pass (2026-05-29)
 

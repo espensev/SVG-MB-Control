@@ -56,6 +56,12 @@ int InsertEventsAttributed(Database& db,
                            const std::vector<EventData>& events,
                            const std::vector<RunWindow>& runs);
 
+// Attributes every event to one run id unconditionally (used by the
+// manifest-free single-CSV ingest, which has no start-event session window).
+int InsertEventsForRun(Database& db,
+                       const std::vector<EventData>& events,
+                       std::int64_t run_id);
+
 std::int64_t InsertPlantModelCapture(Database& db,
                                      const std::string& path_canonical,
                                      const PlantModelData& data,

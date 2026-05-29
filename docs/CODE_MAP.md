@@ -242,9 +242,9 @@ the same responsibility; otherwise they are listed separately.
   dashboard Python server.
 - `scripts/Test-LocalCI.ps1` — CI-style local validation: release
   build + tests without publishing or restarting the live controller.
-- `scripts/analyze_control_run.py` — Legacy direct-CSV compatibility
-  analyzer for captures that have not been ingested into the native
-  analysis DB.
+- `scripts/analyze_control_run.py` — Thin wrapper that ingests a raw
+  control-loop CSV into a temporary DB via the in-repo svg-mb-control.exe
+  and forwards native `analyze report` output (no analysis of its own).
 
 ## Top-Level PowerShell
 

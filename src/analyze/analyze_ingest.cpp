@@ -342,11 +342,111 @@ void IngestPlantModels(Database& db,
     }
 }
 
+// Manifest-free ingest: synthesize one runs row from a bare control-loop CSV
+// (and optional events JSONL), reusing the manifest-path dedup keyed on the
+// CSV's canonical path. Mode/session/identity come from the CSV "# key=value"
+// prologue when present; otherwise sensible fallbacks keep the run selectable.
+void IngestSingleCsv(Database& db,
+                     const IngestOptions& options,
+                     const std::string& ingested_at,
+                     IngestSummary& summary) {
+    const std::string canonical = Canonicalize(options.csv_path).string();
+    ParsedCsv parsed;
+    try {
+        parsed = ParseControlLoopCsv(options.csv_path);
+    } catch (const std::exception& error) {
+        std::cerr << "Error: failed to parse CSV " << options.csv_path.string()
+                  << ": " << error.what() << '\n';
+        return;
+    }
+
+    const auto prologue = [&](const char* key) -> std::optional<std::string> {
+        const auto it = parsed.prologue.find(key);
+        if (it == parsed.prologue.end() || it->second.empty()) {
+            return std::nullopt;
+        }
+        return it->second;
+    };
+
+    ManifestData synth;
+    synth.session_start =
+        prologue("session_start")
+            .value_or(parsed.rows.empty()
+                          ? options.csv_path.stem().string()
+                          : parsed.rows.front().wall_clock);
+    synth.mode = prologue("mode").value_or("control-loop");
+    synth.status = "raw_csv";
+    synth.tool_version = prologue("build_version");
+    synth.git_hash = prologue("git_hash");
+    synth.row_count = static_cast<std::int64_t>(parsed.rows.size());
+    synth.csv_archive_path = options.csv_path;
+
+    if (IsManifestPathInDb(db, canonical)) {
+        if (!options.force) {
+            ++summary.runs_skipped;
+            if (!options.quiet) {
+                std::cout << "skipped (already ingested): "
+                          << options.csv_path.string() << '\n';
+            }
+            return;
+        }
+        Transaction txn(db.handle());
+        DeleteRunByManifestPath(db, canonical);
+        txn.Commit();
+    }
+
+    std::vector<EventData> events;
+    if (!options.events_path.empty()) {
+        std::error_code ec;
+        if (std::filesystem::exists(options.events_path, ec)) {
+            try {
+                events = ParseEventsJsonl(options.events_path);
+            } catch (const std::exception& error) {
+                std::cerr << "Warning: failed to parse events "
+                          << options.events_path.string() << ": "
+                          << error.what() << '\n';
+            }
+        } else if (!options.quiet) {
+            std::cerr << "Warning: events file not found: "
+                      << options.events_path.string() << '\n';
+        }
+    }
+
+    std::int64_t run_id = 0;
+    int event_count = 0;
+    try {
+        Transaction txn(db.handle());
+        run_id = InsertRun(db, canonical, options.csv_path, synth, ingested_at);
+        InsertTickRows(db, run_id, parsed.rows);
+        if (!events.empty()) {
+            event_count = InsertEventsForRun(db, events, run_id);
+        }
+        UpdateRunIngestCounts(
+            db, run_id, static_cast<int>(parsed.rows.size()), event_count);
+        txn.Commit();
+    } catch (const std::exception& error) {
+        std::cerr << "Error: failed to ingest CSV " << options.csv_path.string()
+                  << ": " << error.what() << '\n';
+        return;
+    }
+
+    summary.tick_samples += static_cast<int>(parsed.rows.size());
+    summary.events_ingested += event_count;
+    ++summary.runs_ingested;
+    if (!options.quiet) {
+        std::cout << "ingested run id=" << run_id
+                  << " session=" << synth.session_start
+                  << " ticks=" << parsed.rows.size()
+                  << " events=" << event_count << '\n';
+    }
+}
+
 }  // namespace
 
 int RunAnalyzeIngest(const IngestOptions& options) {
     std::error_code ec;
-    if (!std::filesystem::is_directory(options.runtime_home, ec)) {
+    if (options.csv_path.empty() &&
+        !std::filesystem::is_directory(options.runtime_home, ec)) {
         std::cerr << "Error: runtime_home is not a directory: "
                   << options.runtime_home.string() << '\n';
         return 1;
@@ -390,9 +490,18 @@ int RunAnalyzeIngest(const IngestOptions& options) {
     IngestSummary summary;
     std::vector<RunWindow> run_windows;
 
-    IngestManifests(db, options, ingested_at, summary, run_windows);
-    IngestEvents(db, options, run_windows, summary);
-    IngestPlantModels(db, options, ingested_at, summary);
+    if (!options.csv_path.empty()) {
+        if (!std::filesystem::exists(options.csv_path, ec)) {
+            std::cerr << "Error: CSV not found: "
+                      << options.csv_path.string() << '\n';
+            return 1;
+        }
+        IngestSingleCsv(db, options, ingested_at, summary);
+    } else {
+        IngestManifests(db, options, ingested_at, summary, run_windows);
+        IngestEvents(db, options, run_windows, summary);
+        IngestPlantModels(db, options, ingested_at, summary);
+    }
 
     std::cout << "analyze ingest: db=" << db_path.string()
               << " runs_ingested=" << summary.runs_ingested
