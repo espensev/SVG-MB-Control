@@ -317,7 +317,10 @@ For offline evaluation, use `svg-mb-control analyze report` to summarize one
 ingested run: idle/load/cooldown `p50`/`p90`/`max` for CPU Tctl and GPU
 memory/envelope, per-channel setpoint/duty/RPM and write reversals, response
 delay after the first load-threshold crossing, and authority/write/restore
-failure counts. It is read-only and does not touch the runtime home.
+failure counts. With `--out`, `--manifest-out`, and the decision-record
+options it can also write compact analysis artifacts with source hashes and
+diagnostic flags. It is read-only and does not touch the runtime home unless an
+operator explicitly chooses an output path there.
 
 ## Process logs
 

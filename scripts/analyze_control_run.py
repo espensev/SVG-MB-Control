@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
+"""Summarize a raw, not-yet-ingested control-loop CSV (raw-CSV fallback).
+
+Native `svg-mb-control analyze ingest` + `analyze report` own the run report,
+decision record, and analysis manifest for ingested runs. This script remains a
+compatibility path for captures that have not been ingested yet: it reads a CSV
+(and optional events JSONL) directly and reports temperatures, the GPU-envelope
+peak / threshold-crossing block, loop-timing and process-resource percentiles,
+per-channel setpoint/boost stats, and event counts. Percentiles use the same
+nearest-rank method as the native report. See docs/SCRIPT_STACK_REVIEW.md.
+"""
 from __future__ import annotations
 
 import argparse
 import csv
 import datetime as dt
-import hashlib
 import json
 import math
 import re
@@ -25,6 +34,10 @@ def _data_lines(path: Path):
             yield line
 
 
+# The runtime CSV "# key=value" comment prologue is produced by
+# src/runtime/runtime_csv_archive.cpp (WritePrologue); its field grammar is
+# documented in docs/RUNTIME_LOGGING_AND_EVALUATION.md. Keep this parser and the
+# dashboard's (tools/eval_dashboard/dashboard.js parseCsv) aligned with it.
 def read_csv_prologue(path: Path) -> dict[str, str]:
     fields: dict[str, str] = {}
     with path.open("r", encoding="utf-8", newline="") as handle:
@@ -84,6 +97,11 @@ def text_counts(rows: list[dict[str, str]], name: str) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+# Per-channel boost component column suffixes. The canonical source is the CSV
+# header producer src/runtime/runtime_csv_rows.cpp (built from kBoostStageSpecs);
+# the low_band_* fallback columns used in row_response_boost are emitted only
+# there. Keep this tuple and tools/eval_dashboard/dashboard.js
+# channelResponseBoost in sync with that producer.
 RESPONSE_BOOST_SUFFIXES = (
     "thermal_pressure_boost_pct",
     "midband_pressure_boost_pct",
@@ -119,18 +137,19 @@ def response_boost_column(rows: list[dict[str, str]], prefix: str) -> list[float
 
 
 def percentile(values: list[float], pct: float) -> float | None:
+    # Nearest-rank on values sorted ascending: pX is the value at index
+    # round((X/100) * (n - 1)); p100 is the maximum. math.floor(x + 0.5)
+    # reproduces C++ std::llround (round half away from zero) for the
+    # non-negative scaled index, so this matches the native analyze report
+    # (src/analyze/analyze_report_data.cpp Percentile) and the two reports are
+    # byte-comparable.
     if not values:
         return None
     ordered = sorted(values)
-    if len(ordered) == 1:
-        return ordered[0]
-    position = (len(ordered) - 1) * (pct / 100.0)
-    lower = math.floor(position)
-    upper = math.ceil(position)
-    if lower == upper:
-        return ordered[lower]
-    fraction = position - lower
-    return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+    index = math.floor((pct / 100.0) * (len(ordered) - 1) + 0.5)
+    if index >= len(ordered):
+        index = len(ordered) - 1
+    return ordered[index]
 
 
 def stats(values: list[float]) -> dict[str, float | int | None]:
@@ -208,16 +227,6 @@ def event_field_counts(events: list[dict[str, Any]], key: str) -> dict[str, int]
             continue
         counts[value] = counts.get(value, 0) + 1
     return dict(sorted(counts.items()))
-
-
-def sha256_file(path: Path | None) -> str | None:
-    if path is None or not path.is_file():
-        return None
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def detect_channels(fieldnames: list[str] | None) -> list[int]:
@@ -707,334 +716,19 @@ def fmt_counts(counts: dict[str, int]) -> str:
     return ", ".join(f"{key}:{value}" for key, value in counts.items())
 
 
-def build_diagnostic_flags(summary: dict[str, Any], args) -> list[str]:
-    flags: list[str] = []
-    if summary["row_count"] == 0:
-        flags.append("No CSV data rows were parsed.")
-
-    overrun_count = summary["timing"]["overrun_count"]
-    if overrun_count:
-        flags.append(f"Loop overrun rows were present: {overrun_count}.")
-
-    severity_counts = summary["events"].get("by_severity", {})
-    for severity in ("critical", "error"):
-        count = severity_counts.get(severity, 0)
-        if count:
-            flags.append(f"{severity.capitalize()} event rows were present: {count}.")
-
-    concern_terms = (
-        "failed",
-        "failure",
-        "refused",
-        "circuit_breaker",
-        "sensor_failure",
-        "timeout",
-        "invalid_json",
-    )
-    for event_type, count in summary["events"]["by_type"].items():
-        if any(term in event_type for term in concern_terms):
-            flags.append(f"Concerning event count: {event_type}={count}.")
-
-    cpu_tctl_max = summary["temperatures"]["cpu_tctl_c"]["max"]
-    cpu_max_max = summary["temperatures"]["cpu_max_c"]["max"]
-    cpu_peak = cpu_tctl_max if cpu_tctl_max is not None else cpu_max_max
-    if (
-        cpu_peak is not None
-        and args.cpu_load_threshold_c is not None
-        and cpu_peak >= args.cpu_load_threshold_c
-    ):
-        low_channels = []
-        no_write_channels = []
-        for channel, data in summary["channels"].items():
-            setpoint_max = data["setpoint"]["max"]
-            if (
-                setpoint_max is not None
-                and setpoint_max <= args.low_response_setpoint_pct
-            ):
-                low_channels.append(channel)
-            if data["write_count_delta"] == 0:
-                no_write_channels.append(channel)
-        if low_channels:
-            flags.append(
-                "CPU peak "
-                f"{fmt(cpu_peak)} C met/exceeded {fmt(args.cpu_load_threshold_c)} C, "
-                "while setpoint max stayed at/below "
-                f"{fmt(args.low_response_setpoint_pct)}% on channels "
-                f"{', '.join(low_channels)}."
-            )
-        if no_write_channels:
-            flags.append(
-                "CPU peak "
-                f"{fmt(cpu_peak)} C met/exceeded {fmt(args.cpu_load_threshold_c)} C, "
-                "but write-count delta stayed at zero on channels "
-                f"{', '.join(no_write_channels)}."
-            )
-
-    gpu_response = summary["gpu_response"]
-    if (
-        gpu_response.get("threshold_c") is not None
-        and gpu_response.get("above_threshold_rows")
-    ):
-        low_gpu_channels = []
-        for channel, data in gpu_response["channels"].items():
-            load_max = data["setpoint_during_load"]["max"]
-            if load_max is not None and load_max <= args.low_response_setpoint_pct:
-                low_gpu_channels.append(channel)
-        if low_gpu_channels:
-            flags.append(
-                "GPU envelope met/exceeded "
-                f"{fmt(gpu_response['threshold_c'])} C, while load setpoint max "
-                "stayed at/below "
-                f"{fmt(args.low_response_setpoint_pct)}% on channels "
-                f"{', '.join(low_gpu_channels)}."
-            )
-
-    if not flags:
-        flags.append("No automatic risk flags triggered.")
-    return flags
-
-
-def build_decision_record(
-    summary: dict[str, Any],
-    manifest: dict[str, Any],
-    args,
-) -> str:
-    lines: list[str] = ["# SVG-MB-Control Decision Record", ""]
-    lines.append(f"- Run id: `{manifest['run_id']}`")
-    lines.append(f"- Created: `{manifest['created_at']}`")
-    lines.append(f"- Profile: {summary.get('profile') or 'n/a'}")
-    lines.append(f"- Decision: {args.decision}")
-    if args.hypothesis:
-        lines.append(f"- Hypothesis: {args.hypothesis}")
-    if summary.get("notes"):
-        lines.append(f"- Notes: {summary['notes']}")
-    if args.manifest_out:
-        lines.append(f"- Analysis manifest: `{args.manifest_out}`")
-    lines.append("")
-
-    prologue = summary.get("csv_prologue") or {}
-    identity_keys = [
-        "schema",
-        "mode",
-        "session_start",
-        "producer",
-        "build_version",
-        "git_hash",
-        "config_path",
-        "config_sha256",
-        "runtime_policy_path",
-        "runtime_policy_sha256",
-        "control_poll_tick_ms",
-        "control_write_cooldown_ms",
-    ]
-    identity_rows = [
-        [key, prologue[key]]
-        for key in identity_keys
-        if prologue.get(key)
-    ]
-    if identity_rows:
-        lines.append("## Source Identity")
-        lines.extend(markdown_table(["Field", "Value"], identity_rows))
-        lines.append("")
-
-    artifact_rows: list[list[str]] = []
-    for key in [
-        "csv",
-        "events",
-        "status",
-        "current_state",
-        "config",
-        "build_info",
-        "summary",
-    ]:
-        artifact = manifest["artifacts"].get(key, {})
-        artifact_rows.append([
-            key,
-            artifact.get("path") or "n/a",
-            artifact.get("sha256") or "n/a",
-        ])
-    lines.append("## Artifacts")
-    lines.extend(markdown_table(["Artifact", "Path", "SHA256"], artifact_rows))
-    lines.append("")
-
-    temperatures = summary["temperatures"]
-    timing = summary["timing"]
-    resources = summary["resources"]
-    gpu_response = summary["gpu_response"]
-    event_error_codes = {
-        key: value
-        for key, value in summary["events"].get("by_error_code", {}).items()
-        if key != "none"
-    }
-    metric_rows = [
-        ["Rows", str(summary["row_count"]), ""],
-        ["Duration seconds", fmt(summary["duration_seconds"]), ""],
-        [
-            "CPU/Tctl p90/max C",
-            f"{fmt(temperatures['cpu_tctl_c']['p90'])}/{fmt(temperatures['cpu_tctl_c']['max'])}",
-            f"CPU threshold {fmt(args.cpu_load_threshold_c)} C",
-        ],
-        [
-            "GPU envelope p90/max C",
-            f"{fmt(temperatures['gpu_envelope_c']['p90'])}/{fmt(temperatures['gpu_envelope_c']['max'])}",
-            f"GPU threshold {fmt(gpu_response.get('threshold_c'))} C",
-        ],
-        [
-            "Achieved interval p95/max ms",
-            f"{fmt(timing['loop_achieved_interval_ms']['p95'])}/{fmt(timing['loop_achieved_interval_ms']['max'])}",
-            f"overruns {timing['overrun_count']}",
-        ],
-        [
-            "Loop work p95/max ms",
-            f"{fmt(timing['loop_work_duration_ms']['p95'])}/{fmt(timing['loop_work_duration_ms']['max'])}",
-            "",
-        ],
-        [
-            "Process CPU avg/max pct",
-            f"{fmt(resources['process_cpu_pct']['avg'], 3)}/{fmt(resources['process_cpu_pct']['max'], 3)}",
-            "",
-        ],
-        ["Event rows", str(summary["events"]["count"]), ""],
-        [
-            "Event severity",
-            fmt_counts(summary["events"].get("by_severity", {})),
-            "",
-        ],
-        ["Event error codes", fmt_counts(event_error_codes), ""],
-    ]
-    lines.append("## Metrics")
-    lines.extend(markdown_table(["Metric", "Value", "Context"], metric_rows))
-    lines.append("")
-
-    channel_rows: list[list[str]] = []
-    for channel, data in summary["channels"].items():
-        channel_rows.append([
-            channel,
-            fmt(data["setpoint"]["p90"]),
-            fmt(data["setpoint"]["max"]),
-            str(data["write_count_delta"]),
-            fmt(data["writes_per_min"], 2),
-            fmt(data["response_boost"]["max"]),
-            fmt_counts(data.get("response_sources", {})),
-            fmt_counts(data.get("write_reasons", {})),
-        ])
-    if channel_rows:
-        lines.append("## Channel Response")
-        lines.extend(markdown_table(
-            [
-                "Channel",
-                "set p90",
-                "set max",
-                "writes delta",
-                "writes/min",
-                "boost max",
-                "response sources",
-                "write reasons",
-            ],
-            channel_rows,
-        ))
-        lines.append("")
-
-    flags = build_diagnostic_flags(summary, args)
-    lines.append("## Automatic Flags")
-    for flag in flags:
-        lines.append(f"- {flag}")
-    lines.append("")
-
-    lines.append("## Operator Outcome")
-    lines.append("- Result: pending")
-    lines.append("- Follow-up: pending")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def build_manifest(
-    summary: dict[str, Any],
-    args,
-    summary_path: Path | None,
-    decision_record_path: Path | None,
-) -> dict[str, Any]:
-    created_at = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
-    run_id = args.run_id or Path(args.csv).stem
-    files = {
-        "csv": args.csv,
-        "events": args.events,
-        "status": args.status,
-        "current_state": args.current_state,
-        "config": args.config,
-        "build_info": args.build_info,
-        "summary": summary_path,
-        "decision_record": decision_record_path,
-    }
-    return {
-        "schema": "svg_mb_control.analysis_manifest.v1",
-        "run_id": run_id,
-        "created_at": created_at,
-        "profile": args.profile,
-        "notes": args.notes,
-        "decision": args.decision,
-        "hypothesis": args.hypothesis,
-        "csv_prologue": summary.get("csv_prologue", {}),
-        "analysis_thresholds": {
-            "drop_threshold_pct": args.drop_threshold_pct,
-            "gpu_load_threshold_c": args.gpu_load_threshold_c,
-            "cpu_load_threshold_c": args.cpu_load_threshold_c,
-            "low_response_setpoint_pct": args.low_response_setpoint_pct,
-        },
-        "artifacts": {
-            key: {
-                "path": str(path) if path else None,
-                "sha256": sha256_file(path) if path else None,
-            }
-            for key, path in files.items()
-        },
-        "row_count": summary["row_count"],
-        "event_count": summary["events"]["count"],
-    }
-
-
-def default_decision_record_path(args) -> Path | None:
-    if args.out and args.format == "markdown":
-        return args.out.with_name(f"{args.out.stem}.decision.md")
-    return None
-
-
-def resolve_decision_record_path(args) -> Path | None:
-    if args.no_decision_record:
-        return None
-    if args.decision_record_out:
-        value = args.decision_record_out.strip()
-        if value.lower() == "auto":
-            return default_decision_record_path(args) or args.csv.with_name(
-                f"{args.csv.stem}.decision.md"
-            )
-        return Path(value)
-    return default_decision_record_path(args)
-
-
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Summarize an SVG-MB-Control control-loop CSV and event log."
+        description=(
+            "Summarize a raw, not-yet-ingested SVG-MB-Control control-loop CSV "
+            "and optional event log. For ingested runs prefer the native "
+            "`svg-mb-control analyze report`, which owns decision records and "
+            "analysis manifests."
+        )
     )
     parser.add_argument("--csv", required=True, type=Path, help="Control-loop CSV path.")
     parser.add_argument("--events", type=Path, help="Runtime JSONL event path.")
-    parser.add_argument("--status", type=Path, help="control_runtime.json captured with the run.")
-    parser.add_argument("--current-state", type=Path, help="current_state.json captured with the run.")
-    parser.add_argument("--config", type=Path, help="Control config used for the run.")
-    parser.add_argument("--build-info", type=Path, help="Optional build info artifact.")
-    parser.add_argument("--profile", default="", help="Run profile label.")
-    parser.add_argument("--notes", default="", help="Operator notes.")
-    parser.add_argument("--run-id", default="", help="Stable run id for the manifest.")
-    parser.add_argument(
-        "--hypothesis",
-        default="",
-        help="Tuning hypothesis copied into the generated decision record.",
-    )
-    parser.add_argument(
-        "--decision",
-        default="pending operator review",
-        help="Decision text copied into the generated decision record.",
-    )
+    parser.add_argument("--profile", default="", help="Run profile label for the summary header.")
+    parser.add_argument("--notes", default="", help="Operator notes for the summary header.")
     parser.add_argument(
         "--drop-threshold-pct",
         type=float,
@@ -1051,43 +745,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--cpu-load-threshold-c",
-        type=float,
-        default=75.0,
-        help=(
-            "CPU/Tctl threshold used by the generated decision record to flag "
-            "high-temperature low-response runs."
-        ),
-    )
-    parser.add_argument(
-        "--low-response-setpoint-pct",
-        type=float,
-        default=35.0,
-        help=(
-            "Setpoint ceiling used by the generated decision record to flag "
-            "low/no fan response during load."
-        ),
-    )
-    parser.add_argument(
         "--format",
         choices=("markdown", "json"),
         default="markdown",
         help="Summary output format.",
     )
     parser.add_argument("--out", type=Path, help="Write summary to this path.")
-    parser.add_argument("--manifest-out", type=Path, help="Write run manifest JSON here.")
-    parser.add_argument(
-        "--decision-record-out",
-        help=(
-            "Write a compact Markdown tuning decision record to this path. "
-            "Use 'auto' to derive the path from --out or --csv."
-        ),
-    )
-    parser.add_argument(
-        "--no-decision-record",
-        action="store_true",
-        help="Suppress the automatic decision record normally written beside a Markdown --out file.",
-    )
     return parser.parse_args(argv)
 
 
@@ -1109,28 +772,6 @@ def main(argv: list[str]) -> int:
         args.out.write_text(output, encoding="utf-8")
     else:
         print(output)
-
-    decision_record_path = resolve_decision_record_path(args)
-    manifest = (
-        build_manifest(summary, args, args.out, decision_record_path)
-        if decision_record_path or args.manifest_out
-        else None
-    )
-    if decision_record_path:
-        decision_record_path.parent.mkdir(parents=True, exist_ok=True)
-        decision_record_path.write_text(
-            build_decision_record(summary, manifest, args) + "\n",
-            encoding="utf-8",
-        )
-        manifest["artifacts"]["decision_record"]["sha256"] = sha256_file(
-            decision_record_path
-        )
-
-    if args.manifest_out:
-        args.manifest_out.parent.mkdir(parents=True, exist_ok=True)
-        args.manifest_out.write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-        )
     return 0
 
 

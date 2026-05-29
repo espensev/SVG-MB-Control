@@ -8,21 +8,24 @@ just enough structure to compare runs and justify config changes.
 
 ## Current Status
 
-- Phase 1 analyzer support is implemented in `scripts\analyze_control_run.py`.
+- Phase 1 analyzer support is implemented in native `svg-mb-control analyze
+  ingest` and `svg-mb-control analyze report`; `scripts\analyze_control_run.py`
+  remains as a legacy direct-CSV compatibility path.
 - Runtime manifests are implemented by the controller itself:
   `logs\svg_mb_control_manifest.json` and
   `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json`.
 - Runtime CSV prologues include build/config/runtime-policy identity fields
   without changing row shape.
-- The analyzer now writes compact decision records automatically beside
+- Native `analyze report` writes compact decision records automatically beside
   Markdown summaries and records them in the analysis manifest.
 - Runtime JSONL events include normalized `severity` and `error_code` fields,
   and SQLite ingest stores them in first-class event columns.
 
 ## Phase 1: Offline Summaries
 
-Add a repo-owned analyzer for `control-loop` CSV plus
-`svg_mb_control_events.jsonl`.
+Add a repo-owned analyzer for ingested `control-loop` runtime data, with the
+legacy Python script kept for raw CSV plus `svg_mb_control_events.jsonl`
+compatibility.
 
 Inputs:
 

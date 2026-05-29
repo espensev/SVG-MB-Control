@@ -2,7 +2,7 @@
 
 ## Status
 
-Current as of 2026-05-26.
+Current as of 2026-05-28.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
@@ -87,13 +87,17 @@ logging replacement.
 
 ## Tooling Now Available
 
-- `scripts\analyze_control_run.py` can turn a control-loop CSV plus optional
-  event JSONL into a repeatable Markdown or JSON summary, an automatic compact
-  decision record for Markdown summaries, and an analysis manifest with artifact
-  hashes.
-- The controller writes the native runtime manifest during the run. The analyzer
-  can still create a separate analysis manifest with profile, notes, run id,
-  artifact hashes, and before/after decision context.
+- Native `svg-mb-control analyze ingest` imports runtime manifests, CSV archives,
+  events JSONL, and plant-model captures into the SQLite analysis DB.
+- Native `svg-mb-control analyze report` summarizes one ingested run and can
+  write a report, compact Markdown decision record, and analysis manifest with
+  artifact hashes. Use this as the default evidence path for new runs.
+- `scripts\analyze_control_run.py` remains as a legacy direct-CSV compatibility
+  analyzer for captures that have not been ingested. It emits only the raw run
+  summary (temperatures, GPU-envelope peak, loop-timing and process-resource
+  percentiles, per-channel and event stats); decision records and analysis
+  manifests are native-owned (`analyze report`), and its percentiles use the
+  same nearest-rank method as the native report.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live
@@ -142,24 +146,24 @@ Use this loop for controller changes:
 4. Collect the native runtime manifest first, then the active CSV archive,
    `control_runtime.json`, `current_state.json`, and
    `svg_mb_control_events.jsonl`.
-5. Summarize the run before tuning. Use the repo analyzer as the default first
+5. Summarize the run before tuning. Use the native analyzer as the default first
    pass:
    ```powershell
-   python scripts\analyze_control_run.py `
-     --csv release\runtime\logs\archive\svg_mb_control_control-loop_<timestamp>.csv `
-     --events release\runtime\logs\svg_mb_control_events.jsonl `
-     --status release\runtime\control_runtime.json `
-     --current-state release\runtime\current_state.json `
-     --config config\control.json `
+   release\svg-mb-control.exe analyze ingest `
+     --runtime-home .\release\runtime `
+     --db .\release\runtime\svg_mb_control.db
+   release\svg-mb-control.exe analyze report `
+     --runtime-home .\release\runtime `
+     --db .\release\runtime\svg_mb_control.db `
+     --idle-seconds 300 `
      --profile combined-load `
-     --gpu-load-threshold-c 70 `
      --notes "ambient and subjective noise notes" `
-     --out run-summary.md `
+     --out run-summary.txt `
      --manifest-out run-manifest.json
    ```
    This also writes `run-summary.decision.md` automatically. The decision
-   record includes artifact hashes, CSV prologue identity, channel response
-   attribution counts, and automatic flags for hot-but-low/no-response runs.
+   record includes artifact hashes, run identity, channel response attribution
+   counts, event counts, and automatic flags for hot-but-low/no-response runs.
    Override the path with `--decision-record-out <path>` or suppress it with
    `--no-decision-record`.
    The summary should cover at least:

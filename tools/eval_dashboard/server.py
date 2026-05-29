@@ -11,8 +11,8 @@ import time
 from urllib.parse import parse_qs, urlparse
 
 
-HEALTH_FILES = ("control_health.json", "control_supervisor.json", "control_runtime.json")
 DEFAULT_RUNTIME_HOME = Path("release") / "runtime"
+DASHBOARD_URL_PREFIX = "/tools/eval_dashboard"
 RUNTIME_FILE_METADATA = (
     ("control_health", Path("control_health.json")),
     ("control_supervisor", Path("control_supervisor.json")),
@@ -163,8 +163,20 @@ class EvalDashboardHandler(http.server.SimpleHTTPRequestHandler):
 
     def redirect_dashboard(self) -> None:
         self.send_response(302)
-        self.send_header("Location", "/tools/eval_dashboard/")
+        self.send_header("Location", f"{DASHBOARD_URL_PREFIX}/")
         self.end_headers()
+
+    def serve_dashboard_asset(self, parsed) -> None:
+        original_path = self.path
+        relative_path = parsed.path[len(DASHBOARD_URL_PREFIX):]
+        if not relative_path or relative_path == "/":
+            relative_path = "/index.html"
+        query = f"?{parsed.query}" if parsed.query else ""
+        self.path = relative_path + query
+        try:
+            super().do_GET()
+        finally:
+            self.path = original_path
 
     def send_bytes(self, payload: bytes, content_type: str) -> None:
         self.send_response(200)
@@ -181,36 +193,59 @@ class EvalDashboardHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _send_tail(self, path, content_type, reader, tail_bytes, label) -> None:
+        if not path.is_file():
+            self.send_not_found(f"{label} not found: {path}")
+            return
+        self.send_bytes(reader(path, tail_bytes), content_type)
+
+    def _api_live_tail(self, tail_bytes: int) -> None:
+        self._send_tail(
+            self.runtime_home / "logs" / "svg_mb_control_output.csv",
+            "text/csv; charset=utf-8",
+            read_csv_tail,
+            tail_bytes,
+            "live CSV",
+        )
+
+    def _api_events_tail(self, tail_bytes: int) -> None:
+        self._send_tail(
+            self.runtime_home / "logs" / "svg_mb_control_events.jsonl",
+            "application/x-ndjson; charset=utf-8",
+            read_file_tail,
+            tail_bytes,
+            "events JSONL",
+        )
+
+    def _api_health(self, _tail_bytes: int) -> None:
+        payload = json.dumps(
+            build_health_payload(self.repo_root, self.runtime_home)
+        ).encode("utf-8")
+        self.send_bytes(payload, "application/json; charset=utf-8")
+
+    # Exact-path routing table: API path -> handler method name. Each handler
+    # takes (tail_bytes); health.json ignores it.
+    _API_ROUTES = {
+        "/api/live-tail.csv": "_api_live_tail",
+        "/api/health.json": "_api_health",
+        "/api/events-tail.jsonl": "_api_events_tail",
+    }
+
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         parsed = urlparse(self.path)
-        if parsed.path == "/":
+        if parsed.path in ("/", DASHBOARD_URL_PREFIX):
             self.redirect_dashboard()
             return
 
-        params = parse_qs(parsed.query)
-        tail_bytes = clamp_tail_bytes(params.get("bytes", [None])[0])
-
-        if parsed.path == "/api/live-tail.csv":
-            path = self.runtime_home / "logs" / "svg_mb_control_output.csv"
-            if not path.is_file():
-                self.send_not_found(f"live CSV not found: {path}")
-                return
-            self.send_bytes(read_csv_tail(path, tail_bytes), "text/csv; charset=utf-8")
+        method_name = self._API_ROUTES.get(parsed.path)
+        if method_name is not None:
+            params = parse_qs(parsed.query)
+            tail_bytes = clamp_tail_bytes(params.get("bytes", [None])[0])
+            getattr(self, method_name)(tail_bytes)
             return
 
-        if parsed.path == "/api/health.json":
-            payload = json.dumps(
-                build_health_payload(self.repo_root, self.runtime_home)
-            ).encode("utf-8")
-            self.send_bytes(payload, "application/json; charset=utf-8")
-            return
-
-        if parsed.path == "/api/events-tail.jsonl":
-            path = self.runtime_home / "logs" / "svg_mb_control_events.jsonl"
-            if not path.is_file():
-                self.send_not_found(f"events JSONL not found: {path}")
-                return
-            self.send_bytes(read_file_tail(path, tail_bytes), "application/x-ndjson; charset=utf-8")
+        if parsed.path.startswith(f"{DASHBOARD_URL_PREFIX}/"):
+            self.serve_dashboard_asset(parsed)
             return
 
         super().do_GET()
@@ -231,17 +266,20 @@ def main() -> int:
 
     repo_root = args.repo_root.resolve()
     runtime_home = resolve_runtime_home(repo_root, args.runtime_home)
+    dashboard_root = repo_root / "tools" / "eval_dashboard"
+    if not (dashboard_root / "index.html").is_file():
+        raise FileNotFoundError(f"Dashboard assets not found: {dashboard_root}")
 
     class Handler(EvalDashboardHandler):
         def __init__(self, *handler_args, **handler_kwargs):
-            super().__init__(*handler_args, directory=str(repo_root), **handler_kwargs)
+            super().__init__(*handler_args, directory=str(dashboard_root), **handler_kwargs)
 
     Handler.repo_root = repo_root
     Handler.runtime_home = runtime_home
 
     server = http.server.ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"SVG-MB-Control eval dashboard: http://{args.host}:{args.port}/tools/eval_dashboard/")
-    print(f"Serving repo root: {repo_root}")
+    print(f"SVG-MB-Control eval dashboard: http://{args.host}:{args.port}{DASHBOARD_URL_PREFIX}/")
+    print(f"Serving dashboard root: {dashboard_root}")
     print(f"Reading runtime home: {runtime_home}")
     print("Press Ctrl+C to stop.")
     try:

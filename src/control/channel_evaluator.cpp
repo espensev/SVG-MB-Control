@@ -387,6 +387,13 @@ void DetectAuthorityReassert(EvaluationScratch& s) {
 
 }  // namespace
 
+// GPU control envelope = max(core, memjn, hotspot-if>0). The analyzer copies
+// (src/analyze/analyze_csv.cpp GpuEnvelopeC, the analyze_db.cpp SQL backfill,
+// scripts/analyze_control_run.py gpu_envelope_c, tools/eval_dashboard/
+// dashboard.js gpuEnvelope) implement the same rule but are optional-aware.
+// This control-path copy treats core_c/memjn_c as always present because
+// RuntimeGpuSnapshot stores plain doubles (src/runtime/runtime_snapshot.h).
+// Keep the rule aligned across all copies.
 double GpuControlEnvelopeC(const RuntimeGpuSnapshot& gpu) {
     double envelope = (std::max)(gpu.core_c, gpu.memjn_c);
     if (gpu.hotspot_c > 0.0) {

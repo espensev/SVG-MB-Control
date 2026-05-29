@@ -376,6 +376,11 @@ std::string BuildControlLoopCsvHeader() {
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
+        // Canonical control-loop CSV header. Per-channel boost column names come
+        // from kBoostStageSpecs; the low_band_* columns below are emitted only
+        // here. CSV readers that hardcode these names
+        // (scripts/analyze_control_run.py, tools/eval_dashboard/dashboard.js)
+        // must track this list.
         header << ",channel" << channel << "_observed_temp_c"
                << ",channel" << channel << "_setpoint_pct";
         for (std::size_t s = 0; s < kBoostStageCount; ++s) {

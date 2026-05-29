@@ -265,9 +265,9 @@ Operator commands use the same runtime-home resolution as the active config:
   breakers. Add `--reset-breaker-channel <n>` to target one channel.
 
 `Install-SVG-MB-ControlWatchdogScheduledTask.ps1` adds a separate watchdog task
-that checks health at logon and every minute. It restarts only `stale` or
-`stopped` states; `degraded` is visible but not restarted, and `failed` is left
-for operator review.
+through `svg-mb-control-task-runner.exe`. The task checks health at logon and
+every minute. It restarts only `stale` or `stopped` states; `degraded` is
+visible but not restarted, and `failed` is left for operator review.
 
 Passing `--mode control-loop --config <path>` keeps the loop attached to the
 current terminal and does not add supervisor restart behavior.

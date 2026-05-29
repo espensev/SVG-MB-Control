@@ -152,6 +152,8 @@ the same responsibility; otherwise they are listed separately.
   `RuntimeSnapshot` producer for direct sampling paths.
 - `src/platform/env_util.{h,cpp}` — `GetEnvWithDefault` helper for
   reading env vars with a fallback.
+- `src/platform/file_hash.{h,cpp}` — Shared streaming SHA-256 helper for
+  runtime and analyzer artifact identity.
 - `src/platform/runtime_singleton.{h,cpp}` — Cross-process named
   mutex that enforces single-controller-per-runtime-home.
 - `src/platform/runtime_util.{h,cpp}` — `ProcessIsActive` and
@@ -160,8 +162,9 @@ the same responsibility; otherwise they are listed separately.
   for Session 0 / LocalSystem service migration; see
   `docs/SERVICE_PROBE.md`.
 - `src/platform/task_runner.cpp` — Separate hidden `wWinMain` binary
-  for the scheduled-task watchdog: resolves `svg-mb-control.exe`,
-  launches it under `NUL` stdio, and forwards a `--status` invocation.
+  for scheduled tasks: resolves `svg-mb-control.exe`, launches it under
+  `NUL` stdio, forwards start/stop/restart/status commands, and runs the
+  watchdog health/restart check.
 - `src/platform/windows_lean.h` — Central `WIN32_LEAN_AND_MEAN` /
   `NOMINMAX` guard before `<windows.h>` includes.
 
@@ -169,6 +172,10 @@ the same responsibility; otherwise they are listed separately.
 
 - `src/analyze/analyze_cli.{h,cpp}` — `analyze` subcommand dispatcher
   (`ingest`, `prune`, `report`) with shared option parsing.
+- `src/analyze/analyze_channel_sample_columns.{h,cpp}` —
+  `tick_channel_samples` descriptor: analyzer channel sample column names,
+  SQLite types, generated DDL/insert/select SQL, CSV field names, select
+  indexes, and the `ParsedChannelSample` binder.
 - `src/analyze/analyze_csv.{h,cpp}` — CSV row parser that
   reconstructs per-tick telemetry samples from archived runtime CSVs.
 - `src/analyze/analyze_db.{h,cpp}` — SQLite connection wrapper,
@@ -182,9 +189,15 @@ the same responsibility; otherwise they are listed separately.
   JSON parsers used by ingest.
 - `src/analyze/analyze_prune.{h,cpp}` — Offline retention pruner for
   archive bundles (age- and count-based).
-- `src/analyze/analyze_report.{h,cpp}` — Report generator: temperature
-  ranges, duty-cycle stats, source counts, robustness counters, and
-  short live summaries.
+- `src/analyze/analyze_report.{h,cpp}` — Public report options and
+  orchestration entry point for native `analyze report`.
+- `src/analyze/analyze_report_data.{h,cpp}` — Shared report data model and
+  percentile/band summarization helpers.
+- `src/analyze/analyze_report_queries.{h,cpp}` — Report DB reads, tick
+  banding, channel/event aggregation, manifest evidence loading, and response
+  delay detection.
+- `src/analyze/analyze_report_emit.{h,cpp}` — Text/JSON report emitters,
+  analysis manifest writing, and compact decision records.
 
 ## Tests
 
@@ -195,8 +208,8 @@ the same responsibility; otherwise they are listed separately.
   `control_policy`, CSV utilities, and core helpers.
 - `tests/cpp/pawnio_binary_tests.cpp` — CTest C++ coverage for PawnIO
   binary resolution, load, and SHA-256 verification.
-- `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`
-  subcommand coverage.
+- `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`,
+  `analyze prune`, and native `analyze report` coverage.
 - `tests/test_analyzer.py` — Tests for the Python
   `analyze_control_run.py` offline analyzer.
 - `tests/test_calibration.py` — Calibration sequence parsing and
@@ -229,15 +242,17 @@ the same responsibility; otherwise they are listed separately.
   dashboard Python server.
 - `scripts/Test-LocalCI.ps1` — CI-style local validation: release
   build + tests without publishing or restarting the live controller.
-- `scripts/analyze_control_run.py` — Offline Python analyzer that
-  summarizes timing, temperature, and duty statistics from a
-  control-loop CSV.
+- `scripts/analyze_control_run.py` — Legacy direct-CSV compatibility
+  analyzer for captures that have not been ingested into the native
+  analysis DB.
 
 ## Top-Level PowerShell
 
-- `build.ps1` — Plain CMake configure/build under a guaranteed MSVC
-  x64 environment via `vcvarsall.bat`.
+- `build.ps1` — Convenience delegate to `scripts/Test-LocalCI.ps1
+  -KeepBuildDir`.
 - `build-release.ps1` — Thin delegate to `scripts/Build-Release.ps1`.
+- `Install-SVG-MB-ControlCommon.ps1` — Shared helper functions for the
+  scheduled-task, watchdog, and shortcut installers.
 - `Install-SVG-MB-ControlScheduledTask.ps1` — Install/start/stop/
   status/remove for the main controller scheduled task.
 - `Install-SVG-MB-ControlShortcut.ps1` — Start-menu / desktop
@@ -260,9 +275,11 @@ the same responsibility; otherwise they are listed separately.
 
 ## Tools
 
-- `tools/eval_cinebench.py` — Cinebench-style stress-evaluation
-  helper that drives the controller and extracts a fixed analyzer
-  report.
+- `tools/eval_cinebench.py` — Offline CSV analyzer that summarizes a
+  Cinebench-style load window (pre/load/post Tctl stats, cooldown
+  times, and load-window event counts) from an archived control-loop
+  CSV plus an optional events JSONL. Takes `--csv` and `--events`; it
+  launches nothing and computes stats inline.
 - `tools/eval_dashboard/` — Local web dashboard for offline/live run
   inspection. `index.html` and `styles.css` carry the layout;
   `dashboard.js` parses CSV/event JSONL client-side; `selftest.js`

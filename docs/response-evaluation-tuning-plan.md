@@ -262,12 +262,13 @@ Tight-envelope rule:
 
 ## Implementation Plan
 
-1. Use the in-tree analyzer (`svg-mb-control.exe --analyze ...`) to
-   ingest each run's CSV and JSONL events and emit p50 / p90 / max
-   summaries, response-delay metrics, and authority-loss events. See
-   `docs\RUNTIME_LOGGING_AND_EVALUATION.md` for the analyzer workflow.
-2. Save the decision record produced by `--analyze` next to the manifest
-   under `release\runtime\` or a per-run `runtime\analysis\` folder.
+1. Use the in-tree analyzer (`svg-mb-control.exe analyze ingest` followed by
+   `svg-mb-control.exe analyze report`) to ingest each run's CSV/JSONL evidence
+   and emit p50 / p90 / max summaries, response-delay metrics, and
+   authority-loss events. See `docs\RUNTIME_LOGGING_AND_EVALUATION.md` for the
+   analyzer workflow.
+2. Save the decision record produced by `analyze report --out ...` next to the
+   manifest under `release\runtime\` or a per-run `runtime\analysis\` folder.
 3. Keep CPU override enabled while evaluating combined Cinebench +
    max CUDA response.
 4. Tune GPU curve breakpoints only after Pass 2 shows whether GPU

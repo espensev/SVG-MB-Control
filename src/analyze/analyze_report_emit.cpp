@@ -18,6 +18,11 @@ namespace svg_mb_control::analyze::report_detail {
 
 namespace {
 
+// Diagnostic-flag thresholds for BuildDiagnosticFlags. Named so the
+// hot/slow-response policy has one knob per value rather than bare literals.
+constexpr double kHotChannelSetpointCeilingPct = 35.0;
+constexpr double kSlowSetpointResponseThresholdS = 10.0;
+
 nlohmann::json OptStringToJson(const std::optional<std::string>& value) {
     return value ? nlohmann::json(*value) : nlohmann::json(nullptr);
 }
@@ -192,7 +197,8 @@ std::vector<std::string> BuildDiagnosticFlags(const ReportOptions& options,
     if (data.onset_tick && !data.response_tick) {
         flags.push_back("no_setpoint_response_after_load_threshold");
     }
-    if (data.response_delay_s && *data.response_delay_s > 10.0) {
+    if (data.response_delay_s &&
+        *data.response_delay_s > kSlowSetpointResponseThresholdS) {
         flags.push_back("slow_setpoint_response_after_load_threshold");
     }
     if (data.authority_reasserted > 0) {
@@ -217,7 +223,8 @@ std::vector<std::string> BuildDiagnosticFlags(const ReportOptions& options,
             max_channel_p90 = p90;
         }
     }
-    if (hot && max_channel_p90 && *max_channel_p90 < 35.0) {
+    if (hot && max_channel_p90 &&
+        *max_channel_p90 < kHotChannelSetpointCeilingPct) {
         flags.push_back("hot_but_low_channel_setpoint");
     }
     return flags;
