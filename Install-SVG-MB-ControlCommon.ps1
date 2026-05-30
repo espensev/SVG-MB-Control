@@ -135,7 +135,97 @@ function Get-SvgMbScheduledTask {
         [Parameter(Mandatory = $true)][string]$Path
     )
 
-    Get-ScheduledTask -TaskName $Name -TaskPath $Path -ErrorAction SilentlyContinue
+    try {
+        Get-ScheduledTask -TaskName $Name -TaskPath $Path -ErrorAction Stop
+    } catch {
+        $null
+    }
+}
+
+function Get-SvgMbTaskFullName {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $normalizedPath = Normalize-SvgMbTaskPath -Path $Path
+    return "$normalizedPath$Name"
+}
+
+function Get-SvgMbSchtasksRecord {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $fullName = Get-SvgMbTaskFullName -Name $Name -Path $Path
+    $output = & schtasks.exe /Query /TN $fullName /V /FO CSV 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $output) {
+        return $null
+    }
+
+    try {
+        $records = @($output | ConvertFrom-Csv)
+        if ($records.Count -gt 0) {
+            return $records[0]
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Test-SvgMbScheduledTaskInstalled {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    if (Get-SvgMbScheduledTask -Name $Name -Path $Path) {
+        return $true
+    }
+    return $null -ne (Get-SvgMbSchtasksRecord -Name $Name -Path $Path)
+}
+
+function Start-SvgMbScheduledTaskCompat {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    try {
+        Start-ScheduledTask -TaskName $Name -TaskPath $Path -ErrorAction Stop
+        return
+    } catch {
+        $fullName = Get-SvgMbTaskFullName -Name $Name -Path $Path
+        & schtasks.exe /Run /TN $fullName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not start scheduled task: $fullName"
+        }
+    }
+}
+
+function Remove-SvgMbScheduledTaskCompat {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    try {
+        Unregister-ScheduledTask `
+            -TaskName $Name `
+            -TaskPath $Path `
+            -Confirm:$false `
+            -ErrorAction Stop
+        return
+    } catch {
+        $fullName = Get-SvgMbTaskFullName -Name $Name -Path $Path
+        & schtasks.exe /Delete /TN $fullName /F | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not remove scheduled task: $fullName"
+        }
+    }
 }
 
 function Write-SvgMbTaskInfo {
@@ -146,15 +236,37 @@ function Write-SvgMbTaskInfo {
 
     $task = Get-SvgMbScheduledTask -Name $Name -Path $Path
     if ($task) {
-        $info = Get-ScheduledTaskInfo -TaskName $Name -TaskPath $Path
-        Write-Host "Scheduled task: $Path$Name"
-        Write-Host "  state: $($task.State)"
-        Write-Host "  last_run: $($info.LastRunTime)"
-        Write-Host "  last_result: $($info.LastTaskResult)"
-        Write-Host "  next_run: $($info.NextRunTime)"
-    } else {
-        Write-Host "Scheduled task: not installed ($Path$Name)"
+        try {
+            $info = Get-ScheduledTaskInfo `
+                -TaskName $Name `
+                -TaskPath $Path `
+                -ErrorAction Stop
+            Write-Host "Scheduled task: $Path$Name"
+            Write-Host "  state: $($task.State)"
+            Write-Host "  last_run: $($info.LastRunTime)"
+            Write-Host "  last_result: $($info.LastTaskResult)"
+            Write-Host "  next_run: $($info.NextRunTime)"
+            return
+        } catch {
+            # Fall through to schtasks.exe below. Some Windows environments can
+            # query tasks through schtasks.exe while the ScheduledTasks CIM
+            # cmdlets fail or return no record.
+        }
     }
+
+    $record = Get-SvgMbSchtasksRecord -Name $Name -Path $Path
+    if ($record) {
+        Write-Host "Scheduled task: $(Get-SvgMbTaskFullName -Name $Name -Path $Path)"
+        Write-Host "  state: $($record.Status)"
+        Write-Host "  enabled: $($record.'Scheduled Task State')"
+        Write-Host "  last_run: $($record.'Last Run Time')"
+        Write-Host "  last_result: $($record.'Last Result')"
+        Write-Host "  next_run: $($record.'Next Run Time')"
+        Write-Host "  action: $($record.'Task To Run')"
+        return
+    }
+
+    Write-Host "Scheduled task: not installed ($Path$Name)"
 }
 
 function Register-SvgMbControlTask {

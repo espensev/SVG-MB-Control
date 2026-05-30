@@ -56,9 +56,9 @@ if ($Remove -and ($Install -or $Run -or $Status)) {
 }
 
 if ($Remove) {
-    $existing = Get-SvgMbScheduledTask -Name $TaskName -Path $taskPathValue
+    $existing = Test-SvgMbScheduledTaskInstalled -Name $TaskName -Path $taskPathValue
     if ($existing) {
-        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $taskPathValue -Confirm:$false
+        Remove-SvgMbScheduledTaskCompat -Name $TaskName -Path $taskPathValue
         Write-Host "Removed scheduled task: $taskPathValue$TaskName"
     } else {
         Write-Host "Scheduled task already absent: $taskPathValue$TaskName"

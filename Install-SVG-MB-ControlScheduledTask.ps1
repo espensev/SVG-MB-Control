@@ -55,9 +55,9 @@ $configPath = Resolve-SvgMbControlConfig -ExePath $exePath
 $exeDir = Split-Path -Parent $exePath
 
 if ($Remove) {
-    $existing = Get-SvgMbScheduledTask -Name $TaskName -Path $taskPathValue
+    $existing = Test-SvgMbScheduledTaskInstalled -Name $TaskName -Path $taskPathValue
     if ($existing) {
-        Unregister-ScheduledTask -TaskName $TaskName -TaskPath $taskPathValue -Confirm:$false
+        Remove-SvgMbScheduledTaskCompat -Name $TaskName -Path $taskPathValue
         Write-Host "Removed scheduled task: $taskPathValue$TaskName"
     } else {
         Write-Host "Scheduled task already absent: $taskPathValue$TaskName"
@@ -98,9 +98,9 @@ if ($Stop) {
 }
 
 if ($Start) {
-    $task = Get-SvgMbScheduledTask -Name $TaskName -Path $taskPathValue
+    $task = Test-SvgMbScheduledTaskInstalled -Name $TaskName -Path $taskPathValue
     if ($task) {
-        Start-ScheduledTask -TaskName $TaskName -TaskPath $taskPathValue
+        Start-SvgMbScheduledTaskCompat -Name $TaskName -Path $taskPathValue
         Write-Host "Started scheduled task: $taskPathValue$TaskName"
         Start-Sleep -Seconds 2
     } else {
