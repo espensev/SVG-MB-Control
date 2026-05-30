@@ -294,7 +294,7 @@ void AssignBands(std::vector<TickRow>& ticks, const ReportOptions& options) {
 
 // Loop-timing and process-resource percentiles over all ticks. Operates on the
 // already-loaded ticks (LoadTicks reads the timing/resource columns); overrun
-// counts ticks with a non-zero loop_overrun, matching the Python analyzer.
+// counts ticks with a non-zero loop_overrun.
 TimingResourceStats SummariseTimingResources(
     const std::vector<TickRow>& ticks) {
     std::vector<double> ai, wd, sl, cpu, ws, pb;
@@ -344,8 +344,7 @@ TimingResourceStats SummariseTimingResources(
 
 // GPU-envelope peak + (when a threshold is supplied) threshold-crossing
 // metrics, plus per-channel setpoint at the peak tick and during the load
-// window. Mirrors the Python analyzer's summarize_gpu_response using native
-// nearest-rank percentiles and native elapsed_s.
+// window using native nearest-rank percentiles and native elapsed_s.
 GpuResponseSummary SummariseGpuResponse(
     Database& db, std::int64_t run_id,
     const std::vector<TickRow>& ticks,
@@ -552,9 +551,9 @@ bool LoadChannelStats(Database& db, std::int64_t run_id,
                 cs.max_cpu_low_soak_boost_pct =
                     std::max(cs.max_cpu_low_soak_boost_pct, *soak);
             }
-            // Low-band-inclusive response-boost total (matches the Python
-            // analyzer's row_response_boost): sum the present stage boosts plus
-            // low_band_effective (fallback low_band_stage), track the max.
+            // Low-band-inclusive response-boost total: sum present stage
+            // boosts plus low_band_effective (fallback low_band_stage), track
+            // the max. This preserves the former raw-CSV analyzer rule.
             auto lb_stage = ColumnOptionalDouble(stmt, low_band_stage_idx);
             auto lb_eff = ColumnOptionalDouble(stmt, low_band_effective_idx);
             double boost_total = 0.0;

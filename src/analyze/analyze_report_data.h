@@ -61,7 +61,7 @@ struct GpuChannelAtPeak {
 };
 
 // GPU-envelope peak and (when a threshold is supplied) threshold-crossing
-// summary, mirroring the Python analyzer's summarize_gpu_response.
+// summary for native analyze report output.
 struct GpuResponseSummary {
     bool has_peak = false;
     std::int64_t peak_row_number = 0;  // 1-based ordinal among ticks
@@ -83,8 +83,8 @@ struct ChannelStats {
     double max_gpu_airflow_boost_pct = 0.0;
     double max_cpu_low_soak_boost_pct = 0.0;
     // Max over rows of (sum of the 4 stage boosts present in the row +
-    // low_band_effective-or-stage). Matches the Python analyzer's
-    // row_response_boost rule so the raw-CSV wrapper and native agree.
+    // low_band_effective-or-stage). This preserves the former raw-CSV
+    // analyzer rule after analysis moved fully native.
     double response_boost_total = 0.0;
     std::map<std::string, int> primary_source_counts;
     std::map<std::string, int> response_source_counts;

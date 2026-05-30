@@ -5,13 +5,16 @@
 #include "runtime_artifacts.h"
 #include "runtime_util.h"
 
+#include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
 #include <iomanip>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace svg_mb_control {
 
@@ -99,6 +102,299 @@ void BuildAmdSensorSummary(const RuntimeSnapshot& snapshot, std::string& out) {
     }
 }
 
+// --- Descriptor-driven repeated CSV field groups -------------------------
+//
+// Each repeated per-index block (fan snapshot, fan tach evidence, SIO
+// voltage/temperature, control channel) used to list its column names in a
+// header loop and its row values in a separate row loop, kept aligned by
+// hand. The descriptor tables below put the column-name suffix and its row
+// writer on one line, and the header/row builders both iterate the same
+// table, so the two cannot drift. Column names and emitted values are
+// byte-identical to the previous hand-written blocks; readers that bind by
+// name (native analyze ingest, tools/eval_dashboard/dashboard.js) are
+// unaffected.
+
+// One CSV column in a repeated group. `suffix` is appended after the
+// "<prefix><index>" stem to form the column name (e.g. "_present"); `append`
+// writes the matching row value with its own leading comma, honoring
+// `present` exactly as the previous hand-written row builders did.
+template <class Entity>
+struct CsvColumn {
+    std::string_view suffix;
+    void (*append)(std::ostringstream&, bool present, const Entity& entity);
+};
+
+// Emits ",<prefix><index><suffix>" for every column in `columns`.
+template <class Entity, std::size_t N>
+void AppendEntityColumns(std::ostringstream& header,
+                         std::string_view prefix,
+                         std::uint32_t index,
+                         const std::array<CsvColumn<Entity>, N>& columns) {
+    for (const auto& column : columns) {
+        header << ',' << prefix << index << column.suffix;
+    }
+}
+
+// Writes the row value for every column in `columns`.
+template <class Entity, std::size_t N>
+void AppendEntityFields(std::ostringstream& csv,
+                        bool present,
+                        const Entity& entity,
+                        const std::array<CsvColumn<Entity>, N>& columns) {
+    for (const auto& column : columns) {
+        column.append(csv, present, entity);
+    }
+}
+
+// Header side of a full repeated group: `count` indexed blocks of `columns`.
+template <class Entity, std::size_t N>
+void AppendIndexedColumns(std::ostringstream& header,
+                          std::string_view prefix,
+                          std::size_t count,
+                          const std::array<CsvColumn<Entity>, N>& columns) {
+    for (std::uint32_t index = 0u;
+         index < static_cast<std::uint32_t>(count); ++index) {
+        AppendEntityColumns(header, prefix, index, columns);
+    }
+}
+
+// Row side of a full repeated group: looks up each index with `find` (which
+// returns a pointer or nullptr) and writes its columns, emitting empty cells
+// for absent indices exactly as the previous hand-written loops did.
+template <class Entity, std::size_t N, class Finder>
+void AppendIndexedFields(std::ostringstream& csv,
+                         std::size_t count,
+                         const Finder& find,
+                         const std::array<CsvColumn<Entity>, N>& columns) {
+    static const Entity kEmpty{};
+    for (std::uint32_t index = 0u;
+         index < static_cast<std::uint32_t>(count); ++index) {
+        const Entity* found = find(index);
+        const bool present = found != nullptr;
+        AppendEntityFields(csv, present, present ? *found : kEmpty, columns);
+    }
+}
+
+constexpr std::array<CsvColumn<RuntimeFanSnapshot>, 12> kFanSnapshotColumns{{
+    {"_present",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot&) {
+         AppendCsvFieldBool(csv, present);
+     }},
+    {"_label",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldStringIf(csv, present, fan.label);
+     }},
+    {"_rpm",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldIf(csv, present, fan.rpm);
+     }},
+    {"_tach_raw",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldIf(csv, present, fan.tach_raw);
+     }},
+    {"_tach_valid",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldBoolIf(csv, present, fan.tach_valid);
+     }},
+    {"_duty_raw",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldIf(csv, present, static_cast<unsigned int>(fan.duty_raw));
+     }},
+    {"_duty_pct",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldDoubleIf(csv, present, fan.duty_percent, 2);
+     }},
+    {"_mode_raw",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldIf(csv, present, static_cast<unsigned int>(fan.mode_raw));
+     }},
+    {"_manual_override",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldBoolIf(csv, present, fan.manual_override);
+     }},
+    {"_write_allowed",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldBoolIf(csv, present, fan.write_allowed);
+     }},
+    {"_policy_blocked",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldBoolIf(csv, present, fan.policy_blocked);
+     }},
+    {"_effective_write_allowed",
+     [](std::ostringstream& csv, bool present, const RuntimeFanSnapshot& fan) {
+         AppendCsvFieldBoolIf(csv, present, fan.effective_write_allowed);
+     }},
+}};
+
+constexpr std::array<CsvColumn<RuntimeFanTachEvidenceLogState>, 2>
+    kFanTachEvidenceColumns{{
+        {"_tach_hi_raw",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeFanTachEvidenceLogState& fan) {
+             AppendCsvFieldIf(csv, present,
+                              static_cast<unsigned int>(fan.tach_hi_raw));
+         }},
+        {"_tach_lo_raw",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeFanTachEvidenceLogState& fan) {
+             AppendCsvFieldIf(csv, present,
+                              static_cast<unsigned int>(fan.tach_lo_raw));
+         }},
+    }};
+
+constexpr std::array<CsvColumn<RuntimeSioVoltageLogState>, 4>
+    kSioVoltageColumns{{
+        {"_present",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioVoltageLogState&) {
+             AppendCsvFieldBool(csv, present);
+         }},
+        {"_label",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioVoltageLogState& voltage) {
+             AppendCsvFieldStringIf(csv, present, voltage.label);
+         }},
+        {"_raw",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioVoltageLogState& voltage) {
+             AppendCsvFieldIf(csv, present,
+                              static_cast<unsigned int>(voltage.raw));
+         }},
+        {"_v",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioVoltageLogState& voltage) {
+             AppendCsvFieldDoubleIf(csv, present, voltage.voltage_v, 4);
+         }},
+    }};
+
+constexpr std::array<CsvColumn<RuntimeSioTemperatureLogState>, 6>
+    kSioTemperatureColumns{{
+        {"_present",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioTemperatureLogState&) {
+             AppendCsvFieldBool(csv, present);
+         }},
+        {"_label",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioTemperatureLogState& temperature) {
+             AppendCsvFieldStringIf(csv, present, temperature.label);
+         }},
+        {"_raw",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioTemperatureLogState& temperature) {
+             AppendCsvFieldIf(csv, present,
+                              static_cast<unsigned int>(temperature.raw));
+         }},
+        {"_half_raw",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioTemperatureLogState& temperature) {
+             AppendCsvFieldIf(csv, present,
+                              static_cast<unsigned int>(temperature.half_raw));
+         }},
+        {"_valid",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioTemperatureLogState& temperature) {
+             AppendCsvFieldBoolIf(csv, present, temperature.valid);
+         }},
+        {"_c",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeSioTemperatureLogState& temperature) {
+             AppendCsvFieldDoubleIf(csv, present, temperature.temperature_c);
+         }},
+    }};
+
+// Control-channel columns split around the boost-stage block, whose names
+// come from kBoostStageSpecs and are emitted by the header/row builders
+// directly (already a single source of truth).
+constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 2>
+    kChannelPreBoostColumns{{
+        {"_observed_temp_c",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.observed_temp_c);
+         }},
+        {"_setpoint_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.setpoint_pct);
+         }},
+    }};
+
+constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 13>
+    kChannelPostBoostColumns{{
+        {"_low_band_stage_boost_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present,
+                                    state.low_band_stage_boost_pct);
+         }},
+        {"_low_band_effective_boost_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present,
+                                    state.low_band_effective_boost_pct);
+         }},
+        {"_low_band_debt",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.low_band_debt);
+         }},
+        {"_low_band_signal",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.low_band_signal);
+         }},
+        {"_low_band_stage_active",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldBoolIf(csv, present, state.low_band_stage_active);
+         }},
+        {"_primary_temp_source",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldStringIf(csv, present, state.primary_temp_source);
+         }},
+        {"_response_source",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldStringIf(csv, present, state.response_source);
+         }},
+        {"_write_reason",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldStringIf(csv, present, state.write_reason);
+         }},
+        {"_total_writes",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldIf(csv, present, state.total_writes);
+         }},
+        {"_write_active",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldBoolIf(csv, present, state.write_active);
+         }},
+        {"_baseline_captured",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldBoolIf(csv, present, state.baseline_captured);
+         }},
+        {"_feedforward_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.feedforward_pct);
+         }},
+        {"_correction_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             const bool correction_present =
+                 present && !std::isnan(state.setpoint_pct) &&
+                 !std::isnan(state.feedforward_pct);
+             AppendCsvFieldDoubleIf(csv, correction_present,
+                                    state.setpoint_pct - state.feedforward_pct);
+         }},
+    }};
+
 std::string BuildCommonCsvHeader() {
     std::ostringstream header;
     header
@@ -107,22 +403,8 @@ std::string BuildCommonCsvHeader() {
         << "gpu_available,gpu_name,gpu_last_warning,"
         << "gpu_core_c,gpu_memjn_c,gpu_hotspot_c,"
         << "fan_count,policy_writes_enabled_present,policy_writes_enabled";
-    for (std::uint32_t channel = 0u;
-         channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
-         ++channel) {
-        header << ",fan" << channel << "_present"
-               << ",fan" << channel << "_label"
-               << ",fan" << channel << "_rpm"
-               << ",fan" << channel << "_tach_raw"
-               << ",fan" << channel << "_tach_valid"
-               << ",fan" << channel << "_duty_raw"
-               << ",fan" << channel << "_duty_pct"
-               << ",fan" << channel << "_mode_raw"
-               << ",fan" << channel << "_manual_override"
-               << ",fan" << channel << "_write_allowed"
-               << ",fan" << channel << "_policy_blocked"
-               << ",fan" << channel << "_effective_write_allowed";
-    }
+    AppendIndexedColumns(header, "fan", kRuntimeLogFanChannelCount,
+                         kFanSnapshotColumns);
     return header.str();
 }
 
@@ -161,27 +443,12 @@ void BuildCommonCsvPrefix(std::ostringstream& csv,
     AppendCsvFieldBoolIf(csv, snapshot.policy_writes_enabled_present,
                          snapshot.policy_writes_enabled);
 
-    static const RuntimeFanSnapshot kEmptyFan{};
-    for (std::uint32_t channel = 0u;
-         channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
-         ++channel) {
-        const RuntimeFanSnapshot* found =
-            FindRuntimeFanChannel(snapshot, channel);
-        const bool present = found != nullptr;
-        const RuntimeFanSnapshot& fan = present ? *found : kEmptyFan;
-        AppendCsvFieldBool(csv, present);
-        AppendCsvFieldStringIf(csv, present, fan.label);
-        AppendCsvFieldIf(csv, present, fan.rpm);
-        AppendCsvFieldIf(csv, present, fan.tach_raw);
-        AppendCsvFieldBoolIf(csv, present, fan.tach_valid);
-        AppendCsvFieldIf(csv, present, static_cast<unsigned int>(fan.duty_raw));
-        AppendCsvFieldDoubleIf(csv, present, fan.duty_percent, 2);
-        AppendCsvFieldIf(csv, present, static_cast<unsigned int>(fan.mode_raw));
-        AppendCsvFieldBoolIf(csv, present, fan.manual_override);
-        AppendCsvFieldBoolIf(csv, present, fan.write_allowed);
-        AppendCsvFieldBoolIf(csv, present, fan.policy_blocked);
-        AppendCsvFieldBoolIf(csv, present, fan.effective_write_allowed);
-    }
+    AppendIndexedFields(
+        csv, kRuntimeLogFanChannelCount,
+        [&](std::uint32_t channel) {
+            return FindRuntimeFanChannel(snapshot, channel);
+        },
+        kFanSnapshotColumns);
 }
 
 }  // namespace
@@ -245,30 +512,12 @@ std::string BuildEvidenceLogCsvHeader() {
            << ",sio_evidence_detail"
            << ",sio_voltage_count"
            << ",sio_temperature_count";
-    for (std::uint32_t channel = 0u;
-         channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
-         ++channel) {
-        header << ",fan" << channel << "_tach_hi_raw"
-               << ",fan" << channel << "_tach_lo_raw";
-    }
-    for (std::uint32_t index = 0u;
-         index < static_cast<std::uint32_t>(kRuntimeLogSioVoltageCount);
-         ++index) {
-        header << ",sio_voltage" << index << "_present"
-               << ",sio_voltage" << index << "_label"
-               << ",sio_voltage" << index << "_raw"
-               << ",sio_voltage" << index << "_v";
-    }
-    for (std::uint32_t index = 0u;
-         index < static_cast<std::uint32_t>(kRuntimeLogSioTemperatureCount);
-         ++index) {
-        header << ",sio_temp" << index << "_present"
-               << ",sio_temp" << index << "_label"
-               << ",sio_temp" << index << "_raw"
-               << ",sio_temp" << index << "_half_raw"
-               << ",sio_temp" << index << "_valid"
-               << ",sio_temp" << index << "_c";
-    }
+    AppendIndexedColumns(header, "fan", kRuntimeLogFanChannelCount,
+                         kFanTachEvidenceColumns);
+    AppendIndexedColumns(header, "sio_voltage", kRuntimeLogSioVoltageCount,
+                         kSioVoltageColumns);
+    AppendIndexedColumns(header, "sio_temp", kRuntimeLogSioTemperatureCount,
+                         kSioTemperatureColumns);
     header << BuildGpuEvidenceCsvHeader();
     return header.str();
 }
@@ -305,54 +554,24 @@ std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
     AppendCsvField(csv, state.sio_voltages.size());
     AppendCsvField(csv, state.sio_temperatures.size());
 
-    static const RuntimeFanTachEvidenceLogState kEmptyTach{};
-    for (std::uint32_t channel = 0u;
-         channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
-         ++channel) {
-        const RuntimeFanTachEvidenceLogState* found =
-            FindFanTachEvidenceState(state.fan_tach_evidence, channel);
-        const bool present = found != nullptr;
-        const RuntimeFanTachEvidenceLogState& fan =
-            present ? *found : kEmptyTach;
-        AppendCsvFieldIf(csv, present,
-                         static_cast<unsigned int>(fan.tach_hi_raw));
-        AppendCsvFieldIf(csv, present,
-                         static_cast<unsigned int>(fan.tach_lo_raw));
-    }
-
-    static const RuntimeSioVoltageLogState kEmptyVoltage{};
-    for (std::uint32_t index = 0u;
-         index < static_cast<std::uint32_t>(kRuntimeLogSioVoltageCount);
-         ++index) {
-        const RuntimeSioVoltageLogState* found =
-            FindSioVoltageState(state.sio_voltages, index);
-        const bool present = found != nullptr;
-        const RuntimeSioVoltageLogState& voltage =
-            present ? *found : kEmptyVoltage;
-        AppendCsvFieldBool(csv, present);
-        AppendCsvFieldStringIf(csv, present, voltage.label);
-        AppendCsvFieldIf(csv, present, static_cast<unsigned int>(voltage.raw));
-        AppendCsvFieldDoubleIf(csv, present, voltage.voltage_v, 4);
-    }
-
-    static const RuntimeSioTemperatureLogState kEmptyTemperature{};
-    for (std::uint32_t index = 0u;
-         index < static_cast<std::uint32_t>(kRuntimeLogSioTemperatureCount);
-         ++index) {
-        const RuntimeSioTemperatureLogState* found =
-            FindSioTemperatureState(state.sio_temperatures, index);
-        const bool present = found != nullptr;
-        const RuntimeSioTemperatureLogState& temperature =
-            present ? *found : kEmptyTemperature;
-        AppendCsvFieldBool(csv, present);
-        AppendCsvFieldStringIf(csv, present, temperature.label);
-        AppendCsvFieldIf(csv, present,
-                         static_cast<unsigned int>(temperature.raw));
-        AppendCsvFieldIf(csv, present,
-                         static_cast<unsigned int>(temperature.half_raw));
-        AppendCsvFieldBoolIf(csv, present, temperature.valid);
-        AppendCsvFieldDoubleIf(csv, present, temperature.temperature_c);
-    }
+    AppendIndexedFields(
+        csv, kRuntimeLogFanChannelCount,
+        [&](std::uint32_t channel) {
+            return FindFanTachEvidenceState(state.fan_tach_evidence, channel);
+        },
+        kFanTachEvidenceColumns);
+    AppendIndexedFields(
+        csv, kRuntimeLogSioVoltageCount,
+        [&](std::uint32_t index) {
+            return FindSioVoltageState(state.sio_voltages, index);
+        },
+        kSioVoltageColumns);
+    AppendIndexedFields(
+        csv, kRuntimeLogSioTemperatureCount,
+        [&](std::uint32_t index) {
+            return FindSioTemperatureState(state.sio_temperatures, index);
+        },
+        kSioTemperatureColumns);
     AppendGpuEvidenceCsvRow(csv, state.gpu_evidence);
     return csv.str();
 }
@@ -376,30 +595,19 @@ std::string BuildControlLoopCsvHeader() {
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
-        // Canonical control-loop CSV header. Per-channel boost column names come
-        // from kBoostStageSpecs; the low_band_* columns below are emitted only
-        // here. CSV readers that hardcode these names
-        // (scripts/analyze_control_run.py, tools/eval_dashboard/dashboard.js)
-        // must track this list.
-        header << ",channel" << channel << "_observed_temp_c"
-               << ",channel" << channel << "_setpoint_pct";
+        // Canonical control-loop CSV header. The pre/post column names come
+        // from kChannelPreBoostColumns/kChannelPostBoostColumns (shared with
+        // the row builder); the boost column names come from kBoostStageSpecs.
+        // CSV readers that bind these names by string (native analyze ingest
+        // and tools/eval_dashboard/dashboard.js) track this list.
+        AppendEntityColumns(header, "channel", channel,
+                            kChannelPreBoostColumns);
         for (std::size_t s = 0; s < kBoostStageCount; ++s) {
             header << ",channel" << channel << "_"
                    << kBoostStageSpecs[s].name << "_boost_pct";
         }
-        header << ",channel" << channel << "_low_band_stage_boost_pct"
-               << ",channel" << channel << "_low_band_effective_boost_pct"
-               << ",channel" << channel << "_low_band_debt"
-               << ",channel" << channel << "_low_band_signal"
-               << ",channel" << channel << "_low_band_stage_active"
-               << ",channel" << channel << "_primary_temp_source"
-               << ",channel" << channel << "_response_source"
-               << ",channel" << channel << "_write_reason"
-               << ",channel" << channel << "_total_writes"
-               << ",channel" << channel << "_write_active"
-               << ",channel" << channel << "_baseline_captured"
-               << ",channel" << channel << "_feedforward_pct"
-               << ",channel" << channel << "_correction_pct";
+        AppendEntityColumns(header, "channel", channel,
+                            kChannelPostBoostColumns);
     }
     return header.str();
 }
@@ -434,29 +642,11 @@ std::string BuildControlLoopCsvRow(
         const bool present = found != nullptr;
         const RuntimeControlChannelLogState& state =
             present ? *found : kEmptyChannel;
-        AppendCsvFieldDoubleIf(csv, present, state.observed_temp_c);
-        AppendCsvFieldDoubleIf(csv, present, state.setpoint_pct);
+        AppendEntityFields(csv, present, state, kChannelPreBoostColumns);
         for (std::size_t s = 0; s < kBoostStageCount; ++s) {
             AppendCsvFieldDoubleIf(csv, present, state.stage_boost_pct[s]);
         }
-        AppendCsvFieldDoubleIf(csv, present, state.low_band_stage_boost_pct);
-        AppendCsvFieldDoubleIf(csv, present,
-                               state.low_band_effective_boost_pct);
-        AppendCsvFieldDoubleIf(csv, present, state.low_band_debt);
-        AppendCsvFieldDoubleIf(csv, present, state.low_band_signal);
-        AppendCsvFieldBoolIf(csv, present, state.low_band_stage_active);
-        AppendCsvFieldStringIf(csv, present, state.primary_temp_source);
-        AppendCsvFieldStringIf(csv, present, state.response_source);
-        AppendCsvFieldStringIf(csv, present, state.write_reason);
-        AppendCsvFieldIf(csv, present, state.total_writes);
-        AppendCsvFieldBoolIf(csv, present, state.write_active);
-        AppendCsvFieldBoolIf(csv, present, state.baseline_captured);
-        AppendCsvFieldDoubleIf(csv, present, state.feedforward_pct);
-        const bool correction_present = present &&
-                                        !std::isnan(state.setpoint_pct) &&
-                                        !std::isnan(state.feedforward_pct);
-        AppendCsvFieldDoubleIf(csv, correction_present,
-                               state.setpoint_pct - state.feedforward_pct);
+        AppendEntityFields(csv, present, state, kChannelPostBoostColumns);
     }
     return csv.str();
 }

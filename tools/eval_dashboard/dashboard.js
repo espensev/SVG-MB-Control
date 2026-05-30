@@ -68,8 +68,8 @@ async function fetchTextIfOk(url) {
 
 // CSV row/quote parsing and the "#"-prologue skip mirror the native producer
 // src/runtime/runtime_csv_archive.cpp; the prologue grammar is documented in
-// docs/RUNTIME_LOGGING_AND_EVALUATION.md. Keep aligned with
-// scripts/analyze_control_run.py and src/analyze/analyze_csv.cpp ParseCsvLine.
+// docs/RUNTIME_LOGGING_AND_EVALUATION.md. Keep aligned with the native
+// analyzer's ParseCsvLine in src/analyze/analyze_csv.cpp.
 function parseCsv(text) {
   const content = text
     .split(/\r?\n/)
@@ -205,7 +205,7 @@ function percentileSorted(sorted, pct) {
   // round((X/100) * (n - 1)); p100 is the maximum. Math.floor(x + 0.5)
   // reproduces C++ std::llround (round half away from zero) for the
   // non-negative index, matching the native analyze report
-  // (src/analyze/analyze_report_data.cpp) and scripts/analyze_control_run.py.
+  // (src/analyze/analyze_report_data.cpp).
   if (!sorted.length) {
     return null;
   }
@@ -312,8 +312,8 @@ function column(rows, name) {
 
 // Boost component column names come from the CSV header producer
 // src/runtime/runtime_csv_rows.cpp (kBoostStageSpecs); the low_band_* fallback
-// is emitted only there. Keep in sync with that producer and
-// scripts/analyze_control_run.py RESPONSE_BOOST_SUFFIXES / row_response_boost.
+// is emitted only there. Keep in sync with that producer and native
+// tick_channel_samples ingestion.
 function channelResponseBoost(row, channel) {
   const names = [
     `channel${channel}_thermal_pressure_boost_pct`,

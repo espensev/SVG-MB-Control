@@ -2,15 +2,15 @@
 
 ## Status
 
-Current as of 2026-05-28.
+Current as of 2026-05-29.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
 `control_loop.poll_tick_ms=250`, `write_cooldown_ms=250`, and
 `deadband_pct<=0.25` in the shipped configs.
 
-Implementation sequencing for the logging work lives in
-`docs\LOGGING_IMPROVEMENT_PLAN.md`.
+The completed implementation sequencing is summarized in
+`docs\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
 
 Earlier local evidence from the previous `50 ms` profile:
 
@@ -170,14 +170,15 @@ Use this loop for controller changes:
    Override the path with `--decision-record-out <path>` or suppress it with
    `--no-decision-record`.
    The summary should cover at least:
-   - CPU/Tctl p50, p90, p99, max,
-   - GPU core, memory, hotspot, and derived GPU envelope p50, p90, p99, max,
+   - idle/load/cooldown CPU/Tctl p50, p90, max,
+   - idle/load/cooldown GPU memory junction and derived GPU envelope p50, p90,
+     max,
    - GPU envelope peak timing, optional threshold time, and channel setpoints
      at the GPU peak,
-   - achieved interval p50, p95, max, and overrun count,
-   - loop work duration p50, p95, max,
-   - process CPU and memory ranges,
-   - writes per minute by channel,
+   - achieved interval p50, p90, p95, p99, max, average, and overrun count,
+   - loop work duration p50, p90, p95, p99, max, average,
+   - process CPU, working-set, and private-byte percentiles,
+   - write-count delta by channel,
    - setpoint p50, p90, max by channel,
    - primary source counts by channel (`cpu`, `gpu`, CPU telemetry fallback,
      guard fallback, and unavailable),

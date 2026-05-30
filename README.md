@@ -33,25 +33,26 @@ download it from the network.
 - `third_party\nvapi-controller` contributes the vendored GPU telemetry slice.
 - Legacy bridge executables are not part of the runtime contract in this repo.
 
-## Long-Term Organization Target
+## Internal Organization
 
-Keep this repo standalone, but split the source tree by responsibility as the
-controller stabilizes:
+The repo is standalone and the source tree is split by responsibility:
 
 ```text
 src/
-  app/        main, CLI parsing, mode dispatch
+  app/        main, CLI parsing, mode dispatch, diagnostics
   control/    loop orchestration, channel evaluator, status model
-  runtime/    runtime store, CSV logger, event log, JSON IO
+  runtime/    runtime store, CSV logger, event log, JSON IO,
+              runtime write policy, read/write mode entry points
   hardware/   AMD, GPU, SIO fan backends
   platform/   Windows timer, process metrics, HANDLE wrappers
-  policy/     curves, blending, rate limits, demand smoothing
+  policy/     curves, blending, curve shape
+  analyze/    runtime-log ingest, pruning, reporting
 ```
 
-Add a `svg_mb_control_core` static library target and keep
-`svg-mb-control.exe` as a thin executable wrapper around it. That gives the
-controller a stable internal API and makes C++ unit tests possible without
-launching the full executable for every behavior check.
+`svg_mb_control_core` is the static library target for non-app implementation
+code. `svg-mb-control.exe` is a thin executable wrapper around it, so C++ unit
+tests can exercise core behavior without launching the full executable for
+every behavior check.
 
 See `docs\STRUCTURE_AND_STABILITY.md` for the longer plan.
 
@@ -496,6 +497,8 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 
 ## Documentation
 
+Current contract and operator references:
+
 - `docs\MEASUREMENT_GATE.md`
 - `docs\CONTROL_LOOP.md`
 - `docs\CONTROL_PIPELINE_MATH.md`
@@ -503,11 +506,17 @@ simulation environment hooks for hermetic AMD and fan telemetry.
 - `docs\WRITE_ORCHESTRATION.md`
 - `docs\RUNTIME_HOME.md`
 - `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
-- `docs\LOGGING_IMPROVEMENT_PLAN.md`
 - `docs\STRUCTURE_AND_STABILITY.md`
 - `docs\COOLING_STRATEGY.md`
 - `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`
 - `docs\response-evaluation-tuning-plan.md`
+
+Compacted implementation records, kept separate from the current operator
+workflow:
+
+- `docs\CONTROL_SIMPLIFICATION_TARGETS.md`
+- `docs\LOGGING_IMPROVEMENT_PLAN.md`
+- `docs\SCRIPT_STACK_REVIEW.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
 `docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow.
@@ -517,3 +526,7 @@ and CSV/status identities. The current shipped configs assert a `250 ms`
 control/write profile; lowering cadence, enabling an adaptive floor below that
 profile, adding live channels, or broader controller strategy changes still
 require fresh measurement evidence before changing defaults.
+
+Do not merge completed implementation records into the operator docs unless a
+topic is reopened; keep the current docs as the source of truth and keep closed
+records short.

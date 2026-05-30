@@ -300,4 +300,14 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_loop_config_tests)
     add_test(NAME svg_mb_control_loop_config_tests
              COMMAND svg_mb_control_loop_config_tests)
+
+    add_executable(svg_mb_control_csv_rows_tests
+        tests/cpp/csv_rows_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_csv_rows_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_csv_rows_tests)
+    add_test(NAME svg_mb_control_csv_rows_tests
+             COMMAND svg_mb_control_csv_rows_tests)
 endif()

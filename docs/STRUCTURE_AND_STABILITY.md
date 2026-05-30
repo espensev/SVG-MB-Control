@@ -171,6 +171,11 @@ Completed:
     `app/app_args.{h,cpp}` (`CliOptions` + `ParseCliOptions` + value
     parsers + `PrintUsage`/`PrintVersion`), and `app/app_diagnose.{h,cpp}`
     (`RunDiagnoseAmd`, `RunDiagnoseGpu`, `SampleDirectSnapshotJson`).
+15. Converted repeated runtime CSV field groups in
+    `runtime_csv_rows.cpp` to descriptor tables shared by header and row
+    builders. `svg_mb_control_csv_rows_tests` now checks read-loop,
+    evidence-log, and control-loop header/row alignment plus representative
+    present/absent indexed values.
 
 Remaining polish:
 
