@@ -62,6 +62,16 @@ ProcessResourceSample SampleProcessResources() {
         sample.total_cpu_100ns = FileTimeToU64(kernel) + FileTimeToU64(user);
     }
 
+    FILETIME system_idle{};
+    FILETIME system_kernel{};
+    FILETIME system_user{};
+    if (GetSystemTimes(&system_idle, &system_kernel, &system_user)) {
+        sample.valid_system_cpu = true;
+        sample.system_idle_100ns = FileTimeToU64(system_idle);
+        sample.system_kernel_100ns = FileTimeToU64(system_kernel);
+        sample.system_user_100ns = FileTimeToU64(system_user);
+    }
+
     PROCESS_MEMORY_COUNTERS_EX counters{};
     counters.cb = sizeof(counters);
     if (GetProcessMemoryInfo(
@@ -90,6 +100,37 @@ void UpdateTimingResources(RuntimeControlLoopTimingState* timing,
     if (current.valid_memory) {
         timing->process_working_set_bytes = current.working_set_bytes;
         timing->process_private_bytes = current.private_bytes;
+    }
+
+    // Whole-system CPU busy time, derived independently of the process-cost
+    // path below. GetSystemTimes counters are already summed across all
+    // logical processors and kernel includes idle, so system_cpu_busy_pct is
+    // the ratio of two whole-machine aggregates and must NOT be divided by
+    // processor_count (unlike process_cpu_pct, which normalizes single-process
+    // time to whole-machine capacity). See
+    // docs/cpu-settings-evidence-logger-decision-2026-06-04.md.
+    if (have_previous && previous.valid_system_cpu && current.valid_system_cpu &&
+        current.system_idle_100ns >= previous.system_idle_100ns &&
+        current.system_kernel_100ns >= previous.system_kernel_100ns &&
+        current.system_user_100ns >= previous.system_user_100ns) {
+        const double idle_delta_100ns = static_cast<double>(
+            current.system_idle_100ns - previous.system_idle_100ns);
+        const double kernel_delta_100ns = static_cast<double>(
+            current.system_kernel_100ns - previous.system_kernel_100ns);
+        const double user_delta_100ns = static_cast<double>(
+            current.system_user_100ns - previous.system_user_100ns);
+        const double total_delta_100ns = kernel_delta_100ns + user_delta_100ns;
+        if (total_delta_100ns > 0.0) {
+            timing->system_cpu_idle_delta_ms = idle_delta_100ns / 10000.0;
+            timing->system_cpu_kernel_delta_ms = kernel_delta_100ns / 10000.0;
+            timing->system_cpu_user_delta_ms = user_delta_100ns / 10000.0;
+            timing->system_cpu_processor_count =
+                (std::max)(1u, processor_count);
+            // kernel_delta includes idle_delta, so busy = total - idle.
+            const double busy_delta_100ns = total_delta_100ns - idle_delta_100ns;
+            timing->system_cpu_busy_pct =
+                (busy_delta_100ns / total_delta_100ns) * 100.0;
+        }
     }
 
     if (!have_previous || !previous.valid_cpu || !current.valid_cpu ||

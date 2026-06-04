@@ -217,6 +217,11 @@ void TestControlLoopAligned() {
     timing.loop_started_wall_clock = "2026-05-29T00:00:00.000";
     timing.loop_finished_wall_clock = "2026-05-29T00:00:00.050";
     timing.loop_intended_interval_ms = 50u;
+    timing.system_cpu_idle_delta_ms = 400.0;
+    timing.system_cpu_kernel_delta_ms = 1000.0;
+    timing.system_cpu_user_delta_ms = 200.0;
+    timing.system_cpu_processor_count = 8u;
+    timing.system_cpu_busy_pct = 66.667;
     std::vector<RuntimeControlChannelLogState> channels;
     {
         RuntimeControlChannelLogState channel;
@@ -241,6 +246,13 @@ void TestControlLoopAligned() {
     ExpectAligned(header, row, "control-loop");
     const std::vector<std::string> header_fields = SplitFields(header);
     const std::vector<std::string> row_fields = SplitFields(row);
+    ExpectContains(header, "system_cpu_busy_pct", "control-loop header");
+    ExpectField(header_fields, row_fields, "system_cpu_idle_delta_ms",
+                "400.000", "control-loop row");
+    ExpectField(header_fields, row_fields, "system_cpu_processor_count", "8",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "system_cpu_busy_pct", "66.667",
+                "control-loop row");
     ExpectContains(header, "channel0_observed_temp_c", "control-loop header");
     ExpectContains(header, "channel0_thermal_pressure_boost_pct",
                    "control-loop header");

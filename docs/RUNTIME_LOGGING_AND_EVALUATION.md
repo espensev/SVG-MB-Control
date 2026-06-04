@@ -117,10 +117,15 @@ logging replacement.
 
 - CSV chunk files have no closed/ready marker. A reader must treat the active
   archive path as mutable while Control is running.
-- The control-loop CSV has loop timing and process cost, but not
-  per-sensor-group read durations. Use foreground `evidence-log` for deeper
-  backend timing/cadence diagnosis unless control-loop evidence proves this
-  must move into the hot path.
+- The control-loop CSV has loop timing, process cost, and whole-system CPU busy
+  time (`system_cpu_busy_pct` plus the raw idle/kernel/user deltas and processor
+  count, FEAT-0002), but not per-sensor-group read durations. Use foreground
+  `evidence-log` for deeper backend timing/cadence diagnosis unless control-loop
+  evidence proves this must move into the hot path.
+- Whole-system CPU busy time measures *time* not idle, not CPU *work*. Comparing
+  CPU-setting changes by work-per-Joule (effective frequency + package energy)
+  is the separate FEAT-0006 layer; `system_cpu_busy_pct` is its
+  time-normalization context, not a substitute.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in

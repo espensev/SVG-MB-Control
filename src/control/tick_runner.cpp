@@ -320,6 +320,16 @@ bool RunControlTick(ControlRuntimeContext& context,
             state.last_process_cpu_delta_ms =
                 resource_timing.process_cpu_delta_ms;
             state.last_process_cpu_pct = resource_timing.process_cpu_pct;
+            state.last_system_cpu_idle_delta_ms =
+                resource_timing.system_cpu_idle_delta_ms;
+            state.last_system_cpu_kernel_delta_ms =
+                resource_timing.system_cpu_kernel_delta_ms;
+            state.last_system_cpu_user_delta_ms =
+                resource_timing.system_cpu_user_delta_ms;
+            state.last_system_cpu_processor_count =
+                resource_timing.system_cpu_processor_count;
+            state.last_system_cpu_busy_pct =
+                resource_timing.system_cpu_busy_pct;
         }
         state.resource_window_sample = current_resource_sample;
         state.have_resource_window_sample =
@@ -331,6 +341,15 @@ bool RunControlTick(ControlRuntimeContext& context,
     tick_timing.process_working_set_bytes =
         state.last_process_working_set_bytes;
     tick_timing.process_private_bytes = state.last_process_private_bytes;
+    tick_timing.system_cpu_idle_delta_ms =
+        state.last_system_cpu_idle_delta_ms;
+    tick_timing.system_cpu_kernel_delta_ms =
+        state.last_system_cpu_kernel_delta_ms;
+    tick_timing.system_cpu_user_delta_ms =
+        state.last_system_cpu_user_delta_ms;
+    tick_timing.system_cpu_processor_count =
+        state.last_system_cpu_processor_count;
+    tick_timing.system_cpu_busy_pct = state.last_system_cpu_busy_pct;
     state.last_timing = tick_timing;
 
     if (state.fatal_restore_timeout) {

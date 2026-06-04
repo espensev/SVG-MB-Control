@@ -596,6 +596,11 @@ std::string BuildControlLoopCsvHeader() {
            << ",process_cpu_pct"
            << ",process_working_set_bytes"
            << ",process_private_bytes"
+           << ",system_cpu_idle_delta_ms"
+           << ",system_cpu_kernel_delta_ms"
+           << ",system_cpu_user_delta_ms"
+           << ",system_cpu_processor_count"
+           << ",system_cpu_busy_pct"
            << ",cadence_transient";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
@@ -637,6 +642,12 @@ std::string BuildControlLoopCsvRow(
     AppendCsvFieldDouble(csv, timing.process_cpu_pct);
     AppendCsvField(csv, timing.process_working_set_bytes);
     AppendCsvField(csv, timing.process_private_bytes);
+    AppendCsvFieldDouble(csv, timing.system_cpu_idle_delta_ms);
+    AppendCsvFieldDouble(csv, timing.system_cpu_kernel_delta_ms);
+    AppendCsvFieldDouble(csv, timing.system_cpu_user_delta_ms);
+    AppendCsvFieldIf(csv, timing.system_cpu_processor_count != 0u,
+                     timing.system_cpu_processor_count);
+    AppendCsvFieldDouble(csv, timing.system_cpu_busy_pct);
     AppendCsvFieldDouble(csv, timing.cadence_transient);
 
     static const RuntimeControlChannelLogState kEmptyChannel{};

@@ -19,6 +19,12 @@ struct ProcessResourceSample {
     std::uint64_t total_cpu_100ns = 0u;
     std::uint64_t working_set_bytes = 0u;
     std::uint64_t private_bytes = 0u;
+    // Whole-system CPU time counters from GetSystemTimes, in 100 ns units
+    // summed across all logical processors. kernel_100ns includes idle_100ns.
+    bool valid_system_cpu = false;
+    std::uint64_t system_idle_100ns = 0u;
+    std::uint64_t system_kernel_100ns = 0u;
+    std::uint64_t system_user_100ns = 0u;
     std::chrono::steady_clock::time_point sampled_at =
         std::chrono::steady_clock::time_point{};
 };

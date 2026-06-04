@@ -339,9 +339,23 @@ Control-loop CSV rows include the common telemetry/fan columns plus:
 
 - loop tick and timing-quality fields
 - process CPU and memory fields
+- whole-system CPU activity fields (additive, FEAT-0002):
+  `system_cpu_idle_delta_ms`, `system_cpu_kernel_delta_ms`,
+  `system_cpu_user_delta_ms`, `system_cpu_processor_count`, and
+  `system_cpu_busy_pct`
 - per-channel observed temperature, setpoint, feedforward demand, correction,
   thermal-pressure boost, primary temperature source, write count,
   active-write flag, and baseline flag
+
+The whole-system CPU fields are derived from `GetSystemTimes` deltas over the
+~1 s resource window. They are distinct from the `process_cpu_*` fields, which
+measure only the controller process: `system_cpu_busy_pct` is whole-machine CPU
+busy time and is already core-normalized to `[0, 100]` (it is not divided by
+`system_cpu_processor_count`). Because the underlying counters are summed across
+all logical processors, a `system_cpu_*_delta_ms` value can exceed the wall-clock
+window. All five fields are blank when a system-CPU sample is unavailable; older
+archives without these columns remain valid (consumers bind columns by header
+name). See `docs/cpu-settings-evidence-logger-decision-2026-06-04.md`.
 
 The JSONL event stream uses schema `svg_mb_control.event.v1`. It is the source
 for discrete operational events such as startup, rotation, write attempts,
