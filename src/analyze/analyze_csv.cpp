@@ -28,6 +28,12 @@ bool TryParseDouble(std::string_view text, double& out) {
     if (text.empty()) {
         return false;
     }
+    const char* begin = text.data();
+    const char* end = text.data() + text.size();
+    if (auto [ptr, ec] = std::from_chars(begin, end, out);
+        ec == std::errc{} && ptr == end) {
+        return true;
+    }
     try {
         std::size_t consumed = 0u;
         const std::string owned(text);

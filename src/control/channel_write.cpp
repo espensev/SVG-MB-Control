@@ -20,10 +20,10 @@ std::string ResolveWriteReason(bool first_write, bool authority_reassert) {
     return authority_reassert ? "authority_reassert" : "setpoint_delta";
 }
 
-bool RuntimeFanAllowsWrite(const RuntimeSnapshot& runtime_snapshot,
+bool RuntimeFanAllowsWrite(const RuntimeSnapshotIndex& runtime_index,
                            std::uint32_t channel_id) {
     const RuntimeFanSnapshot* fan =
-        FindRuntimeFanChannel(runtime_snapshot, channel_id);
+        runtime_index.FindFanChannel(channel_id);
     return fan == nullptr || fan->effective_write_allowed;
 }
 
@@ -124,14 +124,14 @@ void NoteSuccessfulChannelWrite(ControlRuntimeContext& context,
 void CaptureChannelBaselineIfAvailable(
     const ControlRuntimeContext& context,
     ChannelState& channel,
-    const RuntimeSnapshot& runtime_snapshot,
+    const RuntimeSnapshotIndex& runtime_index,
     std::uint64_t tick_count) {
     if (channel.baseline_captured) {
         return;
     }
 
     const RuntimeFanSnapshot* fan =
-        FindRuntimeFanChannel(runtime_snapshot, channel.config.channel);
+        runtime_index.FindFanChannel(channel.config.channel);
     if (fan == nullptr) {
         return;
     }
@@ -259,7 +259,7 @@ bool HandleExpiredHoldRestore(
 void TryApplyChannelSetpoint(
     ControlRuntimeContext& context,
     ChannelState& channel,
-    const RuntimeSnapshot& runtime_snapshot,
+    const RuntimeSnapshotIndex& runtime_index,
     const ChannelEvaluation& evaluation,
     FanWriter& fan_writer,
     PendingWritesStore& pending_store,
@@ -294,7 +294,7 @@ void TryApplyChannelSetpoint(
     if (!channel.baseline_captured) {
         return;
     }
-    if (!RuntimeFanAllowsWrite(runtime_snapshot, channel.config.channel)) {
+    if (!RuntimeFanAllowsWrite(runtime_index, channel.config.channel)) {
         return;
     }
     if (channel.circuit_breaker_open) {

@@ -1,5 +1,7 @@
 #include "control_policy.h"
 
+#include "control_math.h"
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -41,10 +43,6 @@ std::string CurveShapeToString(CurveShape shape) {
         case CurveShape::SmootherStep: return "smootherstep";
     }
     return "linear";
-}
-
-static double SmootherStep(double t) {
-    return t * t * t * ((6.0 * t - 15.0) * t + 10.0);
 }
 
 double BlendTemps(const TempInputs& inputs, TempBlend mode) {
@@ -90,7 +88,7 @@ double LookupCurve(const std::vector<CurvePoint>& curve,
                 } else {
                     double t = (temp_c - lo.temp_c) / span;
                     if (shape == CurveShape::SmootherStep) {
-                        t = SmootherStep(t);
+                        t = SmoothStep(t);
                     }
                     raw = lo.duty_pct + t * (hi.duty_pct - lo.duty_pct);
                 }

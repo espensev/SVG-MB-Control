@@ -133,6 +133,12 @@ std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
 std::string BuildControlLoopCsvHeader();
 std::string BuildControlLoopCsvRow(
     const RuntimeSnapshot& snapshot,
+    const RuntimeSnapshotIndex& snapshot_index,
+    std::uint64_t tick_count,
+    const RuntimeControlLoopTimingState& timing,
+    const std::vector<RuntimeControlChannelLogState>& channels);
+std::string BuildControlLoopCsvRow(
+    const RuntimeSnapshot& snapshot,
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
     const std::vector<RuntimeControlChannelLogState>& channels);

@@ -71,7 +71,7 @@ bool StageSpacingSatisfied(const LowBandRuntimeState& state,
 
 void UpdateLowBandState(ControlRuntimeContext& context,
                         const TempInputs& temp_inputs,
-                        const RuntimeSnapshot& runtime_snapshot,
+                        const RuntimeSnapshotIndex& runtime_index,
                         std::uint64_t elapsed_ms,
                         std::chrono::steady_clock::time_point now,
                         std::uint64_t tick_count) {
@@ -212,8 +212,8 @@ void UpdateLowBandState(ControlRuntimeContext& context,
                 channel.low_band_stage_boost_pct);
         }
 
-        if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-                runtime_snapshot, channel.config.channel)) {
+        if (const RuntimeFanSnapshot* fan =
+                runtime_index.FindFanChannel(channel.config.channel)) {
             if (fan->tach_valid) {
                 if (channel.low_band_stage_boost_pct > 0.0005) {
                     channel.low_band_boosted_rpm_sum +=

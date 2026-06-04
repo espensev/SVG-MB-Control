@@ -56,6 +56,7 @@ struct ControlLoopRunState {
 
     // Reused per-tick buffers — capacity retained across ticks.
     RuntimeSnapshot runtime_snapshot;
+    RuntimeSnapshotIndex runtime_snapshot_index;
     std::vector<RuntimeControlChannelLogState> channel_log_states;
 
     // Active CSV/manifest paths for the current log chunk. Updated when

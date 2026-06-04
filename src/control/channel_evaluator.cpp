@@ -186,7 +186,7 @@ struct EvaluationScratch {
     ChannelState& channel;
     const ControlLoopConfig& loop;
     const TempInputs& temp_inputs;
-    const RuntimeSnapshot& runtime_snapshot;
+    const RuntimeSnapshotIndex& runtime_index;
     ChannelEvaluation& evaluation;
 
     double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
@@ -371,8 +371,8 @@ double ComputeFinalSetpoint(EvaluationScratch& s,
 // state and flag an authority-reassert. Leaves evaluation.authority_*
 // at their defaults when no fan snapshot is present for this channel.
 void DetectAuthorityReassert(EvaluationScratch& s) {
-    const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-        s.runtime_snapshot, s.channel.config.channel);
+    const RuntimeFanSnapshot* fan =
+        s.runtime_index.FindFanChannel(s.channel.config.channel);
     if (fan == nullptr) {
         return;
     }
@@ -435,14 +435,14 @@ ChannelTimingConfig BuildChannelTimingConfig(
 ChannelEvaluation EvaluateChannel(ChannelState& channel,
                                   const ControlLoopConfig& loop,
                                   const TempInputs& temp_inputs,
-                                  const RuntimeSnapshot& runtime_snapshot,
+                                  const RuntimeSnapshotIndex& runtime_index,
                                   std::chrono::steady_clock::time_point now) {
     ChannelEvaluation evaluation;
     evaluation.timing = BuildChannelTimingConfig(loop, channel, now);
     channel.last_evaluation_time = now;
     channel.last_write_reason = "none";
 
-    EvaluationScratch s{channel, loop, temp_inputs, runtime_snapshot,
+    EvaluationScratch s{channel, loop, temp_inputs, runtime_index,
                         evaluation};
 
     EvaluatePrimarySetpoint(s);

@@ -414,6 +414,7 @@ std::string BuildCommonCsvHeader() {
 // one ostringstream + one string allocation/copy per row.
 void BuildCommonCsvPrefix(std::ostringstream& csv,
                           const RuntimeSnapshot& snapshot,
+                          const RuntimeSnapshotIndex& snapshot_index,
                           std::string_view mode) {
     AppendCsvString(csv, FormatLocalIso8601(
                              std::chrono::system_clock::now()));
@@ -430,7 +431,7 @@ void BuildCommonCsvPrefix(std::ostringstream& csv,
     BuildAmdSensorSummary(snapshot, amd_summary);
     AppendCsvFieldString(csv, amd_summary);
     AppendCsvFieldDouble(csv,
-                         FindRuntimeAmdSensorTemperature(snapshot, "Tctl/Tdie"));
+                         snapshot_index.FindAmdSensorTemperature("Tctl/Tdie"));
     AppendCsvFieldDouble(csv, FindMaxCpuTemperature(snapshot));
     AppendCsvFieldBool(csv, snapshot.gpu.available);
     AppendCsvFieldString(csv, snapshot.gpu.gpu_name);
@@ -446,7 +447,7 @@ void BuildCommonCsvPrefix(std::ostringstream& csv,
     AppendIndexedFields(
         csv, kRuntimeLogFanChannelCount,
         [&](std::uint32_t channel) {
-            return FindRuntimeFanChannel(snapshot, channel);
+            return snapshot_index.FindFanChannel(channel);
         },
         kFanSnapshotColumns);
 }
@@ -470,7 +471,9 @@ std::string BuildReadLoopCsvHeader() {
 std::string BuildReadLoopCsvRow(const RuntimeSnapshot& snapshot,
                                 const RuntimeReadLoopLogState& state) {
     std::ostringstream csv;
-    BuildCommonCsvPrefix(csv, snapshot, "read-loop");
+    RuntimeSnapshotIndex snapshot_index;
+    snapshot_index.Rebuild(snapshot);
+    BuildCommonCsvPrefix(csv, snapshot, snapshot_index, "read-loop");
     AppendCsvFieldBool(csv, state.telemetry_available);
     AppendCsvFieldBool(csv, state.runtime_home_published);
     AppendCsvFieldBool(csv, state.snapshot_mirror_configured);
@@ -525,7 +528,9 @@ std::string BuildEvidenceLogCsvHeader() {
 std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
                                    const RuntimeEvidenceLogState& state) {
     std::ostringstream csv;
-    BuildCommonCsvPrefix(csv, snapshot, "evidence-log");
+    RuntimeSnapshotIndex snapshot_index;
+    snapshot_index.Rebuild(snapshot);
+    BuildCommonCsvPrefix(csv, snapshot, snapshot_index, "evidence-log");
     AppendCsvFieldBool(csv, state.telemetry_available);
     AppendCsvField(csv, state.successful_polls);
     AppendCsvField(csv, state.skipped_polls);
@@ -614,11 +619,12 @@ std::string BuildControlLoopCsvHeader() {
 
 std::string BuildControlLoopCsvRow(
     const RuntimeSnapshot& snapshot,
+    const RuntimeSnapshotIndex& snapshot_index,
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
     const std::vector<RuntimeControlChannelLogState>& channels) {
     std::ostringstream csv;
-    BuildCommonCsvPrefix(csv, snapshot, "control-loop");
+    BuildCommonCsvPrefix(csv, snapshot, snapshot_index, "control-loop");
     AppendCsvField(csv, tick_count);
     AppendCsvFieldString(csv, timing.loop_started_wall_clock);
     AppendCsvFieldString(csv, timing.loop_finished_wall_clock);
@@ -649,6 +655,17 @@ std::string BuildControlLoopCsvRow(
         AppendEntityFields(csv, present, state, kChannelPostBoostColumns);
     }
     return csv.str();
+}
+
+std::string BuildControlLoopCsvRow(
+    const RuntimeSnapshot& snapshot,
+    std::uint64_t tick_count,
+    const RuntimeControlLoopTimingState& timing,
+    const std::vector<RuntimeControlChannelLogState>& channels) {
+    RuntimeSnapshotIndex snapshot_index;
+    snapshot_index.Rebuild(snapshot);
+    return BuildControlLoopCsvRow(snapshot, snapshot_index, tick_count,
+                                  timing, channels);
 }
 
 }  // namespace svg_mb_control

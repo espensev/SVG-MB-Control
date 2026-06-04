@@ -20,7 +20,7 @@ namespace svg_mb_control {
 void CaptureChannelBaselineIfAvailable(
     const ControlRuntimeContext& context,
     ChannelState& channel,
-    const RuntimeSnapshot& runtime_snapshot,
+    const RuntimeSnapshotIndex& runtime_index,
     std::uint64_t tick_count);
 
 // Emits per-channel sensor-failure / sensor-recovery events when the
@@ -55,7 +55,7 @@ bool HandleExpiredHoldRestore(
 void TryApplyChannelSetpoint(
     ControlRuntimeContext& context,
     ChannelState& channel,
-    const RuntimeSnapshot& runtime_snapshot,
+    const RuntimeSnapshotIndex& runtime_index,
     const ChannelEvaluation& evaluation,
     FanWriter& fan_writer,
     PendingWritesStore& pending_store,

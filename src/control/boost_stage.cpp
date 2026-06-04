@@ -1,5 +1,7 @@
 #include "boost_stage.h"
 
+#include "control_math.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -41,9 +43,7 @@ double PressureScale(double temp_c, double start_c, double full_c) {
     if (!(full_c > start_c)) {
         return 1.0;
     }
-    const double t = std::clamp((temp_c - start_c) / (full_c - start_c),
-                                0.0, 1.0);
-    return t * t * t * ((6.0 * t - 15.0) * t + 10.0);
+    return SmoothStep((temp_c - start_c) / (full_c - start_c));
 }
 
 }  // namespace

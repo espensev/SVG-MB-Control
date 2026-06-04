@@ -1,5 +1,6 @@
 #include "control_policy.h"
 #include "csv_util.h"
+#include "runtime_snapshot.h"
 
 #include <cmath>
 #include <iostream>
@@ -129,12 +130,56 @@ void TestCsvEscape() {
                 "CSV append helpers use stable field formatting");
 }
 
+void TestRuntimeSnapshotIndex() {
+    using namespace svg_mb_control;
+
+    RuntimeSnapshot snapshot;
+    RuntimeFanSnapshot first_fan;
+    first_fan.channel = 2u;
+    first_fan.duty_percent = 31.0;
+    snapshot.fans.push_back(first_fan);
+    RuntimeFanSnapshot duplicate_fan;
+    duplicate_fan.channel = 2u;
+    duplicate_fan.duty_percent = 44.0;
+    snapshot.fans.push_back(duplicate_fan);
+
+    RuntimeAmdSensor first_sensor;
+    first_sensor.label = "Tctl/Tdie";
+    first_sensor.temperature_c = 66.5;
+    snapshot.amd_sensors.push_back(first_sensor);
+    RuntimeAmdSensor duplicate_sensor;
+    duplicate_sensor.label = "Tctl/Tdie";
+    duplicate_sensor.temperature_c = 77.5;
+    snapshot.amd_sensors.push_back(duplicate_sensor);
+
+    RuntimeSnapshotIndex index;
+    index.Rebuild(snapshot);
+
+    const RuntimeFanSnapshot* fan = index.FindFanChannel(2u);
+    ExpectTrue(fan == &snapshot.fans.front(),
+               "snapshot index preserves first fan match");
+    ExpectNear(index.FindAmdSensorTemperature("Tctl/Tdie"), 66.5, 0.001,
+               "snapshot index preserves first AMD sensor match");
+    ExpectTrue(index.FindFanChannel(9u) == nullptr,
+               "snapshot index missing fan returns null");
+    ExpectTrue(std::isnan(index.FindAmdSensorTemperature("missing")),
+               "snapshot index missing AMD sensor returns NaN");
+
+    RuntimeSnapshot empty;
+    index.Rebuild(empty);
+    ExpectTrue(index.FindFanChannel(2u) == nullptr,
+               "snapshot index rebuild drops old fan entries");
+    ExpectTrue(std::isnan(index.FindAmdSensorTemperature("Tctl/Tdie")),
+               "snapshot index rebuild drops old AMD sensor entries");
+}
+
 }  // namespace
 
 int main() {
     TestLookupCurve();
     TestBlendTemps();
     TestCsvEscape();
+    TestRuntimeSnapshotIndex();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " core smoke test failure(s)\n";

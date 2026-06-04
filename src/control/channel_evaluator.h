@@ -50,7 +50,7 @@ ChannelTimingConfig BuildChannelTimingConfig(
 ChannelEvaluation EvaluateChannel(ChannelState& channel,
                                   const ControlLoopConfig& loop,
                                   const TempInputs& temp_inputs,
-                                  const RuntimeSnapshot& runtime_snapshot,
+                                  const RuntimeSnapshotIndex& runtime_index,
                                   std::chrono::steady_clock::time_point now);
 
 std::uint32_t WriteCooldownForAuthorityReassert(

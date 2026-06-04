@@ -2,6 +2,9 @@
 
 Status: completed simplification record, last updated 2026-05-29. The original
 2026-05-26 target list is fully closed (per-target Status lines below).
+The follow-up 2026-05-30 audit for new behavior-preserving performance
+opportunities lives in `docs/discovery-control-math-performance.md`; this file
+remains the completed record for the original target set.
 
 This note records behavior-preserving simplification targets for the control
 runtime. The intent is to reduce expression complexity and duplicated control
