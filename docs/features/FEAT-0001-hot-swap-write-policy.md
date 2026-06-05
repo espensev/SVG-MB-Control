@@ -1,7 +1,7 @@
 # FEAT-0001: Hot-swap runtime write policy
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-03
+**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-06
 **Namespace:** `REQ-WRITEPOLICY-*`
 **Companion to:** `AGENTS.md`, `docs/WRITE_ORCHESTRATION.md`, `docs/RUNTIME_HOME.md`, `docs/MEASUREMENT_GATE.md`
 **Purpose:** allow the running controller to change its write policy
@@ -164,9 +164,9 @@ Proposed behavior (not yet implemented):
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| [`docs/write-policy-hotswap-decision-2026-06-03.md`](../write-policy-hotswap-decision-2026-06-03.md) | Recreate-the-`FanWriter` (build-then-swap) **vs** in-place push-down (a new non-re-init `MbSioController` setter). Also: transition semantics for block/disable while `write_active`, and the build-then-swap failure path. | Proposed — awaits maintainer acceptance |
+| [`docs/write-policy-hotswap-decision-2026-06-03.md`](../write-policy-hotswap-decision-2026-06-03.md) | Recreate-the-`FanWriter` (build-then-swap) **vs** in-place push-down (a new non-re-init `MbSioController` setter). Also: transition semantics for block/disable while `write_active`, and the build-then-swap failure path. | Accepted (maintainer, 2026-06-06) |
 
-Leaning: **recreate via build-then-swap.** A hot-swap is a UX promise (the
+Decision (accepted 2026-06-06): **recreate via build-then-swap.** A hot-swap is a UX promise (the
 operator sees a change take effect with nothing disrupted), not a requirement to
 mutate a live controller. Write-policy changes are infrequent authority/safety
 toggles, so per-swap re-`discover()` latency is invisible against the shipped
@@ -200,7 +200,7 @@ cited contract.
 
 | Decision | Needed before | Current default |
 |---|---|---|
-| Recreate (build-then-swap) vs in-place setter | implementation (§9) | Resolved-lean: recreate; no vendored setter |
+| Recreate (build-then-swap) vs in-place setter | implementation (§9) | Decided: recreate; no vendored setter (accepted 2026-06-06) |
 | Does a live change persist to `config/runtime_policy_*.json`, or stay in-memory until restart? | implementation | In-memory only (startup config is the durable source) |
 | Is per-swap re-`discover()` latency acceptable, or is a faster non-re-enumerating rebuild needed? | implementation | Acceptable — swaps are infrequent and the tick is 250 ms |
 
@@ -223,14 +223,16 @@ cited contract.
 
 - [x] 1. Problem stated as a named code/contract gap with file:line evidence (§2).
 - [x] 2. Stressed invariants identified — Live Runtime Safety, Repo Boundary, Measurement Gate, RUNTIME_HOME schema (§4).
-- [ ] 3. Design decision record written and marked current (§9).
+- [x] 3. Design decision record written and marked current (§9).
 - [x] 4. Concrete `REQ-WRITEPOLICY-*` IDs assigned (§6).
 - [x] 5. Verification mapped to `Test-LocalCI` / review / runtime evidence (§10).
 - [x] 6. Confirmed it does not violate Live Runtime Safety or Repo Boundary; the unblock path is explicitly gated by the Measurement Gate rather than moving the baseline silently.
 - [x] 7. Doctrine check: claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`.
 
-> Gate 3 is open: this spec is `Draft` until the design decision record (§9)
-> exists and is marked current. It is not buildable work yet.
+> Gate 3 is cleared: the design decision record (§9) is accepted and current
+> (maintainer, 2026-06-06). This spec is `Accepted` — authorized for build —
+> but is not yet implemented; the §5 behavior stays proposed until it is built
+> and the verification log (§14) is filled.
 
 ## 14. Verification log  *(fill in after the feature is built)*
 

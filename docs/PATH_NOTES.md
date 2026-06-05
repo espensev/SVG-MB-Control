@@ -23,6 +23,15 @@ checkable.
 
 ---
 
+## 2026-06-06
+
+- **Done** — `FEAT-0001` (hot-swap write policy) promoted `Draft` → `Accepted`:
+  the build-then-swap design decision
+  (`docs/write-policy-hotswap-decision-2026-06-03.md`, Option A) accepted by the
+  maintainer, so promotion gate 3 is cleared. Not yet implemented — the spec §5
+  behavior stays proposed until it is built and the verification log (§14) is
+  filled.
+
 ## 2026-06-03
 
 - **Added** — `docs/features/` spec-before-build system in active use:
@@ -116,9 +125,10 @@ before building.
 
 - **Control-law seam** — `IChannelController` so the control *kind* (not just its
   tuning) is swappable. Captured in `FEAT-0003`; design-capture only.
-- **FEAT-0001 / FEAT-0002 promotion** — both are `Draft`; FEAT-0001's decision
-  record exists, FEAT-0002 still needs its dated decision record before it is
-  buildable (see each spec's gate-3 line).
+- **FEAT-0001 / FEAT-0002 status** — `FEAT-0001` is `Accepted` (gate 3 cleared
+  2026-06-06), not yet implemented. `FEAT-0002` shipped its load layer with
+  `cpu_settings_label` (`REQ-CPUSETTINGS-06`) deferred. Neither is open
+  promotion work now.
 - **CONTROL_PIPELINE_MATH §6.1 prose-vs-code** — align or annotate (see
   2026-06-03 entry).
 - **Doc scope** — consider `docs/HARDWARE_ACCESS.md` split (see 2026-06-03 entry).

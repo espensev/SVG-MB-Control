@@ -1,7 +1,8 @@
 # Write-Policy Hot-Swap Decision - 2026-06-03
 
-Status: proposed design decision for `docs/features/FEAT-0001-hot-swap-write-policy.md`.
-Not yet implemented; not normative until accepted by the maintainer.
+Status: Accepted (maintainer, 2026-06-06) — current design decision for
+`docs/features/FEAT-0001-hot-swap-write-policy.md`. Not yet implemented;
+normative for FEAT-0001 implementation.
 
 **Companion to:** `docs/features/FEAT-0001-hot-swap-write-policy.md`,
 `docs/WRITE_ORCHESTRATION.md`, `docs/RUNTIME_HOME.md`, `docs/MEASUREMENT_GATE.md`.
