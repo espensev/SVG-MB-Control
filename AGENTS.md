@@ -20,6 +20,12 @@
   analyze, config, runtime-home, and test workflows.
 - Use `docs\STRUCTURE_AND_STABILITY.md` for current source layout,
   responsibility boundaries, and remaining structural polish.
+- Use `docs\BUILD_TARGETS_AND_DEPENDENCIES.md` for the executables, runtime
+  scheduled-task processes, and vendored dependencies.
+- Use `docs\PATH_NOTES.md` for the dated log of completed/fixed/added work and
+  the unscheduled ideas backlog. It is a curated journal, not a system of
+  record; `git log`, `docs\features\`, and `docs\STRUCTURE_AND_STABILITY.md`
+  stay authoritative.
 - Use `docs\CONTROL_LOOP.md`, `docs\READ_LOOP.md`, and
   `docs\WRITE_ORCHESTRATION.md` for mode-specific runtime behavior.
 - Use `docs\RUNTIME_HOME.md` for runtime sidecars, status fields, health
