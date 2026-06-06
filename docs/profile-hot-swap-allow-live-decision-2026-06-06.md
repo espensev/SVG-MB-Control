@@ -8,11 +8,11 @@ file is the decision-support record of how it was reached.
 `docs/features/FEAT-0003-selectable-profile-hot-swap.md` (REQ-PROFILE-07),
 `docs/MEASUREMENT_GATE.md`,
 `docs/modular-profile-hotswap-discussion-2026-06-06.md` (measurement-gate section)
-**Purpose:** lay out the two directions for the live-PID authorization posture so
-the maintainer can choose, after a review surfaced that decision **D6** and
+**Purpose:** record the two directions considered for the live-PID authorization
+posture after a review surfaced that decision **D6** and
 `docs/MEASUREMENT_GATE.md` can be read as inconsistent. PID =
-proportional-integral-derivative. This brief changes no decision; D6 stands until
-a direction below is selected.
+proportional-integral-derivative. The selected direction is applied in revised D6;
+this brief is the supporting rationale, not a second source of truth.
 
 > This is design-capture with no runtime effect. FEAT-0003 is `Draft`,
 > not scheduled (see its Scope & intent), and none of the PID/`allow_live`

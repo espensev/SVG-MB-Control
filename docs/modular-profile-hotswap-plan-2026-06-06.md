@@ -315,8 +315,8 @@ conditioning), so the refactor precedes any second law.
    the law-agnostic conditioning out of `channel_evaluator.cpp` into a shared
    output stage applied after any law produces a setpoint — D4's firm list (clamp,
    sensor-safe latch and `safety_override`, deadband, cooldown, breaker, write
-   gate, `decision:141-145`), plus — if D4's open leans (`decision:147-153`) are
-   confirmed — the rate limiter as a safety slew clamp, while the EMA smoothing +
+   gate), plus — if D4's open leans are confirmed — the rate limiter as a safety
+   slew clamp, while the EMA smoothing +
    decay latch stay curve-law-specific. Gate: the existing CTest/pytest lanes stay
    green and the curve output is bit-identical — the load-bearing boost-sum order
    (`:353-364`) locked by an output-equivalence test (REQ-PROFILE-01). Note:
@@ -340,7 +340,7 @@ conditioning), so the refactor precedes any second law.
    (P/PI/PD/PID by gain selection, D3), available first in the non-writing
    shadow/dry-run path so a *writing* channel does not switch to an uncharacterized
    law and move the measurement-gate baseline silently. Live PID would sit behind
-   the explicit per-channel `pid.allow_live` opt-in (D6, `decision:169-182`).
+   the explicit per-channel `pid.allow_live` opt-in (D6).
    Resolved 2026-06-06: D6 was revised to require, before a live PID write, both
    characterization evidence (a shadow-log comparison against the curve baseline is
    accepted) and a non-NaN slew cap, enforced at config load (levers B1+B2);
