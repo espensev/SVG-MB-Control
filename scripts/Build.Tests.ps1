@@ -11,9 +11,13 @@ function Invoke-CMakeTests {
         [Parameter(Mandatory = $true)][string]$BuildDirectory
     )
 
+    # --no-tests=error: fail if the build registered zero tests (for example a
+    # configuration that turned BUILD_TESTING off), so a green CTest lane cannot
+    # mean "0 tests ran". Requires CMake/CTest >= 3.18.
     Invoke-External -FilePath $CTestExe -Arguments @(
         '--test-dir', $BuildDirectory,
-        '--output-on-failure'
+        '--output-on-failure',
+        '--no-tests=error'
     ) -FailureMessage 'CTest lane failed'
 }
 

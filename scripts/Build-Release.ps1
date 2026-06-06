@@ -177,9 +177,11 @@ try {
     Write-Host "Version: $version" -ForegroundColor Green
 
     Write-Host "`n[2/11] Cleaning build directories..." -ForegroundColor Yellow
-    Remove-DirectoryIfExists -Path $BuildRoot
-    New-EmptyDirectory -Path $BuildDir
-    New-EmptyDirectory -Path $DistDir
+    # -Strict: a clean that cannot remove a locked tree fails the build here
+    # instead of warning and then building against stale artifacts.
+    Remove-DirectoryIfExists -Path $BuildRoot -Strict
+    New-EmptyDirectory -Path $BuildDir -Strict
+    New-EmptyDirectory -Path $DistDir -Strict
 
     Write-Host "`n[3/11] Initializing Visual Studio environment..." -ForegroundColor Yellow
     $vsInstallPath = Get-VsInstallPath

@@ -6,22 +6,41 @@
 
 function Remove-DirectoryIfExists {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        # With -Strict, a removal that fails or leaves the directory behind
+        # throws instead of warning. Use it for the pre-build clean so the
+        # pipeline fails loud rather than building against stale artifacts; leave
+        # it off for post-build cleanup, where a leftover is not worth failing on.
+        [switch]$Strict
+    )
 
     if (Test-Path -LiteralPath $Path) {
         try {
             Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
         } catch {
+            if ($Strict) {
+                throw ("Could not remove directory: {0} ({1})" -f $Path, $_.Exception.Message)
+            }
             Write-Warning ("Could not remove directory: {0} ({1})" -f $Path, $_.Exception.Message)
+            return
+        }
+        # Remove-Item can return without error yet leave a locked subtree behind
+        # (for example a held .obj from another process), so verify the removal.
+        if ($Strict -and (Test-Path -LiteralPath $Path)) {
+            throw ("Directory still present after removal (a file is likely locked): {0}" -f $Path)
         }
     }
 }
 
 function New-EmptyDirectory {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$Strict
+    )
 
-    Remove-DirectoryIfExists -Path $Path
+    Remove-DirectoryIfExists -Path $Path -Strict:$Strict
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
 }
 
