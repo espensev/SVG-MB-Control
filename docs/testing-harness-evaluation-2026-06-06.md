@@ -16,6 +16,28 @@ Status of this doc: findings snapshot, not a maintained contract. `git log`,
 
 ---
 
+## Remediation status — applied 2026-06-06
+
+All seven recommendations in §7 were applied the same day on
+`analyze-native-superset`, each validated through `Test-LocalCI.ps1`:
+
+- rec 1 single-instance lock on `Test-LocalCI` — `470fc53`
+- rec 2 unique per-process C++ temp names — `2319e03`
+- rec 3 fail-loud `[2/11]` clean + CTest `--no-tests=error` — `9a99834`
+- rec 4 AMD decode math extracted to `amd_decode.h` + unit-tested (closes the
+  §5 High gap; CTest is now 9 targets, all green) — `547eae6`
+- rec 5 documentation drift fixes — `cd3f672`
+- rec 6 gitignore `__*` / `*_run.log` — `55b59f7`
+- rec 7 `.Path`-under-staged-root kill guard — `e46a6bc`
+
+The original findings below are kept as the dated snapshot; inline `APPLIED` /
+`CLOSED` notes mark what changed. Coverage gaps that were **not** in the rec
+list remain open: `pawnio_binary.cpp` `LoadPawnIoBinary`, `sio_fan_writer.cpp`
+status/retry, the CPUID family/model decode in `DetectAmdCpu`, and
+`analyze_csv.cpp` `ParseTickRow`.
+
+---
+
 ## TL;DR
 
 The harness is sound and genuinely green: a clean run passes CTest 8/8 and the
@@ -149,10 +171,10 @@ the real hardware path:
 
 | Module | Untested behavior | Severity |
 |---|---|---|
-| `src\hardware\amd_reader.cpp` `DecodeTctl` / `DecodeCcdTemp` | raw-register→°C decode math (shift/scale/offset; CCD validity gate). Pure, trivially unit-testable, zero coverage. | High |
+| `src\hardware\amd_reader.cpp` `DecodeTctl` / `DecodeCcdTemp` | raw-register→°C decode math (shift/scale/offset; CCD validity gate). **CLOSED 2026-06-06 (rec 4, `547eae6`)**: extracted to `src\hardware\amd_decode.h` and covered by `tests\cpp\amd_decode_tests.cpp`. | ~~High~~ → closed |
 | `src\hardware\pawnio_binary.cpp` `LoadPawnIoBinary` | SHA-256 verification gating (strict / warn_only / skip; env skip override; mismatch handling) on a ring-0 kernel module. | Medium |
 | `src\hardware\sio_fan_writer.cpp` `TranslateStatus` / `IsTransientSioStatus` / `RetryTransientSioOperation` | status→`FanWriteError` mapping that feeds breaker/restore decisions (`channel_write.cpp` branches on `kPolicyRefused`/`kTimedOut`); 3-attempt retry. | Medium |
-| `src\hardware\amd_reader.cpp` `SelectCcdLayout` + CPUID family/model | Zen model→per-CCD register-base mapping and unsupported fallback. | Medium |
+| `src\hardware\amd_reader.cpp` `SelectCcdLayout` + CPUID family/model | Zen model→per-CCD register-base mapping and unsupported fallback. `SelectCcdLayout` **tested 2026-06-06 (rec 4)**; the CPUID family/model decode in `DetectAmdCpu` stays in the .cpp and untested. | Medium (partial) |
 | `src\analyze\analyze_csv.cpp` `ParseTickRow` | silent row-drop on empty `wall_clock` / missing `loop_tick_count` (offline analysis integrity only). | Low |
 
 Root cause for the AMD items: the functions are in anonymous namespaces (internal
@@ -162,6 +184,13 @@ on both `SVG_MB_CONTROL_SIM_DIRECT_AMD_MODE=enabled` and `disabled`
 `SIM_AMD_*_RAW` hook, unlike the SIO/fan readers which expose `SIM_SIO_TEMPERATURE0_RAW`
 / `SIM_FAN_DUTY_RAW` that DO drive their decoders. So the AMD decode math is
 structurally unreachable, not merely omitted.
+
+UPDATE 2026-06-06 (rec 4): `DecodeTctl`, `DecodeCcdTemp`, and `SelectCcdLayout`
+were moved (behavior-preserving) from the anonymous namespace into the header
+`src\hardware\amd_decode.h` (`namespace svg_mb_control::amd`) and are now
+unit-tested directly by `tests\cpp\amd_decode_tests.cpp`, so the High decode
+gap is closed without adding a `SIM_AMD_*_RAW` hook. The CPUID family/model
+decode in `DetectAmdCpu` was not extracted and remains untested.
 
 Two C++-lane structural notes:
 - `boost_stage_tests.cpp` is a refactor-equivalence guard against a frozen copy
@@ -200,6 +229,10 @@ Two C++-lane structural notes:
 1. Single-instance guard on `Test-LocalCI` (lockfile/mutex) so a second concurrent
    invocation refuses or queues. Removes the shared-`build\` and `%TEMP%`
    collision failures at the source. (Highest ROI.)
+   APPLIED 2026-06-06 (`470fc53`): `Test-LocalCI.ps1` takes a per-repo exclusive
+   lock file in the system temp dir before building; a second run refuses with
+   exit 75 or queues with `-Wait`. Verified: a second run refuses without
+   building while the first holds the lock.
 2. Unique C++ test temp names (fold in `GetCurrentProcessId()` or
    `std::filesystem::temp_directory_path() / unique_path()`); fix the misleading
    TempJsonFile comment. Self-contained; re-validates through this same harness.
@@ -210,13 +243,28 @@ Two C++-lane structural notes:
    hermetic 114/114, exit 0.
 3. Fail loud when `[2/11]` clean cannot remove the tree instead of warning then
    running against stale artifacts; add CTest `--no-tests=error`.
+   APPLIED 2026-06-06 (`9a99834`): opt-in `-Strict` on `Remove-DirectoryIfExists`
+   / `New-EmptyDirectory`, passed at `[2/11]` (cleanup `[11/11]` stays warn-only);
+   `--no-tests=error` added to the CTest lane. Verified: a held build\ file fails
+   `[2/11]` with exit 1; normal run still green.
 4. Close the High gap: extract `DecodeTctl`/`DecodeCcdTemp` to a header and add a
    C++ decode test, or add a `SIM_AMD_*_RAW` hook (mirror the SIO/fan sim path).
+   APPLIED 2026-06-06 (`547eae6`): extracted `DecodeTctl`/`DecodeCcdTemp`/
+   `SelectCcdLayout` to `src\hardware\amd_decode.h`; new CTest target
+   `svg_mb_control_amd_decode_tests` (CTest now 9/9). See §5.
 5. Doc fixes: schema 7→8 (+ the two columns), document the CTest lane, correct
    `-SkipTests`, advance the RUNTIME_LOGGING date stamp.
+   APPLIED 2026-06-06 (`cd3f672`): all four done in `README.md` and
+   `RUNTIME_LOGGING_AND_EVALUATION.md`.
 6. Repo hygiene: remove `__audit_tmp.txt`; gitignore `__*` / `*_run.log`.
+   APPLIED 2026-06-06: `__audit_tmp.txt` deleted earlier; `.gitignore` broadened
+   to `/__*` and `*_run.log` (`55b59f7`).
 7. Optional: add a `.Path`-under-staged-root guard to the test kill helper
    (defense-in-depth on top of PID scoping).
+   APPLIED 2026-06-06 (`e46a6bc`): `_terminate_svg_processes` now also filters on
+   `.Path` under the staged root. Filter logic verified on synthetic paths and
+   `helpers.py` compiles; not exercised end-to-end (the guarded kill is a
+   fallback only reached when graceful `--stop` times out).
 
 ---
 
@@ -234,12 +282,18 @@ Two C++-lane structural notes:
   `src\hardware\sio_fan_writer.cpp`, `src\analyze\analyze_csv.cpp`,
   `src\platform\runtime_singleton.cpp`.
 
-## 9. Not done in this pass
+## 9. Pass status
 
-- Recommendation #2 (unique C++ temp names) was applied and validated; all
-  other recommendations remain open (notably #1, the single-instance lock, which
-  is the remaining cause of concurrent-run collisions on the shared `build\`
-  tree). The auto-memory build/test note was corrected.
-- `__audit_tmp.txt` was deleted (stale 2026-05-29 root scratch).
+- All seven §7 recommendations were applied and validated on 2026-06-06 (see the
+  remediation banner at the top for commit hashes and §7 for per-rec evidence).
+  The whole sweep re-validates green through `Test-LocalCI.ps1 -KeepBuildDir`:
+  CTest 9/9, hermetic 114/114, exit 0.
+- Still open (not part of the rec list — §5 coverage observations): the Medium
+  gaps for `pawnio_binary.cpp` `LoadPawnIoBinary`, `sio_fan_writer.cpp`
+  status/retry mapping, and the CPUID family/model decode in `DetectAmdCpu`; the
+  Low gap for `analyze_csv.cpp` `ParseTickRow`. The two C++-lane structural notes
+  in §5 (frozen-copy boost guard, no auto-registration) also remain.
+- `__audit_tmp.txt` was deleted (stale 2026-05-29 root scratch); the auto-memory
+  build/test note was corrected.
 - Line numbers cited from the static cross-check may drift; symbols are
   authoritative.

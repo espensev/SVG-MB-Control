@@ -46,15 +46,32 @@ checkable.
   salt + counter (`UniqueTempSuffix`); the misleading "distinct per concurrent
   run" comments are corrected. Re-validated: CTest 8/8, hermetic 114/114, exit 0
   (harness-eval rec 2).
-- **Idea** — remaining harness-eval recommendations (not authorized work; see the
-  snapshot doc §7): a single-instance lock on `Test-LocalCI` so a second
-  concurrent run refuses or queues (highest ROI — removes the shared-`build/` and
-  `%TEMP%` collisions at the source); fail-loud when `[2/11]` clean cannot remove
-  a locked tree, plus CTest `--no-tests=error`; close the High gap by extracting
-  `DecodeTctl`/`DecodeCcdTemp` to a header test or adding a `SIM_AMD_*_RAW` hook;
-  doc fixes (README schema `7`→`8` + the two `low_band_*_boost_pct` columns,
-  document the CTest lane, correct `-SkipTests` to "both lanes"); gitignore
-  `__*`/`*_run.log`.
+- **Done** — applied all remaining harness-eval recommendations (rec 1, 3–7;
+  rec 2 is the temp-name fix above), each validated through
+  `Test-LocalCI.ps1 -KeepBuildDir` and committed separately:
+  - **Fixed** — rec 1 single-instance lock on `Test-LocalCI`: a per-repo
+    exclusive lock file in the system temp dir; a second concurrent run refuses
+    (exit 75) or queues with `-Wait`, removing the shared-`build/` and `%TEMP%`
+    collisions at the source (`470fc53`).
+  - **Fixed** — rec 3 fail-loud `[2/11]` clean (opt-in `-Strict` on
+    `Remove-DirectoryIfExists`, so a locked tree fails the build with exit 1
+    instead of building against stale artifacts) plus CTest `--no-tests=error`
+    (`9a99834`).
+  - **Added** — rec 4 closes the §5 High coverage gap: `DecodeTctl` /
+    `DecodeCcdTemp` / `SelectCcdLayout` extracted to `src/hardware/amd_decode.h`
+    and unit-tested by a new 9th CTest target `svg_mb_control_amd_decode_tests`
+    (`547eae6`). The CPUID family/model decode in `DetectAmdCpu` stays untested.
+  - **Fixed** — rec 5 doc drift: README DB schema `7`→`8` + the two
+    `low_band_*_boost_pct` columns, CTest lane documented, `-SkipTests`
+    corrected to both lanes; `RUNTIME_LOGGING_AND_EVALUATION.md` date advanced
+    (`cd3f672`).
+  - **Fixed** — rec 6 `.gitignore` broadened to `/__*` and `*_run.log`
+    (`55b59f7`).
+  - **Added** — rec 7 defense-in-depth: the test kill helper
+    (`_terminate_svg_processes`) now also filters on `.Path` under the staged
+    root, so a recycled PID matching a live `release\` instance is not killed
+    (`e46a6bc`). Filter logic verified; not exercised end-to-end (fallback path).
+  Full-sweep re-validation: CTest 9/9, hermetic 114/114, exit 0.
 - **Fixed** — recovery-gap remediation 3 (the compound cell): a sensor-safe
   (safe-mode) command now bypasses an open write-failure breaker so a
   thermal-safety write reaches the hardware instead of being silently dropped
