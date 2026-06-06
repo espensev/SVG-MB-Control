@@ -107,11 +107,10 @@ On the D3a sub-question specifically — is `curve(temp) + PID(error)` still "a 
 > channel has the characterization evidence (a shadow-log comparison against the
 > curve baseline is accepted as that evidence) **and** a non-NaN slew cap —
 > closing both the evidence-vs-consent gap (reading the gate as an evidence gate)
-> and the NaN-default slew-cap gap argued below. That is exactly the flip
-> condition this section names in its last paragraph. The original-posture
-> description and its line references are kept as the reasoning that produced the
-> revision; see the revised D6 (`docs/profile-hot-swap-decision-2026-06-03.md`)
-> and `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
+> and the NaN-default slew-cap gap argued below. The analysis below is kept as the
+> reasoning that produced the revision; see the revised D6
+> (`docs/profile-hot-swap-decision-2026-06-03.md`) and
+> `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
 
 This element analyzed the original D6 posture for how a PID channel earned the right to write the fan. That original shape was: a PID channel defaulted to shadow/dry-run — it computed and logged a setpoint but suppressed the write — and `pid.allow_live: true` was a per-channel operator opt-in that authorized live writes immediately, before characterization evidence existed. The claim was that this stayed inside the `docs/MEASUREMENT_GATE.md` invariant ("shipped live behavior is the measured baseline") because the crossing was explicit and recorded: `allow_live` was in config and would emit `control_loop.profile_applied` naming the channel and law. None of this exists in code — there is no `allow_live`, no shadow path, no `IChannelController` or `PidController` in `src/control/` (grep finds only unrelated uses of the word controller — the process supervisor, the config-print, and the Super I/O / GPU hardware controllers — none a control-law discriminator).
 
