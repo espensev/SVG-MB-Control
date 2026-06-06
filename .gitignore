@@ -11,7 +11,7 @@
 /hwlogparalell.CSV
 *.pyc
 # Local scratch / tooling artifacts (not part of the repo)
-/__audit_tmp.txt
-/__localci_run.log
+/__*
+*_run.log
 /review/
 /.antigravitycli/
