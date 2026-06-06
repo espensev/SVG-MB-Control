@@ -1,8 +1,10 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.1   **Updated:** 2026-06-03
-**Companion to:** `AGENTS.md`, `docs/STRUCTURE_AND_STABILITY.md`, `docs/MEASUREMENT_GATE.md`
+**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-06
+**Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
+`docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
+`docs/MEASUREMENT_GATE.md`
 **Purpose:** define the *spec-before-build* system — each new feature gets its
 own detailed spec **before** it is implemented, so the implementation can be
 checked against the written spec afterward.
@@ -28,7 +30,10 @@ where a single new feature is scoped against those contracts before code lands.
 | `docs/CONTROL_LOOP.md`, `READ_LOOP.md`, `WRITE_ORCHESTRATION.md`, `RUNTIME_HOME.md`, `CONTROL_PIPELINE_MATH.md` | Mode and runtime behavior contracts. | The behavior sections a spec references instead of restating. |
 | `docs/MEASUREMENT_GATE.md` | What is blocked until characterized (cadence, channels, mixed-input strategy). | A spec must declare whether it crosses the gate and what evidence it needs. |
 | `docs/<topic>-decision-YYYY-MM-DD.md` | One dated decision per direction-setting choice. | A feature earns its decision record before implementation; the spec links it. |
+| `docs/TRACEABILITY.md` | Central `REQ-*` to verification map. | Every feature requirement gets one audit row here when introduced or changed. |
+| `docs/FEATURE_VERIFICATION_CHECKLIST.md` | Practical implementation and handoff checklist. | The checklist used while building and verifying an accepted feature. |
 | `.\scripts\Test-LocalCI.ps1` / `.\build-release.ps1` | CI-style validation and release gates. | Where a spec's `REQ-*` requirements are verified. |
+| `tests/test_feature_specs.py` | Machine check for feature-spec consistency. | Fails the Python lane if registry, requirement, traceability, gate, or verification-log state drifts. |
 
 > A `Reserved` or `Draft` spec is planning, not a backlog to start, and not
 > permission to write code. Nothing in a feature spec is normative until its
@@ -44,15 +49,23 @@ Reserved  ->  Draft  ->  Accepted  ->  Implemented  ->  Done
    spec body is not yet written (or is a stub).
 2. **Draft** — the spec is being written in detail (this is "document it before
    we add it"). The promotion gates (§3) are worked through here.
-3. **Accepted** — the feature is authorized; its required design decision
+3. **Accepted** — the spec is agreed and may become buildable work when
+   implementation is explicitly authorized; its required design decision
    record(s) exist and are current; `REQ-*` IDs are assigned; verification is
    mapped to real checks (`Test-LocalCI`, build-release, contract review, or
-   runtime evidence).
+   runtime evidence) and to `docs/TRACEABILITY.md`.
 4. **Implemented** — code lands; the relevant docs are updated per `AGENTS.md`
    §Change Checklist. The spec's **verification log** is filled in: each `REQ-*`
    is checked against the running controller ("the check-against-it-later step").
 5. **Done** — all acceptance criteria pass; the spec is the historical record of
    what shipped.
+
+A spec may sit at **Draft with all promotion gates (§3) checked** when it is
+deliberate design-capture that is not being promoted — for example `FEAT-0003`,
+recorded as not-a-net-benefit and not scheduled. That differs from **Accepted**:
+Accepted means agreed and authorizable (still needing explicit build
+authorization), whereas a held Draft is complete design that is intentionally
+not advancing at all.
 
 ## 3. Promotion gates
 
@@ -68,8 +81,8 @@ template's §13 checklist. In short:
 3. Write or update the design decision record(s) **before** implementation
    starts (dated `docs/<topic>-decision-YYYY-MM-DD.md`).
 4. Assign concrete `REQ-*` IDs only after the decision chooses a direction.
-5. Map every requirement to a real verification check in the same change that
-   introduces it.
+5. Map every requirement to a real verification check in the feature spec and
+   in `docs/TRACEABILITY.md` in the same change that introduces it.
 6. Confirm it does not violate Live Runtime Safety or Repo Boundary and does not
    silently move the Measurement Gate baseline.
 7. Doctrine check (`CLAUDE.md`): grounded claims, correct `must`/`should`/`is`
@@ -87,7 +100,10 @@ template's §13 checklist. In short:
 
 Reserve a row (FEAT id + `REQ-*` namespace) when a feature is first proposed, so
 it has a home before it is built. Write the spec body when implementation
-approaches. None below is normative until its promotion gates pass.
+approaches. None below is normative until its promotion gates pass. A `Reserved`
+row carries no linked spec body in the enforced set; a body written then deferred
+is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
+(`tests/test_feature_specs.py`) only when promoted back to `Draft`.
 
 | FEAT | Feature | `REQ-*` namespace | Status |
 |---|---|---|---|
@@ -95,5 +111,5 @@ approaches. None below is normative until its promotion gates pass.
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (load layer; label deferred) |
 | [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Selectable control-law profile with hot-swap | `REQ-PROFILE-*` | Draft |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Draft |
-| [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Draft |
-| [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Draft |
+| FEAT-0005 | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Reserved (body parked in `_parked/`) |
+| FEAT-0006 | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Reserved (body parked in `_parked/`) |

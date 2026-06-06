@@ -25,6 +25,50 @@ checkable.
 
 ## 2026-06-06
 
+- **Changed** — acted on a multi-agent review of the feature-governance batch
+  (verdict: the system is sound and CI-enforced; the excess is concentrated in
+  speculative specs, not the machinery). Demoted `FEAT-0005`/`FEAT-0006` from
+  full Draft specs to **Reserved**: bodies parked under
+  `docs/features/_parked/`, registry rows delinked, and their
+  `REQ-ACTCONFIRM-*` / `REQ-CPUEFF-*` rows dropped from `docs/TRACEABILITY.md`.
+  `FEAT-0004` kept at Draft as the one keeper (a present, operator-visible
+  PawnIO-absent gap). Two doc-fills: `TRACEABILITY.md` §1 now states the
+  enforcing test checks structure, not that cited checks exist/pass;
+  `docs/features/README.md` §2 names the "Draft with all gates checked, held as
+  design-capture" state (`FEAT-0003`). `tests/test_feature_specs.py` stays green
+  (5/5) after the demotion.
+- **Added** — `docs/modular-profile-hotswap-plan-2026-06-06.md`: deepens
+  `FEAT-0003` design-capture on the "change the entire per-channel control
+  function at runtime" idea — the *modular* angle the existing D1–D7 decisions
+  left open. Adds two labeled proposals (A: law-dispatch shape — hard-named
+  switch vs registry table, recommend "A1 now, reversible to A2"; B: what a
+  "profile" object is + a `--profile` startup surface, recommend named on-disk
+  profiles), a grounded "what we have today" inventory of `EvaluateChannel`, the
+  implemented-vs-spec hot-swap machinery, a design-capture dependency order
+  (seam-extraction refactor first, bit-identity gated), and 8 open maintainer
+  questions. Status guard: FEAT-0003 stays design-capture, not scheduled, not a
+  net benefit — this authorizes nothing.
+- **Fixed** — accuracy-only file:line drift in the two 2026-06-03 profile-hotswap
+  docs: recovery-gap remediation 3 (`33f8d24`/`68a6fc4`) added
+  `ChannelEvaluation::safety_override`, shifting `channel_evaluator.{cpp,h}` refs
+  ~5 lines. Corrected `EvaluateChannel` `435-469`→`440-474`, `EvaluatePrimarySetpoint`
+  `243-278`→`243-283`, the boost-sum `348-359`→`353-364`, `ChannelEvaluation`
+  `h:30-41`→`h:30-47`, and sensor-safe `248-259`→`248-264` in
+  `FEAT-0003-selectable-profile-hot-swap.md` and
+  `profile-hot-swap-decision-2026-06-03.md`. No decision changed; correction table
+  in the new plan doc §8.
+- **Added** — feature-intake guardrail for specs-before-build:
+  `AGENTS.md` now requires new capabilities, runtime schema/status/log/manifest
+  fields, CLI/operator surfaces, live-runtime workflows, and shipped config
+  behavior to map to an implementation-authorized `docs/features/FEAT-*` spec
+  before product code starts. Added `docs/TRACEABILITY.md` as the central
+  `REQ-*` to verification map, and updated the feature template/README so new or
+  changed requirements must update that map in the same change. Follow-up:
+  `tests/test_feature_specs.py` now checks feature registry/status, `REQ-*`
+  coverage in spec sections 6/10/14, traceability rows, accepted/implemented
+  promotion-gate state, and implemented verification-log results in the Python
+  lane; `docs/FEATURE_VERIFICATION_CHECKLIST.md` records the human handoff
+  checklist.
 - **Added** — `docs/testing-harness-evaluation-2026-06-06.md`: a findings
   snapshot of the local CI test harness (`scripts/Test-LocalCI.ps1` →
   `Build-Release.ps1`, both test lanes). Verdict: green and live-loop-safe (CTest

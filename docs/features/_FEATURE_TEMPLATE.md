@@ -3,8 +3,10 @@
 **Project:** svg-mb-control
 **Status:** Template   **Version:** 0.1   **Updated:** YYYY-MM-DD
 **Namespace:** `REQ-<AREA>-*`
-**Companion to:** `AGENTS.md`, `docs/STRUCTURE_AND_STABILITY.md`, the relevant
-mode doc (`CONTROL_LOOP.md` / `READ_LOOP.md` / `WRITE_ORCHESTRATION.md`)
+**Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
+`docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
+the relevant mode doc (`CONTROL_LOOP.md` / `READ_LOOP.md` /
+`WRITE_ORCHESTRATION.md`)
 **Purpose:** one-line statement of the feature.
 
 > Copy this file to `FEAT-NNNN-<slug>.md`, fill every section, and add the
@@ -107,7 +109,8 @@ marked current.
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
 What "done" means, and where each requirement is verified. Map every requirement
-to a concrete check this repo actually runs.
+to a concrete check this repo actually runs. Add or update the matching
+requirement row in `docs/TRACEABILITY.md` in the same change.
 
 | Requirement | Verify (T/B/M/R) | Where |
 |---|---|---|
@@ -141,7 +144,7 @@ Verify legend:
 - [ ] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
 - [ ] 3. Required design decision record(s) written and marked current (§9).
 - [ ] 4. Concrete `REQ-*` IDs assigned from the reserved namespace (§6).
-- [ ] 5. Verification mapped to real checks — `Test-LocalCI`, build-release, contract review, or runtime evidence (§10).
+- [ ] 5. Verification mapped to real checks — `Test-LocalCI`, build-release, contract review, or runtime evidence (§10), and mirrored in `docs/TRACEABILITY.md`.
 - [ ] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline.
 - [ ] 7. Doctrine check: claims are grounded; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
@@ -149,7 +152,8 @@ Verify legend:
 
 The point of writing this spec in advance: after implementation, confirm each
 requirement against the running controller and the cited contract. Date each
-check; link the test run, build, commit, or runtime-evidence file.
+check; link the test run, build, commit, or runtime-evidence file. Keep
+`docs/TRACEABILITY.md` aligned with the final result.
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|

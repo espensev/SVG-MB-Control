@@ -1,7 +1,13 @@
 # FEAT-0005: Write actuation confirmation (non-actuating-write detection)
 
+> **Reserved / parked 2026-06-06.** Demoted from Draft to Reserved; this full
+> body is preserved under `docs/features/_parked/` pending implementation. The
+> active registry row is in `docs/features/README.md` §5. While parked, this body
+> is not part of the enforced feature set (`tests/test_feature_specs.py`) and its
+> `REQ-ACTCONFIRM-*` rows are not mirrored in `docs/TRACEABILITY.md`.
+
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-03
+**Status:** Reserved (parked; body preserved)   **Version:** 0.1   **Updated:** 2026-06-06
 **Namespace:** `REQ-ACTCONFIRM-*`
 **Companion to:** `AGENTS.md`, `docs/WRITE_ORCHESTRATION.md`, `docs/CONTROL_LOOP.md`, `docs/CONTROL_PIPELINE_MATH.md`, `docs/RUNTIME_HOME.md`, `docs/MEASUREMENT_GATE.md`
 **Purpose:** detect a fan write that the driver accepts but that does not

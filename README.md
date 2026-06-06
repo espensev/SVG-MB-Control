@@ -504,13 +504,17 @@ CTest lane of the native unit-test executables registered under `BUILD_TESTING`
 in `CMakeLists.txt` before this Python lane. Run directly on a clean checkout,
 `python -m unittest discover tests -v` first builds the executable; a missing or
 failed build yields skipped tests rather than failures, so use `Test-LocalCI.ps1`
-when a green result must mean tested.
+when a green result must mean tested. The Python lane also includes
+`tests\test_feature_specs.py`, which checks feature-spec registry,
+traceability, promotion-gate, and verification-log consistency.
 
 ## Documentation
 
 Current contract and operator references:
 
 - `docs\MEASUREMENT_GATE.md`
+- `docs\TRACEABILITY.md`
+- `docs\FEATURE_VERIFICATION_CHECKLIST.md`
 - `docs\CONTROL_LOOP.md`
 - `docs\CONTROL_PIPELINE_MATH.md`
 - `docs\READ_LOOP.md`

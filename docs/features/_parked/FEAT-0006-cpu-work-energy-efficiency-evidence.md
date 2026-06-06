@@ -1,7 +1,14 @@
 # FEAT-0006: CPU work & energy efficiency evidence
 
+> **Reserved / parked 2026-06-06.** Demoted from Draft to Reserved; this full
+> body is preserved under `docs/features/_parked/` pending FEAT-0004 shipping and
+> a read-only live MSR feasibility check. The active registry row is in
+> `docs/features/README.md` §5. While parked, this body is not part of the
+> enforced feature set (`tests/test_feature_specs.py`) and its `REQ-CPUEFF-*`
+> rows are not mirrored in `docs/TRACEABILITY.md`.
+
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-04
+**Status:** Reserved (parked; body preserved)   **Version:** 0.1   **Updated:** 2026-06-06
 **Namespace:** `REQ-CPUEFF-*`
 **Companion to:** `AGENTS.md`, `docs/RUNTIME_HOME.md`,
 `docs/RUNTIME_LOGGING_AND_EVALUATION.md`, `docs/READ_LOOP.md`,
