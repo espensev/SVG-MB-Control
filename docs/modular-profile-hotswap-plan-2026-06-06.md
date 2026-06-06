@@ -282,13 +282,13 @@ specified but not yet implemented**.
   or accept torn-write-consumed-and-lost (open question §7-5).
 
 **Spec-only — FEAT-0001 build-then-swap** (Accepted, authorized, not yet built;
-`docs/features/FEAT-0001-hot-swap-write-policy.md:4,85,232-249`). Its restore /
+`docs/features/FEAT-0001-hot-swap-write-policy.md:4,85,235-252`). Its restore /
 capture choreography is what a profile swap reuses for a **channel-set change**
 (REQ-PROFILE-09): for dropped channels, restore baseline and clear `write_active`
 via the same path as `HandleExpiredHoldRestore` (`channel_write.cpp:186-257`).
 Because FEAT-0001 is not implemented, REQ-PROFILE-09 already says channel-set
 changes are out of scope until it ships, and requires a swap to reject a candidate
-whose channel set differs (`docs/features/FEAT-0003-selectable-profile-hot-swap.md:192`).
+whose channel set differs (`docs/features/FEAT-0003-selectable-profile-hot-swap.md:198`).
 
 **Primitives that exist vs are missing** (for the §6 ordering):
 
@@ -340,10 +340,14 @@ conditioning), so the refactor precedes any second law.
    (P/PI/PD/PID by gain selection, D3), available first in the non-writing
    shadow/dry-run path so a *writing* channel does not switch to an uncharacterized
    law and move the measurement-gate baseline silently. Live PID would sit behind
-   the explicit per-channel `pid.allow_live` opt-in (D6, `decision:169-182`). Note
-   that D6 and REQ-PROFILE-07 diverge on whether characterization evidence is
-   required *before* live PID: D6 authorizes `allow_live` without it, REQ-PROFILE-07
-   requires it — an unresolved divergence flagged as open question §7-8.
+   the explicit per-channel `pid.allow_live` opt-in (D6, `decision:169-182`).
+   Resolved 2026-06-06: the earlier divergence between D6 and REQ-PROFILE-07 over
+   whether characterization evidence is required *before* live PID is closed —
+   REQ-PROFILE-07 was aligned to D6 (the requirement derives from the decision per
+   `docs/features/README.md` §3 gate 4), so live PID is gated by the explicit,
+   recorded `pid.allow_live` opt-in, not an evidence-first block. The residual open
+   item (what compact evidence a recorded `allow_live` crossing should still
+   gather) is §7-8.
 6. **Step 6 would (optionally) promote dispatch A1 → A2** (registry table) only if
    a third law or external registration is wanted.
 
@@ -365,10 +369,18 @@ These surfaced from grounding and are not decided by the existing decision recor
 3. **Channel-set changes in slice 1.** Confirm slice 1 is law/param swap on a
    **fixed** channel set, deferring add/remove/reorder until FEAT-0001 ships
    (REQ-PROFILE-09).
-4. **Request-file convention.** Both specs propose a `runtime/requests/` subdir,
-   but every implemented request file is flat at the runtime-home root
-   (`runtime_lifecycle.cpp:17,22`); no `runtime/requests/` directory exists today.
-   Flat (breaker-reset precedent) or introduce the subdir?
+4. **Request-file convention (corrected toward flat 2026-06-06).** Every
+   implemented request file is flat at the runtime-home root
+   (`circuit_breaker_reset.request.json`, `stop.request.json`;
+   `runtime_lifecycle.cpp:17,22`); no `runtime/requests/` directory exists today.
+   FEAT-0003 §7 previously gave a `runtime/requests/profile.json` example; it is
+   corrected to the flat-root `profile.request.json` to match that precedent and
+   its own "modeled on the breaker-reset request file" claim. Introducing a
+   `runtime/requests/` subdir later remains an option, but has no precedent — open
+   only as a deliberate future choice, not the default. (FEAT-0001 §7/§8 carried
+   the same `runtime/requests/write_policy.json` example; it was corrected to the
+   flat-root `write_policy.request.json` in the same 2026-06-06 change, so both
+   specs now match the flat convention.)
 5. **Single-shot intake ergonomics.** The breaker-reset take deletes the request
    file even on parse error (`runtime_lifecycle.cpp:101`). A mirrored profile
    intake would be single-shot — a malformed profile request is consumed and
@@ -381,10 +393,27 @@ These surfaced from grounding and are not decided by the existing decision recor
    `last_raw_demand_pct` (`control_runtime_context.h:31`, set at
    `channel_evaluator.cpp:457`). It is a curve-law EMA input, so it likely moves
    into `CurveOverlayController`; confirm when slimming `ChannelState`.
-8. **Measurement-gate exact evidence.** The live-write gate for a non-curve law is
-   taken from FEAT-0003 §4/§12, not from `docs/MEASUREMENT_GATE.md` directly.
-   Before authorizing any live (non-shadow) PID, confirm the gate's exact
-   characterization-evidence requirement against that doc.
+8. **Measurement-gate evidence (requirement-vs-decision divergence resolved
+   2026-06-06; substantive question open).** The *documentation* divergence is
+   closed: REQ-PROFILE-07 was aligned to D6 (the requirement derives from the
+   decision), so the requirement no longer contradicts the decision's
+   `pid.allow_live` design. Whether D6's `allow_live` actually *satisfies*
+   `docs/MEASUREMENT_GATE.md` is a separate, unsettled question — the maintainer's
+   call on D6 itself. Two defensible readings exist: (a) the gate's "What This
+   Blocks" list is cadence, write cooldown, blocked-channel membership, and
+   higher-rate-cadence strategy, so a same-cadence PID on an already-live channel
+   is a recorded crossing rather than a blocked one; (b) the gate's Exit Criteria
+   are measurements ("a different controller strategy" clears the gate only once
+   evidence exists), so `allow_live` is *consent, not evidence* and does not clear
+   the gate on its own terms. The discussion doc's "measurement gate" section
+   argues (b) in detail and flags a concrete code gap: the slew-cap floor D4
+   relies on (`rise/fall_rate_pct_per_min`, `max_setpoint_step_pct`) defaults to
+   NaN/off (`control_loop.h:29-31`; `RateLimitSetpoint` returns the value
+   unmodified on NaN, `channel_evaluator.cpp:55-57`), so an `allow_live` PID is not
+   guaranteed a slew bound. Open for the maintainer: accept D6 as written, or
+   tighten D6 (and then REQ-PROFILE-07) to require evidence and/or a non-NaN slew
+   cap before `allow_live`. The accept-vs-tighten options are written up in
+   `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
 
 ## 8. Reference-drift correction (accuracy-only)
 

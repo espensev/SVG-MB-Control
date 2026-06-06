@@ -1,7 +1,7 @@
 # FEAT-0003: Selectable control-law profile with hot-swap
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-03
+**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-06
 **Namespace:** `REQ-PROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/CONTROL_LOOP.md`,
 `docs/CONTROL_PIPELINE_MATH.md`, `docs/WRITE_ORCHESTRATION.md`,
@@ -114,7 +114,7 @@ capability does not exist yet.
 | Invariant | Source | How this feature stays inside it |
 |---|---|---|
 | No fan write / authority change outside an explicit operator action | `AGENTS.md` §Live Runtime Safety | A profile change applies only from an explicit runtime-home request consumed at the tick boundary, and emits a `control_loop.profile_*` event for every applied or rejected change. |
-| Shipped live behavior is the measured baseline | `docs/MEASUREMENT_GATE.md` | The characterized live behavior is the curve+overlay law on the shipped channel set. Switching a *writing* channel to PID is a new, uncharacterized live behavior and crosses the gate; PID is first available in a non-writing shadow/dry-run path (§5) until characterized (REQ-PROFILE-07). |
+| Shipped live behavior is the measured baseline | `docs/MEASUREMENT_GATE.md` | The characterized live behavior is the curve+overlay law on the shipped channel set. Switching a *writing* channel to PID is a new, uncharacterized live behavior and crosses the gate; PID is first available in a non-writing shadow/dry-run path (§5), and a live PID write is an explicit, recorded gate crossing via the per-channel `pid.allow_live` opt-in (decision record D6), not a silent baseline move (REQ-PROFILE-07). |
 | Control-computation identity stays documented and validated | `docs/CONTROL_PIPELINE_MATH.md` | `CONTROL_PIPELINE_MATH.md` is scoped to the curve+overlay law (now `CurveOverlayController`) and its output stays byte-identical (REQ-PROFILE-01); the PID law gets its own identity reference (REQ-PROFILE-10). |
 | Runtime sidecar / status / manifest schema stays backward-compatible | `docs/RUNTIME_HOME.md` | New `controller` config key, request file, status, and CSV fields are additive; an absent `controller` key means the curve+overlay law, so existing configs and archives stay valid. |
 | Repo stays standalone; no sibling-repo / bridge dependency | `AGENTS.md` §Repo Boundary | The seam, both controllers, and the swap are in-repo; no external process or sibling repo is added. |
@@ -167,13 +167,19 @@ Proposed behavior (not yet implemented):
   dynamic state by default (§9), and swap `context.loop`, each
   `context.channels[i].config`, and each controller at the tick boundary; emit
   `control_loop.profile_applied` with the per-channel law/parameter delta.
-- **Measurement-gate path for PID.** Until the PID law on a given channel is
-  characterized, the PID controller runs in a non-writing shadow/dry-run path: it
-  computes a setpoint and logs it (so its behavior can be compared to the curve
-  baseline), but the write is suppressed for that channel — composing with
-  FEAT-0001's write-policy gate. Authorizing live PID writes requires the
-  characterization evidence named in `docs/MEASUREMENT_GATE.md`
-  (REQ-PROFILE-07).
+- **Measurement-gate path for PID.** By default the PID law on a given channel
+  runs in a non-writing shadow/dry-run path: it computes a setpoint and logs it
+  (so its behavior can be compared to the curve baseline), but the write is
+  suppressed for that channel — composing with FEAT-0001's write-policy gate.
+  A live PID write is authorized only by the explicit per-channel
+  `pid.allow_live` opt-in (decision record D6, which is the source of truth for
+  this path); the opt-in emits `control_loop.profile_applied` naming the channel
+  and the law, so the gate crossing is explicit and recorded rather than a silent
+  baseline move, and the shared safety floor (clamp to `[min_duty_pct, 100]`, the
+  slew cap, sensor-safe mode, the circuit breaker) still applies. Per D6 the
+  maintainer accepted that `allow_live` authorizes live PID before
+  characterization evidence exists; requiring evidence first would be a change to
+  D6, not to this requirement (REQ-PROFILE-07).
 - **Atomicity.** The loop is single-threaded per tick; a change applies between
   ticks and never interleaves with an in-flight write.
 
@@ -187,7 +193,7 @@ Proposed behavior (not yet implemented):
 | REQ-PROFILE-04 | A profile change — including a change of control-law kind per channel — must be consumed at a tick boundary via a runtime-home request file, build-then-validate-then-swap. A validation failure must leave the running profile in force, leave no partial state, and emit a rejection event. |
 | REQ-PROFILE-05 | On a swap, each channel's control-law dynamic state must be reset by default; any carry-over of dynamic state is opt-in and out of the first slice. |
 | REQ-PROFILE-06 | Shared output conditioning (clamp to `[min_duty_pct, 100]`, sensor-safe mode, deadband, write cooldown, control-hold, circuit breaker, baseline capture/restore, write gate) must apply identically regardless of controller kind. |
-| REQ-PROFILE-07 | Switching a writing channel to a control-law kind not in the characterized baseline crosses `docs/MEASUREMENT_GATE.md`. PID must be available first in a non-writing shadow/dry-run path that computes and logs but does not write; live PID writes require the characterization evidence named in the gate. |
+| REQ-PROFILE-07 | Switching a writing channel to a control-law kind not in the characterized baseline crosses `docs/MEASUREMENT_GATE.md`. PID must be available first in a non-writing shadow/dry-run path that computes and logs but does not write; a live PID write must require the explicit per-channel `pid.allow_live` opt-in (decision record D6), which must emit `control_loop.profile_applied` so the crossing is recorded rather than silent, with the shared safety floor still applied. (D6 is the source of truth for this path; it authorizes `allow_live` without prior characterization evidence — see §5.) |
 | REQ-PROFILE-08 | The active control-law kind per channel must be recorded in the runtime status and CSV (additive fields), so an operator and the analyzer can attribute observed behavior to the law that produced it. |
 | REQ-PROFILE-09 | A swap that changes the channel set (add/remove/reorder) must match channels by `channel` id and reuse the FEAT-0001 restore/capture choreography. If FEAT-0001 is not yet implemented, channel-set changes are out of scope and the swap must reject a candidate whose channel set differs. |
 | REQ-PROFILE-10 | Introducing and maintaining the controllers must keep the control-identity docs current: `docs/CONTROL_PIPELINE_MATH.md` scoped to the curve+overlay law, and a sibling identity reference for the PID law (per `AGENTS.md` §Change Checklist). |
@@ -200,9 +206,14 @@ Proposed behavior (not yet implemented):
   the derivative variant flag, the integral clamp bounds, and `bias`/feed-forward
   selection (exact field set settled in §9). `min_duty_pct` and the output slew
   cap are shared output fields, reused from the existing channel schema.
-- **New runtime-home request file** (for example
-  `runtime/requests/profile.json`): names the target profile or carries an inline
-  profile body. Absence = no change. Modeled on the breaker-reset request file.
+- **New runtime-home request file** (for example `profile.request.json` at the
+  runtime-home root, matching the implemented flat convention of
+  `circuit_breaker_reset.request.json` and `stop.request.json`,
+  `src/runtime/runtime_lifecycle.cpp:17,22`): names the target profile or carries
+  an inline profile body. Absence = no change. Modeled on the breaker-reset request
+  file. Whether to introduce a `runtime/requests/` subdir instead of the flat root
+  is left open in `docs/modular-profile-hotswap-plan-2026-06-06.md` §7-4; no
+  `runtime/requests/` directory exists today.
 - **New status + CSV fields:** active `controller` kind per channel; for PID, the
   current error and per-term contributions for evidence. Additive; absent in old
   archives.
@@ -227,7 +238,7 @@ Proposed behavior (not yet implemented):
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| [`docs/profile-hot-swap-decision-2026-06-03.md`](../profile-hot-swap-decision-2026-06-03.md) | The control-law seam shape; where control-law dynamic state lives (in `ChannelState` vs. owned by the controller); the PID structure (derivative variant, integral anti-windup, and whether PID trims a feed-forward bias/curve or runs from a fixed bias); which current output dynamics are shared safety conditioning vs. curve-law-specific; the state carry-over-vs-reset default on swap; the measurement-gate path (shadow/dry-run before live PID); and whether channel-set changes are in the first slice. | Proposed — awaits maintainer acceptance |
+| [`docs/profile-hot-swap-decision-2026-06-03.md`](../profile-hot-swap-decision-2026-06-03.md) | The control-law seam shape; where control-law dynamic state lives (in `ChannelState` vs. owned by the controller); the PID structure (derivative variant, integral anti-windup, and whether PID trims a feed-forward bias/curve or runs from a fixed bias); which current output dynamics are shared safety conditioning vs. curve-law-specific; the state carry-over-vs-reset default on swap; the measurement-gate path (shadow/dry-run default; live PID via the recorded `pid.allow_live` opt-in); and whether channel-set changes are in the first slice. | Selected 2026-06-03 (maintainer): D2/D3a/D6; D3b/D3c leans recorded. Current design-capture record of direction — implementation not scheduled, and this record is the source of truth for the directional choices it settles. |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -239,7 +250,7 @@ Proposed behavior (not yet implemented):
 | REQ-PROFILE-04 | T | test: profile request applied at tick boundary; a validation failure on swap retains the running profile and emits a rejection event |
 | REQ-PROFILE-05 | T | test: after a swap, the new controller's dynamic state is reset (integral = 0, no carried smoothing/boost) |
 | REQ-PROFILE-06 | T, R | test: sensor-safe mode, deadband, cooldown, breaker, and clamp behave identically for both controller kinds; review vs. `channel_write.*` |
-| REQ-PROFILE-07 | R, M | review vs. `docs/MEASUREMENT_GATE.md`; runtime evidence that PID runs shadow/dry-run before any live PID write |
+| REQ-PROFILE-07 | R, M | review vs. `docs/MEASUREMENT_GATE.md` and decision record D6; runtime evidence that PID runs shadow/dry-run by default and that a live PID write occurs only under an explicit `pid.allow_live` opt-in that emits `control_loop.profile_applied` |
 | REQ-PROFILE-08 | T | CSV/status header+row tests assert the per-channel controller-kind field is present and correct |
 | REQ-PROFILE-09 | T, R | test: a candidate with a differing channel set is rejected when FEAT-0001 is absent; when present, dropped channels restore and added channels capture baseline |
 | REQ-PROFILE-10 | R | review: `CONTROL_PIPELINE_MATH.md` scoped to curve+overlay and unchanged in value; PID identity reference exists |
@@ -263,9 +274,10 @@ cited contract.
 
 - **Measurement gate:** changing tuning numbers within the curve+overlay law does
   not move the baseline. Switching a *writing* channel to the PID law is a new
-  live control behavior and **does** cross `docs/MEASUREMENT_GATE.md`; PID must
-  run in the non-writing shadow/dry-run path until characterized
-  (REQ-PROFILE-07).
+  live control behavior and **does** cross `docs/MEASUREMENT_GATE.md`; PID runs in
+  the non-writing shadow/dry-run path by default, and a live PID write requires the
+  explicit per-channel `pid.allow_live` opt-in (decision record D6), which records
+  the crossing rather than moving the baseline silently (REQ-PROFILE-07).
 - **Depends on:** the request-intake + build-then-swap mechanism is shared with
   `docs/features/FEAT-0001-hot-swap-write-policy.md`; channel-set changes on a
   swap depend on FEAT-0001's restore/capture path (REQ-PROFILE-09). Evidence for

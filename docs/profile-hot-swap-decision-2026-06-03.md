@@ -246,3 +246,12 @@ control law may be from the current feed-forward curve.
   identity documented.
 - Runtime evidence for `control_loop.profile_*` events and PID shadow/dry-run
   behavior when exercised live (respecting `AGENTS.md` §Live Runtime Safety).
+
+## Reconsideration (2026-06-06)
+
+A 2026-06-06 review questioned whether **D6**'s `allow_live`-without-evidence
+posture satisfies `docs/MEASUREMENT_GATE.md` (read as an evidence gate, not a
+consent gate), and noted that the slew-cap floor D6 relies on defaults to NaN/off
+in code (`src/control/control_loop.h:29-31`; `src/control/channel_evaluator.cpp:55-57`).
+D6 is unchanged pending a maintainer choice; the accept-vs-tighten options are laid
+out in `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.

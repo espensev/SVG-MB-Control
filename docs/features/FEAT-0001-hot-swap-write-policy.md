@@ -138,9 +138,12 @@ Proposed behavior (not yet implemented):
 
 ## 7. Data / schema deltas
 
-- **New runtime-home request file** (e.g. `runtime/requests/write_policy.json`):
-  fields for `writes_enabled` (optional bool) and `blocked_channels` (optional
-  list), modeled on the breaker-reset request file. Absence = no change.
+- **New runtime-home request file** (e.g. `write_policy.request.json` at the
+  runtime-home root, matching the implemented flat convention of
+  `circuit_breaker_reset.request.json` / `stop.request.json`,
+  `src/runtime/runtime_lifecycle.cpp:17,22`): fields for `writes_enabled`
+  (optional bool) and `blocked_channels` (optional list), modeled on the
+  breaker-reset request file. Absence = no change.
 - **New status fields** reflecting the current effective write policy, so an
   operator can confirm a change landed.
 - **New event types** `control_loop.write_policy_applied` /
@@ -154,7 +157,7 @@ Proposed behavior (not yet implemented):
 ## 8. CLI / config / operator surface deltas
 
 - **New operator action** to write the request file (e.g. a subcommand that
-  emits `runtime/requests/write_policy.json`), parallel to the existing breaker
+  emits `write_policy.request.json`), parallel to the existing breaker
   reset operator path. Respects `AGENTS.md` §Live Runtime Safety: it is an
   explicit, opt-in action.
 - Update `README.md` (operator workflow) and `docs/WRITE_ORCHESTRATION.md` +

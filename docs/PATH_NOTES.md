@@ -25,6 +25,48 @@ checkable.
 
 ## 2026-06-06
 
+- **Fixed** — reconciled three cross-doc inconsistencies in the `FEAT-0003`
+  profile-hot-swap design-capture (surfaced by review). **High:**
+  `REQ-PROFILE-07` carried the pre-decision "characterization evidence before any
+  live PID write" lean, contradicting decision `D6`, which authorizes live PID via
+  an explicit per-channel `pid.allow_live` opt-in *without* prior evidence. Aligned
+  the requirement to `D6` (a requirement derives from its decision —
+  `docs/features/README.md` §3 gate 4) across FEAT-0003 §4/§5/§6/§10/§12 and
+  `docs/TRACEABILITY.md`, and named the decision record the source of truth for
+  this path. That resolves the *requirement-vs-decision divergence* (the
+  requirement no longer contradicts `D6`); whether `D6`'s `allow_live` actually
+  *satisfies* `docs/MEASUREMENT_GATE.md` is a separate, open maintainer call — the
+  discussion doc's measurement-gate section argues the gate is evidence-not-consent
+  and that the slew-cap floor is NaN-by-default (`control_loop.h:29-31`;
+  `channel_evaluator.cpp:55-57`). Tightening to evidence-first is a change to `D6`,
+  not the requirement. **Medium:** FEAT-0003 §7 proposed a `runtime/requests/profile.json`
+  subdir while claiming to model the breaker-reset file; corrected to the flat-root
+  `profile.request.json`, the only implemented convention
+  (`circuit_breaker_reset.request.json` / `stop.request.json`,
+  `src/runtime/runtime_lifecycle.cpp:17,22`). **Low:** FEAT-0003 §9 decision-row
+  status said "Proposed — awaits maintainer acceptance"; updated to the selected
+  `D2`/`D3a`/`D6` directions, consistent with §11/§13 and the decision doc's
+  "Selected directions." Reframed
+  `docs/modular-profile-hotswap-plan-2026-06-06.md` §6/§7-4/§7-8: the
+  requirement-vs-decision divergence is resolved, the substantive D6-vs-gate
+  question is flagged open, and FEAT-0001's matching `runtime/requests/` subdir is
+  corrected the same way (flat-root `write_policy.request.json`). Corrected the
+  drifted FEAT-0003 line citation in the plan (`:192`→`:198`)
+  and converted the discussion doc's drifted citation to a section ref
+  (`:197-202`→`§7`). `tests/test_feature_specs.py` green (5/5). D6's *decision* is
+  unchanged (only a dated reconsideration pointer appended to the decision doc);
+  the discussion doc's other in-flight edits are the user's, left untouched.
+- **Added** — `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`: a
+  reconsideration brief for D6's `pid.allow_live` posture (Status: Open), drafting
+  **accept-as-is vs tighten** after the discussion doc's measurement-gate section
+  argued `MEASUREMENT_GATE.md` reads as an evidence gate, not a consent gate.
+  Recommends a non-NaN slew-cap parse precondition (B2) unconditionally +
+  shadow-default; B1 (evidence-before-live, which re-tightens REQ-PROFILE-07) is the
+  maintainer's read of the gate. Linked from D6 (a "Reconsideration (2026-06-06)"
+  note) and plan §7-8. **Checked:** the slew cap is NaN-by-default in code
+  (`control_loop.h:29-31`; `channel_evaluator.cpp:55-57` returns unmodified on NaN),
+  but shipped `config/control.release.json` sets it for all live channels 0–5 — a
+  latent precondition gap, not an active live defect.
 - **Changed** — acted on a multi-agent review of the feature-governance batch
   (verdict: the system is sound and CI-enforced; the excess is concentrated in
   speculative specs, not the machinery). Demoted `FEAT-0005`/`FEAT-0006` from
@@ -37,6 +79,16 @@ checkable.
   `docs/features/README.md` §2 names the "Draft with all gates checked, held as
   design-capture" state (`FEAT-0003`). `tests/test_feature_specs.py` stays green
   (5/5) after the demotion.
+- **Added** — `docs/modular-profile-hotswap-discussion-2026-06-06.md`: a
+  non-normative design-commentary companion to the plan doc — a grounded,
+  two-sided discussion of each element (premise, skeptic's case, seam, state
+  decouple, conditioning split, PID-as-example, measurement gate, Proposals A/B,
+  reuse machinery, dependency order, the 8 questions), each closing with the one
+  fact that would flip its judgment. Net position: the seam is worth *designing*
+  and step-1 conditioning-extraction has standalone merit, but not worth
+  *building* under FEAT-0003's current status. Authorizes nothing. Adversarially
+  reviewed (5 agents) for doctrine + ref accuracy; cross-doc citations to the
+  plan are by section (not line) to resist drift.
 - **Added** — `docs/modular-profile-hotswap-plan-2026-06-06.md`: deepens
   `FEAT-0003` design-capture on the "change the entire per-channel control
   function at runtime" idea — the *modular* angle the existing D1–D7 decisions
