@@ -98,6 +98,12 @@ in one change.
 - `Reset()` becomes a controller rebuild; no `ChannelState` field-zeroing path is
   needed.
 
+Clarification (2026-06-06): `last_raw_demand_pct` is not law-agnostic merely
+because it is reported. It is written by the curve law and published as
+`feedforward_pct`, so a future decouple should treat it as curve-controller-owned
+or publish it through a kind-aware/nullable reporting field rather than keeping it
+as a generic `ChannelState` reporting field.
+
 Rationale: removes the config+state welding (Problem #2) in the same change that
 introduces the seam, so there is one end state rather than an interim with welded
 curve state. Cost: the larger first change must reproduce today's

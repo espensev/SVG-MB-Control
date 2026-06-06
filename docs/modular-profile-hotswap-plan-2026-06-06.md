@@ -203,7 +203,7 @@ D7 fixes the apply order for a profile change (validate the candidate via
 `LoadControlLoopConfig` → channel-set delta → build + reset + swap at the tick
 boundary; `docs/profile-hot-swap-decision-2026-06-03.md` §D7). It does **not**
 pin what a *profile* is as an operator object, nor the startup selection surface.
-FEAT-0003 §7/§8 float both a `runtime/requests/profile.json` request and an
+FEAT-0003 §7/§8 float both a flat-root `profile.request.json` request and an
 optional `--profile <name>` selector but leave the form open.
 
 **"Whole-profile swap" would rebuild the entire per-channel controller set at one
@@ -391,8 +391,10 @@ These surfaced from grounding and are not decided by the existing decision recor
    additive drop-in.
 7. **`last_raw_demand_pct` ownership (D2 gap).** D2's field-bucketing did not name
    `last_raw_demand_pct` (`control_runtime_context.h:31`, set at
-   `channel_evaluator.cpp:457`). It is a curve-law EMA input, so it likely moves
-   into `CurveOverlayController`; confirm when slimming `ChannelState`.
+   `channel_evaluator.cpp:457`). It is curve-law-produced reporting state (published
+   as `feedforward_pct`), not a law-agnostic control input, so it should move with
+   `CurveOverlayController` or become a kind-aware/nullable reporting value when
+   slimming `ChannelState`.
 8. **Measurement-gate evidence — resolved 2026-06-06 (B1+B2).** A review found D6's
    original `allow_live`-without-evidence posture in tension with
    `docs/MEASUREMENT_GATE.md`: the gate's Exit Criteria are measurements, so a

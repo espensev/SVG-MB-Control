@@ -198,7 +198,7 @@ Proposed behavior (not yet implemented):
 | REQ-PROFILE-05 | On a swap, each channel's control-law dynamic state must be reset by default; any carry-over of dynamic state is opt-in and out of the first slice. |
 | REQ-PROFILE-06 | Shared output conditioning (clamp to `[min_duty_pct, 100]`, sensor-safe mode, deadband, write cooldown, control-hold, circuit breaker, baseline capture/restore, write gate) must apply identically regardless of controller kind. |
 | REQ-PROFILE-07 | Switching a writing channel to a control-law kind not in the characterized baseline crosses `docs/MEASUREMENT_GATE.md`. PID must be available first in a non-writing shadow/dry-run path that computes and logs but does not write. A live PID write must require the explicit per-channel `pid.allow_live` opt-in, which (per decision record D6) must be rejected at config load unless **both** the characterization evidence exists (a shadow-log comparison against the curve baseline is accepted as that evidence) **and** the channel sets a non-NaN, positive slew cap; it must emit `control_loop.profile_applied` so the crossing is recorded as well as evidenced, with the shared safety floor still applied. (D6 is the source of truth for this path.) |
-| REQ-PROFILE-08 | The active control-law kind per channel must be recorded in the runtime status and CSV (additive fields), so an operator and the analyzer can attribute observed behavior to the law that produced it. |
+| REQ-PROFILE-08 | The active control-law kind per channel must be recorded in the runtime status and CSV (additive fields), so an operator and the analyzer can attribute observed behavior to the law that produced it. Law-specific reporting fields must be kind-aware or nullable; curve-only feed-forward values such as `feedforward_pct` / `last_raw_demand_pct` must not be published as if they were meaningful for PID channels. |
 | REQ-PROFILE-09 | A swap that changes the channel set (add/remove/reorder) must match channels by `channel` id and reuse the FEAT-0001 restore/capture choreography. If FEAT-0001 is not yet implemented, channel-set changes are out of scope and the swap must reject a candidate whose channel set differs. |
 | REQ-PROFILE-10 | Introducing and maintaining the controllers must keep the control-identity docs current: `docs/CONTROL_PIPELINE_MATH.md` scoped to the curve+overlay law, and a sibling identity reference for the PID law (per `AGENTS.md` §Change Checklist). |
 
@@ -223,8 +223,10 @@ Proposed behavior (not yet implemented):
   is left open in `docs/modular-profile-hotswap-plan-2026-06-06.md` §7-4; no
   `runtime/requests/` directory exists today.
 - **New status + CSV fields:** active `controller` kind per channel; for PID, the
-  current error and per-term contributions for evidence. Additive; absent in old
-  archives.
+  current error and per-term contributions for evidence. Law-specific fields are
+  kind-aware or nullable, so the current curve-only `feedforward_pct` /
+  `last_raw_demand_pct` reporting value does not imply a meaningful feed-forward
+  value on PID channels. Additive; absent in old archives.
 - **New event types** `control_loop.profile_applied` /
   `control_loop.profile_rejected` / `control_loop.profile_invalid`.
 - **Schema/version impact:** additive only; update `docs/RUNTIME_HOME.md`
@@ -259,7 +261,7 @@ Proposed behavior (not yet implemented):
 | REQ-PROFILE-05 | T | test: after a swap, the new controller's dynamic state is reset (integral = 0, no carried smoothing/boost) |
 | REQ-PROFILE-06 | T, R | test: sensor-safe mode, deadband, cooldown, breaker, and clamp behave identically for both controller kinds; review vs. `channel_write.*` |
 | REQ-PROFILE-07 | T, R, M | config-load test that `pid.allow_live: true` is rejected unless the channel has the characterization evidence and a non-NaN slew cap; review vs. `docs/MEASUREMENT_GATE.md` and decision record D6; runtime evidence that PID runs shadow/dry-run by default and that a live PID write occurs only under an `allow_live` opt-in that emits `control_loop.profile_applied` |
-| REQ-PROFILE-08 | T | CSV/status header+row tests assert the per-channel controller-kind field is present and correct |
+| REQ-PROFILE-08 | T | CSV/status header+row tests assert the per-channel controller-kind field is present and correct, and law-specific reporting fields are kind-aware/nullable rather than stale or misleading |
 | REQ-PROFILE-09 | T, R | test: a candidate with a differing channel set is rejected when FEAT-0001 is absent; when present, dropped channels restore and added channels capture baseline |
 | REQ-PROFILE-10 | R | review: `CONTROL_PIPELINE_MATH.md` scoped to curve+overlay and unchanged in value; PID identity reference exists |
 
