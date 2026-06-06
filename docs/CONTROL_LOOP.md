@@ -320,7 +320,11 @@ current terminal and does not add supervisor restart behavior.
   for that channel. It logs `control_loop.sensor_recovered` when valid input
   returns.
 - After repeated write failures for a channel, the loop logs
-  `control_loop.circuit_breaker_opened` and stops trying that channel. The
+  `control_loop.circuit_breaker_opened` and stops normal writes for that
+  channel. A sensor-safe (safe-mode) command still bypasses the open breaker so
+  a thermal-safety write reaches the hardware
+  (`docs/discovery-recovery-gap-audit-2026-06-04.md`, remediation 3); a
+  successful bypassed write closes the breaker. The
   reset path is `--reset-breakers` or
   `--reset-breakers --reset-breaker-channel <n>`. The reset clears
   `circuit_breaker_open` and `consecutive_write_failures`, logs

@@ -297,7 +297,14 @@ void TryApplyChannelSetpoint(
     if (!RuntimeFanAllowsWrite(runtime_index, channel.config.channel)) {
         return;
     }
-    if (channel.circuit_breaker_open) {
+    // The write-failure circuit breaker stops futile normal-control writes,
+    // but a sensor-safe (thermal-safety) command must still reach the
+    // hardware. Suppressing it is the fail-loud-turned-fail-silent compound
+    // cell in docs/discovery-recovery-gap-audit-2026-06-04.md (remediation 3):
+    // a breaker-open channel that then loses its sensor would otherwise drop
+    // its 100% safe-mode command. A safe-mode command bypasses the breaker; a
+    // successful write below closes it, a failed one leaves it open and loud.
+    if (channel.circuit_breaker_open && !evaluation.safety_override) {
         return;
     }
 

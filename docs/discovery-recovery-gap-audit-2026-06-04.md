@@ -6,7 +6,9 @@ but left unrecovered - including any compound failure where the fail-safe
 philosophy inverts to fail-silent.
 
 **Date:** 2026-06-04
-**Status:** complete; findings verified against source. No code changed.
+**Status:** complete; findings verified against source. Remediation 3 (break
+the compound cell) implemented 2026-06-06 with a regression test; remediations 1
+and 2 remain open. The Q1-Q5 findings below describe the pre-fix behavior.
 **Recommended next:** treat this as the evidence record for three remediations
 (actuation-truth signal, degraded/failed escalation wiring, compound-cell
 break). Any code change to the control or recovery path is evidence-gated per
@@ -206,7 +208,12 @@ and are evidence-gated; none were applied.
 3. **Break the compound cell.** Let a sensor-safe setpoint bypass the
    write-failure breaker (`src/control/channel_write.cpp:300-302`), or fail the
    channel to a hardware-safe state rather than a frozen duty. Smallest change,
-   highest safety value.
+   highest safety value. **Implemented 2026-06-06:** a `safety_override` flag on
+   `ChannelEvaluation` (set on the safe-mode path in `channel_evaluator.cpp`)
+   lets `TryApplyChannelSetpoint` pass the breaker gate for a sensor-safe
+   command only; a successful bypassed write closes the breaker, a failed one
+   leaves it open and logs `control_loop.write_failed`. Covered by
+   `tests/cpp/channel_write_tests.cpp`.
 
 **Evidence:** see Q1-Q5 for the exact lines each remediation targets.
 

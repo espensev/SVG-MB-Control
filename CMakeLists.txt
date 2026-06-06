@@ -310,4 +310,14 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_csv_rows_tests)
     add_test(NAME svg_mb_control_csv_rows_tests
              COMMAND svg_mb_control_csv_rows_tests)
+
+    add_executable(svg_mb_control_channel_write_tests
+        tests/cpp/channel_write_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_channel_write_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_channel_write_tests)
+    add_test(NAME svg_mb_control_channel_write_tests
+             COMMAND svg_mb_control_channel_write_tests)
 endif()

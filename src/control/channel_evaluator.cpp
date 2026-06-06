@@ -256,6 +256,11 @@ void EvaluatePrimarySetpoint(EvaluationScratch& s) {
             }
             s.raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
             s.response_source = "sensor_safe_mode";
+            // Mark this as a thermal-safety command so the write path lets it
+            // through an open write-failure breaker (recovery-gap remediation
+            // 3). cpu_override cannot replace it (it caps at 100%) and the
+            // boost overlays only add, so the flag stays valid to the end.
+            s.evaluation.safety_override = true;
         }
         return;
     }

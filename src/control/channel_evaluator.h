@@ -38,6 +38,12 @@ struct ChannelEvaluation {
     ChannelSensorEvent sensor_event = ChannelSensorEvent::None;
     double sensor_event_observed_temp_c =
         std::numeric_limits<double>::quiet_NaN();
+    // True when this evaluation is the sensor-failure safe-mode command
+    // (setpoint forced to kSafeModeFanDuty because the primary sensor is
+    // unavailable). The write path lets this thermal-safety command bypass
+    // the write-failure circuit breaker so it is not silently suppressed
+    // (docs/discovery-recovery-gap-audit-2026-06-04.md, remediation 3).
+    bool safety_override = false;
 };
 
 double GpuControlEnvelopeC(const RuntimeGpuSnapshot& gpu);

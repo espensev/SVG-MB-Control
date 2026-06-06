@@ -25,6 +25,15 @@ checkable.
 
 ## 2026-06-06
 
+- **Fixed** — recovery-gap remediation 3 (the compound cell): a sensor-safe
+  (safe-mode) command now bypasses an open write-failure breaker so a
+  thermal-safety write reaches the hardware instead of being silently dropped
+  (new `ChannelEvaluation::safety_override`, set on the safe-mode path in
+  `channel_evaluator.cpp`, honored at the breaker gate in `channel_write.cpp`).
+  Normal writes still respect the breaker. Regression test
+  `tests/cpp/channel_write_tests.cpp` (CTest 8/8, pytest 114/114); docs updated
+  (`CONTROL_PIPELINE_MATH.md`, `CONTROL_LOOP.md`,
+  `discovery-recovery-gap-audit-2026-06-04.md`).
 - **Done** — `FEAT-0001` (hot-swap write policy) promoted `Draft` → `Accepted`:
   the build-then-swap design decision
   (`docs/write-policy-hotswap-decision-2026-06-03.md`, Option A) accepted by the

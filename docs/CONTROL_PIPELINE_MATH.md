@@ -548,14 +548,22 @@ A computed $u^{(c)}_k$ is committed only if every gate passes:
    yet for the channel.
 5. **Policy.** Skip if `effective_write_allowed` is false in the runtime
    fan snapshot for the channel.
-6. **Breaker.** Skip if the per-channel circuit breaker is open.
+6. **Breaker.** Skip if the per-channel circuit breaker is open, **unless**
+   this is a sensor-safe (safe-mode) command (`safety_override`): a
+   thermal-safety write must reach the hardware even when the breaker is open
+   (`docs/discovery-recovery-gap-audit-2026-06-04.md`, remediation 3). A normal
+   command is still skipped while the breaker is open. This gates *whether* a
+   computed setpoint is written; it does not change the setpoint value, so the
+   control identity above is unaffected.
 
 A successful write updates $u^{(c)}_{k-1} \leftarrow u^{(c)}_k$ and
 records `last_write_time` $= t_k$.
 
 A **failed** write increments `consecutive_write_failures`; once it
 reaches `kMaxConsecutiveFailures` ($= 5$) the breaker opens. The open breaker
-then gates future writes for that channel. `--reset-breakers` clears open
+then gates future normal writes for that channel; a sensor-safe (safe-mode)
+command bypasses it, and a successful bypassed write closes the breaker.
+`--reset-breakers` clears open
 breakers and failure counters through `circuit_breaker_reset.request.json`;
 `--reset-breaker-channel <n>` narrows the reset to one channel. The next write
 still passes through the same baseline, policy, cooldown, and fan-backend gates.
