@@ -344,29 +344,44 @@ class StagedControlApp:
             "Where-Object { $ids -contains $_.Id }).Count",
         ).returncode != 0
 
-    @staticmethod
-    def _terminate_svg_processes(process_ids: set[int]) -> None:
+    def _terminate_svg_processes(self, process_ids: set[int]) -> None:
         if not process_ids:
             return
-        StagedControlApp._run_process_filter(
+        # Defense-in-depth on top of PID scoping: only stop a PID-matched
+        # process whose image path is under this test's staged root, so a
+        # recycled PID that now belongs to a live release\ instance is never
+        # killed. The staged app runs a copy of the exe from self.root (see
+        # __enter__), so its .Path is under that root; a packaged controller
+        # running from release\ is not.
+        self._run_process_filter(
             process_ids,
             "Get-Process svg-mb-control -ErrorAction SilentlyContinue | "
             "Where-Object { $ids -contains $_.Id } | "
+            "Where-Object { $_.Path -and "
+            "$_.Path.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) } | "
             "Stop-Process -Force -ErrorAction SilentlyContinue",
+            root=self._root,
         )
 
     @staticmethod
     def _run_process_filter(
         process_ids: set[int],
         command: str,
+        root: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         ids = ",".join(str(pid) for pid in sorted(process_ids))
+        setup = f"$ids=@({ids});"
+        if root is not None:
+            root_str = str(root)
+            if not root_str.endswith(("\\", "/")):
+                root_str += "\\"
+            setup += " $root='" + root_str.replace("'", "''") + "';"
         return subprocess.run(
             [
                 "powershell",
                 "-NoProfile",
                 "-Command",
-                f"$ids=@({ids}); {command}",
+                f"{setup} {command}",
             ],
             capture_output=True,
             text=True,
