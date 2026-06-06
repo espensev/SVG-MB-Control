@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -78,12 +79,29 @@ class RecordingFanWriter : public svg_mb_control::FanWriter {
     std::string BackendLabel() const override { return "recording"; }
 };
 
+// A per-process-unique component so two concurrent test processes (for example
+// two Test-LocalCI runs) never share a %TEMP% directory. A fixed name lets a
+// second process remove_all the dir mid-test in the first; random_device yields
+// a distinct salt per process and the counter disambiguates within one.
+std::string UniqueTempSuffix() {
+    static const unsigned long long kProcessSalt = [] {
+        std::random_device rd;
+        return (static_cast<unsigned long long>(rd()) << 32) ^
+               static_cast<unsigned long long>(rd());
+    }();
+    static unsigned long long counter = 0;
+    return std::to_string(kProcessSalt) + "_" + std::to_string(++counter);
+}
+
 // A fresh, empty runtime-home directory for the pending-writes sidecar and the
-// control-loop event log. Removed and recreated so each test starts clean.
+// control-loop event log. The name carries a per-process salt (UniqueTempSuffix)
+// so concurrent test processes do not collide; removed and recreated so each
+// test starts clean.
 std::filesystem::path MakeTempHome(const char* name) {
     std::filesystem::path home =
         std::filesystem::temp_directory_path() /
-        (std::string("svg_mb_control_channel_write_tests_") + name);
+        (std::string("svg_mb_control_channel_write_tests_") + name + "_" +
+         UniqueTempSuffix());
     std::error_code ec;
     std::filesystem::remove_all(home, ec);
     std::filesystem::create_directories(home, ec);

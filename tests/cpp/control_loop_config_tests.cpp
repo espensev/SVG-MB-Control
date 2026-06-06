@@ -23,6 +23,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -72,13 +73,28 @@ void ExpectThrowsContaining(const std::function<void()>& thunk,
     }
 }
 
-// Writes the given JSON text to a temp file and removes the file on
-// scope exit. The path is regenerated per construction so concurrent
-// runs in CTest get distinct files.
+// A per-process-unique filename component so two concurrent test processes
+// (for example two Test-LocalCI runs) never share a %TEMP% path. A per-process
+// counter alone is insufficient: it resets to the same value in every process,
+// so every process would reuse svg_mb_control_config_test_1.json and one run
+// could truncate the file mid-read in another. random_device yields a distinct
+// salt per process; the counter disambiguates files within one process.
+std::string UniqueTempSuffix() {
+    static const unsigned long long kProcessSalt = [] {
+        std::random_device rd;
+        return (static_cast<unsigned long long>(rd()) << 32) ^
+               static_cast<unsigned long long>(rd());
+    }();
+    static unsigned long long counter = 0;
+    return std::to_string(kProcessSalt) + "_" + std::to_string(++counter);
+}
+
+// Writes the given JSON text to a temp file and removes the file on scope
+// exit. The filename carries a per-process salt + counter (UniqueTempSuffix)
+// so concurrent test processes get distinct files.
 class TempJsonFile {
   public:
     explicit TempJsonFile(std::string_view content) {
-        static std::size_t counter = 0;
         std::error_code ec;
         const auto tmp_dir = std::filesystem::temp_directory_path(ec);
         if (ec || tmp_dir.empty()) {
@@ -86,7 +102,7 @@ class TempJsonFile {
                 "temp_directory_path failed in TempJsonFile setup");
         }
         path_ = tmp_dir / (std::string("svg_mb_control_config_test_") +
-                           std::to_string(++counter) + ".json");
+                           UniqueTempSuffix() + ".json");
         std::ofstream out(path_, std::ios::binary | std::ios::trunc);
         out << content;
         if (!out) {
