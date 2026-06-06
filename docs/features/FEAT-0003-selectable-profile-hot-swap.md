@@ -25,9 +25,9 @@ boundary without restarting the process.
 ## 1. Summary
 
 Today the per-channel control law is fixed in code: `EvaluateChannel`
-(`src/control/channel_evaluator.cpp:435-469`) implements one law — a feed-forward
+(`src/control/channel_evaluator.cpp:440-474`) implements one law — a feed-forward
 temperature→duty curve (`EvaluatePrimarySetpoint`,
-`channel_evaluator.cpp:243-278`; `LookupCurve`,
+`channel_evaluator.cpp:243-283`; `LookupCurve`,
 `src/policy/control_policy.cpp:68-101`) plus a CPU-override curve, demand
 smoothing, four boost overlays, a low-band residual, and a per-channel rate
 limiter. A profile is only a set of tuning numbers fed to that one law; there is
@@ -60,7 +60,9 @@ capability does not exist yet.
    inside `EvaluateChannel` on a config flag, which mixes two unrelated laws in
    one translation unit.
 2. **The current law is feed-forward, not feedback.** It computes
-   `duty = curve(temp) + overlays` (`channel_evaluator.cpp:273-367`); it does not
+   `duty = curve(temp) + overlays` (`channel_evaluator.cpp:453-467`, composing
+   `EvaluatePrimarySetpoint`/`ApplyCpuOverride`/`UpdateDemandAndBoosts`/`ComputeFinalSetpoint`);
+   it does not
    regulate temperature to a target. A PID/PI/PD/P controller regulates a
    measured temperature to a target temperature by trimming duty, which is a
    different computation with different state (an integral accumulator and a
@@ -123,14 +125,14 @@ Proposed behavior (not yet implemented):
 
 - **Control-law seam.** A per-channel `IChannelController` exposes one evaluation
   method that returns a `ChannelEvaluation` (the existing result type,
-  `channel_evaluator.h:30-41`), a `Reset()` that clears the law's dynamic state,
+  `channel_evaluator.h:30-47`), a `Reset()` that clears the law's dynamic state,
   and a `Kind()` identifier (for example `curve_overlay`, `pid`). The tick body
   calls the channel's controller instead of the free `EvaluateChannel`.
 - **Curve+overlay law preserved.** `CurveOverlayController` wraps the current law.
   For a config with no `controller` key (or `controller: "curve_overlay"`), its
   output is identical to today's `EvaluateChannel`. The boost-sum operand order
   that `docs/CONTROL_PIPELINE_MATH.md` §5 marks load-bearing
-  (`channel_evaluator.cpp:348-359`) is preserved.
+  (`channel_evaluator.cpp:353-364`) is preserved.
 - **PID law.** `PidController` selects a primary temperature the same way the
   curve law does (`SelectPrimaryCurveInput`, `channel_evaluator.cpp:198-237` —
   shared input selection, including `temp_blend` and the source-aware guard),
@@ -141,7 +143,7 @@ Proposed behavior (not yet implemented):
   variant, the integral clamp, and the `bias`/feed-forward question are settled
   in the decision record (§9).
 - **Shared output conditioning.** Clamp to `[min_duty_pct, 100]`, sensor-safe
-  mode (100% on sustained sensor failure, `channel_evaluator.cpp:248-259`),
+  mode (100% on sustained sensor failure, `channel_evaluator.cpp:248-264`),
   deadband, write cooldown, control-hold, circuit breaker, baseline
   capture/restore, and the write gate (`channel_write.*`) are law-agnostic and
   apply identically regardless of controller kind. Which of the current

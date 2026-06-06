@@ -21,7 +21,7 @@ with one or more gains set to zero.
 ## Problem
 
 The per-channel control law is fixed in code. `EvaluateChannel`
-(`src/control/channel_evaluator.cpp:435-469`) is the only control law: a
+(`src/control/channel_evaluator.cpp:440-474`) is the only control law: a
 feed-forward temperature→duty curve plus a CPU-override curve, demand smoothing,
 four boost overlays, a low-band residual, and a per-channel rate limiter. The
 tick body calls it directly (`src/control/tick_runner.cpp:241-243`).
@@ -71,7 +71,7 @@ class IChannelController {
 
 Rationale:
 - `EvaluateChannel` is already an input→output function with no I/O
-  (`channel_evaluator.cpp:435-469`): it reads `ChannelState` + `loop` + inputs,
+  (`channel_evaluator.cpp:440-474`): it reads `ChannelState` + `loop` + inputs,
   mutates dynamic state on `ChannelState`, and returns a `ChannelEvaluation`. It
   is a control law behind a single call site (`tick_runner.cpp:241`). Wrapping it
   is a move, not a rewrite.
@@ -134,7 +134,7 @@ Sub-decision D3a is selected below; D3b and D3c carry recorded leans:
 Shared with the curve law (no PID-specific copy): primary-temperature selection
 including `temp_blend` and the source-aware guard (`SelectPrimaryCurveInput`,
 `channel_evaluator.cpp:198-237`); sensor-safe mode
-(`channel_evaluator.cpp:248-259`); the `[min_duty_pct, 100]` clamp.
+(`channel_evaluator.cpp:248-264`); the `[min_duty_pct, 100]` clamp.
 
 ## D4 — Shared output conditioning vs. curve-law-specific dynamics
 
