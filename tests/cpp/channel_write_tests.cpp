@@ -6,9 +6,14 @@
 // while a normal command must still be suppressed by an open breaker. Both legs
 // run in the same breaker-open state so the test proves the gate condition
 // `circuit_breaker_open && !safety_override` is wired as intended.
+//
+// It also covers the other half of the seam: that EvaluateChannel actually sets
+// safety_override when a channel drops into sensor-safe mode, so the two changed
+// files are proven to connect end to end.
 
 #include "channel_evaluator.h"
 #include "channel_write.h"
+#include "control_policy.h"
 #include "control_runtime_context.h"
 #include "fan_writer.h"
 #include "pending_writes.h"
@@ -227,6 +232,53 @@ void TestSafetyWriteFailureKeepsBreakerOpen() {
     std::filesystem::remove_all(home, ec);
 }
 
+// The other half of the seam: EvaluateChannel sets safety_override once a
+// channel falls into sensor-safe mode (primary sensor unavailable past the
+// failure threshold). EvaluateChannel is pure, so no context/temp dir needed.
+void TestEvaluatorSetsSafetyOverrideOnSensorFailure() {
+    using namespace svg_mb_control;
+    ControlLoopConfig loop;
+    ChannelState channel;
+    channel.config.channel = 2u;
+    channel.config.temp_blend = TempBlend::CpuOnly;
+    channel.config.curve = {{30.0, 20.0}, {70.0, 100.0}};
+
+    RuntimeSnapshot empty_snapshot;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(empty_snapshot);
+    const auto now = std::chrono::steady_clock::now();
+
+    TempInputs no_input;  // cpu and gpu both unavailable -> primary missing
+
+    // Below kMaxConsecutiveSensorFailures (3): no safe mode, no override.
+    const ChannelEvaluation e1 =
+        EvaluateChannel(channel, loop, no_input, index, now);
+    ExpectTrue(!e1.safety_override,
+               "no safety_override before the sensor-failure threshold (1)");
+    const ChannelEvaluation e2 =
+        EvaluateChannel(channel, loop, no_input, index, now);
+    ExpectTrue(!e2.safety_override,
+               "no safety_override before the sensor-failure threshold (2)");
+
+    // 3rd consecutive miss crosses the threshold -> sensor-safe command.
+    const ChannelEvaluation e3 =
+        EvaluateChannel(channel, loop, no_input, index, now);
+    ExpectTrue(e3.safety_override,
+               "EvaluateChannel sets safety_override in sensor-safe mode");
+    ExpectTrue(e3.response_source == "sensor_safe_mode",
+               "sensor-safe command carries response_source sensor_safe_mode");
+    ExpectTrue(e3.has_setpoint, "sensor-safe command produces a setpoint");
+
+    // A present primary temperature clears safe mode and the override.
+    TempInputs with_temp;
+    with_temp.cpu_c = 55.0;
+    with_temp.cpu_available = true;
+    const ChannelEvaluation e4 =
+        EvaluateChannel(channel, loop, with_temp, index, now);
+    ExpectTrue(!e4.safety_override,
+               "safety_override clears when a primary temperature returns");
+}
+
 }  // namespace
 
 int main() {
@@ -234,6 +286,7 @@ int main() {
     TestNormalWriteSuppressedByOpenBreaker();
     TestNormalWriteAppliesWhenBreakerClosed();
     TestSafetyWriteFailureKeepsBreakerOpen();
+    TestEvaluatorSetsSafetyOverrideOnSensorFailure();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " channel write test failure(s)\n";
