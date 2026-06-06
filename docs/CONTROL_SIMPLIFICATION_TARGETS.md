@@ -1,16 +1,21 @@
 # Control Simplification Targets
 
-Status: current planning note, 2026-05-26.
+Status: completed simplification record, last updated 2026-05-29. The original
+2026-05-26 target list is fully closed (per-target Status lines below).
+The follow-up 2026-05-30 audit for new behavior-preserving performance
+opportunities lives in `docs/discovery-control-math-performance.md`; this file
+remains the completed record for the original target set.
 
 This note records behavior-preserving simplification targets for the control
 runtime. The intent is to reduce expression complexity and duplicated control
 logic without changing shipped tuning, channel curves, boost rates, write
 cadence, runtime sidecar contracts, or live fan behavior.
 
-Use `docs/CONTROL_PIPELINE_MATH.md` as the identity reference while doing this
-work. Any implementation change that alters curve lookup, smoothing, boost
-composition, low-band behavior, cadence scoring, CSV/status fields, or response
-attribution must update that reference and run the normal validation workflow.
+For future behavior-preserving simplification work, use
+`docs/CONTROL_PIPELINE_MATH.md` as the identity reference. Any implementation
+change that alters curve lookup, smoothing, boost composition, low-band
+behavior, cadence scoring, CSV/status fields, or response attribution must
+update that reference and run the normal validation workflow.
 
 ## Constraints
 
@@ -24,7 +29,17 @@ attribution must update that reference and run the normal validation workflow.
 
 ## 1. Unify The Math Primitives
 
-Current shape:
+Status: **completed 2026-05-28**. `SmoothStep`, `SmoothScale`, and
+`MoveTowardRateLimited` now live in `src/control/control_math.{h,cpp}`;
+`cadence_score` and `low_band_integrator` include it. C++ coverage:
+`tests/cpp/control_math_tests.cpp` (svg_mb_control_math_tests target).
+`channel_evaluator::RateLimitSetpoint` stayed where it is: it has two
+semantics MoveTowardRateLimited does not (NaN-current → return target
+for the first-write contract, plus the additive `max_setpoint_step_pct`
+cap). `policy::control_policy.cpp` retains its own SmootherStep for the
+curve-shape interpolation only.
+
+Original analysis (kept for context):
 
 - `src/control/cadence_score.cpp` owns `SmoothStep`, `SmoothScale`, and
   `MoveTowardRateLimited`.
@@ -67,7 +82,15 @@ Validation:
 
 ## 2. Extract Raw Demand Resolution From `EvaluateChannel`
 
-Current shape:
+Status: **completed 2026-05-28**. `EvaluateChannel` is now a 30-line
+orchestrator threading partial state through a local `EvaluationScratch`
+shim across five private helpers: `EvaluatePrimarySetpoint`,
+`ApplyCpuOverride`, `UpdateDemandAndBoosts`, `ComputeFinalSetpoint`,
+`DetectAuthorityReassert`. The boost-sum operand order in
+`ComputeFinalSetpoint` is preserved bit-for-bit so FP associativity
+stays identical to the pre-refactor expression.
+
+Original analysis (kept for context):
 
 - `src/control/channel_evaluator.cpp::EvaluateChannel` handles:
   - effective timing computation,
@@ -119,7 +142,18 @@ Validation:
 
 ## 3. Name Low-Band Gates
 
-Current shape:
+Status: **completed 2026-05-28**. `UpdateLowBandState` now reads
+through named predicates: `SensorReleased(available, temp_c,
+release_c)`, `PrimaryResponseActive(channels)` (carries the one-tick
+lag note in its docstring), `ShouldAccrueDebt(signal, primary_active)`,
+`ShouldReleaseDebt(cpu_released, gpu_released)`, and
+`StageSpacingSatisfied(state, spacing, now)`. The signal-active and
+primary-response-freeze thresholds are now named constexpr constants
+(`kSignalEpsilonPct`, `kPrimaryResponseFreezeThresholdPct`).
+`LowBandChannelConfigured` was already centralized. State mutation
+order and the deliberate one-tick lag are unchanged.
+
+Original analysis (kept for context):
 
 - `src/control/low_band_integrator.cpp::UpdateLowBandState` is compact, but key
   decisions are embedded as local predicates:
@@ -163,7 +197,13 @@ Validation:
 
 ## 4. Make Run-Mode Parsing Table-Driven
 
-Current shape:
+Status: **completed pre-2026-05-28** in commit "Drive run-mode
+label/argument/parse from a single table" (3bf3e38). `kRunModeTable` in
+`src/control/control_supervisor.cpp` is now the single source of truth
+for the six mode strings; both `ParseRunMode` overloads, `RunModeLabel`,
+and `RunModeArgument` adapt the same table.
+
+Original analysis (kept for context):
 
 - `src/control/control_supervisor.cpp` has two parallel `ParseRunMode`
   functions:
@@ -201,7 +241,19 @@ Validation:
 
 ## 5. Reduce CLI Parser Ladder Pressure
 
-Current shape:
+Status: **closed 2026-05-28; no further action planned**. `src/app/app_main.cpp`
+was split into a thin `RunApp` orchestrator plus three sibling modules:
+`app/app_signals.{h,cpp}` (Win32 handler + RAII scopes,
+`StopSignaled()`), `app/app_args.{h,cpp}` (`CliOptions`,
+`ParseCliOptions`, the value parsers, `PrintUsage`, `PrintVersion`), and
+`app/app_diagnose.{h,cpp}` (`RunDiagnoseAmd`, `RunDiagnoseGpu`,
+`SampleDirectSnapshotJson`). The `ParseCliOptions` if/else-if ladder
+itself remains in `app_args.cpp` intentionally: it is linear, explicit, and
+keeps value-taking options close to their validation. Grouped parse helpers
+would mostly move branches sideways without improving the operator-facing
+logic.
+
+Original analysis (kept for context):
 
 - `src/app/app_main.cpp::ParseCliOptions` is a long `if`/`else if` ladder that
   owns runtime commands, mode selection, write-once flags, calibration flags,
@@ -246,7 +298,27 @@ Validation:
 
 ## 6. Reduce CSV Schema/Header Mirroring
 
-Current shape:
+Status: **completed 2026-05-29**. Every repeated per-index field group in
+`src/runtime/runtime_csv_rows.cpp` is now descriptor-driven. The
+boost-stage channel columns still come from the shared `kBoostStageSpecs`
+loop; the fan-snapshot, fan tach evidence, SIO voltage, SIO temperature,
+and remaining per-channel columns now come from `CsvColumn<Entity>` tables
+(`kFanSnapshotColumns`, `kFanTachEvidenceColumns`, `kSioVoltageColumns`,
+`kSioTemperatureColumns`, `kChannelPreBoostColumns`,
+`kChannelPostBoostColumns`). Each entry pairs a column-name suffix with its
+row writer, and both the header builder and the row builder iterate the
+same table, so the two cannot drift. Emitted column names and values are
+byte-identical; the GPU-evidence block in `gpu_evidence_csv.cpp` was
+already a paired header/row helper and is left as is. C++ coverage:
+`tests/cpp/csv_rows_tests.cpp` (svg_mb_control_csv_rows_tests target)
+asserts header-column-count == row-field-count for all three CSV variants
+and spot-checks boundary column names plus representative present/absent row
+values; the end-to-end `tests/test_read_loop.py`,
+`tests/test_evidence_log.py`, and `tests/test_control_loop.py` continue to lock
+the real header names against the by-name consumers (native analyze ingest and
+`tools/eval_dashboard/dashboard.js`).
+
+Original analysis (kept for context):
 
 - `src/runtime/runtime_csv_rows.cpp` manually builds CSV headers and matching
   rows.
@@ -288,7 +360,13 @@ Validation:
 
 ## 7. Build Test CSV Fixtures From Field Descriptors
 
-Current shape:
+Status: **completed 2026-05-28**. `tests/test_analyze_ingest.py` now builds
+fixture headers and rows from field lists (`COMMON_FIELDS`,
+`FAN_FIELD_SUFFIXES`, `LOOP_FIELDS`, `CHANNEL_FIELD_SUFFIXES`) and routes rows
+through `_csv_row`, which rejects missing or extra fields before writing the
+CSV.
+
+Original shape (kept for context):
 
 - `tests/test_analyze_ingest.py` owns `CSV_HEADER_PARTS`, `_write_fixture_csv`,
   and `_write_ramp_csv` as manually aligned string/cell lists.
@@ -327,7 +405,13 @@ Validation:
 
 ## 8. Add A Staged Background Runtime Test Helper
 
-Current shape:
+Status: **completed 2026-05-28**. `tests/helpers.py::StagedControlApp` now
+owns staged executable setup, read-loop config creation, runtime-home paths,
+start/status/restart/stop helpers, and guaranteed cleanup for background
+supervisor/worker tests. `tests/test_smoke.py` uses it for staged launch,
+restart, watchdog-start, and startup-failure coverage.
+
+Original shape (kept for context):
 
 - `tests/test_smoke.py` repeats the same staged-executable setup:
   - create temp dir,
@@ -369,7 +453,22 @@ Validation:
 
 ## 9. Split `RunAnalyzeReport` Into Query And Assembly Helpers
 
-Current shape:
+Status: **completed 2026-05-28**. The 845-line `analyze_report.cpp`
+became a ~180-line `RunAnalyzeReport` orchestrator plus three sibling
+modules in the `svg_mb_control::analyze::report_detail` namespace:
+`analyze_report_data.{h,cpp}` (types + percentile/median/SummariseBand
+helpers), `analyze_report_queries.{h,cpp}` (`LoadTicks`,
+`ComputeElapsedTime`, `AssignBands`, `LoadChannelStats`, `MergeFanStats`,
+`LoadRobustnessCounts`, `LoadEventFieldCounts`,
+`ComputeIdleSetpointBaselines`, `DetectResponseDelay`,
+`LoadRuntimeManifestEvidence`), and `analyze_report_emit.{h,cpp}`
+(`EmitJsonReport`, `EmitTextReport`, `BuildDecisionRecord`,
+`WriteAnalysisManifest`, `BuildDiagnosticFlags`,
+`AutoDecisionRecordPath`, `WriteTextFile`). C++ coverage:
+`tests/cpp/analyze_report_tests.cpp` (svg_mb_control_analyze_report_tests
+target).
+
+Original analysis (kept for context):
 
 - `src/analyze/analyze_report.cpp::RunAnalyzeReport` is a large pipeline that
   opens the database, selects the run, loads ticks, assigns bands, loads
@@ -408,14 +507,22 @@ Validation:
 
 ## 10. Centralize Analyzer Channel Sample Columns
 
-Current shape:
+Status: **completed 2026-05-28**.
+`src/analyze/analyze_channel_sample_columns.{h,cpp}` now owns the
+`tick_channel_samples` descriptor: column names, SQLite types, create-table SQL,
+insert SQL, select-all SQL, CSV field-name construction, select indexes, and
+`BindTickChannelSample`. `analyze_csv.cpp`, `analyze_db.cpp`,
+`analyze_ingest_db.cpp`, and `analyze_report_queries.cpp` consume that
+descriptor instead of hand-copying the channel field order.
+
+Original shape (kept for context):
 
 - A channel CSV field can touch several analyzer layers:
   - `src/analyze/analyze_csv.{h,cpp}`,
   - `src/analyze/analyze_db.cpp` DDL and migrations,
   - `src/analyze/analyze_ingest_db.cpp` insert SQL and bind positions,
-  - `src/analyze/analyze_report.cpp` query column positions,
-  - Python analyzer fixtures.
+  - `src/analyze/analyze_report_queries.cpp` query column positions,
+  - wrapper/native analyzer fixtures.
 - This is related to the runtime CSV mirroring target, but it is specifically
   the ingestion/database side.
 
@@ -446,7 +553,17 @@ Validation:
 
 ## 11. Reuse Control Config Channel Descriptors In Text And JSON Output
 
-Current shape:
+Status: **closed 2026-05-28; no further action planned**. The three BelowStart
+pressure stages (thermal, midband, GPU airflow) now render their JSON
+sub-objects via a `kBoostStageSpecs` loop in `BuildJsonSummary`, with JSON keys
+coming straight from the spec table. The text summary uses a small
+`kPressureBoostTextLabels` table that maps display labels to `BoostStage`.
+The CPU low-soak block stays bespoke for text and JSON intentionally because
+its shape differs: explicit `release_c`, per-minute rates, and different
+operator-facing labels. Forcing it into the BelowStart descriptor would add
+branching without reducing schema risk.
+
+Original analysis (kept for context):
 
 - `src/control/control_config_print.cpp` renders channel configuration twice:
   - operator text output,
@@ -480,59 +597,43 @@ Validation:
 
 - Run `python -m unittest tests.test_smoke tests.test_config_contracts -v`.
 
-## 12. Split The Python Analysis Script Renderers Into Sections
+## 12. Retire The Python Analysis Renderer Split
 
-Current shape:
+Status: **closed 2026-05-29; no further action planned**.
+`scripts/analyze_control_run.py` is now a thin compatibility wrapper: it ingests
+a raw CSV into a temporary SQLite database through native
+`svg-mb-control.exe analyze ingest --csv` and forwards native
+`analyze report` output. The former Python renderers
+(`render_markdown`, `build_decision_record`, `build_diagnostic_flags`, manifest
+generation, GPU-response summaries, timing summaries) no longer exist, so
+splitting them is obsolete.
 
-- `scripts/analyze_control_run.py` is useful but has large renderer functions:
-  - `render_markdown`,
-  - `build_decision_record`,
-  - `build_diagnostic_flags`.
-- The script already has good summary objects; the rendering layer is the
-  densest remaining part.
-
-Simplification:
-
-- Extract section renderers:
-  - run identity,
-  - cadence/timing,
-  - channel response,
-  - event summary,
-  - diagnostic flags,
-  - decision-record recommendations.
-- Keep output text byte-for-byte where possible, or update tests deliberately if
-  wording changes.
-
-Payoff:
-
-- Makes analysis report changes reviewable in small units.
-- Reduces the chance of accidentally changing unrelated sections while tuning
-  one diagnostic.
-
-Risk:
-
-- Low. This is offline tooling.
-- Snapshot-style tests may need small expected-output updates if section
-  boundaries change.
-
-Validation:
-
-- Run `python -m unittest tests.test_analyzer -v`.
+Validation: `tests/test_analyzer.py` now checks wrapper integration, and
+native report behavior is covered by `tests/test_analyze_ingest.py` plus the
+C++ analyze-report tests.
 
 ## Suggested Order
+
+Completed or closed:
 
 1. Unify math primitives.
 2. Extract raw demand and final setpoint composition from `EvaluateChannel`.
 3. Name low-band gates.
 4. Make run-mode parsing table-driven.
 5. Build test CSV fixtures from field descriptors.
-6. Reduce CSV schema/header mirroring.
-7. Centralize analyzer channel sample columns.
-8. Add a staged background runtime test helper.
-9. Split `RunAnalyzeReport` into query and assembly helpers.
-10. Reuse control config channel descriptors in text and JSON output.
-11. Split the Python analysis script renderers into sections.
-12. Reduce CLI parser ladder pressure.
+6. Centralize analyzer channel sample columns.
+7. Add a staged background runtime test helper.
+8. Split `RunAnalyzeReport` into query and assembly helpers.
+9. Reuse control config channel descriptors in text and JSON output
+   (closed with CPU low-soak intentionally bespoke).
+10. Reduce CLI parser ladder pressure (closed with the residual ladder
+    intentionally explicit).
+11. Reduce CSV schema/header mirroring (closed by making every repeated
+    per-index CSV field group descriptor-driven; see target 6).
+12. Retire the Python analysis renderer split (closed because
+    `scripts/analyze_control_run.py` now delegates analysis to native
+    `analyze ingest --csv` plus `analyze report`; see target 12).
 
-The first three are controller-local and should make the math easier to review.
-The later items are broader maintainability work and can be done independently.
+Remaining:
+
+None. All targets are completed or closed.

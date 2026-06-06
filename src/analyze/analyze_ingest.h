@@ -7,6 +7,10 @@ namespace svg_mb_control::analyze {
 struct IngestOptions {
     std::filesystem::path runtime_home;
     std::filesystem::path db_path;  // empty -> runtime_home / svg_mb_control.db
+    // When set, ingest a single bare control-loop CSV (with no runtime
+    // manifest) plus an optional events JSONL, synthesizing one runs row.
+    std::filesystem::path csv_path;
+    std::filesystem::path events_path;
     bool force = false;
     bool quiet = false;
 };

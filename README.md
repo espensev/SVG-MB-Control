@@ -33,25 +33,26 @@ download it from the network.
 - `third_party\nvapi-controller` contributes the vendored GPU telemetry slice.
 - Legacy bridge executables are not part of the runtime contract in this repo.
 
-## Long-Term Organization Target
+## Internal Organization
 
-Keep this repo standalone, but split the source tree by responsibility as the
-controller stabilizes:
+The repo is standalone and the source tree is split by responsibility:
 
 ```text
 src/
-  app/        main, CLI parsing, mode dispatch
+  app/        main, CLI parsing, mode dispatch, diagnostics
   control/    loop orchestration, channel evaluator, status model
-  runtime/    runtime store, CSV logger, event log, JSON IO
+  runtime/    runtime store, CSV logger, event log, JSON IO,
+              runtime write policy, read/write mode entry points
   hardware/   AMD, GPU, SIO fan backends
   platform/   Windows timer, process metrics, HANDLE wrappers
-  policy/     curves, blending, rate limits, demand smoothing
+  policy/     curves, blending, curve shape
+  analyze/    runtime-log ingest, pruning, reporting
 ```
 
-Add a `svg_mb_control_core` static library target and keep
-`svg-mb-control.exe` as a thin executable wrapper around it. That gives the
-controller a stable internal API and makes C++ unit tests possible without
-launching the full executable for every behavior check.
+`svg_mb_control_core` is the static library target for non-app implementation
+code. `svg-mb-control.exe` is a thin executable wrapper around it, so C++ unit
+tests can exercise core behavior without launching the full executable for
+every behavior check.
 
 See `docs\STRUCTURE_AND_STABILITY.md` for the longer plan.
 
@@ -66,7 +67,8 @@ Preferred release build:
 Useful options:
 
 - `-KeepBuildDir` keeps `build\` after a successful release build
-- `-SkipTests` skips `python -m unittest discover tests -v`
+- `-SkipTests` skips both test lanes (the C++ CTest lane and
+  `python -m unittest discover tests -v`)
 - `-NoStopProcesses` skips the pre-build stop of running `svg-mb-control`
   processes
 - `-NoPublish` builds and tests without updating `release\` or creating an
@@ -88,9 +90,14 @@ cmake --build --preset x64-release
 Release-script outputs:
 
 - `release\svg-mb-control.exe`
+- `release\svg-mb-control-task-runner.exe`
 - `release\control.json`
+- `release\config\machines\snd-desk.cooling.policy.json`
 - `release\runtime_policy_write_live.json`
+- `release\Install-SVG-MB-ControlCommon.ps1`
+- `release\Install-SVG-MB-ControlShortcut.ps1`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
+- `release\Install-SVG-MB-ControlWatchdogScheduledTask.ps1`
 - `release\resources\pawnio\AMDFamily17.bin` (vendored from PawnIO.Modules
   release 0.2.6; provenance and SHA-256 in
   `third_party\pawnio\README.md`)
@@ -159,11 +166,12 @@ cd .\release
 ```
 
 This registers an at-logon scheduled task named `SVG-MB Control` for the current
-user, runs it elevated, and starts the controller immediately. The task action
-uses `svg-mb-control-task-runner.exe --start --config <release\control.json>`
-when the native task runner is present, so Task Scheduler does not launch the
-console executable directly. The runner then starts `svg-mb-control.exe` through
-the same supervised launch path as the manual start command.
+user, runs it elevated, and starts the controller immediately. In the release
+package, the task action uses
+`svg-mb-control-task-runner.exe --start --config <release\control.json>`, so
+Task Scheduler does not launch the console executable directly. The runner then
+starts `svg-mb-control.exe` through the same supervised launch path as the
+manual start command.
 
 Optional watchdog install:
 
@@ -172,11 +180,11 @@ cd .\release
 .\Install-SVG-MB-ControlWatchdogScheduledTask.ps1
 ```
 
-The watchdog runs through `svg-mb-control-task-runner.exe --watchdog-run` when
-the native task runner is present. It evaluates `svg-mb-control.exe --health
---json` at logon and every minute, does nothing for `healthy` or `degraded`,
-restarts the controller for `stale` or `stopped`, and leaves `failed` untouched
-for operator review.
+The watchdog requires and runs through
+`svg-mb-control-task-runner.exe --watchdog-run`. It evaluates
+`svg-mb-control.exe --health --json` at logon and every minute, does nothing
+for `healthy` or `degraded`, restarts the controller for `stale` or `stopped`,
+and leaves `failed` untouched for operator review.
 
 Task manager commands:
 
@@ -271,6 +279,7 @@ release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --retain-days 14 --apply
 release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --idle-seconds 300
 release\svg-mb-control.exe analyze report --run 7 --load-threshold-c 70 --json
+release\svg-mb-control.exe analyze report --run 7 --idle-seconds 300 --profile combined-load --notes "ambient and subjective noise notes" --out runtime\analysis\combined-load-summary.txt --manifest-out runtime\analysis\combined-load-manifest.json
 ```
 
 Behavior:
@@ -278,13 +287,16 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `7`). The schema
+- The DB schema is bootstrapped on first use (schema version `8`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
-  control envelope used by response analysis, and
+  control envelope used by response analysis,
   `tick_channel_samples.primary_temp_source` preserves per-channel
-  CPU/GPU/guard attribution for the primary curve input.
+  CPU/GPU/guard attribution for the primary curve input, and
+  `tick_channel_samples.low_band_stage_boost_pct` /
+  `low_band_effective_boost_pct` record the per-channel low-band boost (staged
+  and effective).
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.
@@ -310,31 +322,41 @@ Behavior:
   counts. The idle band is the ticks whose elapsed time is below
   `--idle-seconds` (default `300`, matching the evaluation passes); percentiles
   use nearest-rank on sorted ascending values where `p100` is the maximum.
-  `--json` emits the same metrics as a JSON object. `analyze report` is
-  read-only; it never writes to fans, the runtime, or the database.
+  `--json` emits the same metrics as a JSON object.
+- `analyze report --out <path>` writes the text or JSON report to a file. For
+  text reports, a sibling `*.decision.md` record is written automatically unless
+  `--no-decision-record` is set. Use `--decision-record-out <path>` or
+  `--decision-record-out auto` to override the path.
+- `analyze report --manifest-out <path>` writes an analysis manifest with run
+  identity, profile/notes/decision context, source artifact hashes, generated
+  output hashes, response metrics, channel attribution counts, event
+  severity/error-code counts, and diagnostic flags for no-response,
+  slow-response, hot-but-low-setpoint, authority, write, and restore issues.
+  `analyze report` is read-only; it never writes to fans, the runtime, or the
+  database.
 
 Post-run response-test summaries and decision records:
 
 ```powershell
-python scripts\analyze_control_run.py `
-  --csv release\runtime\logs\archive\svg_mb_control_control-loop_<timestamp>.csv `
-  --events release\runtime\logs\svg_mb_control_events.jsonl `
-  --status release\runtime\control_runtime.json `
-  --current-state release\runtime\current_state.json `
-  --config release\control.json `
+release\svg-mb-control.exe analyze ingest --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db
+release\svg-mb-control.exe analyze report `
+  --runtime-home .\release\runtime `
+  --db .\release\runtime\svg_mb_control.db `
+  --idle-seconds 300 `
   --profile combined-load `
-  --gpu-load-threshold-c 70 `
   --notes "ambient and subjective noise notes" `
-  --out runtime\analysis\combined-load-summary.md `
+  --out runtime\analysis\combined-load-summary.txt `
   --manifest-out runtime\analysis\combined-load-manifest.json
 ```
 
-When `--out` writes a Markdown summary, the analyzer also writes a sibling
-`*.decision.md` record automatically. The generated decision record includes
-run identity, artifact hashes, response metrics, channel attribution counts,
-and automatic flags for hot-but-low/no-response runs. Use
-`--decision-record-out <path>` or `--decision-record-out auto` to override the
-path, and `--no-decision-record` to suppress it.
+The generated decision record includes run identity, artifact hashes, response
+metrics, channel attribution counts, event counts, and automatic flags for
+hot-but-low/no-response runs. `scripts\analyze_control_run.py` is a thin
+convenience wrapper for archived captures that have not been ingested yet: it
+shells the in-repo `svg-mb-control.exe` to `analyze ingest --csv` into a
+temporary database and forwards native `analyze report` output (text or JSON),
+so all analysis is native. Prefer native `analyze ingest` plus `analyze
+report` for new work.
 
 Local eval dashboard:
 
@@ -342,7 +364,7 @@ Local eval dashboard:
 .\scripts\Start-EvalDashboard.ps1 -Open
 ```
 
-This serves the repo root and opens
+This serves the dashboard assets and opens
 `http://127.0.0.1:8765/tools/eval_dashboard/`. The dashboard auto-loads the
 recent tail of the packaged live CSV mirror from
 `release\runtime\logs\svg_mb_control_output.csv` when available, so long-running
@@ -364,6 +386,9 @@ Canonical config files:
 - `config\control.example.json` for repo-local editing
 - `config\control.release.json` for packaging into `release\control.json`
 - `config\runtime_policy_write_live.json` for the packaged live-write policy
+- `config\machines\snd-desk.cooling.policy.json` for the machine-specific fan
+  topology, idle/low-load pressure strategy, and cooling-policy data behind the
+  shipped profile
 
 Common fields:
 
@@ -386,11 +411,15 @@ Field notes:
   when configured.
 - `runtime_policy_path` is read locally by direct write and control flows.
 - The shipped live policy controls airflow lanes `0,1,2,3,4,5`.
-  Lanes `2,3` are included for the higher-floor front-intake response and use
-  one-step rate-limited fan commands.
+  Machine-specific fan topology and cooling intent live in
+  `docs\COOLING_STRATEGY.md` and
+  `config\machines\snd-desk.cooling.policy.json`.
 - The packaged control loop uses GPU envelope curves plus per-channel
   `cpu_override_curve` overlays, commanding the higher duty so Cinebench plus
   max CUDA load has a CPU response path without raising idle floors.
+- The SND-DESK release config keeps positive pressure with lower intake hard
+  minima plus low/medium curve points on channels `2`, `3`, and `4`, rather
+  than holding the old `60% / 56% / 31%` intake floor at idle.
 - Response smoothing and bounded decay latching are applied before rate
   limiting so the loop emits intermediate PWM steps without chasing small
   high-temperature dips. The radiator Noctua lanes use staggered CPU overlay
@@ -470,19 +499,39 @@ python -m unittest discover tests -v
 The smoke suite is direct-only. It launches the real executable and uses
 simulation environment hooks for hermetic AMD and fan telemetry.
 
+The release build (`build-release.ps1`) and `Test-LocalCI.ps1` also run a C++
+CTest lane of the native unit-test executables registered under `BUILD_TESTING`
+in `CMakeLists.txt` before this Python lane. Run directly on a clean checkout,
+`python -m unittest discover tests -v` first builds the executable; a missing or
+failed build yields skipped tests rather than failures, so use `Test-LocalCI.ps1`
+when a green result must mean tested. The Python lane also includes
+`tests\test_feature_specs.py`, which checks feature-spec registry,
+traceability, promotion-gate, and verification-log consistency.
+
 ## Documentation
 
+Current contract and operator references:
+
 - `docs\MEASUREMENT_GATE.md`
+- `docs\TRACEABILITY.md`
+- `docs\FEATURE_VERIFICATION_CHECKLIST.md`
 - `docs\CONTROL_LOOP.md`
 - `docs\CONTROL_PIPELINE_MATH.md`
 - `docs\READ_LOOP.md`
 - `docs\WRITE_ORCHESTRATION.md`
 - `docs\RUNTIME_HOME.md`
 - `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
-- `docs\LOGGING_IMPROVEMENT_PLAN.md`
 - `docs\STRUCTURE_AND_STABILITY.md`
+- `docs\COOLING_STRATEGY.md`
 - `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`
 - `docs\response-evaluation-tuning-plan.md`
+
+Compacted implementation records, kept separate from the current operator
+workflow:
+
+- `docs\CONTROL_SIMPLIFICATION_TARGETS.md`
+- `docs\LOGGING_IMPROVEMENT_PLAN.md`
+- `docs\SCRIPT_STACK_REVIEW.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
 `docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow.
@@ -492,3 +541,7 @@ and CSV/status identities. The current shipped configs assert a `250 ms`
 control/write profile; lowering cadence, enabling an adaptive floor below that
 profile, adding live channels, or broader controller strategy changes still
 require fresh measurement evidence before changing defaults.
+
+Do not merge completed implementation records into the operator docs unless a
+topic is reopened; keep the current docs as the source of truth and keep closed
+records short.

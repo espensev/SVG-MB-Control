@@ -2,21 +2,13 @@
 """Ad-hoc analysis of the latest control-loop CSV around the Cinebench window."""
 from __future__ import annotations
 
+import argparse
 import csv
 import datetime as dt
 import json
 import statistics
 import sys
 from pathlib import Path
-
-CSV_PATH = Path(
-    r"D:\Development\Thermals\SVG-MB\SVG-MB-Control\release\runtime\logs\archive"
-    r"\svg_mb_control_control-loop_20260524_024240.csv"
-)
-EVENTS_PATH = Path(
-    r"D:\Development\Thermals\SVG-MB\SVG-MB-Control\release\runtime\logs"
-    r"\svg_mb_control_events.jsonl"
-)
 
 
 def data_lines(path: Path):
@@ -88,10 +80,28 @@ def fmt_stats(s, unit="", digits=2):
     )
 
 
-def main():
-    print(f"Loading {CSV_PATH.name}")
-    with CSV_PATH.open("r", encoding="utf-8", newline="") as fh:
-        reader = csv.DictReader(data_lines(CSV_PATH))
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Offline analysis of a control-loop CSV around a Cinebench-style "
+            "load window (pre/load/post Tctl stats, cooldown, event counts)."
+        )
+    )
+    parser.add_argument(
+        "--csv", type=Path, required=True,
+        help="Path to an archived control-loop CSV.",
+    )
+    parser.add_argument(
+        "--events", type=Path, default=None,
+        help="Optional events JSONL for load-window event counts.",
+    )
+    args = parser.parse_args(argv)
+    csv_path = args.csv
+    events_path = args.events
+
+    print(f"Loading {csv_path.name}")
+    with csv_path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(data_lines(csv_path))
         rows = list(reader)
     print(f"  rows: {len(rows)}")
 
@@ -250,11 +260,11 @@ def main():
     print(f"  CPU Tctl < 65 C : {t_cool_65} s after load end")
 
     # Authority/reassert events during load
-    if EVENTS_PATH.exists():
+    if events_path is not None and events_path.exists():
         load_start = parsed[win_start_i]["ts"]
         load_end = parsed[win_end_i]["ts"]
         evs = []
-        with EVENTS_PATH.open("r", encoding="utf-8") as fh:
+        with events_path.open("r", encoding="utf-8") as fh:
             for line in fh:
                 try:
                     e = json.loads(line)

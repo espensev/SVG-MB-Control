@@ -19,12 +19,9 @@ void BuildChannelLogStates(
         state.observed_temp_c = channel.last_observed_temp_c;
         state.setpoint_pct = channel.last_setpoint_pct;
         state.feedforward_pct = channel.last_raw_demand_pct;
-        state.thermal_pressure_boost_pct =
-            channel.thermal_pressure_boost_pct;
-        state.midband_pressure_boost_pct =
-            channel.midband_pressure_boost_pct;
-        state.gpu_airflow_boost_pct = channel.gpu_airflow_boost_pct;
-        state.cpu_low_soak_boost_pct = channel.cpu_low_soak_boost_pct;
+        for (std::size_t s = 0; s < kBoostStageCount; ++s) {
+            state.stage_boost_pct[s] = channel.boosts[s].boost_pct;
+        }
         state.low_band_stage_boost_pct =
             channel.low_band_stage_boost_pct;
         state.low_band_effective_boost_pct =

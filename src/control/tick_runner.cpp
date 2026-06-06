@@ -157,6 +157,7 @@ bool RunControlTick(ControlRuntimeContext& context,
     SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, fan_writer,
                                 context.runtime_policy,
                                 state.runtime_snapshot);
+    state.runtime_snapshot_index.Rebuild(state.runtime_snapshot);
     const bool runtime_snapshot_available =
         RuntimeSnapshotHasTelemetry(state.runtime_snapshot);
 
@@ -176,8 +177,9 @@ bool RunControlTick(ControlRuntimeContext& context,
     // Extract CPU temp.
     TempInputs temp_inputs;
     if (runtime_snapshot_available) {
-        const double cpu_c = FindRuntimeAmdSensorTemperature(
-            state.runtime_snapshot, context.loop.cpu_temp_label);
+        const double cpu_c =
+            state.runtime_snapshot_index.FindAmdSensorTemperature(
+                context.loop.cpu_temp_label);
         if (!std::isnan(cpu_c)) {
             temp_inputs.cpu_c = cpu_c;
             temp_inputs.cpu_available = true;
@@ -198,7 +200,7 @@ bool RunControlTick(ControlRuntimeContext& context,
         low_band_elapsed_ms =
             static_cast<std::uint64_t>(achieved_interval_ms + 0.5);
     }
-    UpdateLowBandState(context, temp_inputs, state.runtime_snapshot,
+    UpdateLowBandState(context, temp_inputs, state.runtime_snapshot_index,
                        low_band_elapsed_ms, now_steady, state.tick_count);
 
     if (runtime_snapshot_available) {
@@ -221,7 +223,7 @@ bool RunControlTick(ControlRuntimeContext& context,
             BuildChannelTimingConfig(context.loop, channel, now_steady);
 
         CaptureChannelBaselineIfAvailable(
-            context, channel, state.runtime_snapshot, state.tick_count);
+            context, channel, state.runtime_snapshot_index, state.tick_count);
 
         if (!HandleExpiredHoldRestore(context,
                                       channel,
@@ -237,13 +239,13 @@ bool RunControlTick(ControlRuntimeContext& context,
         }
 
         const ChannelEvaluation evaluation = EvaluateChannel(
-            channel, context.loop, temp_inputs, state.runtime_snapshot,
+            channel, context.loop, temp_inputs, state.runtime_snapshot_index,
             now_steady);
         AppendChannelSensorEvent(context, channel, evaluation,
                                  state.tick_count);
         TryApplyChannelSetpoint(context,
                                 channel,
-                                state.runtime_snapshot,
+                                state.runtime_snapshot_index,
                                 evaluation,
                                 fan_writer,
                                 pending_store,
@@ -318,6 +320,16 @@ bool RunControlTick(ControlRuntimeContext& context,
             state.last_process_cpu_delta_ms =
                 resource_timing.process_cpu_delta_ms;
             state.last_process_cpu_pct = resource_timing.process_cpu_pct;
+            state.last_system_cpu_idle_delta_ms =
+                resource_timing.system_cpu_idle_delta_ms;
+            state.last_system_cpu_kernel_delta_ms =
+                resource_timing.system_cpu_kernel_delta_ms;
+            state.last_system_cpu_user_delta_ms =
+                resource_timing.system_cpu_user_delta_ms;
+            state.last_system_cpu_processor_count =
+                resource_timing.system_cpu_processor_count;
+            state.last_system_cpu_busy_pct =
+                resource_timing.system_cpu_busy_pct;
         }
         state.resource_window_sample = current_resource_sample;
         state.have_resource_window_sample =
@@ -329,6 +341,15 @@ bool RunControlTick(ControlRuntimeContext& context,
     tick_timing.process_working_set_bytes =
         state.last_process_working_set_bytes;
     tick_timing.process_private_bytes = state.last_process_private_bytes;
+    tick_timing.system_cpu_idle_delta_ms =
+        state.last_system_cpu_idle_delta_ms;
+    tick_timing.system_cpu_kernel_delta_ms =
+        state.last_system_cpu_kernel_delta_ms;
+    tick_timing.system_cpu_user_delta_ms =
+        state.last_system_cpu_user_delta_ms;
+    tick_timing.system_cpu_processor_count =
+        state.last_system_cpu_processor_count;
+    tick_timing.system_cpu_busy_pct = state.last_system_cpu_busy_pct;
     state.last_timing = tick_timing;
 
     if (state.fatal_restore_timeout) {
@@ -349,6 +370,7 @@ bool RunControlTick(ControlRuntimeContext& context,
         csv_logger.WriteRow(
             BuildControlLoopCsvRow(
                 state.runtime_snapshot,
+                state.runtime_snapshot_index,
                 state.tick_count,
                 state.last_timing,
                 state.channel_log_states));

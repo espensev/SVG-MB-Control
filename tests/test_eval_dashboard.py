@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import http.server
 import importlib.util
+import threading
+import urllib.error
+import urllib.request
 
 from tests.helpers import *
 
@@ -143,6 +147,49 @@ class EvalDashboardTests(unittest.TestCase):
             self.assertEqual(payload["runtime"]["process_id"], 333)
             self.assertTrue(payload["files"]["control_runtime"]["exists"])
 
+    def test_dashboard_server_does_not_serve_repo_root_files(self) -> None:
+        server = _load_dashboard_server()
+        with tempfile.TemporaryDirectory() as td_str:
+            repo_root = Path(td_str)
+            dashboard = repo_root / "tools" / "eval_dashboard"
+            dashboard.mkdir(parents=True)
+            (dashboard / "index.html").write_text("dashboard", encoding="utf-8")
+            (repo_root / "secret.txt").write_text("do not serve", encoding="utf-8")
+
+            class Handler(server.EvalDashboardHandler):
+                def __init__(self, *handler_args, **handler_kwargs):
+                    super().__init__(
+                        *handler_args,
+                        directory=str(dashboard),
+                        **handler_kwargs,
+                    )
+
+            Handler.repo_root = repo_root
+            Handler.runtime_home = repo_root / "release" / "runtime"
+
+            httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                host, port = httpd.server_address
+                base_url = f"http://{host}:{port}"
+                with urllib.request.urlopen(
+                    f"{base_url}/tools/eval_dashboard/", timeout=2
+                ) as response:
+                    self.assertEqual(response.read().decode("utf-8"), "dashboard")
+
+                try:
+                    urllib.request.urlopen(f"{base_url}/secret.txt", timeout=2)
+                except urllib.error.HTTPError as error:
+                    self.assertEqual(error.code, 404)
+                    error.close()
+                else:
+                    self.fail("repo-root file was served by the dashboard server")
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=2)
+
     def test_dashboard_server_help(self) -> None:
         result = subprocess.run(
             [
@@ -161,5 +208,5 @@ class EvalDashboardTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=f"{result.stdout}\n{result.stderr}")
         self.assertIn("Serve the local SVG-MB-Control eval dashboard", result.stdout)
-        self.assertIn("serves the repo root", result.stdout)
+        self.assertIn("serves only the dashboard assets", result.stdout)
         self.assertIn("RuntimeHome", result.stdout)

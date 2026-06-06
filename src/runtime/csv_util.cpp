@@ -5,14 +5,28 @@
 
 namespace svg_mb_control {
 
-std::string CsvEscape(std::string_view text) {
-    bool needs_quotes = false;
+namespace {
+
+bool CsvNeedsQuotes(std::string_view text) {
     for (const char ch : text) {
         if (ch == '"' || ch == ',' || ch == '\n' || ch == '\r') {
-            needs_quotes = true;
-            break;
+            return true;
         }
     }
+    return false;
+}
+
+void AppendRaw(std::ostringstream& csv, std::string_view text) {
+    if (text.empty()) {
+        return;
+    }
+    csv.write(text.data(), static_cast<std::streamsize>(text.size()));
+}
+
+}  // namespace
+
+std::string CsvEscape(std::string_view text) {
+    const bool needs_quotes = CsvNeedsQuotes(text);
     if (!needs_quotes) {
         return std::string(text);
     }
@@ -32,7 +46,19 @@ std::string CsvEscape(std::string_view text) {
 }
 
 void AppendCsvString(std::ostringstream& csv, std::string_view text) {
-    csv << CsvEscape(text);
+    if (!CsvNeedsQuotes(text)) {
+        AppendRaw(csv, text);
+        return;
+    }
+    csv << '"';
+    for (const char ch : text) {
+        if (ch == '"') {
+            csv << "\"\"";
+        } else {
+            csv << ch;
+        }
+    }
+    csv << '"';
 }
 
 void AppendCsvDouble(std::ostringstream& csv, double value, int precision) {

@@ -1,9 +1,12 @@
 #include "channel_evaluator.h"
 
+#include "boost_stage.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 namespace svg_mb_control {
@@ -113,141 +116,6 @@ double ApplyDemandSmoothing(double raw_desired_pct,
     return std::clamp(smoothed, 0.0, 100.0);
 }
 
-// Generic smootherstep pressure boost integrator shared by the
-// high-temperature thermal-pressure stage, the mid-band pressure stage, and
-// the GPU early-airflow boost. Returns 0.0 (inert) when the parameter set is
-// incomplete or non-positive, matching the original thermal-pressure
-// disabled-path contract.
-double UpdatePressureBoost(double temp_c,
-                           double current_boost_pct,
-                           std::uint64_t elapsed_ms,
-                           double start_c,
-                           double full_c,
-                           double rise_pct_per_sec,
-                           double fall_pct_per_sec,
-                           double max_boost_pct) {
-    if (std::isnan(start_c) || std::isnan(full_c) ||
-        std::isnan(rise_pct_per_sec) || std::isnan(fall_pct_per_sec) ||
-        std::isnan(max_boost_pct) ||
-        rise_pct_per_sec <= 0.0 ||
-        fall_pct_per_sec < 0.0 ||
-        max_boost_pct <= 0.0) {
-        return 0.0;
-    }
-
-    double boost = std::isnan(current_boost_pct)
-        ? 0.0
-        : std::clamp(current_boost_pct, 0.0, max_boost_pct);
-    if (elapsed_ms == 0u || std::isnan(temp_c)) {
-        return boost;
-    }
-
-    const double dt_seconds = static_cast<double>(elapsed_ms) / 1000.0;
-    if (temp_c >= start_c) {
-        double pressure_scale = 1.0;
-        if (full_c > start_c) {
-            double t = std::clamp(
-                (temp_c - start_c) / (full_c - start_c), 0.0, 1.0);
-            pressure_scale = t * t * t * ((6.0 * t - 15.0) * t + 10.0);
-        }
-
-        if (boost < max_boost_pct) {
-            boost += rise_pct_per_sec * pressure_scale * dt_seconds;
-        }
-    } else {
-        boost -= fall_pct_per_sec * dt_seconds;
-    }
-
-    return std::clamp(boost, 0.0, max_boost_pct);
-}
-
-double UpdateThermalPressureBoost(double observed_temp_c,
-                                  double current_boost_pct,
-                                  std::uint64_t elapsed_ms,
-                                  const ChannelControlConfig& config) {
-    return UpdatePressureBoost(
-        observed_temp_c, current_boost_pct, elapsed_ms,
-        config.thermal_pressure_start_c, config.thermal_pressure_full_c,
-        config.thermal_pressure_rise_pct_per_sec,
-        config.thermal_pressure_fall_pct_per_sec,
-        config.thermal_pressure_max_boost_pct);
-}
-
-double UpdateMidbandPressureBoost(double observed_temp_c,
-                                  double current_boost_pct,
-                                  std::uint64_t elapsed_ms,
-                                  const ChannelControlConfig& config) {
-    return UpdatePressureBoost(
-        observed_temp_c, current_boost_pct, elapsed_ms,
-        config.midband_pressure_start_c, config.midband_pressure_full_c,
-        config.midband_pressure_rise_pct_per_sec,
-        config.midband_pressure_fall_pct_per_sec,
-        config.midband_pressure_max_boost_pct);
-}
-
-double UpdateGpuAirflowBoost(double gpu_temp_c,
-                             bool gpu_available,
-                             double current_boost_pct,
-                             std::uint64_t elapsed_ms,
-                             const ChannelControlConfig& config) {
-    const double temp_c = gpu_available
-        ? gpu_temp_c
-        : std::numeric_limits<double>::quiet_NaN();
-    return UpdatePressureBoost(
-        temp_c, current_boost_pct, elapsed_ms,
-        config.gpu_airflow_start_c, config.gpu_airflow_full_c,
-        config.gpu_airflow_rise_pct_per_sec,
-        config.gpu_airflow_fall_pct_per_sec,
-        config.gpu_airflow_max_boost_pct);
-}
-
-double UpdateCpuLowSoakBoost(double cpu_temp_c,
-                             bool cpu_available,
-                             double current_boost_pct,
-                             std::uint64_t elapsed_ms,
-                             const ChannelControlConfig& config) {
-    if (std::isnan(config.cpu_low_soak_start_c) ||
-        std::isnan(config.cpu_low_soak_full_c) ||
-        std::isnan(config.cpu_low_soak_release_c) ||
-        std::isnan(config.cpu_low_soak_rise_pct_per_min) ||
-        std::isnan(config.cpu_low_soak_fall_pct_per_min) ||
-        std::isnan(config.cpu_low_soak_max_boost_pct) ||
-        config.cpu_low_soak_rise_pct_per_min <= 0.0 ||
-        config.cpu_low_soak_fall_pct_per_min < 0.0 ||
-        config.cpu_low_soak_max_boost_pct <= 0.0) {
-        return 0.0;
-    }
-
-    double boost = std::isnan(current_boost_pct)
-        ? 0.0
-        : std::clamp(
-              current_boost_pct, 0.0, config.cpu_low_soak_max_boost_pct);
-    if (elapsed_ms == 0u) {
-        return boost;
-    }
-
-    const double dt_minutes = static_cast<double>(elapsed_ms) / 60000.0;
-    if (cpu_available && !std::isnan(cpu_temp_c)) {
-        if (cpu_temp_c >= config.cpu_low_soak_start_c) {
-            const double t = std::clamp(
-                (cpu_temp_c - config.cpu_low_soak_start_c) /
-                    (config.cpu_low_soak_full_c -
-                     config.cpu_low_soak_start_c),
-                0.0, 1.0);
-            const double soak_scale =
-                t * t * t * ((6.0 * t - 15.0) * t + 10.0);
-            boost += config.cpu_low_soak_rise_pct_per_min *
-                     soak_scale * dt_minutes;
-        } else if (cpu_temp_c <= config.cpu_low_soak_release_c) {
-            boost -= config.cpu_low_soak_fall_pct_per_min * dt_minutes;
-        }
-    } else {
-        boost -= config.cpu_low_soak_fall_pct_per_min * dt_minutes;
-    }
-
-    return std::clamp(boost, 0.0, config.cpu_low_soak_max_boost_pct);
-}
-
 bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
                                double last_issued_pct,
                                double tolerance_pct,
@@ -275,12 +143,13 @@ bool FanNeedsAuthorityReassert(const RuntimeFanSnapshot& fan,
     return true;
 }
 
-std::string AddResponseModifier(std::string source, const char* modifier) {
+std::string AddResponseModifier(std::string source,
+                                std::string_view modifier) {
     if (source.empty() || source == "unavailable") {
-        return modifier;
+        return std::string(modifier);
     }
     source += '+';
-    source += modifier;
+    source.append(modifier);
     return source;
 }
 
@@ -308,6 +177,23 @@ PrimaryCurveInput SelectLegacyMaxInput(const TempInputs& inputs,
     out.source = guarded ? "gpu_guard" : "gpu";
     return out;
 }
+
+// Per-evaluation scratch state threaded through the EvaluateChannel
+// helpers. References capture the call inputs; the four in-progress
+// fields carry partial results between helpers. Pure scratch — does not
+// outlive the EvaluateChannel call.
+struct EvaluationScratch {
+    ChannelState& channel;
+    const ControlLoopConfig& loop;
+    const TempInputs& temp_inputs;
+    const RuntimeSnapshotIndex& runtime_index;
+    ChannelEvaluation& evaluation;
+
+    double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
+    double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
+    std::string response_source = "unavailable";
+    std::string primary_temp_source = "unavailable";
+};
 
 PrimaryCurveInput SelectPrimaryCurveInput(
     const TempInputs& inputs,
@@ -350,8 +236,169 @@ PrimaryCurveInput SelectPrimaryCurveInput(
     return out;
 }
 
+// Step 1 of EvaluateChannel: pick the primary curve input, drive the
+// sensor failure/recovery transitions, and seed raw_desired_setpoint
+// from the curve. Sets primary_temp_source even on the no-input path so
+// callers can record it in channel/evaluation.
+void EvaluatePrimarySetpoint(EvaluationScratch& s) {
+    const PrimaryCurveInput primary =
+        SelectPrimaryCurveInput(s.temp_inputs, s.channel.config);
+    s.primary_temp_source = primary.source;
+
+    if (!primary.available) {
+        ++s.channel.consecutive_sensor_failures;
+        if (s.channel.consecutive_sensor_failures >=
+            ChannelState::kMaxConsecutiveSensorFailures) {
+            if (!s.channel.sensor_failed) {
+                s.channel.sensor_failed = true;
+                s.evaluation.sensor_event =
+                    ChannelSensorEvent::FailureDetected;
+            }
+            s.raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
+            s.response_source = "sensor_safe_mode";
+            // Mark this as a thermal-safety command so the write path lets it
+            // through an open write-failure breaker (recovery-gap remediation
+            // 3). cpu_override cannot replace it (it caps at 100%) and the
+            // boost overlays only add, so the flag stays valid to the end.
+            s.evaluation.safety_override = true;
+        }
+        return;
+    }
+
+    if (s.channel.consecutive_sensor_failures > 0u ||
+        s.channel.sensor_failed) {
+        if (s.channel.sensor_failed) {
+            s.evaluation.sensor_event = ChannelSensorEvent::Recovered;
+            s.evaluation.sensor_event_observed_temp_c = primary.temp_c;
+        }
+        s.channel.consecutive_sensor_failures = 0u;
+        s.channel.sensor_failed = false;
+    }
+
+    s.raw_desired_setpoint = LookupCurve(
+        s.channel.config.curve, primary.temp_c,
+        s.channel.config.min_duty_pct, s.channel.config.curve_shape);
+    s.observed_temp_c = primary.temp_c;
+    s.response_source = "primary_curve";
+}
+
+// Step 2: merge the optional CPU override curve. Wins if no primary
+// input was available or if its curve commands a higher duty.
+void ApplyCpuOverride(EvaluationScratch& s) {
+    if (s.channel.config.cpu_override_curve.empty() ||
+        !s.temp_inputs.cpu_available) {
+        return;
+    }
+    const double cpu_setpoint = LookupCurve(
+        s.channel.config.cpu_override_curve, s.temp_inputs.cpu_c,
+        s.channel.config.min_duty_pct, s.channel.config.curve_shape);
+    if (std::isnan(s.raw_desired_setpoint) ||
+        cpu_setpoint > s.raw_desired_setpoint) {
+        s.raw_desired_setpoint = cpu_setpoint;
+        s.observed_temp_c = s.temp_inputs.cpu_c;
+        s.response_source = "cpu_override";
+    }
+}
+
+// Step 3: smooth the raw demand, integrate the four boost overlays, and
+// build the response_source modifier string. Returns the smoothed base
+// setpoint for the final clamp+rate-limit step. Writes the final
+// response_source onto channel and evaluation.
+double UpdateDemandAndBoosts(EvaluationScratch& s) {
+    const double smoothed_base_setpoint = ApplyDemandSmoothing(
+        s.raw_desired_setpoint, s.channel.smoothed_demand_pct,
+        s.evaluation.timing.elapsed_since_last_evaluation_ms,
+        s.channel.config);
+    s.channel.smoothed_demand_pct = smoothed_base_setpoint;
+
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        s.channel.boosts[i].boost_pct = UpdateBoostStage(
+            kBoostStageSpecs[i], s.channel.config.boosts[i],
+            s.channel.boosts[i].boost_pct,
+            s.evaluation.timing.elapsed_since_last_evaluation_ms,
+            s.temp_inputs, s.observed_temp_c);
+    }
+
+    constexpr double kBoostResponseTagThresholdPct = 0.0005;
+    for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+        if (s.channel.boosts[i].boost_pct > kBoostResponseTagThresholdPct) {
+            s.response_source = AddResponseModifier(
+                std::move(s.response_source),
+                kBoostStageSpecs[i].response_tag);
+        }
+    }
+    if (s.channel.low_band_stage_boost_pct > kBoostResponseTagThresholdPct) {
+        s.response_source =
+            AddResponseModifier(std::move(s.response_source), "low_band_stage");
+    }
+    s.channel.last_response_source = s.response_source;
+    s.evaluation.response_source = s.response_source;
+    return smoothed_base_setpoint;
+}
+
+// Step 4: apply the low-band residual cap, sum every contribution, clamp
+// to [0, 100], and apply the per-channel rate limiter. Returns the
+// rate-limited setpoint. Operand order in the boost-sum is load-bearing
+// (see CONTROL_PIPELINE_MATH.md §5): preserving left-to-right
+// associativity keeps the result bit-identical to pre-table builds.
+double ComputeFinalSetpoint(EvaluationScratch& s,
+                            double smoothed_base_setpoint) {
+    double low_band_contrib = s.channel.low_band_stage_boost_pct;
+    if (!std::isnan(s.loop.low_band_residual_cap_pct)) {
+        low_band_contrib =
+            (std::min)(low_band_contrib, s.loop.low_band_residual_cap_pct);
+    }
+    s.channel.low_band_effective_boost_pct = low_band_contrib;
+
+    const double desired_setpoint = std::clamp(
+        smoothed_base_setpoint +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::ThermalPressure)].boost_pct +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::MidbandPressure)].boost_pct +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::GpuAirflow)].boost_pct +
+            s.channel.boosts[static_cast<std::size_t>(
+                BoostStage::CpuLowSoak)].boost_pct +
+            low_band_contrib,
+        0.0, 100.0);
+
+    return RateLimitSetpoint(
+        desired_setpoint, s.channel.last_issued_pct,
+        s.evaluation.timing.elapsed_since_last_write_ms,
+        s.channel.config.rise_rate_pct_per_min,
+        s.channel.config.fall_rate_pct_per_min,
+        s.channel.config.max_setpoint_step_pct);
+}
+
+// Step 5: when running in continuous-hold mode (effective_hold_ms == 0),
+// detect drift between the last issued setpoint and the observed fan
+// state and flag an authority-reassert. Leaves evaluation.authority_*
+// at their defaults when no fan snapshot is present for this channel.
+void DetectAuthorityReassert(EvaluationScratch& s) {
+    const RuntimeFanSnapshot* fan =
+        s.runtime_index.FindFanChannel(s.channel.config.channel);
+    if (fan == nullptr) {
+        return;
+    }
+    s.evaluation.authority_reassert =
+        s.evaluation.timing.effective_hold_ms == 0u &&
+        FanNeedsAuthorityReassert(
+            *fan, s.channel.last_issued_pct,
+            (std::max)(kAuthorityDutyTolerancePct,
+                       s.evaluation.timing.effective_deadband_pct),
+            &s.evaluation.authority_detail);
+}
+
 }  // namespace
 
+// GPU control envelope = max(core, memjn, hotspot-if>0). The analyzer copies
+// (src/analyze/analyze_csv.cpp GpuEnvelopeC, the analyze_db.cpp SQL backfill,
+// scripts/analyze_control_run.py gpu_envelope_c, tools/eval_dashboard/
+// dashboard.js gpuEnvelope) implement the same rule but are optional-aware.
+// This control-path copy treats core_c/memjn_c as always present because
+// RuntimeGpuSnapshot stores plain doubles (src/runtime/runtime_snapshot.h).
+// Keep the rule aligned across all copies.
 double GpuControlEnvelopeC(const RuntimeGpuSnapshot& gpu) {
     double envelope = (std::max)(gpu.core_c, gpu.memjn_c);
     if (gpu.hotspot_c > 0.0) {
@@ -393,148 +440,33 @@ ChannelTimingConfig BuildChannelTimingConfig(
 ChannelEvaluation EvaluateChannel(ChannelState& channel,
                                   const ControlLoopConfig& loop,
                                   const TempInputs& temp_inputs,
-                                  const RuntimeSnapshot& runtime_snapshot,
+                                  const RuntimeSnapshotIndex& runtime_index,
                                   std::chrono::steady_clock::time_point now) {
     ChannelEvaluation evaluation;
     evaluation.timing = BuildChannelTimingConfig(loop, channel, now);
     channel.last_evaluation_time = now;
     channel.last_write_reason = "none";
 
-    const PrimaryCurveInput primary =
-        SelectPrimaryCurveInput(temp_inputs, channel.config);
-    double raw_desired_setpoint = std::numeric_limits<double>::quiet_NaN();
-    double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
-    std::string response_source = "unavailable";
-    std::string primary_temp_source = primary.source;
+    EvaluationScratch s{channel, loop, temp_inputs, runtime_index,
+                        evaluation};
 
-    if (!primary.available) {
-        ++channel.consecutive_sensor_failures;
-        if (channel.consecutive_sensor_failures >=
-            ChannelState::kMaxConsecutiveSensorFailures) {
-            if (!channel.sensor_failed) {
-                channel.sensor_failed = true;
-                evaluation.sensor_event =
-                    ChannelSensorEvent::FailureDetected;
-            }
-            raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
-            response_source = "sensor_safe_mode";
-        }
-    } else {
-        if (channel.consecutive_sensor_failures > 0u ||
-            channel.sensor_failed) {
-            if (channel.sensor_failed) {
-                evaluation.sensor_event = ChannelSensorEvent::Recovered;
-                evaluation.sensor_event_observed_temp_c = primary.temp_c;
-            }
-            channel.consecutive_sensor_failures = 0u;
-            channel.sensor_failed = false;
-        }
+    EvaluatePrimarySetpoint(s);
+    ApplyCpuOverride(s);
 
-        raw_desired_setpoint = LookupCurve(
-            channel.config.curve, primary.temp_c, channel.config.min_duty_pct,
-            channel.config.curve_shape);
-        observed_temp_c = primary.temp_c;
-        response_source = "primary_curve";
-    }
-
-    if (!channel.config.cpu_override_curve.empty() &&
-        temp_inputs.cpu_available) {
-        const double cpu_setpoint = LookupCurve(
-            channel.config.cpu_override_curve, temp_inputs.cpu_c,
-            channel.config.min_duty_pct, channel.config.curve_shape);
-        if (std::isnan(raw_desired_setpoint) ||
-            cpu_setpoint > raw_desired_setpoint) {
-            raw_desired_setpoint = cpu_setpoint;
-            observed_temp_c = temp_inputs.cpu_c;
-            response_source = "cpu_override";
-        }
-    }
-
-    channel.last_observed_temp_c = observed_temp_c;
-    channel.last_raw_demand_pct = raw_desired_setpoint;
-    channel.last_primary_temp_source = primary_temp_source;
-    evaluation.observed_temp_c = observed_temp_c;
-    evaluation.response_source = response_source;
-    if (std::isnan(raw_desired_setpoint)) {
-        channel.last_response_source = response_source;
+    channel.last_observed_temp_c = s.observed_temp_c;
+    channel.last_raw_demand_pct = s.raw_desired_setpoint;
+    channel.last_primary_temp_source = s.primary_temp_source;
+    evaluation.observed_temp_c = s.observed_temp_c;
+    evaluation.response_source = s.response_source;
+    if (std::isnan(s.raw_desired_setpoint)) {
+        channel.last_response_source = s.response_source;
         return evaluation;
     }
 
-    const double smoothed_base_setpoint = ApplyDemandSmoothing(
-        raw_desired_setpoint, channel.smoothed_demand_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.smoothed_demand_pct = smoothed_base_setpoint;
-    channel.thermal_pressure_boost_pct = UpdateThermalPressureBoost(
-        observed_temp_c, channel.thermal_pressure_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.midband_pressure_boost_pct = UpdateMidbandPressureBoost(
-        observed_temp_c, channel.midband_pressure_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.gpu_airflow_boost_pct = UpdateGpuAirflowBoost(
-        temp_inputs.gpu_c, temp_inputs.gpu_available,
-        channel.gpu_airflow_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    channel.cpu_low_soak_boost_pct = UpdateCpuLowSoakBoost(
-        temp_inputs.cpu_c, temp_inputs.cpu_available,
-        channel.cpu_low_soak_boost_pct,
-        evaluation.timing.elapsed_since_last_evaluation_ms, channel.config);
-    if (channel.thermal_pressure_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "thermal_pressure");
-    }
-    if (channel.midband_pressure_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "midband_pressure");
-    }
-    if (channel.gpu_airflow_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "gpu_airflow");
-    }
-    if (channel.cpu_low_soak_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "cpu_low_soak");
-    }
-    if (channel.low_band_stage_boost_pct > 0.0005) {
-        response_source =
-            AddResponseModifier(std::move(response_source), "low_band_stage");
-    }
-    channel.last_response_source = response_source;
-    evaluation.response_source = response_source;
-
-    // Low-band is second priority: hard-cap its contribution to the final
-    // setpoint at low_band_residual_cap_pct when configured. NaN preserves the
-    // pre-feature uncapped behavior.
-    double low_band_contrib = channel.low_band_stage_boost_pct;
-    if (!std::isnan(loop.low_band_residual_cap_pct)) {
-        low_band_contrib =
-            (std::min)(low_band_contrib, loop.low_band_residual_cap_pct);
-    }
-    channel.low_band_effective_boost_pct = low_band_contrib;
-    const double desired_setpoint = std::clamp(
-        smoothed_base_setpoint + channel.thermal_pressure_boost_pct +
-            channel.midband_pressure_boost_pct +
-            channel.gpu_airflow_boost_pct +
-            channel.cpu_low_soak_boost_pct +
-            low_band_contrib,
-        0.0, 100.0);
-    const double setpoint = RateLimitSetpoint(
-        desired_setpoint, channel.last_issued_pct,
-        evaluation.timing.elapsed_since_last_write_ms,
-        channel.config.rise_rate_pct_per_min,
-        channel.config.fall_rate_pct_per_min,
-        channel.config.max_setpoint_step_pct);
+    const double smoothed_base_setpoint = UpdateDemandAndBoosts(s);
+    const double setpoint = ComputeFinalSetpoint(s, smoothed_base_setpoint);
     channel.last_setpoint_pct = setpoint;
-
-    if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-            runtime_snapshot, channel.config.channel)) {
-        evaluation.authority_reassert =
-            evaluation.timing.effective_hold_ms == 0u &&
-            FanNeedsAuthorityReassert(
-                *fan, channel.last_issued_pct,
-                (std::max)(kAuthorityDutyTolerancePct,
-                           evaluation.timing.effective_deadband_pct),
-                &evaluation.authority_detail);
-    }
+    DetectAuthorityReassert(s);
 
     evaluation.has_setpoint = true;
     evaluation.setpoint_pct = setpoint;

@@ -1,5 +1,7 @@
 #include "analyze_csv.h"
 
+#include "analyze_channel_sample_columns.h"
+
 #include <algorithm>
 #include <charconv>
 #include <fstream>
@@ -25,6 +27,12 @@ bool TryParseInt64(std::string_view text, std::int64_t& out) {
 bool TryParseDouble(std::string_view text, double& out) {
     if (text.empty()) {
         return false;
+    }
+    const char* begin = text.data();
+    const char* end = text.data() + text.size();
+    if (auto [ptr, ec] = std::from_chars(begin, end, out);
+        ec == std::errc{} && ptr == end) {
+        return true;
     }
     try {
         std::size_t consumed = 0u;
@@ -87,6 +95,61 @@ const std::string& GetField(const std::vector<std::string>& fields,
 
 bool HasColumn(const CsvHeader& header, const std::string& name) {
     return header.column_index.find(name) != header.column_index.end();
+}
+
+void SetChannelSampleField(ParsedChannelSample& ch,
+                           TickChannelSampleColumn id,
+                           const std::string& value) {
+    switch (id) {
+        case TickChannelSampleColumn::ObservedTempC:
+            ch.observed_temp_c = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::SetpointPct:
+            ch.setpoint_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::ThermalPressureBoostPct:
+            ch.thermal_pressure_boost_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::MidbandPressureBoostPct:
+            ch.midband_pressure_boost_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::GpuAirflowBoostPct:
+            ch.gpu_airflow_boost_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::CpuLowSoakBoostPct:
+            ch.cpu_low_soak_boost_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::PrimaryTempSource:
+            ch.primary_temp_source = AsText(value);
+            break;
+        case TickChannelSampleColumn::ResponseSource:
+            ch.response_source = AsText(value);
+            break;
+        case TickChannelSampleColumn::WriteReason:
+            ch.write_reason = AsText(value);
+            break;
+        case TickChannelSampleColumn::TotalWrites:
+            ch.total_writes = AsInt(value);
+            break;
+        case TickChannelSampleColumn::WriteActive:
+            ch.write_active = AsInt(value);
+            break;
+        case TickChannelSampleColumn::BaselineCaptured:
+            ch.baseline_captured = AsInt(value);
+            break;
+        case TickChannelSampleColumn::FeedforwardPct:
+            ch.feedforward_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::CorrectionPct:
+            ch.correction_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::LowBandStageBoostPct:
+            ch.low_band_stage_boost_pct = AsDouble(value);
+            break;
+        case TickChannelSampleColumn::LowBandEffectiveBoostPct:
+            ch.low_band_effective_boost_pct = AsDouble(value);
+            break;
+    }
 }
 
 std::optional<double> GpuEnvelopeC(std::optional<double> core_c,
@@ -259,40 +322,22 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
     }
 
     for (std::uint32_t ci = 0u; ci < 64u; ++ci) {
-        const std::string prefix = "channel" + std::to_string(ci) + "_";
-        if (!HasColumn(header, prefix + "observed_temp_c")) {
+        if (!HasColumn(
+                header,
+                TickChannelCsvFieldName(
+                    ci,
+                    TickChannelSampleColumnById(
+                        TickChannelSampleColumn::ObservedTempC).name))) {
             break;
         }
         ParsedChannelSample ch;
         ch.channel = ci;
-        ch.observed_temp_c = AsDouble(
-            GetField(fields, header, prefix + "observed_temp_c"));
-        ch.setpoint_pct = AsDouble(
-            GetField(fields, header, prefix + "setpoint_pct"));
-        ch.thermal_pressure_boost_pct = AsDouble(
-            GetField(fields, header, prefix + "thermal_pressure_boost_pct"));
-        ch.midband_pressure_boost_pct = AsDouble(
-            GetField(fields, header, prefix + "midband_pressure_boost_pct"));
-        ch.gpu_airflow_boost_pct = AsDouble(
-            GetField(fields, header, prefix + "gpu_airflow_boost_pct"));
-        ch.cpu_low_soak_boost_pct = AsDouble(
-            GetField(fields, header, prefix + "cpu_low_soak_boost_pct"));
-        ch.primary_temp_source = AsText(
-            GetField(fields, header, prefix + "primary_temp_source"));
-        ch.response_source = AsText(
-            GetField(fields, header, prefix + "response_source"));
-        ch.write_reason = AsText(
-            GetField(fields, header, prefix + "write_reason"));
-        ch.total_writes = AsInt(
-            GetField(fields, header, prefix + "total_writes"));
-        ch.write_active = AsInt(
-            GetField(fields, header, prefix + "write_active"));
-        ch.baseline_captured = AsInt(
-            GetField(fields, header, prefix + "baseline_captured"));
-        ch.feedforward_pct = AsDouble(
-            GetField(fields, header, prefix + "feedforward_pct"));
-        ch.correction_pct = AsDouble(
-            GetField(fields, header, prefix + "correction_pct"));
+        for (const auto& spec : TickChannelSampleColumns()) {
+            SetChannelSampleField(
+                ch, spec.id,
+                GetField(fields, header,
+                         TickChannelCsvFieldName(ci, spec.name)));
+        }
         row.channels.push_back(std::move(ch));
     }
 
@@ -316,6 +361,15 @@ ParsedCsv ParseControlLoopCsv(const std::filesystem::path& path) {
             continue;
         }
         if (line[0] == '#') {
+            std::string body = line.substr(1);
+            if (!body.empty() && body.front() == ' ') {
+                body.erase(0, 1);
+            }
+            const auto eq = body.find('=');
+            if (eq != std::string::npos) {
+                result.prologue.emplace(body.substr(0, eq),
+                                        body.substr(eq + 1));
+            }
             continue;
         }
         if (!header_parsed) {

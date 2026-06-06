@@ -66,6 +66,10 @@ async function fetchTextIfOk(url) {
   return response.text();
 }
 
+// CSV row/quote parsing and the "#"-prologue skip mirror the native producer
+// src/runtime/runtime_csv_archive.cpp; the prologue grammar is documented in
+// docs/RUNTIME_LOGGING_AND_EVALUATION.md. Keep aligned with the native
+// analyzer's ParseCsvLine in src/analyze/analyze_csv.cpp.
 function parseCsv(text) {
   const content = text
     .split(/\r?\n/)
@@ -197,20 +201,19 @@ function percentile(values, pct) {
 }
 
 function percentileSorted(sorted, pct) {
+  // Nearest-rank on an ascending-sorted array: pX is the value at index
+  // round((X/100) * (n - 1)); p100 is the maximum. Math.floor(x + 0.5)
+  // reproduces C++ std::llround (round half away from zero) for the
+  // non-negative index, matching the native analyze report
+  // (src/analyze/analyze_report_data.cpp).
   if (!sorted.length) {
     return null;
   }
-  if (sorted.length === 1) {
-    return sorted[0];
+  let index = Math.floor((sorted.length - 1) * (pct / 100) + 0.5);
+  if (index >= sorted.length) {
+    index = sorted.length - 1;
   }
-  const position = (sorted.length - 1) * (pct / 100);
-  const lower = Math.floor(position);
-  const upper = Math.ceil(position);
-  if (lower === upper) {
-    return sorted[lower];
-  }
-  const fraction = position - lower;
-  return sorted[lower] + (sorted[upper] - sorted[lower]) * fraction;
+  return sorted[index];
 }
 
 function stats(values) {
@@ -307,6 +310,10 @@ function column(rows, name) {
   return rows.map((row) => maybeNumber(row[name])).filter((value) => value !== null);
 }
 
+// Boost component column names come from the CSV header producer
+// src/runtime/runtime_csv_rows.cpp (kBoostStageSpecs); the low_band_* fallback
+// is emitted only there. Keep in sync with that producer and native
+// tick_channel_samples ingestion.
 function channelResponseBoost(row, channel) {
   const names = [
     `channel${channel}_thermal_pressure_boost_pct`,

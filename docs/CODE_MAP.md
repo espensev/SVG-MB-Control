@@ -16,10 +16,15 @@ the same responsibility; otherwise they are listed separately.
 
 ## App Dispatch (`src/app/`)
 
-- `src/app/app_main.{h,cpp}` — `RunApp` entry: CLI parsing, config-path
-  resolution, mode dispatch (control-loop, read-loop, write-once,
-  evidence-log, calibrate, analyze, health, `--show-config`), and console
-  control handling.
+- `src/app/app_main.{h,cpp}` — `RunApp` entry: config-path resolution and
+  mode dispatch (control-loop, read-loop, write-once, evidence-log, calibrate,
+  analyze, health, `--show-config`).
+- `src/app/app_args.{h,cpp}` — CLI option model, value parsers, help/version
+  output, and argument validation.
+- `src/app/app_diagnose.{h,cpp}` — One-shot diagnostic helpers for AMD/GPU
+  sampling and direct snapshot JSON.
+- `src/app/app_signals.{h,cpp}` — Win32 console handler, active loop scopes,
+  and cooperative stop signal state.
 - `src/app/startup_banner.{h,cpp}` — Mode-specific stdout startup
   diagnostics (resolved config path, runtime home, key channel settings).
 
@@ -74,13 +79,6 @@ the same responsibility; otherwise they are listed separately.
 - `src/policy/control_policy.{h,cpp}` — Curve/blend primitives:
   `CurvePoint`, `TempBlend` enum (incl. `MaxCpuGpuSourceAware`),
   `CurveShape`, `BlendTemps`, `LookupCurve`.
-- `src/policy/runtime_write_policy.{h,cpp}` — Loads
-  `runtime_policy_write_live.json` and answers "is this channel
-  blocked / are writes enabled?".
-- `src/policy/write_orchestrator.{h,cpp}` — Write-once mode:
-  baseline capture from a runtime snapshot, freshness check, sidecar
-  upsert, direct duty write, hold, restore. Also owns
-  `ReconcilePendingWrites` for orphaned-sidecar recovery.
 
 ## Runtime IO and State (`src/runtime/`)
 
@@ -104,16 +102,20 @@ the same responsibility; otherwise they are listed separately.
 - `src/runtime/runtime_csv_archive.{h,cpp}` — `RuntimeCsvLogger`:
   rotating CSV writer with manifest tracking and archive directory
   layout.
-- `src/runtime/runtime_csv_rows.{h,cpp}` — `RuntimeControlRow`,
-  `RuntimeControlChannelLogState`, and read-loop row structs that
-  define the CSV column contract.
+- `src/runtime/runtime_csv_rows.{h,cpp}` — `RuntimeControlChannelLogState`
+  and the read-loop/evidence-log row structs that define the CSV column
+  contract. Repeated per-index field groups (fan snapshot, fan tach
+  evidence, SIO voltage/temperature, control channel) are emitted from
+  shared `CsvColumn<Entity>` descriptor tables so the header and row
+  builders iterate one source of truth and cannot drift.
 - `src/runtime/runtime_event_log.{h,cpp}` — `RuntimeLogEvent` struct,
   `AppendRuntimeEvent` JSONL writer, and the event-count probe.
 - `src/runtime/runtime_health.{h,cpp}` — `EvaluateRuntimeHealth` and
   `AssessHealthState`: turns `control_runtime.json` + process state
   into `healthy / degraded / stale / stopped / failed`.
 - `src/runtime/runtime_lifecycle.{h,cpp}` — Stop-request and
-  reset-request file management (`runtime/stop`, `runtime/reset`).
+  reset-request file management (`stop.request.json`,
+  `circuit_breaker_reset.request.json`).
 - `src/runtime/runtime_paths.{h,cpp}` — `RuntimeArtifactNaming`, the
   ISO-8601 local formatter, and resolvers for log/manifest/event
   paths.
@@ -125,6 +127,13 @@ the same responsibility; otherwise they are listed separately.
   and `WriteReadLoopStatus` (v1) writers.
 - `src/runtime/runtime_supervisor_state.{h,cpp}` — Supervisor sidecar
   with restart counts, worker exit codes, and last-restart timestamps.
+- `src/runtime/runtime_write_policy.{h,cpp}` — Loads
+  `runtime_policy_write_live.json` and answers "is this channel blocked / are
+  writes enabled?".
+- `src/runtime/write_orchestrator.{h,cpp}` — Write-once mode: baseline capture
+  from a runtime snapshot, freshness check, sidecar upsert, direct duty write,
+  hold, restore. Also owns `ReconcilePendingWrites` for orphaned-sidecar
+  recovery.
 
 ## Hardware Backends (`src/hardware/`)
 
@@ -152,6 +161,8 @@ the same responsibility; otherwise they are listed separately.
   `RuntimeSnapshot` producer for direct sampling paths.
 - `src/platform/env_util.{h,cpp}` — `GetEnvWithDefault` helper for
   reading env vars with a fallback.
+- `src/platform/file_hash.{h,cpp}` — Shared streaming SHA-256 helper for
+  runtime and analyzer artifact identity.
 - `src/platform/runtime_singleton.{h,cpp}` — Cross-process named
   mutex that enforces single-controller-per-runtime-home.
 - `src/platform/runtime_util.{h,cpp}` — `ProcessIsActive` and
@@ -160,8 +171,9 @@ the same responsibility; otherwise they are listed separately.
   for Session 0 / LocalSystem service migration; see
   `docs/SERVICE_PROBE.md`.
 - `src/platform/task_runner.cpp` — Separate hidden `wWinMain` binary
-  for the scheduled-task watchdog: resolves `svg-mb-control.exe`,
-  launches it under `NUL` stdio, and forwards a `--status` invocation.
+  for scheduled tasks: resolves `svg-mb-control.exe`, launches it under
+  `NUL` stdio, forwards start/stop/restart/status commands, and runs the
+  watchdog health/restart check.
 - `src/platform/windows_lean.h` — Central `WIN32_LEAN_AND_MEAN` /
   `NOMINMAX` guard before `<windows.h>` includes.
 
@@ -169,6 +181,10 @@ the same responsibility; otherwise they are listed separately.
 
 - `src/analyze/analyze_cli.{h,cpp}` — `analyze` subcommand dispatcher
   (`ingest`, `prune`, `report`) with shared option parsing.
+- `src/analyze/analyze_channel_sample_columns.{h,cpp}` —
+  `tick_channel_samples` descriptor: analyzer channel sample column names,
+  SQLite types, generated DDL/insert/select SQL, CSV field names, select
+  indexes, and the `ParsedChannelSample` binder.
 - `src/analyze/analyze_csv.{h,cpp}` — CSV row parser that
   reconstructs per-tick telemetry samples from archived runtime CSVs.
 - `src/analyze/analyze_db.{h,cpp}` — SQLite connection wrapper,
@@ -182,9 +198,15 @@ the same responsibility; otherwise they are listed separately.
   JSON parsers used by ingest.
 - `src/analyze/analyze_prune.{h,cpp}` — Offline retention pruner for
   archive bundles (age- and count-based).
-- `src/analyze/analyze_report.{h,cpp}` — Report generator: temperature
-  ranges, duty-cycle stats, source counts, robustness counters, and
-  short live summaries.
+- `src/analyze/analyze_report.{h,cpp}` — Public report options and
+  orchestration entry point for native `analyze report`.
+- `src/analyze/analyze_report_data.{h,cpp}` — Shared report data model and
+  percentile/band summarization helpers.
+- `src/analyze/analyze_report_queries.{h,cpp}` — Report DB reads, tick
+  banding, channel/event aggregation, manifest evidence loading, and response
+  delay detection.
+- `src/analyze/analyze_report_emit.{h,cpp}` — Text/JSON report emitters,
+  analysis manifest writing, and compact decision records.
 
 ## Tests
 
@@ -193,12 +215,25 @@ the same responsibility; otherwise they are listed separately.
   runtime-home factory, CSV/JSON readers, simulation env builder.
 - `tests/cpp/core_smoke_tests.cpp` — CTest C++ coverage for
   `control_policy`, CSV utilities, and core helpers.
+- `tests/cpp/analyze_report_tests.cpp` — CTest coverage for native
+  analyze-report pure helpers (percentiles, band summaries,
+  diagnostic flags).
+- `tests/cpp/boost_stage_tests.cpp` — CTest trajectory-equivalence
+  coverage for the table-driven boost-stage updater.
+- `tests/cpp/control_loop_config_tests.cpp` — CTest coverage for
+  control-loop config parsing and validation round trips.
+- `tests/cpp/control_math_tests.cpp` — CTest coverage for shared
+  smootherstep, scaling, and rate-limit math primitives.
+- `tests/cpp/csv_rows_tests.cpp` — CTest coverage for runtime CSV
+  header/row alignment and representative present/absent indexed
+  fields across read-loop, evidence-log, and control-loop rows.
 - `tests/cpp/pawnio_binary_tests.cpp` — CTest C++ coverage for PawnIO
   binary resolution, load, and SHA-256 verification.
-- `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`
-  subcommand coverage.
-- `tests/test_analyzer.py` — Tests for the Python
-  `analyze_control_run.py` offline analyzer.
+- `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`,
+  `analyze prune`, and native `analyze report` coverage.
+- `tests/test_analyzer.py` — Integration tests for the Python
+  `analyze_control_run.py` wrapper around native `analyze ingest --csv` plus
+  `analyze report`.
 - `tests/test_calibration.py` — Calibration sequence parsing and
   step-wise execution coverage.
 - `tests/test_config_contracts.py` — `control.json` schema validation
@@ -229,15 +264,17 @@ the same responsibility; otherwise they are listed separately.
   dashboard Python server.
 - `scripts/Test-LocalCI.ps1` — CI-style local validation: release
   build + tests without publishing or restarting the live controller.
-- `scripts/analyze_control_run.py` — Offline Python analyzer that
-  summarizes timing, temperature, and duty statistics from a
-  control-loop CSV.
+- `scripts/analyze_control_run.py` — Thin wrapper that ingests a raw
+  control-loop CSV into a temporary DB via the in-repo svg-mb-control.exe
+  and forwards native `analyze report` output (no analysis of its own).
 
 ## Top-Level PowerShell
 
-- `build.ps1` — Plain CMake configure/build under a guaranteed MSVC
-  x64 environment via `vcvarsall.bat`.
+- `build.ps1` — Convenience delegate to `scripts/Test-LocalCI.ps1
+  -KeepBuildDir`.
 - `build-release.ps1` — Thin delegate to `scripts/Build-Release.ps1`.
+- `Install-SVG-MB-ControlCommon.ps1` — Shared helper functions for the
+  scheduled-task, watchdog, and shortcut installers.
 - `Install-SVG-MB-ControlScheduledTask.ps1` — Install/start/stop/
   status/remove for the main controller scheduled task.
 - `Install-SVG-MB-ControlShortcut.ps1` — Start-menu / desktop
@@ -254,12 +291,17 @@ the same responsibility; otherwise they are listed separately.
   shipped with `release\`.
 - `config/runtime_policy_write_live.json` — Write-policy contract
   (writes enabled, restore-on-exit, blocked channels).
+- `config/machines/snd-desk.cooling.policy.json` — Machine-specific
+  fan topology, pressure-balance strategy, and cooling-policy data
+  behind the shipped profile.
 
 ## Tools
 
-- `tools/eval_cinebench.py` — Cinebench-style stress-evaluation
-  helper that drives the controller and extracts a fixed analyzer
-  report.
+- `tools/eval_cinebench.py` — Offline CSV analyzer that summarizes a
+  Cinebench-style load window (pre/load/post Tctl stats, cooldown
+  times, and load-window event counts) from an archived control-loop
+  CSV plus an optional events JSONL. Takes `--csv` and `--events`; it
+  launches nothing and computes stats inline.
 - `tools/eval_dashboard/` — Local web dashboard for offline/live run
   inspection. `index.html` and `styles.css` carry the layout;
   `dashboard.js` parses CSV/event JSONL client-side; `selftest.js`
@@ -268,8 +310,8 @@ the same responsibility; otherwise they are listed separately.
 
 ## Docs
 
-Current reference docs (the `AGENTS.md` navigation list plus other
-docs that are kept current):
+Current contract and reference docs (the `AGENTS.md` navigation list
+plus other docs that are kept current):
 
 - `docs/STRUCTURE_AND_STABILITY.md` — Module boundaries and migration
   status.
@@ -278,12 +320,12 @@ docs that are kept current):
 - `docs/WRITE_ORCHESTRATION.md` — Write-once and runtime write policy.
 - `docs/CONTROL_PIPELINE_MATH.md` — Maintained numerical reference
   for the control identity.
+- `docs/COOLING_STRATEGY.md` — SND-DESK fan topology, pressure strategy,
+  floor philosophy, and fan relationship rules.
 - `docs/RUNTIME_HOME.md` — Runtime sidecar, status, log, manifest,
   and archive layout.
 - `docs/RUNTIME_LOGGING_AND_EVALUATION.md` — Tuning, runtime
   evidence, analyzer workflow, logging gaps.
-- `docs/CONTROL_SIMPLIFICATION_TARGETS.md` — Tracked simplification
-  candidates.
 - `docs/SERVICE_PROBE.md` — Service-feasibility probe contract.
 - `docs/MEASUREMENT_GATE.md` — Sensor validity gating rules.
 - `docs/NORMAL_RUNTIME_AIRFLOW_PROFILE.md` — Steady-state airflow
@@ -293,6 +335,16 @@ docs that are kept current):
 - `docs/source-aware-blend-decision-2026-05-26.md` — Current source-
   aware blend decision and verification record.
 
+Compacted implementation records (closed topics; keep these short and
+do not merge them into operator docs unless the topic is reopened):
+
+- `docs/CONTROL_SIMPLIFICATION_TARGETS.md` — Completed simplification
+  record for the closed 2026-05-26 target list.
+- `docs/LOGGING_IMPROVEMENT_PLAN.md` — Completed logging/analyzer
+  implementation record.
+- `docs/SCRIPT_STACK_REVIEW.md` — Completed script-stack
+  simplification record.
+
 Historical / discovery (per `AGENTS.md`, treat as context, not
 current contract, unless re-validated):
 
@@ -300,7 +352,6 @@ current contract, unless re-validated):
 - `docs/build-optimization-results.md`
 - `docs/code-quality-pass-2026-05-19.md`
 - `docs/evaluation-and-optimization-recommendations.md`
-- `docs/LOGGING_IMPROVEMENT_PLAN.md`
 - `docs/discovery-bench-cpp-priority.md`
 - `docs/discovery-bench-logger-gap.md`
 - `docs/discovery-control-bench-logging.md`

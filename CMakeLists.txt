@@ -130,6 +130,7 @@ endfunction()
 
 add_library(svg_mb_control_core STATIC
     src/pch.cpp
+    src/control/boost_stage.cpp
     src/control/cadence_score.cpp
     src/control/calibration.cpp
     src/control/channel_evaluator.cpp
@@ -138,6 +139,7 @@ add_library(svg_mb_control_core STATIC
     src/control/control_config_print.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
+    src/control/control_math.cpp
     src/control/control_runtime_context.cpp
     src/control/control_scheduler.cpp
     src/control/control_status_writer.cpp
@@ -153,14 +155,14 @@ add_library(svg_mb_control_core STATIC
     src/hardware/sio_fan_writer.cpp
     src/platform/direct_runtime_snapshot.cpp
     src/platform/env_util.cpp
+    src/platform/file_hash.cpp
     src/platform/runtime_singleton.cpp
     src/platform/runtime_util.cpp
     src/platform/service_probe.cpp
     src/policy/control_policy.cpp
-    src/policy/runtime_write_policy.cpp
-    src/policy/write_orchestrator.cpp
     src/runtime/csv_util.cpp
     src/runtime/evidence_log.cpp
+    src/runtime/evidence_signatures.cpp
     src/runtime/gpu_evidence_csv.cpp
     src/runtime/json_io.cpp
     src/runtime/pending_writes.cpp
@@ -174,6 +176,9 @@ add_library(svg_mb_control_core STATIC
     src/runtime/runtime_snapshot.cpp
     src/runtime/runtime_status.cpp
     src/runtime/runtime_supervisor_state.cpp
+    src/runtime/runtime_write_policy.cpp
+    src/runtime/write_orchestrator.cpp
+    src/analyze/analyze_channel_sample_columns.cpp
     src/analyze/analyze_cli.cpp
     src/analyze/analyze_csv.cpp
     src/analyze/analyze_db.cpp
@@ -181,6 +186,9 @@ add_library(svg_mb_control_core STATIC
     src/analyze/analyze_ingest_db.cpp
     src/analyze/analyze_json_artifacts.cpp
     src/analyze/analyze_prune.cpp
+    src/analyze/analyze_report_data.cpp
+    src/analyze/analyze_report_emit.cpp
+    src/analyze/analyze_report_queries.cpp
     src/analyze/analyze_report.cpp
 )
 
@@ -205,7 +213,10 @@ endif()
 configure_svg_mb_control_target(svg_mb_control_core)
 
 add_executable(svg_mb_control
+    src/app/app_args.cpp
+    src/app/app_diagnose.cpp
     src/app/app_main.cpp
+    src/app/app_signals.cpp
     src/app/startup_banner.cpp
     src/main.cpp
     ${SVG_MB_CONTROL_RESOURCE_SOURCES}
@@ -249,4 +260,74 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_pawnio_binary_tests)
     add_test(NAME svg_mb_control_pawnio_binary_tests
              COMMAND svg_mb_control_pawnio_binary_tests)
+
+    add_executable(svg_mb_control_boost_stage_tests
+        tests/cpp/boost_stage_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_boost_stage_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_boost_stage_tests)
+    add_test(NAME svg_mb_control_boost_stage_tests
+             COMMAND svg_mb_control_boost_stage_tests)
+
+    add_executable(svg_mb_control_math_tests
+        tests/cpp/control_math_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_math_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_math_tests)
+    add_test(NAME svg_mb_control_math_tests
+             COMMAND svg_mb_control_math_tests)
+
+    add_executable(svg_mb_control_analyze_report_tests
+        tests/cpp/analyze_report_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_analyze_report_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_analyze_report_tests)
+    add_test(NAME svg_mb_control_analyze_report_tests
+             COMMAND svg_mb_control_analyze_report_tests)
+
+    add_executable(svg_mb_control_loop_config_tests
+        tests/cpp/control_loop_config_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_loop_config_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_loop_config_tests)
+    add_test(NAME svg_mb_control_loop_config_tests
+             COMMAND svg_mb_control_loop_config_tests)
+
+    add_executable(svg_mb_control_csv_rows_tests
+        tests/cpp/csv_rows_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_csv_rows_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_csv_rows_tests)
+    add_test(NAME svg_mb_control_csv_rows_tests
+             COMMAND svg_mb_control_csv_rows_tests)
+
+    add_executable(svg_mb_control_channel_write_tests
+        tests/cpp/channel_write_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_channel_write_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_channel_write_tests)
+    add_test(NAME svg_mb_control_channel_write_tests
+             COMMAND svg_mb_control_channel_write_tests)
+
+    add_executable(svg_mb_control_amd_decode_tests
+        tests/cpp/amd_decode_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_amd_decode_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_amd_decode_tests)
+    add_test(NAME svg_mb_control_amd_decode_tests
+             COMMAND svg_mb_control_amd_decode_tests)
 endif()

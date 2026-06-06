@@ -1,8 +1,10 @@
 #pragma once
 
+#include "boost_stage.h"
 #include "gpu_reader.h"
 #include "runtime_snapshot.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -19,10 +21,11 @@ struct RuntimeControlChannelLogState {
     double observed_temp_c = std::numeric_limits<double>::quiet_NaN();
     double setpoint_pct = std::numeric_limits<double>::quiet_NaN();
     double feedforward_pct = std::numeric_limits<double>::quiet_NaN();
-    double thermal_pressure_boost_pct = 0.0;
-    double midband_pressure_boost_pct = 0.0;
-    double gpu_airflow_boost_pct = 0.0;
-    double cpu_low_soak_boost_pct = 0.0;
+    // Per-stage boost contribution snapshot for this channel, indexed by
+    // BoostStage. The CSV column order and JSON status key order both
+    // come from kBoostStageSpecs, so do not reorder this without checking
+    // the existing field-name contract.
+    std::array<double, kBoostStageCount> stage_boost_pct{};
     double low_band_stage_boost_pct = 0.0;
     double low_band_effective_boost_pct = 0.0;
     double low_band_debt = 0.0;
@@ -48,6 +51,17 @@ struct RuntimeControlLoopTimingState {
     double process_cpu_pct = std::numeric_limits<double>::quiet_NaN();
     std::uint64_t process_working_set_bytes = 0u;
     std::uint64_t process_private_bytes = 0u;
+    // Whole-system CPU activity for this resource window (FEAT-0002). Counters
+    // come from GetSystemTimes and are summed across all logical processors, so
+    // a *_delta_ms can exceed the wall-clock window (~processor_count x window).
+    // system_cpu_busy_pct is already core-normalized to [0,100]; it is not the
+    // controller-process cost (that stays process_cpu_pct). All blank/NaN when
+    // unavailable. See docs/cpu-settings-evidence-logger-decision-2026-06-04.md.
+    double system_cpu_idle_delta_ms = std::numeric_limits<double>::quiet_NaN();
+    double system_cpu_kernel_delta_ms = std::numeric_limits<double>::quiet_NaN();
+    double system_cpu_user_delta_ms = std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t system_cpu_processor_count = 0u;
+    double system_cpu_busy_pct = std::numeric_limits<double>::quiet_NaN();
     // Upward-only adaptive cadence transient (Phase 2): the unitless [0,1]
     // slew score that produced loop_intended_interval_ms this tick. 0 when
     // adaptation is off or there is no transient.
@@ -128,6 +142,12 @@ std::string BuildEvidenceLogCsvRow(const RuntimeSnapshot& snapshot,
                                    const RuntimeEvidenceLogState& state);
 
 std::string BuildControlLoopCsvHeader();
+std::string BuildControlLoopCsvRow(
+    const RuntimeSnapshot& snapshot,
+    const RuntimeSnapshotIndex& snapshot_index,
+    std::uint64_t tick_count,
+    const RuntimeControlLoopTimingState& timing,
+    const std::vector<RuntimeControlChannelLogState>& channels);
 std::string BuildControlLoopCsvRow(
     const RuntimeSnapshot& snapshot,
     std::uint64_t tick_count,

@@ -51,11 +51,21 @@ struct ControlLoopRunState {
         std::numeric_limits<double>::quiet_NaN();
     double last_process_cpu_pct =
         std::numeric_limits<double>::quiet_NaN();
+    double last_system_cpu_idle_delta_ms =
+        std::numeric_limits<double>::quiet_NaN();
+    double last_system_cpu_kernel_delta_ms =
+        std::numeric_limits<double>::quiet_NaN();
+    double last_system_cpu_user_delta_ms =
+        std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t last_system_cpu_processor_count = 0u;
+    double last_system_cpu_busy_pct =
+        std::numeric_limits<double>::quiet_NaN();
 
     RuntimeControlLoopTimingState last_timing;
 
     // Reused per-tick buffers — capacity retained across ticks.
     RuntimeSnapshot runtime_snapshot;
+    RuntimeSnapshotIndex runtime_snapshot_index;
     std::vector<RuntimeControlChannelLogState> channel_log_states;
 
     // Active CSV/manifest paths for the current log chunk. Updated when

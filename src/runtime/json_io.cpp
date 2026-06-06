@@ -1,6 +1,7 @@
 #include "json_io.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <stdexcept>
@@ -32,16 +33,29 @@ std::string MakeUniqueTempSuffix() {
 void ReplaceFileWithTemp(const std::filesystem::path& temp,
                          const std::filesystem::path& target) {
 #ifdef _WIN32
-    if (!MoveFileExW(temp.wstring().c_str(),
-                     target.wstring().c_str(),
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        const DWORD error = GetLastError();
-        std::error_code cleanup_ec;
-        std::filesystem::remove(temp, cleanup_ec);
-        throw std::runtime_error(
-            "Failed to replace JSON output file: Windows error " +
-            std::to_string(error));
+    DWORD error = 0u;
+    for (unsigned int attempt = 0u; attempt < 6u; ++attempt) {
+        if (MoveFileExW(temp.wstring().c_str(),
+                        target.wstring().c_str(),
+                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            return;
+        }
+        error = GetLastError();
+        const bool retryable = error == ERROR_ACCESS_DENIED ||
+                               error == ERROR_SHARING_VIOLATION ||
+                               error == ERROR_LOCK_VIOLATION;
+        if (!retryable || attempt == 5u) {
+            break;
+        }
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(10u << attempt));
     }
+
+    std::error_code cleanup_ec;
+    std::filesystem::remove(temp, cleanup_ec);
+    throw std::runtime_error(
+        "Failed to replace JSON output file " + target.string() +
+        ": Windows error " + std::to_string(error));
 #else
     std::error_code ec;
     std::filesystem::rename(temp, target, ec);
@@ -242,11 +256,18 @@ void WriteJsonFileAtomic(const std::filesystem::path& target_path,
 
 bool TryWriteJsonFileAtomic(const std::filesystem::path& target_path,
                             const nlohmann::json& payload,
-                            int indent) {
+                            int indent,
+                            std::string* error_message) {
     try {
         WriteJsonFileAtomic(target_path, payload, indent);
+        if (error_message != nullptr) {
+            error_message->clear();
+        }
         return true;
-    } catch (const std::exception&) {
+    } catch (const std::exception& error) {
+        if (error_message != nullptr) {
+            *error_message = error.what();
+        }
         return false;
     }
 }

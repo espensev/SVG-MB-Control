@@ -1,18 +1,77 @@
 #include "low_band_integrator.h"
 
-#include "cadence_score.h"
+#include "control_math.h"
 #include "low_band_evidence.h"
 #include "runtime_event_log.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <sstream>
+#include <vector>
 
 namespace svg_mb_control {
 
+namespace {
+
+// Above this threshold the low-band signal is treated as meaningfully
+// non-zero, gating debt accrual. Pure epsilon, not a tuning knob.
+constexpr double kSignalEpsilonPct = 0.0001;
+
+// Per-channel boost level (in % of duty) at which a primary response is
+// considered "engaged" for the purposes of freezing low-band debt
+// accrual. Cross-references kBoostStageSpecs[i].is_primary via
+// ChannelState::HasPrimaryResponseAbove.
+constexpr double kPrimaryResponseFreezeThresholdPct = 0.05;
+
+// True when the temperature input either has no telemetry or has fallen
+// to/below its release threshold. Mirrors the symmetric CPU/GPU release
+// semantics used by the debt-decay branch.
+bool SensorReleased(bool available, double temp_c, double release_c) {
+    return !available || temp_c <= release_c;
+}
+
+// True when any channel reports a primary boost above the freeze
+// threshold. The boost fields reflect the previous tick because
+// UpdateLowBandState runs before per-channel evaluation; the resulting
+// one-tick lag is acceptable here.
+bool PrimaryResponseActive(const std::vector<ChannelState>& channels) {
+    for (const auto& ch : channels) {
+        if (ch.HasPrimaryResponseAbove(kPrimaryResponseFreezeThresholdPct)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Low-band debt accrues only when (a) the smootherstep-scaled signal is
+// meaningfully non-zero and (b) no primary response is already carrying
+// the load.
+bool ShouldAccrueDebt(double signal, bool primary_response_active) {
+    return signal > kSignalEpsilonPct && !primary_response_active;
+}
+
+// Symmetric release condition: debt only decays once both CPU and GPU
+// have fallen back into their respective released bands (or gone away).
+bool ShouldReleaseDebt(bool cpu_released, bool gpu_released) {
+    return cpu_released && gpu_released;
+}
+
+// Stage activations are rate-limited: a freshly activated channel must
+// wait stage_spacing_ms past the most recent activation before another
+// channel may activate. The first activation always satisfies the gate.
+bool StageSpacingSatisfied(const LowBandRuntimeState& state,
+                           std::chrono::milliseconds spacing,
+                           std::chrono::steady_clock::time_point now) {
+    return !state.have_last_stage_activation ||
+           (now - state.last_stage_activation_time) >= spacing;
+}
+
+}  // namespace
+
 void UpdateLowBandState(ControlRuntimeContext& context,
                         const TempInputs& temp_inputs,
-                        const RuntimeSnapshot& runtime_snapshot,
+                        const RuntimeSnapshotIndex& runtime_index,
                         std::uint64_t elapsed_ms,
                         std::chrono::steady_clock::time_point now,
                         std::uint64_t tick_count) {
@@ -39,31 +98,17 @@ void UpdateLowBandState(ControlRuntimeContext& context,
         (std::max)(cfg.cpu_weight * cpu_scale, cfg.gpu_weight * gpu_scale),
         0.0, 1.0);
 
-    const bool cpu_released =
-        !temp_inputs.cpu_available || temp_inputs.cpu_c <= cfg.cpu_release_c;
-    const bool gpu_released =
-        !temp_inputs.gpu_available || temp_inputs.gpu_c <= cfg.gpu_release_c;
+    const bool cpu_released = SensorReleased(temp_inputs.cpu_available,
+                                             temp_inputs.cpu_c,
+                                             cfg.cpu_release_c);
+    const bool gpu_released = SensorReleased(temp_inputs.gpu_available,
+                                             temp_inputs.gpu_c,
+                                             cfg.gpu_release_c);
+    const bool primary_response_active = PrimaryResponseActive(context.channels);
 
-    // Low-band is second priority. Freeze debt accrual while any channel is
-    // running a primary response (mid-band pressure, GPU airflow, or
-    // high-temperature thermal pressure) so low-band does not keep building
-    // debt on top of the responses that are already carrying the load. The
-    // boost fields reflect the previous tick (UpdateLowBandState runs before
-    // per-channel evaluation); a one-tick lag is acceptable here. Decay still
-    // runs once temperatures fall back into the released band.
-    bool primary_response_active = false;
-    for (const auto& ch : context.channels) {
-        if (ch.midband_pressure_boost_pct > 0.05 ||
-            ch.gpu_airflow_boost_pct > 0.05 ||
-            ch.thermal_pressure_boost_pct > 0.05) {
-            primary_response_active = true;
-            break;
-        }
-    }
-
-    if (signal > 0.0001 && !primary_response_active) {
+    if (ShouldAccrueDebt(signal, primary_response_active)) {
         state.debt += cfg.rise_per_min * signal * dt_minutes;
-    } else if (cpu_released && gpu_released) {
+    } else if (ShouldReleaseDebt(cpu_released, gpu_released)) {
         state.debt -= cfg.fall_per_min * dt_minutes;
     }
     state.debt = std::clamp(state.debt, 0.0, 1.0);
@@ -110,8 +155,7 @@ void UpdateLowBandState(ControlRuntimeContext& context,
             }
 
             const bool spacing_ok =
-                !state.have_last_stage_activation ||
-                (now - state.last_stage_activation_time) >= stage_spacing;
+                StageSpacingSatisfied(state, stage_spacing, now);
             if (!channel.low_band_stage_active &&
                 channel.low_band_eligible_ms >=
                     channel.config.low_band_hold_ms &&
@@ -168,8 +212,8 @@ void UpdateLowBandState(ControlRuntimeContext& context,
                 channel.low_band_stage_boost_pct);
         }
 
-        if (const RuntimeFanSnapshot* fan = FindRuntimeFanChannel(
-                runtime_snapshot, channel.config.channel)) {
+        if (const RuntimeFanSnapshot* fan =
+                runtime_index.FindFanChannel(channel.config.channel)) {
             if (fan->tach_valid) {
                 if (channel.low_band_stage_boost_pct > 0.0005) {
                     channel.low_band_boosted_rpm_sum +=

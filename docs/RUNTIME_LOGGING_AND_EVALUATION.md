@@ -2,15 +2,15 @@
 
 ## Status
 
-Current as of 2026-05-26.
+Current as of 2026-06-06.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
 `control_loop.poll_tick_ms=250`, `write_cooldown_ms=250`, and
 `deadband_pct<=0.25` in the shipped configs.
 
-Implementation sequencing for the logging work lives in
-`docs\LOGGING_IMPROVEMENT_PLAN.md`.
+The completed implementation sequencing is summarized in
+`docs\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
 
 Earlier local evidence from the previous `50 ms` profile:
 
@@ -87,13 +87,20 @@ logging replacement.
 
 ## Tooling Now Available
 
-- `scripts\analyze_control_run.py` can turn a control-loop CSV plus optional
-  event JSONL into a repeatable Markdown or JSON summary, an automatic compact
-  decision record for Markdown summaries, and an analysis manifest with artifact
-  hashes.
-- The controller writes the native runtime manifest during the run. The analyzer
-  can still create a separate analysis manifest with profile, notes, run id,
-  artifact hashes, and before/after decision context.
+- Native `svg-mb-control analyze ingest` imports runtime manifests, CSV archives,
+  events JSONL, and plant-model captures into the SQLite analysis DB.
+- Native `svg-mb-control analyze report` summarizes one ingested run and can
+  write a report, compact Markdown decision record, and analysis manifest with
+  artifact hashes. Use this as the default evidence path for new runs.
+- Native `svg-mb-control analyze ingest --csv <path> [--events <path>]` ingests a
+  bare control-loop CSV with no runtime manifest, and `analyze report` adds a
+  GPU-envelope-peak block (`--gpu-load-threshold-c`), a loop-timing and
+  process-resource percentile section, and a per-channel low-band-inclusive
+  response-boost total.
+- `scripts\analyze_control_run.py` is a thin convenience wrapper for captures
+  that have not been ingested: it ingests the CSV into a temporary DB with the
+  in-repo `svg-mb-control.exe` and forwards native `analyze report` output. All
+  analysis is native; the script reimplements nothing.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live
@@ -110,10 +117,15 @@ logging replacement.
 
 - CSV chunk files have no closed/ready marker. A reader must treat the active
   archive path as mutable while Control is running.
-- The control-loop CSV has loop timing and process cost, but not
-  per-sensor-group read durations. Use foreground `evidence-log` for deeper
-  backend timing/cadence diagnosis unless control-loop evidence proves this
-  must move into the hot path.
+- The control-loop CSV has loop timing, process cost, and whole-system CPU busy
+  time (`system_cpu_busy_pct` plus the raw idle/kernel/user deltas and processor
+  count, FEAT-0002), but not per-sensor-group read durations. Use foreground
+  `evidence-log` for deeper backend timing/cadence diagnosis unless control-loop
+  evidence proves this must move into the hot path.
+- Whole-system CPU busy time measures *time* not idle, not CPU *work*. Comparing
+  CPU-setting changes by work-per-Joule (effective frequency + package energy)
+  is the separate FEAT-0006 layer; `system_cpu_busy_pct` is its
+  time-normalization context, not a substitute.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in
@@ -142,35 +154,36 @@ Use this loop for controller changes:
 4. Collect the native runtime manifest first, then the active CSV archive,
    `control_runtime.json`, `current_state.json`, and
    `svg_mb_control_events.jsonl`.
-5. Summarize the run before tuning. Use the repo analyzer as the default first
+5. Summarize the run before tuning. Use the native analyzer as the default first
    pass:
    ```powershell
-   python scripts\analyze_control_run.py `
-     --csv release\runtime\logs\archive\svg_mb_control_control-loop_<timestamp>.csv `
-     --events release\runtime\logs\svg_mb_control_events.jsonl `
-     --status release\runtime\control_runtime.json `
-     --current-state release\runtime\current_state.json `
-     --config config\control.json `
+   release\svg-mb-control.exe analyze ingest `
+     --runtime-home .\release\runtime `
+     --db .\release\runtime\svg_mb_control.db
+   release\svg-mb-control.exe analyze report `
+     --runtime-home .\release\runtime `
+     --db .\release\runtime\svg_mb_control.db `
+     --idle-seconds 300 `
      --profile combined-load `
-     --gpu-load-threshold-c 70 `
      --notes "ambient and subjective noise notes" `
-     --out run-summary.md `
+     --out run-summary.txt `
      --manifest-out run-manifest.json
    ```
    This also writes `run-summary.decision.md` automatically. The decision
-   record includes artifact hashes, CSV prologue identity, channel response
-   attribution counts, and automatic flags for hot-but-low/no-response runs.
+   record includes artifact hashes, run identity, channel response attribution
+   counts, event counts, and automatic flags for hot-but-low/no-response runs.
    Override the path with `--decision-record-out <path>` or suppress it with
    `--no-decision-record`.
    The summary should cover at least:
-   - CPU/Tctl p50, p90, p99, max,
-   - GPU core, memory, hotspot, and derived GPU envelope p50, p90, p99, max,
+   - idle/load/cooldown CPU/Tctl p50, p90, max,
+   - idle/load/cooldown GPU memory junction and derived GPU envelope p50, p90,
+     max,
    - GPU envelope peak timing, optional threshold time, and channel setpoints
      at the GPU peak,
-   - achieved interval p50, p95, max, and overrun count,
-   - loop work duration p50, p95, max,
-   - process CPU and memory ranges,
-   - writes per minute by channel,
+   - achieved interval p50, p90, p95, p99, max, average, and overrun count,
+   - loop work duration p50, p90, p95, p99, max, average,
+   - process CPU, working-set, and private-byte percentiles,
+   - write-count delta by channel,
    - setpoint p50, p90, max by channel,
    - primary source counts by channel (`cpu`, `gpu`, CPU telemetry fallback,
      guard fallback, and unavailable),
@@ -218,10 +231,11 @@ Tune that model from data first:
   abrupt or too noisy.
 
 `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` records the rationale, hardware basis,
-and re-validation procedure for the adopted low-load airflow floors in
-`config\control.release.json`. Treat that document as the worked example of a
-tuning decision record and update it (or write a sibling note) when the
-shipped floor profile is intentionally changed again.
+and re-validation procedure for the adopted low-load airflow policy in
+`config\control.release.json`, including the dynamic low/medium intake curves.
+Treat that document as the worked example of a tuning decision record and
+update it (or write a sibling note) when the shipped floor or low-end curve
+profile is intentionally changed again.
 
 ## Next Actions
 

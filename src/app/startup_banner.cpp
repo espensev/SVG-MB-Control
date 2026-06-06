@@ -79,21 +79,25 @@ void PrintControlLoopStartup(const ControlConfig& config,
                   << channel.decay_latch_above_pct
                   << "%/" << channel.decay_latch_pct_per_min
                   << "%/min"
-                  << " thermal_pressure="
-                  << channel.thermal_pressure_start_c
-                  << '-' << channel.thermal_pressure_full_c
-                  << "C +" << channel.thermal_pressure_max_boost_pct
-                  << "% @ " << channel.thermal_pressure_rise_pct_per_sec
-                  << "%/s -" << channel.thermal_pressure_fall_pct_per_sec
+                  << " thermal_pressure=";
+        const auto& thermal = channel.boosts[
+            static_cast<std::size_t>(BoostStage::ThermalPressure)];
+        std::cout << thermal.start_c
+                  << '-' << thermal.full_c
+                  << "C +" << thermal.max_boost_pct
+                  << "% @ " << thermal.rise_per_unit
+                  << "%/s -" << thermal.fall_per_unit
                   << "%/s";
-        if (channel.cpu_low_soak_max_boost_pct > 0.0) {
+        const auto& soak = channel.boosts[
+            static_cast<std::size_t>(BoostStage::CpuLowSoak)];
+        if (soak.max_boost_pct > 0.0) {
             std::cout << " cpu_low_soak="
-                      << channel.cpu_low_soak_start_c
-                      << '-' << channel.cpu_low_soak_full_c
-                      << "C release<=" << channel.cpu_low_soak_release_c
-                      << "C +" << channel.cpu_low_soak_max_boost_pct
-                      << "% @ " << channel.cpu_low_soak_rise_pct_per_min
-                      << "%/min -" << channel.cpu_low_soak_fall_pct_per_min
+                      << soak.start_c
+                      << '-' << soak.full_c
+                      << "C release<=" << soak.release_c
+                      << "C +" << soak.max_boost_pct
+                      << "% @ " << soak.rise_per_unit
+                      << "%/min -" << soak.fall_per_unit
                       << "%/min";
         }
         std::cout << " curve=";

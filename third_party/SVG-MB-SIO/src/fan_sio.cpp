@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
+#include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 namespace mb::hw {
@@ -98,11 +101,14 @@ constexpr std::uint8_t kSioLdnHwm = 0x0Bu;
 constexpr std::uint8_t kSioEnterKey = 0x87u;
 constexpr std::uint8_t kSioExitKey = 0xAAu;
 constexpr wchar_t kIsaMutexName[] = L"Global\\Access_ISABUS.HTP.Method";
-constexpr DWORD kIsaMutexTimeoutMs = 100u;
+constexpr DWORD kIsaMutexTimeoutMs = 500u;
 constexpr const char kPawnIoDevicePath[] = "\\\\?\\GLOBALROOT\\Device\\PawnIO";
 constexpr std::uint32_t kPawnIoLoadBinary = (41394u << 16) | (0x821u << 2);
 constexpr std::uint32_t kPawnIoExecuteFn = (41394u << 16) | (0x841u << 2);
 constexpr std::size_t kPawnIoFnNameLength = 32u;
+constexpr unsigned int kPawnIoOpenAttempts = 16u;
+constexpr unsigned int kPawnIoOpenInitialDelayMs = 25u;
+constexpr unsigned int kPawnIoOpenMaxDelayMs = 250u;
 
 DWORD remaining_timeout_ms(ULONGLONG timeout_start_tick,
                            DWORD timeout_ms);
@@ -114,6 +120,35 @@ Status device_io_control_with_timeout(HANDLE handle,
                                       DWORD out_size,
                                       DWORD timeout_ms,
                                       DWORD* out_bytes_returned);
+
+bool retryable_pawnio_open_error(DWORD error) {
+    switch (error) {
+        case ERROR_ACCESS_DENIED:
+        case ERROR_BUSY:
+        case ERROR_DEV_NOT_EXIST:
+        case ERROR_FILE_NOT_FOUND:
+        case ERROR_LOCK_VIOLATION:
+        case ERROR_NOT_READY:
+        case ERROR_PATH_NOT_FOUND:
+        case ERROR_SHARING_VIOLATION:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool retryable_pawnio_load_status(Status status) {
+    return status == Status::access_denied || status == Status::error ||
+           status == Status::no_device || status == Status::timeout;
+}
+
+void sleep_before_pawnio_retry(unsigned int attempt) {
+    unsigned int delay_ms = kPawnIoOpenInitialDelayMs << attempt;
+    if (delay_ms > kPawnIoOpenMaxDelayMs) {
+        delay_ms = kPawnIoOpenMaxDelayMs;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+}
 
 std::filesystem::path executable_directory() {
     std::array<char, MAX_PATH> buffer{};
@@ -356,27 +391,65 @@ Status SioPortTransport::open_pawnio_lpc(std::string* warning_text) {
         return Status::not_supported;
     }
 
-    HANDLE handle = CreateFileA(kPawnIoDevicePath,
-                                GENERIC_READ | GENERIC_WRITE,
-                                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                nullptr,
-                                OPEN_EXISTING,
-                                FILE_FLAG_OVERLAPPED,
-                                nullptr);
-    if (handle == INVALID_HANDLE_VALUE) {
-        if (warning_text != nullptr) {
-            *warning_text = "PawnIO device is not available for Super I/O LPC access.";
+    DWORD last_open_error = ERROR_SUCCESS;
+    Status last_status = Status::error;
+    bool failed_during_open = true;
+    unsigned int attempts = 0u;
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    for (unsigned int attempt = 0u; attempt < kPawnIoOpenAttempts; ++attempt) {
+        attempts = attempt + 1u;
+        handle = CreateFileA(kPawnIoDevicePath,
+                             GENERIC_READ | GENERIC_WRITE,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE,
+                             nullptr,
+                             OPEN_EXISTING,
+                             FILE_FLAG_OVERLAPPED,
+                             nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            last_open_error = GetLastError();
+            last_status = status_from_win32_error(last_open_error);
+            failed_during_open = true;
+            if (attempt + 1u >= kPawnIoOpenAttempts ||
+                !retryable_pawnio_open_error(last_open_error)) {
+                break;
+            }
+            sleep_before_pawnio_retry(attempt);
+            continue;
         }
-        return status_from_win32_error(GetLastError());
+
+        const Status load_status = load_pawnio_binary(handle, resolved_bin);
+        if (load_status == Status::ok) {
+            break;
+        }
+
+        CloseHandle(handle);
+        handle = INVALID_HANDLE_VALUE;
+        last_status = load_status;
+        failed_during_open = false;
+        if (attempt + 1u >= kPawnIoOpenAttempts ||
+            !retryable_pawnio_load_status(load_status)) {
+            break;
+        }
+        sleep_before_pawnio_retry(attempt);
     }
 
-    const Status load_status = load_pawnio_binary(handle, resolved_bin);
-    if (load_status != Status::ok) {
-        CloseHandle(handle);
+    if (handle == INVALID_HANDLE_VALUE) {
         if (warning_text != nullptr) {
-            *warning_text = "Failed to load LpcIO.bin into PawnIO.";
+            if (failed_during_open) {
+                *warning_text =
+                    std::string("PawnIO device is not available for Super I/O LPC access: path=") +
+                    kPawnIoDevicePath + " win32_error=" +
+                    std::to_string(last_open_error) + " status=" +
+                    status_string(last_status) + " attempts=" +
+                    std::to_string(attempts);
+            } else {
+                *warning_text =
+                    std::string("Failed to load LpcIO.bin into PawnIO: path=") +
+                    resolved_bin + " status=" + status_string(last_status) +
+                    " attempts=" + std::to_string(attempts);
+            }
         }
-        return load_status;
+        return last_status;
     }
 
     handle_ = handle;
@@ -1155,6 +1228,9 @@ Status Nct6701Controller::lock_mutex() const {
     const DWORD result = WaitForSingleObject(mutex_handle_, kIsaMutexTimeoutMs);
     if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED) {
         return Status::ok;
+    }
+    if (result == WAIT_TIMEOUT) {
+        return Status::timeout;
     }
     return Status::error;
 }

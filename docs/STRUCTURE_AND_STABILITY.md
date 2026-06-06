@@ -11,11 +11,13 @@ Current layout:
 ```text
 src/
   app/        thin executable entry, CLI parsing, mode dispatch
-  control/    loop orchestration, channel evaluator, status model
-  runtime/    runtime store, CSV logger, event log, JSON IO
+  control/    loop orchestration, channel evaluator, boost stages,
+              cadence, control math, status model
+  runtime/    runtime store, CSV logger, event log, JSON IO, runtime
+              write policy, read-loop + write-once mode entry points
   hardware/   AMD, GPU, SIO fan backends
   platform/   Windows timer, process metrics, HANDLE wrappers
-  policy/     curves, blending, rate limits, demand smoothing
+  policy/     curve lookup, temperature blending, curve shape
   analyze/    run ingestion, pruning, reporting
 ```
 
@@ -43,20 +45,27 @@ A core library gives three stability benefits:
 
 `app/`
 
-- thin `wmain` wrapper,
-- command-line parsing,
-- config path selection,
-- mode dispatch,
-- console control handling,
-- process startup output.
+- thin `wmain` wrapper (`main.cpp`),
+- mode dispatch orchestrator (`app_main.cpp`: `RunApp`),
+- command-line parsing (`app_args.{h,cpp}`: `CliOptions`,
+  `ParseCliOptions`, `PrintUsage`, `PrintVersion`),
+- Win32 console signal handler and RAII scopes
+  (`app_signals.{h,cpp}`: `ConsoleCtrlScope`, `ActiveControlLoopScope`,
+  `ActiveReadLoopScope`, `StopSignaled()`),
+- one-shot diagnostic modes
+  (`app_diagnose.{h,cpp}`: `RunDiagnoseAmd`, `RunDiagnoseGpu`,
+  `SampleDirectSnapshotJson`),
+- process startup banner output (`startup_banner.cpp`).
 
 `control/`
 
 - control-loop lifecycle (`control_loop.cpp`: startup, shutdown, dispatch),
 - per-tick body (`tick_runner.cpp`: sampling, channel decisions, artifacts, wait),
-- channel evaluation (`channel_evaluator.cpp`: curve, smoothing, pressure terms),
+- channel evaluation (`channel_evaluator.cpp`: curve, smoothing, boost composition, rate limit),
+- boost overlays (`boost_stage.cpp`: per-stage smootherstep integrator shared by thermal_pressure, midband_pressure, gpu_airflow, cpu_low_soak),
 - channel-write gates (`channel_write.cpp`: deadband, cooldown, breaker, hold restore),
 - adaptive cadence (`cadence_score.cpp`: slew score, effective tick interval),
+- shared math primitives (`control_math.{h,cpp}`: smootherstep, scale, rate-limited approach — used by cadence + low-band),
 - low-band integrator (`low_band_integrator.cpp`: signal, debt, stage activation),
 - control status publication shape (`control_status_writer.cpp`),
 - supervisor and run-mode dispatch (`control_supervisor.cpp`),
@@ -69,7 +78,10 @@ A core library gives three stability benefits:
 - CSV logger,
 - event JSONL writer,
 - pending-write sidecars,
-- run summary/manifest plumbing.
+- run summary/manifest plumbing,
+- runtime write authorization policy (`runtime_write_policy.{h,cpp}`),
+- read-loop and write-once mode entry points
+  (`read_loop.cpp`, `write_orchestrator.cpp`).
 
 `hardware/`
 
@@ -87,15 +99,19 @@ A core library gives three stability benefits:
 - Windows timer resolution,
 - process resource sampling,
 - Win32 handle wrappers,
-- mutex/driver-handle RAII.
+- mutex/driver-handle RAII,
+- shared streaming SHA-256 helper (`file_hash.{h,cpp}`,
+  `Sha256FileHex`) consumed by the analyze report and the CSV archive.
 
 `policy/`
 
 - curve lookup,
 - temperature blending,
-- rate limiting,
-- demand smoothing,
-- thermal-pressure trim math.
+- curve shape parsing.
+
+Rate limiting, demand smoothing, and boost-stage trim math live in
+`control/` next to the channel evaluator they feed (see
+`control_math.{h,cpp}`, `boost_stage.{h,cpp}`, `channel_evaluator.cpp`).
 
 ## Migration Order
 
@@ -114,15 +130,60 @@ Completed:
    from `amd_reader.cpp` into the standalone `hardware/pawnio_binary`
    module, and registered a dedicated CTest target
    (`svg_mb_control_pawnio_binary_tests`) for the pure helpers.
+8. Replaced four hand-rolled per-tick boost integrators with a
+   table-driven `UpdateBoostStage` in `control/boost_stage.{h,cpp}`
+   driven by `kBoostStageSpecs`. Deleted 21 legacy config fields from
+   `ChannelControlConfig` and four legacy state doubles from
+   `ChannelState`. CSV/JSON/banner output stayed byte-identical.
+   Trajectory equivalence is locked by
+   `svg_mb_control_boost_stage_tests`.
+9. Moved the shared math primitives (`SmoothStep`, `SmoothScale`,
+   `MoveTowardRateLimited`) from `cadence_score.cpp` into
+   `control/control_math.{h,cpp}`. `cadence_score` keeps just the
+   cadence logic; `low_band_integrator` consumes the primitives without
+   pulling in `cadence_score.h`.
+10. Re-homed `runtime_write_policy.{h,cpp}` and
+    `write_orchestrator.{h,cpp}` from `src/policy/` to `src/runtime/`.
+    `src/policy/` now contains only the curve/blend math the channel
+    evaluator consumes.
+11. Split `EvaluateChannel` into five single-purpose helpers
+    (`EvaluatePrimarySetpoint`, `ApplyCpuOverride`,
+    `UpdateDemandAndBoosts`, `ComputeFinalSetpoint`,
+    `DetectAuthorityReassert`) threaded through a local
+    `EvaluationScratch` shim. The orchestrator dropped from ~140 lines
+    to ~30.
+12. Split `src/analyze/analyze_report.cpp` (was 845 lines) into a
+    `RunAnalyzeReport` orchestrator plus three sibling modules in the
+    `svg_mb_control::analyze::report_detail` namespace:
+    `analyze_report_data.{h,cpp}`, `analyze_report_queries.{h,cpp}`,
+    `analyze_report_emit.{h,cpp}`. The new `analyze report` flow also
+    writes JSON analysis manifests and Markdown decision records via
+    the new `platform/file_hash` SHA-256 helper.
+13. Added three CTest targets covering pure helpers that recent
+    refactors exposed: `svg_mb_control_math_tests` (smootherstep + rate
+    limit), `svg_mb_control_analyze_report_tests` (percentile / band
+    summary / band assignment / diagnostic flags), and
+    `svg_mb_control_loop_config_tests` (boost-stage validator round
+    trips through `LoadControlLoopConfig`).
+14. Split `src/app/app_main.cpp` (was 847 lines) into a thin `RunApp`
+    orchestrator plus three sibling modules: `app/app_signals.{h,cpp}`
+    (Win32 console handler + RAII scopes, exposes `StopSignaled()`),
+    `app/app_args.{h,cpp}` (`CliOptions` + `ParseCliOptions` + value
+    parsers + `PrintUsage`/`PrintVersion`), and `app/app_diagnose.{h,cpp}`
+    (`RunDiagnoseAmd`, `RunDiagnoseGpu`, `SampleDirectSnapshotJson`).
+15. Converted repeated runtime CSV field groups in
+    `runtime_csv_rows.cpp` to descriptor tables shared by header and row
+    builders. `svg_mb_control_csv_rows_tests` now checks read-loop,
+    evidence-log, and control-loop header/row alignment plus representative
+    present/absent indexed values.
 
 Remaining polish:
 
-1. Split `src/app/app_main.cpp` further if CLI parsing or mode dispatch grows.
-2. Convert includes to module-qualified paths only if the team wants stricter
+1. Convert includes to module-qualified paths only if the team wants stricter
    include ownership; the current build keeps compatibility include roots.
-3. Split Python smoke tests by runtime mode if the single file becomes hard to
+2. Split Python smoke tests by runtime mode if the single file becomes hard to
    navigate.
-4. Separate build/package from live deploy/restart if local verification should
+3. Separate build/package from live deploy/restart if local verification should
    never stop the controller.
 
 ## Guardrails

@@ -1,5 +1,6 @@
 #include "analyze_db.h"
 
+#include "analyze_channel_sample_columns.h"
 #include "sqlite3.h"
 
 #include <utility>
@@ -94,29 +95,6 @@ CREATE TABLE IF NOT EXISTS tick_fan_samples (
     policy_blocked INTEGER,
     effective_write_allowed INTEGER,
     PRIMARY KEY (run_id, tick_count, fan_index),
-    FOREIGN KEY (run_id, tick_count)
-        REFERENCES tick_samples(run_id, tick_count) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS tick_channel_samples (
-    run_id INTEGER NOT NULL,
-    tick_count INTEGER NOT NULL,
-    channel INTEGER NOT NULL,
-    observed_temp_c REAL,
-    setpoint_pct REAL,
-    thermal_pressure_boost_pct REAL,
-    midband_pressure_boost_pct REAL,
-    gpu_airflow_boost_pct REAL,
-    cpu_low_soak_boost_pct REAL,
-    primary_temp_source TEXT,
-    response_source TEXT,
-    write_reason TEXT,
-    total_writes INTEGER,
-    write_active INTEGER,
-    baseline_captured INTEGER,
-    feedforward_pct REAL,
-    correction_pct REAL,
-    PRIMARY KEY (run_id, tick_count, channel),
     FOREIGN KEY (run_id, tick_count)
         REFERENCES tick_samples(run_id, tick_count) ON DELETE CASCADE
 );
@@ -444,6 +422,7 @@ void MigrateSchema(Database& db);
 void BootstrapSchema(Database& db) {
     Transaction txn(db.handle());
     db.Exec(kSchemaSql);
+    db.Exec(TickChannelSampleCreateTableSql());
     Statement upsert = db.Prepare(
         "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?1) "
         "ON CONFLICT(key) DO NOTHING");
@@ -582,6 +561,21 @@ void MigrateSchema(Database& db) {
                 "ADD COLUMN primary_temp_source TEXT");
         }
         SetSchemaVersion(db, 7);
+    }
+    if (version <= 7) {
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "low_band_stage_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN low_band_stage_boost_pct REAL");
+        }
+        if (!ColumnExists(db, "tick_channel_samples",
+                          "low_band_effective_boost_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_channel_samples "
+                "ADD COLUMN low_band_effective_boost_pct REAL");
+        }
+        SetSchemaVersion(db, 8);
     }
 }
 

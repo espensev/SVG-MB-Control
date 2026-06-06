@@ -11,21 +11,11 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-function Resolve-ControlExe {
-    $scriptRoot = Split-Path -Parent $PSCommandPath
-    $candidates = @(
-        (Join-Path $scriptRoot 'svg-mb-control.exe'),
-        (Join-Path $scriptRoot 'release\svg-mb-control.exe')
-    )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-            return (Resolve-Path -LiteralPath $candidate).ProviderPath
-        }
-    }
-
-    throw 'Could not find svg-mb-control.exe next to this script or under release\.'
+$commonScript = Join-Path (Split-Path -Parent $PSCommandPath) 'Install-SVG-MB-ControlCommon.ps1'
+if (-not (Test-Path -LiteralPath $commonScript -PathType Leaf)) {
+    throw "Common installer helpers not found: $commonScript"
 }
+. $commonScript
 
 function Set-ShortcutRunAsAdmin {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -83,7 +73,7 @@ if ($Remove) {
     return
 }
 
-$exePath = Resolve-ControlExe
+$exePath = Resolve-SvgMbControlExe -ScriptPath $PSCommandPath
 $exeDir = Split-Path -Parent $exePath
 
 New-Item -ItemType Directory -Path $shortcutDir -Force | Out-Null

@@ -265,9 +265,9 @@ Operator commands use the same runtime-home resolution as the active config:
   breakers. Add `--reset-breaker-channel <n>` to target one channel.
 
 `Install-SVG-MB-ControlWatchdogScheduledTask.ps1` adds a separate watchdog task
-that checks health at logon and every minute. It restarts only `stale` or
-`stopped` states; `degraded` is visible but not restarted, and `failed` is left
-for operator review.
+through `svg-mb-control-task-runner.exe`. The task checks health at logon and
+every minute. It restarts only `stale` or `stopped` states; `degraded` is
+visible but not restarted, and `failed` is left for operator review.
 
 Passing `--mode control-loop --config <path>` keeps the loop attached to the
 current terminal and does not add supervisor restart behavior.
@@ -287,11 +287,15 @@ current terminal and does not add supervisor restart behavior.
 - While `control-loop` runs, Control requests a 1 ms Windows timer period so the
   fixed-start-period loop is not stretched by the default scheduler
   quantum.
-- On this host, the radiator Noctua lanes inside that set are `1,4,5`. Excluding
-  Channel `6` does not mean "no radiator control"; it only keeps the separate
-  pump-like or still-ambiguous lane out of the shipped live loop.
-- Lanes `2,3` are treated as slow front-intake airflow lanes and use
-  higher floors plus rate-limited smootherstep response.
+- The SND-DESK fan topology and pressure strategy are maintained in
+  `docs\COOLING_STRATEGY.md` and
+  `config\machines\snd-desk.cooling.policy.json`. In brief, channels
+  `2,3` are the PA602 stock 200 mm front intakes, channel `4` is the
+  front radiator Noctua intake, and channel `6` remains out of the
+  shipped live loop.
+- Channels `2`, `3`, and `4` use lower hard minima plus low/medium curve
+  points through `72 C` for the positive-pressure intake bias. The curve and
+  CPU overlay carry this demand; the loop has no separate soft-floor operator.
 - The shipped curves use GPU envelope as the primary case-airflow signal and a
   mandatory CPU/Tctl overlay so Cinebench plus max CUDA load can raise channels
   even when the GPU curve alone would not.
@@ -306,8 +310,8 @@ current terminal and does not add supervisor restart behavior.
   turning the high-temperature CPU override into an always-on low-band curve.
 - Channel `6` remains explicitly blocked in the shipped live runtime policy.
 - Do not assume one identical curve shape or RPM target across the three
-  radiator Noctua lanes. Rear-radiator, front-radiator, and center-radiator
-  tuning are expected to diverge.
+  radiator Noctua lanes. Rear-radiator, front-radiator intake, and
+  center-radiator tuning are expected to diverge.
 
 ## Failure Behavior
 
@@ -316,7 +320,11 @@ current terminal and does not add supervisor restart behavior.
   for that channel. It logs `control_loop.sensor_recovered` when valid input
   returns.
 - After repeated write failures for a channel, the loop logs
-  `control_loop.circuit_breaker_opened` and stops trying that channel. The
+  `control_loop.circuit_breaker_opened` and stops normal writes for that
+  channel. A sensor-safe (safe-mode) command still bypasses the open breaker so
+  a thermal-safety write reaches the hardware
+  (`docs/discovery-recovery-gap-audit-2026-06-04.md`, remediation 3); a
+  successful bypassed write closes the breaker. The
   reset path is `--reset-breakers` or
   `--reset-breakers --reset-breaker-channel <n>`. The reset clears
   `circuit_breaker_open` and `consecutive_write_failures`, logs

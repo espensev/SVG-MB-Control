@@ -134,6 +134,48 @@ RuntimeSnapshot ParseRuntimeSnapshotJson(const std::string& snapshot_json) {
     return snapshot;
 }
 
+void RuntimeSnapshotIndex::Rebuild(const RuntimeSnapshot& snapshot) {
+    fans_by_channel_.clear();
+    amd_sensors_by_label_.clear();
+
+    fans_by_channel_.reserve(snapshot.fans.size());
+    for (const auto& fan : snapshot.fans) {
+        fans_by_channel_.emplace(fan.channel, &fan);
+    }
+
+    amd_sensors_by_label_.reserve(snapshot.amd_sensors.size());
+    for (const auto& sensor : snapshot.amd_sensors) {
+        amd_sensors_by_label_.emplace(
+            std::string_view(sensor.label.data(), sensor.label.size()),
+            &sensor);
+    }
+}
+
+void RuntimeSnapshotIndex::Clear() {
+    fans_by_channel_.clear();
+    amd_sensors_by_label_.clear();
+}
+
+const RuntimeFanSnapshot* RuntimeSnapshotIndex::FindFanChannel(
+    std::uint32_t channel) const {
+    const auto found = fans_by_channel_.find(channel);
+    return found == fans_by_channel_.end() ? nullptr : found->second;
+}
+
+const RuntimeAmdSensor* RuntimeSnapshotIndex::FindAmdSensor(
+    std::string_view label) const {
+    const auto found = amd_sensors_by_label_.find(label);
+    return found == amd_sensors_by_label_.end() ? nullptr : found->second;
+}
+
+double RuntimeSnapshotIndex::FindAmdSensorTemperature(
+    std::string_view label) const {
+    const RuntimeAmdSensor* sensor = FindAmdSensor(label);
+    return sensor == nullptr
+        ? std::numeric_limits<double>::quiet_NaN()
+        : sensor->temperature_c;
+}
+
 const RuntimeFanSnapshot* FindRuntimeFanChannel(const RuntimeSnapshot& snapshot,
                                                 std::uint32_t channel) {
     for (const auto& fan : snapshot.fans) {

@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace svg_mb_control {
@@ -45,6 +47,25 @@ struct RuntimeSnapshot {
     std::vector<RuntimeAmdSensor> amd_sensors;
     RuntimeGpuSnapshot gpu;
     std::vector<RuntimeFanSnapshot> fans;
+};
+
+// Per-snapshot lookup cache for hot paths that need to query the same sampled
+// telemetry repeatedly. Rebuild it after the source RuntimeSnapshot changes.
+// Duplicate labels/channels preserve the existing first-match semantics of the
+// linear FindRuntime* helpers.
+class RuntimeSnapshotIndex {
+public:
+    void Rebuild(const RuntimeSnapshot& snapshot);
+    void Clear();
+
+    const RuntimeFanSnapshot* FindFanChannel(std::uint32_t channel) const;
+    const RuntimeAmdSensor* FindAmdSensor(std::string_view label) const;
+    double FindAmdSensorTemperature(std::string_view label) const;
+
+private:
+    std::unordered_map<std::uint32_t, const RuntimeFanSnapshot*> fans_by_channel_;
+    std::unordered_map<std::string_view, const RuntimeAmdSensor*>
+        amd_sensors_by_label_;
 };
 
 // Parses the runtime snapshot JSON into a product-owned in-memory model that

@@ -24,6 +24,19 @@ struct ReportOptions {
     // A tick is "under load" once cpu_tctl_c or gpu_envelope_c reaches this
     // value. Default 75 C matches the CPU response watch line in the plan.
     double load_threshold_c = 75.0;
+    // Optional GPU-envelope threshold for the GPU-response block's
+    // threshold-crossing metrics. When unset, only the peak + per-channel
+    // setpoint-at-peak are reported.
+    std::optional<double> gpu_load_threshold_c;
+    std::filesystem::path out_path;
+    std::filesystem::path manifest_out_path;
+    std::filesystem::path decision_record_out_path;
+    bool decision_record_auto = false;
+    bool no_decision_record = false;
+    std::string profile;
+    std::string notes;
+    std::string hypothesis;
+    std::string decision;
     bool as_json = false;
     bool quiet = false;
 };

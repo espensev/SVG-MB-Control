@@ -4,6 +4,22 @@ from tests.helpers import *
 
 
 class ConfigContractTests(unittest.TestCase):
+    def test_native_watchdog_recovery_uses_restart(self) -> None:
+        source = (REPO_ROOT / "src" / "platform" / "task_runner.cpp").read_text(
+            encoding="utf-8"
+        )
+        watchdog_block = source.split(
+            'if (HasFlag(argc, argv, L"--watchdog-run")) {', 1
+        )[1].split('if (HasFlag(argc, argv, L"--start")) {', 1)[0]
+        self.assertIn(
+            'RunHiddenAndWait(control_exe, {L"--restart"}, config_path)',
+            watchdog_block,
+        )
+        self.assertNotIn(
+            'RunHiddenAndWait(control_exe, {L"--start"}, config_path)',
+            watchdog_block,
+        )
+
     def test_shipped_configs_default_to_control_loop(self) -> None:
         for rel_path in (
             Path("config") / "control.example.json",
@@ -45,14 +61,19 @@ class ConfigContractTests(unittest.TestCase):
             }
             self.assertLessEqual(by_channel[0]["min_duty_pct"], 16.0)
             self.assertLessEqual(by_channel[1]["min_duty_pct"], 22.0)
-            self.assertGreaterEqual(by_channel[2]["min_duty_pct"], 54.0)
-            self.assertGreaterEqual(by_channel[3]["min_duty_pct"], 50.0)
+            if rel_path.name == "control.release.json":
+                self.assertEqual(by_channel[2]["min_duty_pct"], 42.0)
+                self.assertEqual(by_channel[3]["min_duty_pct"], 38.0)
+                self.assertEqual(by_channel[4]["min_duty_pct"], 24.0)
+            else:
+                self.assertGreaterEqual(by_channel[2]["min_duty_pct"], 54.0)
+                self.assertGreaterEqual(by_channel[3]["min_duty_pct"], 50.0)
+                self.assertLessEqual(by_channel[4]["min_duty_pct"], 31.0)
             self.assertGreaterEqual(
                 by_channel[2]["min_duty_pct"] - by_channel[3]["min_duty_pct"],
                 4.0,
                 msg=f"{rel_path} front 200mm channels should avoid same-rpm resonance",
             )
-            self.assertLessEqual(by_channel[4]["min_duty_pct"], 31.0)
             self.assertLessEqual(by_channel[5]["min_duty_pct"], 20.0)
             for channel in by_channel.values():
                 self.assertIn("max_setpoint_step_pct", channel)
@@ -65,6 +86,37 @@ class ConfigContractTests(unittest.TestCase):
                         "must emit sub-1% setpoint steps"
                     ),
                 )
+
+    def test_release_intake_low_end_curves_follow_machine_policy(self) -> None:
+        policy = _read_json(
+            REPO_ROOT / "config" / "machines" / "snd-desk.cooling.policy.json"
+        )
+        self.assertIsNotNone(policy)
+        config = _read_json(REPO_ROOT / "config" / "control.release.json")
+        self.assertIsNotNone(config)
+
+        release_channels = {
+            item["channel"]: item
+            for item in config["control_loop"]["channels"]
+        }
+        fans = {fan["channel"]: fan for fan in policy["fans"]}
+
+        for channel_id in policy["release_profile"]["soft_floor_channels"]:
+            fan = fans[channel_id]
+            expected_curve = fan["response_intent"]["soft_floor_curve"]
+            channel = release_channels[channel_id]
+            self.assertEqual(channel["min_duty_pct"], fan["release_min_duty_pct"])
+            self.assertEqual(channel["min_duty_pct"], expected_curve[0]["duty_pct"])
+            self.assertEqual(
+                channel["curve"][: len(expected_curve)],
+                expected_curve,
+                msg=f"channel {channel_id} primary low-end curve drifted",
+            )
+            self.assertEqual(
+                channel["cpu_override_curve"][: len(expected_curve)],
+                expected_curve,
+                msg=f"channel {channel_id} CPU low-end curve drifted",
+            )
 
     def test_shipped_control_loop_configs_scope_to_live_airflow_lanes(self) -> None:
         expected_channels = [0, 1, 2, 3, 4, 5]

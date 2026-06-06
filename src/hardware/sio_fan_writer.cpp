@@ -8,10 +8,12 @@
 #include "svg_mb_sio/svg_mb_sio.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace svg_mb_control {
@@ -21,9 +23,33 @@ namespace {
 constexpr std::array<std::uint16_t, 7u> kNct6701FanCountRegisters = {
     0x4B0u, 0x4B2u, 0x4B4u, 0x4B6u, 0x4B8u, 0x4BAu, 0x4CCu
 };
+constexpr unsigned int kSioTransientAttempts = 3u;
+constexpr unsigned int kSioTransientRetryDelayMs = 75u;
 
 std::string StatusString(MbSioStatus status) {
     return std::string(mb_sio_status_string(status));
+}
+
+bool IsTransientSioStatus(MbSioStatus status) {
+    return status == MbSioStatus::access_denied ||
+           status == MbSioStatus::error ||
+           status == MbSioStatus::timeout;
+}
+
+template <typename Operation>
+MbSioStatus RetryTransientSioOperation(Operation&& operation) {
+    MbSioStatus status = MbSioStatus::error;
+    for (unsigned int attempt = 0u; attempt < kSioTransientAttempts;
+         ++attempt) {
+        status = operation();
+        if (status == MbSioStatus::ok || !IsTransientSioStatus(status) ||
+            attempt + 1u >= kSioTransientAttempts) {
+            return status;
+        }
+        std::this_thread::sleep_for(
+            std::chrono::milliseconds(kSioTransientRetryDelayMs));
+    }
+    return status;
 }
 
 FanWriteResult TranslateStatus(MbSioStatus status,
@@ -90,7 +116,9 @@ class SioFanWriter final : public FanWriter {
         }
 
         std::vector<MbFanSnapshot> fans;
-        const MbSioStatus status = controller_.read_fans(device_, fans);
+        const MbSioStatus status = RetryTransientSioOperation([&]() {
+            return controller_.read_fans(device_, fans);
+        });
         if (status != MbSioStatus::ok) {
             return MakeReadResult(
                 TranslateStatus(status, channel, "read_fans").error,
@@ -114,7 +142,9 @@ class SioFanWriter final : public FanWriter {
         out.fans.clear();
 
         std::vector<MbFanSnapshot> fans;
-        const MbSioStatus status = controller_.read_fans(device_, fans);
+        const MbSioStatus status = RetryTransientSioOperation([&]() {
+            return controller_.read_fans(device_, fans);
+        });
         if (status != MbSioStatus::ok) {
             out.error = TranslateStatus(status, 0u, "read_fans").error;
             out.detail = "svg_mb_sio read_fans failed: " + StatusString(status);
@@ -137,12 +167,15 @@ class SioFanWriter final : public FanWriter {
             std::uint8_t hi_raw = 0u;
             std::uint8_t lo_raw = 0u;
             const std::uint16_t hi_reg = kNct6701FanCountRegisters[channel];
-            MbSioStatus status = controller_.read_raw_register(
-                device_, hi_reg, &hi_raw);
+            MbSioStatus status = RetryTransientSioOperation([&]() {
+                return controller_.read_raw_register(device_, hi_reg, &hi_raw);
+            });
             if (status == MbSioStatus::ok) {
-                status = controller_.read_raw_register(
-                    device_, static_cast<std::uint16_t>(hi_reg + 1u),
-                    &lo_raw);
+                status = RetryTransientSioOperation([&]() {
+                    return controller_.read_raw_register(
+                        device_, static_cast<std::uint16_t>(hi_reg + 1u),
+                        &lo_raw);
+                });
             }
             if (status != MbSioStatus::ok) {
                 return MakeFanTachEvidenceResult(
@@ -162,7 +195,9 @@ class SioFanWriter final : public FanWriter {
 
     SioVoltageScanResult ReadVoltages() override {
         std::vector<MbVoltageSnapshot> voltages;
-        const MbSioStatus status = controller_.read_voltages(device_, voltages);
+        const MbSioStatus status = RetryTransientSioOperation([&]() {
+            return controller_.read_voltages(device_, voltages);
+        });
         if (status != MbSioStatus::ok) {
             return MakeVoltageScanResult(
                 TranslateStatus(status, 0u, "read_voltages").error,
@@ -184,8 +219,9 @@ class SioFanWriter final : public FanWriter {
 
     SioTemperatureScanResult ReadSioTemperatures() override {
         std::vector<MbSioTemperatureSnapshot> temperatures;
-        const MbSioStatus status =
-            controller_.read_sio_temperatures(device_, temperatures);
+        const MbSioStatus status = RetryTransientSioOperation([&]() {
+            return controller_.read_sio_temperatures(device_, temperatures);
+        });
         if (status != MbSioStatus::ok) {
             return MakeTemperatureScanResult(
                 TranslateStatus(status, 0u, "read_sio_temperatures").error,
@@ -216,9 +252,11 @@ class SioFanWriter final : public FanWriter {
                 "svg_mb_sio set_fan_duty failed for channel " +
                     std::to_string(channel) + ": channel out of range");
         }
+        const MbSioStatus status = RetryTransientSioOperation([&]() {
+            return controller_.set_fan_duty(device_, channel, duty_pct);
+        });
         return TranslateStatus(
-            controller_.set_fan_duty(device_, channel, duty_pct),
-            channel, "set_fan_duty");
+            status, channel, "set_fan_duty");
     }
 
     FanWriteResult RestoreSavedState(std::uint32_t channel,
@@ -231,10 +269,12 @@ class SioFanWriter final : public FanWriter {
                 "svg_mb_sio restore_saved_state failed for channel " +
                     std::to_string(channel) + ": channel out of range");
         }
+        const MbSioStatus status = RetryTransientSioOperation([&]() {
+            return controller_.restore_saved_state(
+                device_, channel, duty_raw, mode_raw, timeout_ms);
+        });
         return TranslateStatus(
-            controller_.restore_saved_state(
-                device_, channel, duty_raw, mode_raw, timeout_ms),
-            channel, "restore_saved_state");
+            status, channel, "restore_saved_state");
     }
 
     std::string BackendLabel() const override {

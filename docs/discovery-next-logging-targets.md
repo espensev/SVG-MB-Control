@@ -150,7 +150,7 @@
 - Keep Control standalone; do not add a runtime dependency on the sibling Bench repo.
 - Keep the 50 ms control path narrow. Full GPU/SIO evidence belongs outside `control-loop`.
 - Do not make another logger write the existing controller latest files.
-- Use the repo build workflow (`build-release.ps1` / `scripts/Build-Release.ps1`) for validation; the untracked root `build.ps1` should not become the default workflow without reconciling the repo instructions.
+- Use the repo build workflow (`build-release.ps1` / `scripts/Build-Release.ps1`) for validation; the untracked root `build.ps1` should not become the default workflow without reconciling the repo instructions. (Update 2026-05-29: `build.ps1` is now tracked and reconciled — it delegates to `scripts/Test-LocalCI.ps1 -KeepBuildDir`; see `docs/CODE_MAP.md`.)
 - Existing uncommitted changes in hot-path files should be preserved and verified rather than overwritten.
 
 ### Risks

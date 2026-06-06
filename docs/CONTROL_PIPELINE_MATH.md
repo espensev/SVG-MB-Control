@@ -1,13 +1,15 @@
 # Control Pipeline — Mathematical Reference
 
-Status: **current**, last verified 2026-05-26 against
+Status: **current**, last verified 2026-05-28 against
 `src/control/tick_runner.cpp` (per-tick orchestration),
-`src/control/channel_evaluator.cpp` (curve, smoothing, integrators, rate
-limit, authority reassert), `src/control/low_band_integrator.cpp` (global
-signal, debt, per-channel stage), `src/control/cadence_score.cpp` (slew
-score, cadence target, generic rate-limit helper),
-`src/control/channel_write.cpp` (write gates),
-`src/control/control_scheduler.cpp` (sliced wait), and
+`src/control/channel_evaluator.cpp` (curve, smoothing, boost composition,
+rate limit, authority reassert),
+`src/control/boost_stage.cpp` (per-stage boost integrator shared by
+thermal_pressure, midband_pressure, gpu_airflow, and cpu_low_soak),
+`src/control/low_band_integrator.cpp` (global signal, debt, per-channel
+stage), `src/control/cadence_score.cpp` (slew score, cadence target,
+generic rate-limit helper), `src/control/channel_write.cpp` (write
+gates), `src/control/control_scheduler.cpp` (sliced wait), and
 `src/policy/control_policy.cpp` (curve / blend helpers). Cross-cuts the
 prose in `CONTROL_LOOP.md` with the actual numerical operators.
 
@@ -279,6 +281,14 @@ identical integrator with seconds-scale rates; the fourth (CPU low-soak)
 uses a minutes-scale rate. All four are clamped to a configured maximum
 and return to zero in their respective release conditions.
 
+Implementation: a single `UpdateBoostStage` in `src/control/boost_stage.cpp`
+covers all four, driven by `kBoostStageSpecs` which tags each stage with
+its input source (`ObservedTemp` / `GpuEnvelope` / `CpuTemp`), rate unit
+(`PerSec` / `PerMin`), and release semantics (`BelowStart` for the three
+seconds-scale stages, `ExplicitRelease` for the CPU low-soak band).
+Per-channel state is `ChannelState::boosts[BoostStage]` (configured side:
+`ChannelControlConfig::boosts[BoostStage]`).
+
 ### 6.1 Unified seconds-scale integrator
 
 Given a generic boost state $B$, observed temperature $T_{\mathrm{obs}}$,
@@ -311,10 +321,12 @@ Finally $B_k \leftarrow \mathrm{clip}(B_k, 0, B_{\max})$.
 
 The integrator is **disabled** (returns $0$) when any of the start, full,
 rise, fall, or max parameters is undefined, when the rise or max parameter is
-non-positive, or when the fall parameter is negative (`UpdatePressureBoost`
+non-positive, or when the fall parameter is negative (`UpdateBoostStage`
 guard clause). A zero fall rate is valid and means no decay. When
 $T_{\mathrm{obs}}$ is undefined the existing boost is held and no integration
-occurs.
+occurs (`BelowStart` release mode). For the `ExplicitRelease` stage (CPU
+low-soak) an undefined input causes decay instead, matching the pre-table
+behavior.
 
 Anti-windup is implicit: integration is gated on $B < B_{\max}$ on the
 rising path. Decay is unconditional on the falling path.
@@ -536,14 +548,22 @@ A computed $u^{(c)}_k$ is committed only if every gate passes:
    yet for the channel.
 5. **Policy.** Skip if `effective_write_allowed` is false in the runtime
    fan snapshot for the channel.
-6. **Breaker.** Skip if the per-channel circuit breaker is open.
+6. **Breaker.** Skip if the per-channel circuit breaker is open, **unless**
+   this is a sensor-safe (safe-mode) command (`safety_override`): a
+   thermal-safety write must reach the hardware even when the breaker is open
+   (`docs/discovery-recovery-gap-audit-2026-06-04.md`, remediation 3). A normal
+   command is still skipped while the breaker is open. This gates *whether* a
+   computed setpoint is written; it does not change the setpoint value, so the
+   control identity above is unaffected.
 
 A successful write updates $u^{(c)}_{k-1} \leftarrow u^{(c)}_k$ and
 records `last_write_time` $= t_k$.
 
 A **failed** write increments `consecutive_write_failures`; once it
 reaches `kMaxConsecutiveFailures` ($= 5$) the breaker opens. The open breaker
-then gates future writes for that channel. `--reset-breakers` clears open
+then gates future normal writes for that channel; a sensor-safe (safe-mode)
+command bypasses it, and a successful bypassed write closes the breaker.
+`--reset-breakers` clears open
 breakers and failure counters through `circuit_breaker_reset.request.json`;
 `--reset-breaker-channel <n>` narrows the reset to one channel. The next write
 still passes through the same baseline, policy, cooldown, and fan-backend gates.
@@ -717,20 +737,20 @@ math check as code/config validation only.
   JSONL rows, and Windows error 5 sidecar/evidence write failures. Treat raw
   analyzer maxima from this run as unreliable unless filtered.
 
-2026-05-26 low-load steady-state check (post airflow-floor adoption,
+2026-05-26 low-load steady-state check (static-floor reference profile,
 commit `10ceaec`):
 
 - Source run: `release\runtime\logs\svg_mb_control_output.csv`
   (session start `2026-05-26T10:14:00`, manifest config
   `sha256=036cda22e65c7f06f64f865556cf18771c86caa715b34f00a7acca489c093f06`,
   producer git hash `b396b53a94a9`).
-- Per-channel `last_setpoint_pct` matched the configured floors
+- Per-channel `last_setpoint_pct` matched the then-configured floors
   within the PWM quantization step
   (channels `0/1/2/3/4/5` at
   `15.5/22.0/60.15/56.15/31.0/20.0`%).
 - `low_band_evidence.json` reported `activation_count = 0` and
   `max_debt ≈ 8.7e-4`; the low-band path stayed below the per-channel
-  debt thresholds for the duration of the capture, so the floor uplift
+  debt thresholds for the duration of the capture, so the static floor uplift
   kept the integrated signal below activation under the observed
   Tctl/Tdie p50 of `~46.8 C` and GPU core p50 `~28 C`.
 - `control_runtime.json` reported no open circuit breakers, no
@@ -742,9 +762,10 @@ commit `10ceaec`):
 
 The 2026-05-26 capture validates the identities in §8.2 (clipped
 additive composition), §6 (integrator hold at zero with no rising
-input), and §7 (debt does not accrue when `signal ≈ 0`) against the
-adopted floors, and confirms `loop_slip_ms`/`loop_overrun` invariants
-for §10.
+input), and §7 (debt does not accrue when `signal ≈ 0`) against that
+reference profile, and confirms `loop_slip_ms`/`loop_overrun` invariants
+for §10. The later dynamic low/medium intake profile changes config curve
+points but does not change the mathematical control identity in this file.
 
 2026-05-26 source-aware blend counterfactual:
 
@@ -798,8 +819,8 @@ changes enough that these checks are incomplete.
 | §3   | `channel_evaluator.cpp:SelectPrimaryCurveInput`, `control_policy.cpp:BlendTemps`, `channel_evaluator.cpp:GpuControlEnvelopeC` |
 | §4   | `control_policy.cpp:LookupCurve`, `control_policy.cpp:SmootherStep` |
 | §5   | `channel_evaluator.cpp:ApplyDemandSmoothing` |
-| §6.1–6.2 | `channel_evaluator.cpp:UpdatePressureBoost`, `UpdateThermalPressureBoost`, `UpdateMidbandPressureBoost`, `UpdateGpuAirflowBoost` |
-| §6.3 | `channel_evaluator.cpp:UpdateCpuLowSoakBoost` |
+| §6.1–6.2 | `boost_stage.cpp:UpdateBoostStage` (BelowStart specs in `kBoostStageSpecs`: ThermalPressure, MidbandPressure, GpuAirflow) |
+| §6.3 | `boost_stage.cpp:UpdateBoostStage` (ExplicitRelease spec: CpuLowSoak) |
 | §7   | `low_band_integrator.cpp:UpdateLowBandState`, `cadence_score.cpp:SmoothScale` |
 | §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `cadence_score.cpp:MoveTowardRateLimited` |
 | §8.2–8.3 | `channel_evaluator.cpp:EvaluateChannel` (final composition) |

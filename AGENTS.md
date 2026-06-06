@@ -20,6 +20,17 @@
   analyze, config, runtime-home, and test workflows.
 - Use `docs\STRUCTURE_AND_STABILITY.md` for current source layout,
   responsibility boundaries, and remaining structural polish.
+- Use `docs\BUILD_TARGETS_AND_DEPENDENCIES.md` for the executables, runtime
+  scheduled-task processes, and vendored dependencies.
+- Use `docs\PATH_NOTES.md` for the dated log of completed/fixed/added work and
+  the unscheduled ideas backlog. It is a curated journal, not a system of
+  record; `git log`, `docs\features\`, and `docs\STRUCTURE_AND_STABILITY.md`
+  stay authoritative.
+- Use `docs\features\README.md`, the matching `docs\features\FEAT-*.md`, and
+  `docs\TRACEABILITY.md` for new feature intake, requirement IDs, promotion
+  status, and requirement-to-verification mapping. Use
+  `docs\FEATURE_VERIFICATION_CHECKLIST.md` while implementing or verifying a
+  feature.
 - Use `docs\CONTROL_LOOP.md`, `docs\READ_LOOP.md`, and
   `docs\WRITE_ORCHESTRATION.md` for mode-specific runtime behavior.
 - Use `docs\RUNTIME_HOME.md` for runtime sidecars, status fields, health
@@ -28,13 +39,40 @@
   runtime-evidence collection, analyzer workflow, and current logging gaps.
 - Use `docs\CONTROL_PIPELINE_MATH.md` as the maintained numerical reference
   for control-computation identity.
+- Use `docs\COOLING_STRATEGY.md` for the strategy, fan inventory, floor
+  philosophy, and fan-relationship rules behind the shipped curves. The
+  machine-readable companion is
+  `config\machines\snd-desk.cooling.policy.json`.
 - Treat `docs\discovery-*.md`, `docs\code-quality-pass-*.md`,
   `docs\evaluation-and-optimization-recommendations.md`,
   `docs\build-optimization-results.md`, and other older recommendation files
   as historical context unless they explicitly say they are current and
   agree with README, current docs, source, and tests.
-  `docs\response-evaluation-tuning-plan.md` and
+  `docs\COOLING_STRATEGY.md`,
+  `docs\response-evaluation-tuning-plan.md`, and
   `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` are maintained as current.
+
+## Feature Intake Gate
+
+- Before product-code work starts for a new capability, control behavior,
+  runtime schema/status/log/manifest field, CLI/operator surface, live-runtime
+  workflow, or shipped config behavior, identify the owning `docs\features\FEAT-*`
+  spec and confirm it is implementation-authorized.
+- If no accepted, implementation-authorized spec exists, land or update the spec
+  first. The spec must define the `REQ-*` IDs, required decision record(s),
+  acceptance criteria, and entries in `docs\TRACEABILITY.md`.
+- Before handoff for feature work, use
+  `docs\FEATURE_VERIFICATION_CHECKLIST.md` and keep the owning spec's
+  verification log aligned with `docs\TRACEABILITY.md`.
+- `Reserved` and `Draft` specs are planning records, not implementation
+  permission. `Accepted` specs are buildable only when the spec text or the
+  maintainer explicitly authorizes implementation.
+- Defect fixes, behavior-preserving refactors, and docs-only corrections do not
+  require a feature spec, but behavior changes found during those tasks must
+  either map to an existing spec or promote a new one before the behavior is
+  expanded.
+- Ideas in `docs\PATH_NOTES.md` or discovery/recommendation docs are not
+  authorized work until promoted through `docs\features\`.
 
 ## Change Checklist
 
@@ -49,6 +87,8 @@
   `docs\RUNTIME_LOGGING_AND_EVALUATION.md`.
 - For CLI or operator workflow changes, update `README.md` and the relevant
   mode-specific doc.
+- For feature-spec or `REQ-*` changes, update `docs\features\README.md`, the
+  owning feature spec, and `docs\TRACEABILITY.md` in the same change.
 
 ## Live Runtime Safety
 

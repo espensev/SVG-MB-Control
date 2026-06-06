@@ -10,3 +10,8 @@
 /alresponse.CSV
 /hwlogparalell.CSV
 *.pyc
+# Local scratch / tooling artifacts (not part of the repo)
+/__*
+*_run.log
+/review/
+/.antigravitycli/

@@ -17,14 +17,27 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = REPO_ROOT / "build" / "x64-release"
 _TEST_EXE_ENV = os.environ.get("SVG_MB_CONTROL_TEST_EXE")
 CONTROL_EXE = Path(_TEST_EXE_ENV) if _TEST_EXE_ENV else BUILD_DIR / "svg-mb-control.exe"
+_TEST_TASK_RUNNER_ENV = os.environ.get("SVG_MB_CONTROL_TEST_TASK_RUNNER_EXE")
+CONTROL_TASK_RUNNER_EXE = (
+    Path(_TEST_TASK_RUNNER_ENV)
+    if _TEST_TASK_RUNNER_ENV
+    else BUILD_DIR / "svg-mb-control-task-runner.exe"
+)
 BUILD_SCRIPT = REPO_ROOT / "build-release.ps1"
 
 
 def _ensure_release_build() -> None:
-    if CONTROL_EXE.is_file():
+    if CONTROL_EXE.is_file() and CONTROL_TASK_RUNNER_EXE.is_file():
         return
-    if _TEST_EXE_ENV:
-        raise unittest.SkipTest(f"configured test executable not found: {CONTROL_EXE}")
+    if _TEST_EXE_ENV or _TEST_TASK_RUNNER_ENV:
+        missing = [
+            str(path)
+            for path in (CONTROL_EXE, CONTROL_TASK_RUNNER_EXE)
+            if not path.is_file()
+        ]
+        raise unittest.SkipTest(
+            "configured test executable not found: " + ", ".join(missing)
+        )
 
     result = subprocess.run(
         [
@@ -331,29 +344,44 @@ class StagedControlApp:
             "Where-Object { $ids -contains $_.Id }).Count",
         ).returncode != 0
 
-    @staticmethod
-    def _terminate_svg_processes(process_ids: set[int]) -> None:
+    def _terminate_svg_processes(self, process_ids: set[int]) -> None:
         if not process_ids:
             return
-        StagedControlApp._run_process_filter(
+        # Defense-in-depth on top of PID scoping: only stop a PID-matched
+        # process whose image path is under this test's staged root, so a
+        # recycled PID that now belongs to a live release\ instance is never
+        # killed. The staged app runs a copy of the exe from self.root (see
+        # __enter__), so its .Path is under that root; a packaged controller
+        # running from release\ is not.
+        self._run_process_filter(
             process_ids,
             "Get-Process svg-mb-control -ErrorAction SilentlyContinue | "
             "Where-Object { $ids -contains $_.Id } | "
+            "Where-Object { $_.Path -and "
+            "$_.Path.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase) } | "
             "Stop-Process -Force -ErrorAction SilentlyContinue",
+            root=self._root,
         )
 
     @staticmethod
     def _run_process_filter(
         process_ids: set[int],
         command: str,
+        root: Path | None = None,
     ) -> subprocess.CompletedProcess[str]:
         ids = ",".join(str(pid) for pid in sorted(process_ids))
+        setup = f"$ids=@({ids});"
+        if root is not None:
+            root_str = str(root)
+            if not root_str.endswith(("\\", "/")):
+                root_str += "\\"
+            setup += " $root='" + root_str.replace("'", "''") + "';"
         return subprocess.run(
             [
                 "powershell",
                 "-NoProfile",
                 "-Command",
-                f"$ids=@({ids}); {command}",
+                f"{setup} {command}",
             ],
             capture_output=True,
             text=True,

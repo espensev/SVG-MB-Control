@@ -19,7 +19,7 @@ namespace svg_mb_control {
 // to fall back to the configured `poll_tick_ms`.
 void UpdateLowBandState(ControlRuntimeContext& context,
                         const TempInputs& temp_inputs,
-                        const RuntimeSnapshot& runtime_snapshot,
+                        const RuntimeSnapshotIndex& runtime_index,
                         std::uint64_t elapsed_ms,
                         std::chrono::steady_clock::time_point now,
                         std::uint64_t tick_count);

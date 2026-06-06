@@ -199,7 +199,7 @@ int RunTaskRunner(int argc, wchar_t** argv) {
             return 0;
         }
         if (health == 2) {
-            return RunHiddenAndWait(control_exe, {L"--start"}, config_path);
+            return RunHiddenAndWait(control_exe, {L"--restart"}, config_path);
         }
         return health;
     }
