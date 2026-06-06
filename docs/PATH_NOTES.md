@@ -25,6 +25,24 @@ checkable.
 
 ## 2026-06-06
 
+- **Changed** — revised decision **D6** (profile hot-swap live authorization) to the
+  **B1+B2** posture (maintainer, 2026-06-06): `pid.allow_live: true` is rejected at
+  config load unless the channel has characterization evidence (a shadow-log
+  comparison against the curve baseline is accepted) *and* a non-NaN slew cap. This
+  reverses, by intent, the align-`REQ-PROFILE-07`-to-D6 direction recorded below —
+  the review found `MEASUREMENT_GATE.md` reads as an evidence (not consent) gate and
+  the slew-cap floor is NaN-by-default (`control_loop.h:29-31`;
+  `channel_evaluator.cpp:55-57`). Propagated source-of-truth-first: D6 →
+  `REQ-PROFILE-07` (FEAT-0003 §4/§5/§6/§7/§9/§10/§11/§12; verify now `T,R,M`) →
+  `docs/TRACEABILITY.md` → modular plan §6/§7-8; the brief
+  `docs/profile-hot-swap-allow-live-decision-2026-06-06.md` is marked **Resolved
+  (B1+B2)**. Refreshed the discussion doc's measurement-gate section (its
+  evidence-vs-consent argument was *adopted*; added a resolution note and fixed
+  drifted decision-doc citations). Citation sweep + line→section de-drift: converted
+  doc-to-doc cites in the plan and brief to section refs, and fixed the cites my D6
+  expansion drifted (decision §D7 / §Consequences / §Selected directions; FEAT-0003
+  §6). `tests/test_feature_specs.py` green (5/5). The discussion doc stays unstaged
+  (its other in-flight de-drift edits are the user's).
 - **Fixed** — reconciled three cross-doc inconsistencies in the `FEAT-0003`
   profile-hot-swap design-capture (surfaced by review). **High:**
   `REQ-PROFILE-07` carried the pre-decision "characterization evidence before any

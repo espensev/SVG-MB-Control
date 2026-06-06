@@ -91,7 +91,7 @@ Result values:
 | `REQ-PROFILE-04` | T | Profile request applies at tick boundary; validation failure retains running profile and emits rejection. | not buildable |
 | `REQ-PROFILE-05` | T | Swap resets new controller dynamic state by default. | not buildable |
 | `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, and write gates behave identically by controller kind. | not buildable |
-| `REQ-PROFILE-07` | R, M | Review `MEASUREMENT_GATE.md` and decision record D6; PID runs shadow/dry-run by default, and a live PID write occurs only under the explicit `pid.allow_live` opt-in (recorded crossing). | not buildable |
+| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision record D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded `allow_live` crossing. | not buildable |
 | `REQ-PROFILE-08` | T | CSV/status tests assert per-channel controller-kind field. | not buildable |
 | `REQ-PROFILE-09` | T, R | Differing channel-set candidate rejected until FEAT-0001 restore/capture path exists. | not buildable |
 | `REQ-PROFILE-10` | R | Review control-identity docs for curve-overlay scope and PID identity reference. | not buildable |

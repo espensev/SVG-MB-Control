@@ -20,7 +20,7 @@ work and does not change FEAT-0003's status.
 
 FEAT-0003 carries a recorded maintainer decision. This document does **not**
 rescind, weaken, or supersede it. Quoted (with one marked elision) from
-`docs/features/FEAT-0003-selectable-profile-hot-swap.md:16-23`:
+`docs/features/FEAT-0003-selectable-profile-hot-swap.md` Scope & intent:
 
 > **Scope & intent (2026-06-03).** This spec is design-capture, not scheduled
 > work. Per the maintainer, the feature is not believed to be a net benefit and
@@ -28,7 +28,7 @@ rescind, weaken, or supersede it. Quoted (with one marked elision) from
 > control laws the per-channel seam must be able to host … Any implementation
 > would be a demonstration.
 
-The same status is recorded in `docs/profile-hot-swap-decision-2026-06-03.md:3-8`
+The same status is recorded in `docs/profile-hot-swap-decision-2026-06-03.md` (status note)
 and in the 2026-06-03 **Idea** row of `docs/PATH_NOTES.md` ("FEAT-0003 is
 design-capture … not scheduled work"; PATH_NOTES is a frequently-appended
 journal, so it is cited by dated entry rather than line number). Accordingly:
@@ -52,7 +52,7 @@ The per-channel control "function" is the single free function **`EvaluateChanne
 (`src/control/channel_evaluator.cpp:440-474`). It is a pure input→output
 orchestration over file-private helpers with no I/O, which is why D1 frames
 wrapping it as a controller as a *move, not a rewrite*
-(`docs/profile-hot-swap-decision-2026-06-03.md:72-80`).
+(`docs/profile-hot-swap-decision-2026-06-03.md` §D1).
 
 **Inputs / output.** `EvaluateChannel` takes a mutable `ChannelState&` (per-channel
 config plus every dynamic-state field), `const ControlLoopConfig&`, a
@@ -110,7 +110,7 @@ call site and no seam.
 
 The unit that would swap is the whole per-channel law — the entire
 `EvaluateChannel` computation — behind the `IChannelController` seam D1 defines
-(`docs/profile-hot-swap-decision-2026-06-03.md:51-69`). The seam would sit at a
+(`docs/profile-hot-swap-decision-2026-06-03.md` §D1). The seam would sit at a
 single call site over an already law-agnostic output contract, because:
 
 - `ChannelEvaluation` (`channel_evaluator.h:30-47`) is already a law-agnostic
@@ -127,13 +127,13 @@ the "modular" framing needs the two deepenings in §3–§4 rather than just D1:
    field to live in, and there is no defined seam for which `ChannelState` fields
    carry over vs reset. D2 already chose "controller owns its state, slim
    `ChannelState` to law-agnostic fields"
-   (`docs/profile-hot-swap-decision-2026-06-03.md:86-107`) — so "change the
+   (`docs/profile-hot-swap-decision-2026-06-03.md` §D2) — so "change the
    function" requires a state-ownership refactor first, not an additive drop-in.
 2. **Output conditioning is inline in the curve law, not separated.** Sensor-safe
    (`:248-264`), EMA smoothing + decay-latch (`:72-117`), and the rate limiter
    (`:37-70`) all sit inside `channel_evaluator.cpp`. D4's **firm** law-agnostic
    list is the clamp, sensor-safe, deadband, cooldown, breaker, and write gate
-   (`docs/profile-hot-swap-decision-2026-06-03.md:141-145`). Two further
+   (`docs/profile-hot-swap-decision-2026-06-03.md` §D4). Two further
    dispositions are recorded there only as **open leans** (`:147-153`): the EMA
    smoothing + decay latch lean curve-law-specific, and the rise/fall/step rate
    limiter leans shared as a safety slew clamp. Either way that split is **not
@@ -201,7 +201,7 @@ This recommendation does not change D1; it fills the dispatch gap D1 left open.
 
 D7 fixes the apply order for a profile change (validate the candidate via
 `LoadControlLoopConfig` → channel-set delta → build + reset + swap at the tick
-boundary; `docs/profile-hot-swap-decision-2026-06-03.md:184-204`). It does **not**
+boundary; `docs/profile-hot-swap-decision-2026-06-03.md` §D7). It does **not**
 pin what a *profile* is as an operator object, nor the startup selection surface.
 FEAT-0003 §7/§8 float both a `runtime/requests/profile.json` request and an
 optional `--profile <name>` selector but leave the form open.
@@ -288,7 +288,7 @@ capture choreography is what a profile swap reuses for a **channel-set change**
 via the same path as `HandleExpiredHoldRestore` (`channel_write.cpp:186-257`).
 Because FEAT-0001 is not implemented, REQ-PROFILE-09 already says channel-set
 changes are out of scope until it ships, and requires a swap to reject a candidate
-whose channel set differs (`docs/features/FEAT-0003-selectable-profile-hot-swap.md:198`).
+whose channel set differs (`docs/features/FEAT-0003-selectable-profile-hot-swap.md` §6, REQ-PROFILE-09).
 
 **Primitives that exist vs are missing** (for the §6 ordering):
 
@@ -341,13 +341,13 @@ conditioning), so the refactor precedes any second law.
    shadow/dry-run path so a *writing* channel does not switch to an uncharacterized
    law and move the measurement-gate baseline silently. Live PID would sit behind
    the explicit per-channel `pid.allow_live` opt-in (D6, `decision:169-182`).
-   Resolved 2026-06-06: the earlier divergence between D6 and REQ-PROFILE-07 over
-   whether characterization evidence is required *before* live PID is closed —
-   REQ-PROFILE-07 was aligned to D6 (the requirement derives from the decision per
-   `docs/features/README.md` §3 gate 4), so live PID is gated by the explicit,
-   recorded `pid.allow_live` opt-in, not an evidence-first block. The residual open
-   item (what compact evidence a recorded `allow_live` crossing should still
-   gather) is §7-8.
+   Resolved 2026-06-06: D6 was revised to require, before a live PID write, both
+   characterization evidence (a shadow-log comparison against the curve baseline is
+   accepted) and a non-NaN slew cap, enforced at config load (levers B1+B2);
+   REQ-PROFILE-07 and `docs/TRACEABILITY.md` were re-tightened to match (a
+   requirement derives from its decision, `docs/features/README.md` §3 gate 4). So
+   live PID is evidence-gated and slew-bounded, not authorized on an audit event
+   alone. See §7-8 and `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
 6. **Step 6 would (optionally) promote dispatch A1 → A2** (registry table) only if
    a third law or external registration is wanted.
 
@@ -393,26 +393,17 @@ These surfaced from grounding and are not decided by the existing decision recor
    `last_raw_demand_pct` (`control_runtime_context.h:31`, set at
    `channel_evaluator.cpp:457`). It is a curve-law EMA input, so it likely moves
    into `CurveOverlayController`; confirm when slimming `ChannelState`.
-8. **Measurement-gate evidence (requirement-vs-decision divergence resolved
-   2026-06-06; substantive question open).** The *documentation* divergence is
-   closed: REQ-PROFILE-07 was aligned to D6 (the requirement derives from the
-   decision), so the requirement no longer contradicts the decision's
-   `pid.allow_live` design. Whether D6's `allow_live` actually *satisfies*
-   `docs/MEASUREMENT_GATE.md` is a separate, unsettled question — the maintainer's
-   call on D6 itself. Two defensible readings exist: (a) the gate's "What This
-   Blocks" list is cadence, write cooldown, blocked-channel membership, and
-   higher-rate-cadence strategy, so a same-cadence PID on an already-live channel
-   is a recorded crossing rather than a blocked one; (b) the gate's Exit Criteria
-   are measurements ("a different controller strategy" clears the gate only once
-   evidence exists), so `allow_live` is *consent, not evidence* and does not clear
-   the gate on its own terms. The discussion doc's "measurement gate" section
-   argues (b) in detail and flags a concrete code gap: the slew-cap floor D4
-   relies on (`rise/fall_rate_pct_per_min`, `max_setpoint_step_pct`) defaults to
-   NaN/off (`control_loop.h:29-31`; `RateLimitSetpoint` returns the value
-   unmodified on NaN, `channel_evaluator.cpp:55-57`), so an `allow_live` PID is not
-   guaranteed a slew bound. Open for the maintainer: accept D6 as written, or
-   tighten D6 (and then REQ-PROFILE-07) to require evidence and/or a non-NaN slew
-   cap before `allow_live`. The accept-vs-tighten options are written up in
+8. **Measurement-gate evidence — resolved 2026-06-06 (B1+B2).** A review found D6's
+   original `allow_live`-without-evidence posture in tension with
+   `docs/MEASUREMENT_GATE.md`: the gate's Exit Criteria are measurements, so a
+   recorded crossing is *consent, not evidence*; and the slew-cap floor D4 relies on
+   defaults to NaN/off in code (`control_loop.h:29-31`; `RateLimitSetpoint` returns
+   the value unmodified on NaN, `channel_evaluator.cpp:55-57`), so an `allow_live`
+   PID was not guaranteed a slew bound. The maintainer selected **B1+B2**: D6 is
+   revised so `allow_live: true` is rejected at config load unless the channel has
+   the characterization evidence (shadow-log comparison accepted) *and* a non-NaN
+   slew cap; REQ-PROFILE-07 and `docs/TRACEABILITY.md` were re-tightened to match.
+   Full options and reasoning:
    `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
 
 ## 8. Reference-drift correction (accuracy-only)
