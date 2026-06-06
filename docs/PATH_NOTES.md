@@ -25,6 +25,36 @@ checkable.
 
 ## 2026-06-06
 
+- **Added** — `docs/testing-harness-evaluation-2026-06-06.md`: a findings
+  snapshot of the local CI test harness (`scripts/Test-LocalCI.ps1` →
+  `Build-Release.ps1`, both test lanes). Verdict: green and live-loop-safe (CTest
+  8/8, hermetic 114/114, 0 skips on this Windows host); names the real weaknesses
+  — shared mutable state across runs (single `build/` tree, fixed-name `%TEMP%`
+  files), several skip-rather-than-fail paths, and 5 adversarially-verified
+  coverage gaps in the real-hardware decode/translate path (one High:
+  `amd_reader.cpp` `DecodeTctl`/`DecodeCcdTemp` is structurally unreachable from
+  the harness — no `SIM_AMD_*_RAW` hook). Labeled a snapshot, not a maintained
+  contract; `git log`/`README.md`/tests stay authoritative.
+- **Fixed** — flaky concurrent-run collision in the C++ test lane: two
+  `Test-LocalCI` runs shared fixed-name `%TEMP%` artifacts
+  (`svg_mb_control_config_test_<N>.json` and
+  `svg_mb_control_channel_write_tests_<name>`), so one run could truncate a file
+  mid-read in the other and fail `svg_mb_control_loop_config_tests` with "parse
+  error ... empty input". `TempJsonFile`
+  (`tests/cpp/control_loop_config_tests.cpp`) and `MakeTempHome`
+  (`tests/cpp/channel_write_tests.cpp`) now carry a per-process `random_device`
+  salt + counter (`UniqueTempSuffix`); the misleading "distinct per concurrent
+  run" comments are corrected. Re-validated: CTest 8/8, hermetic 114/114, exit 0
+  (harness-eval rec 2).
+- **Idea** — remaining harness-eval recommendations (not authorized work; see the
+  snapshot doc §7): a single-instance lock on `Test-LocalCI` so a second
+  concurrent run refuses or queues (highest ROI — removes the shared-`build/` and
+  `%TEMP%` collisions at the source); fail-loud when `[2/11]` clean cannot remove
+  a locked tree, plus CTest `--no-tests=error`; close the High gap by extracting
+  `DecodeTctl`/`DecodeCcdTemp` to a header test or adding a `SIM_AMD_*_RAW` hook;
+  doc fixes (README schema `7`→`8` + the two `low_band_*_boost_pct` columns,
+  document the CTest lane, correct `-SkipTests` to "both lanes"); gitignore
+  `__*`/`*_run.log`.
 - **Fixed** — recovery-gap remediation 3 (the compound cell): a sensor-safe
   (safe-mode) command now bypasses an open write-failure breaker so a
   thermal-safety write reaches the hardware instead of being silently dropped
