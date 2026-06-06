@@ -320,4 +320,14 @@ if(BUILD_TESTING)
     configure_svg_mb_control_target(svg_mb_control_channel_write_tests)
     add_test(NAME svg_mb_control_channel_write_tests
              COMMAND svg_mb_control_channel_write_tests)
+
+    add_executable(svg_mb_control_amd_decode_tests
+        tests/cpp/amd_decode_tests.cpp
+    )
+    target_link_libraries(svg_mb_control_amd_decode_tests PRIVATE
+        svg_mb_control_core
+    )
+    configure_svg_mb_control_target(svg_mb_control_amd_decode_tests)
+    add_test(NAME svg_mb_control_amd_decode_tests
+             COMMAND svg_mb_control_amd_decode_tests)
 endif()

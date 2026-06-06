@@ -4,6 +4,7 @@
 
 #include <intrin.h>
 
+#include "amd_decode.h"
 #include "env_util.h"
 #include "pawnio_binary.h"
 
@@ -32,10 +33,7 @@ enum class Status {
     access_denied = -6,
 };
 
-constexpr std::uint32_t kTempOffsetFlag = 0x80000u;
 constexpr std::uint32_t kTctlTdieAddress = 0x00059800u;
-constexpr std::uint32_t kCcdTempZen2Base = 0x00059954u;
-constexpr std::uint32_t kCcdTempZen4Base = 0x00059B08u;
 constexpr std::uint32_t kMaxCcds = 8u;
 
 // Constant per-CCD sensor labels. Indexing this table avoids rebuilding the
@@ -308,47 +306,6 @@ bool DetectAmdCpu(std::string* out_name,
     return true;
 }
 
-bool SelectCcdLayout(std::uint32_t cpu_model, std::uint32_t* out_base) {
-    switch (cpu_model) {
-        case 0x31u:
-        case 0x71u:
-        case 0x21u:
-            if (out_base != nullptr) {
-                *out_base = kCcdTempZen2Base;
-            }
-            return true;
-        case 0x61u:
-        case 0x44u:
-            if (out_base != nullptr) {
-                *out_base = kCcdTempZen4Base;
-            }
-            return true;
-        default:
-            if (out_base != nullptr) {
-                *out_base = 0u;
-            }
-            return false;
-    }
-}
-
-double DecodeTctl(std::uint32_t raw) {
-    double temp = static_cast<double>(((raw >> 21) * 125u) * 0.001);
-    if ((raw & kTempOffsetFlag) != 0u) {
-        temp -= 49.0;
-    }
-    return temp;
-}
-
-double DecodeCcdTemp(std::uint32_t raw, bool* out_valid) {
-    const std::uint32_t raw_12bit = raw & 0xFFFu;
-    const double temp =
-        ((static_cast<double>(raw_12bit * 125u) - 305000.0) * 0.001);
-    if (out_valid != nullptr) {
-        *out_valid = (raw_12bit > 0u && temp < 125.0);
-    }
-    return temp;
-}
-
 }  // namespace
 
 struct AmdReader::Impl {
@@ -481,7 +438,7 @@ struct AmdReader::Impl {
         mutex_handle = OpenOrCreatePciMutex();
         cpu_name = std::move(detected_cpu_name);
         transport_path = pawnio_bin.string();
-        supports_ccd = SelectCcdLayout(cpu_model, &ccd_base);
+        supports_ccd = amd::SelectCcdLayout(cpu_model, &ccd_base);
         ccd_count_hint = 0u;
         initialized = true;
         if (warning_text != nullptr) {
@@ -632,7 +589,7 @@ const AmdSnapshot& AmdReader::Sample() {
 
     snapshot.samples.push_back(AmdTemperatureSample{
         .label = "Tctl/Tdie",
-        .temperature_c = DecodeTctl(raw),
+        .temperature_c = amd::DecodeTctl(raw),
         .sensor_index = 0u,
         .raw_value = raw,
     });
@@ -648,7 +605,7 @@ const AmdSnapshot& AmdReader::Sample() {
             }
 
             bool valid = false;
-            const double ccd_temp = DecodeCcdTemp(ccd_raw, &valid);
+            const double ccd_temp = amd::DecodeCcdTemp(ccd_raw, &valid);
             if (!valid) {
                 continue;
             }
