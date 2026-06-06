@@ -2,7 +2,7 @@
 
 ## Status
 
-Current as of 2026-05-29.
+Current as of 2026-06-06.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,

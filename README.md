@@ -67,7 +67,8 @@ Preferred release build:
 Useful options:
 
 - `-KeepBuildDir` keeps `build\` after a successful release build
-- `-SkipTests` skips `python -m unittest discover tests -v`
+- `-SkipTests` skips both test lanes (the C++ CTest lane and
+  `python -m unittest discover tests -v`)
 - `-NoStopProcesses` skips the pre-build stop of running `svg-mb-control`
   processes
 - `-NoPublish` builds and tests without updating `release\` or creating an
@@ -286,13 +287,16 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `7`). The schema
+- The DB schema is bootstrapped on first use (schema version `8`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
-  control envelope used by response analysis, and
+  control envelope used by response analysis,
   `tick_channel_samples.primary_temp_source` preserves per-channel
-  CPU/GPU/guard attribution for the primary curve input.
+  CPU/GPU/guard attribution for the primary curve input, and
+  `tick_channel_samples.low_band_stage_boost_pct` /
+  `low_band_effective_boost_pct` record the per-channel low-band boost (staged
+  and effective).
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.
@@ -494,6 +498,13 @@ python -m unittest discover tests -v
 
 The smoke suite is direct-only. It launches the real executable and uses
 simulation environment hooks for hermetic AMD and fan telemetry.
+
+The release build (`build-release.ps1`) and `Test-LocalCI.ps1` also run a C++
+CTest lane of the native unit-test executables registered under `BUILD_TESTING`
+in `CMakeLists.txt` before this Python lane. Run directly on a clean checkout,
+`python -m unittest discover tests -v` first builds the executable; a missing or
+failed build yields skipped tests rather than failures, so use `Test-LocalCI.ps1`
+when a green result must mean tested.
 
 ## Documentation
 
