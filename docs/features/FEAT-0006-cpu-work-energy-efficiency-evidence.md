@@ -1,14 +1,15 @@
 # FEAT-0006: CPU work & energy efficiency evidence
 
-> **Reserved / parked 2026-06-06.** Demoted from Draft to Reserved; this full
-> body is preserved under `docs/features/_parked/` pending FEAT-0004 shipping and
-> a read-only live MSR feasibility check. The active registry row is in
-> `docs/features/README.md` §5. While parked, this body is not part of the
-> enforced feature set (`tests/test_feature_specs.py`) and its `REQ-CPUEFF-*`
-> rows are not mirrored in `docs/TRACEABILITY.md`.
+> **Promoted to Draft 2026-06-07** from Reserved. The v1 acquisition path is
+> committed by the accepted
+> [`cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md),
+> which also folds in the counter-read safety review. `REQ-CPUEFF-*` are now
+> mirrored in `docs/TRACEABILITY.md` and this body is in the enforced feature set
+> (`tests/test_feature_specs.py`). Implementation is **not** yet authorized: it
+> awaits a one-shot read-only live MSR validation on the target part (see §13).
 
 **Project:** svg-mb-control
-**Status:** Reserved (parked; body preserved)   **Version:** 0.1   **Updated:** 2026-06-06
+**Status:** Draft   **Version:** 0.2   **Updated:** 2026-06-07
 **Namespace:** `REQ-CPUEFF-*`
 **Companion to:** `AGENTS.md`, `docs/RUNTIME_HOME.md`,
 `docs/RUNTIME_LOGGING_AND_EVALUATION.md`, `docs/READ_LOOP.md`,
@@ -147,9 +148,14 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
 ## 7. Data / schema deltas
 
 - New runtime CSV/status fields, additive (final names settled at implementation):
-  Tier 1 — work counters (instructions retired and/or APERF/MPERF deltas),
-  package-energy delta (Joules) and/or raw energy-counter delta; Tier 2 —
-  effective frequency, Vcore, throttle/limit reason; plus workload/setting labels.
+  Tier 1 — a resource-window sample id and duration, work counters
+  (instructions retired and/or APERF/MPERF deltas), package-energy delta
+  (Joules) and/or raw energy-counter delta, and per-signal acquisition markers
+  so package energy and cycles can be `disabled`, `unavailable`, `quarantine`,
+  or `validated` independently; Tier 2 — effective frequency, Vcore,
+  throttle/limit reason; plus workload/setting labels. The sample id/window are
+  required so an analyzer can avoid double-counting one resource-window delta
+  repeated across multiple 250 ms control-loop rows.
 - Config impact: undecided; a workload/setting label may come from config or a
   runtime marker (shared open question with FEAT-0002 §8).
 - Schema/version impact: update `docs/RUNTIME_HOME.md` and
@@ -170,15 +176,15 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
 | [`docs/cpu-work-energy-acquisition-verification-2026-06-04.md`](../cpu-work-energy-acquisition-verification-2026-06-04.md) | Feasibility input: is `read_msr` reachable? **Done (2026-06-04): yes** — the shipped `AMDFamily17.bin` already exposes `ioctl_read_msr`; APERF/MPERF + RAPL package energy are reachable read-only via the existing transport. Surfaces the 32-bit energy wrap, APERF/MPERF affinity, and INST_RETIRED-needs-writes caveats. | Current |
-| `docs/cpu-work-energy-acquisition-decision-YYYY-MM-DD.md` | The committed acquisition path per signal. Lead (from verification): v1 = package energy (`0xC001029B` + unit `0xC0010299`) + APERF/MPERF effective frequency via a read-only MSR allow-list, loaded `strict`; defer `INST_RETIRED` (needs PMC programming = MSR writes), per-core aggregation, and SMU-mailbox Vcore/PPT/TDC/EDC. | Needed |
-| `docs/cpu-counter-read-safety-review-YYYY-MM-DD.md` | A Live Runtime Safety review confirming the read set is read-only and bounded (only `ioctl_read_msr` on a fixed MSR allow-list; never `ioctl_write_msr`), that no CPU-control write path is introduced, and how an unsupported (`#GP`) or wrapped counter degrades to blank. May be folded into the acquisition decision. | Needed |
+| [`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md) | Proposed acquisition path and folded safety review: v1 = package energy (`0xC001029B` + unit `0xC0010299`) plus APERF/MPERF if affinity validates, through a read-only MSR allow-list; bin stays `warn_only` for temperature while MSR-derived fields are field-gated strict; sample id/window prevent resource-window double-counting; per-signal provenance lets energy validate independently from cycles. | Accepted 2026-06-07 |
+| `docs/cpu-counter-read-safety-review-YYYY-MM-DD.md` | A Live Runtime Safety review confirming the read set is read-only and bounded (only `ioctl_read_msr` on a fixed MSR allow-list; never `ioctl_write_msr`), that no CPU-control write path is introduced, and how an unsupported (`#GP`) or wrapped counter degrades to blank. May be folded into the acquisition decision. | Accepted — folded into the 2026-06-07 decision |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
 | Requirement | Verify (T/B/M/R) | Where |
 |---|---|---|
 | REQ-CPUEFF-01 | T, M | unit/smoke test for work-counter delta math; runtime CSV evidence on a supported machine |
-| REQ-CPUEFF-02 | T, M | unit/smoke test for energy-counter delta → Joules/avg-power; runtime CSV evidence |
+| REQ-CPUEFF-02 | T, M | unit/smoke test for energy-counter delta → Joules/avg-power; sample-id/window de-duplication; runtime CSV evidence |
 | REQ-CPUEFF-03 | T, R | test for context-field propagation; review vs `docs/RUNTIME_HOME.md` |
 | REQ-CPUEFF-04 | T, R | analyzer-ingest tests with old archives missing the new fields; no-false-zero test |
 | REQ-CPUEFF-05 | R | code review: read paths only; no CPU-control write |
@@ -207,7 +213,8 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
   control math. Read-only evidence.
 - **Depends on:** FEAT-0002 (whole-system busy time is the time-normalization
   context); the PawnIO transport (`src/hardware/amd_reader.cpp`) and its
-  availability signal (FEAT-0004).
+  availability signal (FEAT-0004, recommended operational context, not a build
+  blocker).
 - **Build/test impact:** counter-delta math tests, analyzer-ingest compatibility
   tests, and the enumerated-read-set review. No `CONTROL_PIPELINE_MATH.md` update
   unless control computation changes, which this feature must not do.
@@ -219,20 +226,26 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 - [x] 2. Stressed invariants identified — Repo Boundary, Live Runtime Safety
   (read-only, bounded register reads), runtime-home schema, Measurement Gate,
   control identity (§4).
-- [ ] 3. Required design decision record(s) written and marked current — the
-  acquisition path and the counter-read safety review (§9).
-- [ ] 4. Concrete `REQ-CPUEFF-*` IDs confirmed after the acquisition decision picks
-  a direction (§6, reserved).
+- [x] 3. Required design decision record(s) written and marked current — the
+  acquisition path and the counter-read safety review are settled by the accepted
+  [`cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md) (§9).
+- [x] 4. Concrete `REQ-CPUEFF-*` IDs confirmed (§6) and mirrored in
+  `docs/TRACEABILITY.md`, now that the acquisition decision picks the v1 direction.
 - [x] 5. Verification mapped to `Test-LocalCI` / review / runtime evidence (§10).
-- [ ] 6. Confirm read-only/bounded hardware access and no Measurement Gate move —
-  pending the enumerated read set and its safety review (§9, REQ-CPUEFF-05/06).
+- [x] 6. Read-only/bounded hardware access confirmed by review and no Measurement
+  Gate move — the enumerated MSR allow-list and the counter-read safety review are
+  in the §9 decision (REQ-CPUEFF-05/06). Empirical confirmation on hardware is the
+  live-validation acceptance item below, not a promotion gate.
 - [x] 7. Doctrine check: current behavior is grounded; proposed behavior is
   labeled proposed; Tier 3 named as out of scope.
 
-> Gates 3, 4, and 6 are open: this spec is `Draft` until the acquisition design
-> decision and the counter-read safety review exist and are marked current. It is
-> not buildable work yet. The committed *target* (Tier 1 + Tier 2, work-per-Joule)
-> is agreed; the *acquisition* is the next artifact.
+> All seven promotion gates are met. The spec is held at `Draft` rather than
+> `Accepted` because implementation is intentionally not authorized until a
+> one-shot **read-only live MSR validation** on the target part (Ryzen 9 9950X3D,
+> Family 1Ah) passes: RAPL availability/encoding on Family 1Ah, whether PawnIO
+> honors caller thread affinity for `rdmsr`, and `#GP`→blank. FEAT-0004 is
+> recommended operational context, not a build blocker. The committed target
+> (Tier 1 + Tier 2, work-per-Joule) and the v1 acquisition path are agreed.
 
 ## 14. Verification log  *(fill in after the feature is built)*
 

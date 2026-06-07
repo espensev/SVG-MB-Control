@@ -1,13 +1,14 @@
 # CPU Work/Energy Acquisition Decision - 2026-06-07
 
-Status: **proposed** design decision for
-`docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`. Settles
+Status: **accepted** by the maintainer 2026-06-07. Design decision for
+`docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`; settles
 FEAT-0006 promotion **gate 3** (acquisition design record) and folds in the
 **gate 6** counter-read safety review (§"Counter-read safety review" below).
-**Not normative until accepted by the maintainer.** FEAT-0006 is
-`Reserved`/parked, so this decision is a planning record, not implementation
-permission: per `AGENTS.md` §Feature Intake Gate, building this needs FEAT-0006
-promoted to an implementation-authorized state and FEAT-0004 shipped.
+FEAT-0006 is now `Draft` with its promotion gates met. This decision is
+normative for the acquisition design, but it does **not** authorize
+implementation: per `AGENTS.md` §Feature Intake Gate, building awaits the
+one-shot read-only live MSR validation (RAPL on Family 1Ah; PawnIO affinity;
+`#GP`→blank). FEAT-0004 is recommended operational context, not a blocker.
 
 **Companion to:**
 `docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`,

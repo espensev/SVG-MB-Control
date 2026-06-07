@@ -1,7 +1,7 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-06
+**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-07
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/MEASUREMENT_GATE.md`
@@ -108,8 +108,9 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | FEAT | Feature | `REQ-*` namespace | Status |
 |---|---|---|---|
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
-| [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (load layer; label deferred) |
+| [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; live package verification pending; label deferred) |
 | [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Selectable control-law profile with hot-swap | `REQ-PROFILE-*` | Draft |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Draft |
 | FEAT-0005 | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Reserved (body parked in `_parked/`) |
-| FEAT-0006 | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Reserved (body parked in `_parked/`) |
+| [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Draft |
+| FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |
