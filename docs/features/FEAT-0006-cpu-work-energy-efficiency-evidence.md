@@ -313,12 +313,13 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 
 ## 14. Verification log  *(fill in after the feature is built)*
 
-> **Partial — v1 energy-logger source/test layer landed 2026-06-07; analyzer
-> average-watts derivation landed 2026-06-09.** The status stays **Accepted**
+> **Partial — v1 energy-logger landed 2026-06-07; analyzer average-watts
+> derivation landed 2026-06-09; cycle (APERF/MPERF) logger landed 2026-06-09
+> (default-off).** The status stays **Accepted**
 > (not yet `Implemented`). What is verified: it compiles in the full build, the
 > pure math **and** the baseline/delta/sample-id/guard transition are unit-tested
 > (`rapl_energy.h` / `AdvanceEnergyWindow`), the **default-off** path is inert
-> (CTest 10/10 + hermetic lane via `.\scripts\Test-LocalCI.ps1`), and `analyze
+> (CTest 11/11 + hermetic lane via `.\scripts\Test-LocalCI.ps1`), and `analyze
 > report` now derives time-weighted average package power from the
 > `cpu_pkg_energy_*` columns — schema v9, sample-id de-duplication, no-false-zero
 > "unavailable" path — covered by `ComputePackagePower` unit tests and the
@@ -326,15 +327,17 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 > **enabled** integration path (`SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`) —
 > cadence gating, the real MSR read, and mirror-across-ticks — has run **nowhere**
 > (CI is default-off; the live run that proved RAPL was the separate throwaway
-> probe). Also pending: the live runtime-CSV (M) evidence, the quarantine-exit
-> Evaluation, and REQ-CPUEFF-01/08 (deferred). Promotion to `Implemented`
+> probe; the cycle logger's enabled path is likewise unrun in CI). Also pending:
+> the analyzer effective-frequency derivation from the new cycle columns, the
+> live runtime-CSV (M) evidence, the quarantine-exit Evaluation, and
+> REQ-CPUEFF-08 (deferred). Promotion to `Implemented`
 > additionally requires reconciling the §14 and `docs/TRACEABILITY.md`
 > REQ-CPUEFF result cells to byte-identical text (then enforced by
 > `test_traceability_results_match_implemented_verification_logs`).
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-CPUEFF-01 | deferred | Not yet implemented (energy-only first cut), but reachable: the shipped bin allow-lists the AMD RO aliases `0xC00000E7`/`0xC00000E8`, so delivered cycles (ΔAPERF) are a v1 work proxy — the 2026-06-07 `#GP` was a probe-index error (corrected 2026-06-09, §11). `INST_RETIRED` needs PMC writes (out of scope). The corrected live read passed 2026-06-09 (reachable, affinity honored, plausible effective frequency); gated now only on the cycle-path implementation + build authorization. | 2026-06-09 |
+| REQ-CPUEFF-01 | partial (cycle logger landed default-off; analyzer derivation + enabled-path/live CSV unrun) | Cycle logger landed: `cpu_cycles.h` pure math (allow-list {MPERF_RO `0xC00000E7`, APERF_RO `0xC00000E8`}, 64-bit modular delta, ratio + effective-freq, implausibility guard, `AdvanceCycleWindow`) + `cpu_cycles_tests` (CTest 11/11 via Test-LocalCI); `amd_reader` reads APERF/MPERF per-core under a transient affinity pin and logs `cpu_aperf_delta`/`cpu_mperf_delta` + `cpu_cycles_*` (default-off `SVG_MB_CONTROL_CPU_CYCLES_MODE`). Reachability + affinity + plausibility live-confirmed 2026-06-09 (corrected probe). `INST_RETIRED` stays out of scope (PMC writes). **Not yet:** the analyzer effective-frequency derivation, and the enabled integration path (run nowhere — default-off). | 2026-06-09 |
 | REQ-CPUEFF-02 | partial (logger + analyzer derivation landed & tested; enabled path + live CSV unrun) | `rapl_energy` unit tests — ESU decode, 32-bit modular wrap, multi-wrap→guard-blank, avg-watts, and the `AdvanceEnergyWindow` transition (baseline / id-increment / guard-blank-keeps-id / wrap) — + CTest 10/10 via Test-LocalCI; logger landed (`amd_reader.cpp`, `runtime_csv_rows.cpp`). Analyzer landed 2026-06-09: schema v9 columns (`analyze_db`, `analyze_csv`, `analyze_ingest_db`), time-weighted `ComputePackagePower` with sample-id de-duplication + per-window watt percentiles (`analyze_report_*`), `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end (dedup over mirrored ticks, blank-delta exclusion, no-false-zero "unavailable"). **Enabled integration path not exercised in CI (default-off) or on hardware**; live runtime-CSV (M) evidence pending. | 2026-06-09 |
 | REQ-CPUEFF-03 | pass (v1 scope) | Temperature stays aligned with the window; the energy-only first cut reports effective-frequency inputs `unavailable` (not guessed) — but they are reachable with the shipped bin (RO aliases; the 2026-06-07 `#GP` was a probe-index error, corrected 2026-06-09); control-loop / `csv_rows` tests pass. | 2026-06-09 |
 | REQ-CPUEFF-04 | pass | Additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility-guard tests. | 2026-06-07 |

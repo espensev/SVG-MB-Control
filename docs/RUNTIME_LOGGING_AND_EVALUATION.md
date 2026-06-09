@@ -146,11 +146,14 @@ logging replacement.
   `(cpu_pkg_energy_delta_uj / 1e6) / (cpu_power_window_ms / 1000)` over distinct
   sample ids — heat dissipated (average package watts); pairing it with fan RPM
   to get cooling watts-per-RPM is downstream analysis, not a logged or derived
-  field. The CPU **work**
-  numerator (delivered cycles) and effective frequency are **not emitted by this
-  first cut** but are reachable with the shipped bin (AMD read-only aliases
-  `0xC00000E7`/`0xC00000E8`; the 2026-06-07 `#GP` was a probe-index error) — a
-  near-term cycle-path addition (see
+  field. The FEAT-0006 cycle layer adds **read-only AMD APERF/MPERF** (off by
+  default; enable with `SVG_MB_CONTROL_CPU_CYCLES_MODE=enabled`): raw
+  `cpu_aperf_delta` (delivered cycles, the work numerator) and `cpu_mperf_delta`
+  over `cpu_cycles_window_ms`, keyed by `cpu_cycles_sample_id`, with provenance in
+  `cpu_cycles_acquisition`. Read per-core under a transient affinity pin from the
+  AMD read-only aliases `0xC00000E7`/`0xC00000E8` (the 2026-06-07 `#GP` was a
+  probe-index error). Effective frequency = `(cpu_aperf_delta / cpu_mperf_delta)
+  x P0` and cycles-per-Joule are derived later by the analyzer, not logged (see
   `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
   `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
 - Status publication is rate-limited in the current implementation, so tools

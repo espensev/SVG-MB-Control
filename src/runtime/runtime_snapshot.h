@@ -59,6 +59,16 @@ struct RuntimeSnapshot {
     std::uint64_t pkg_energy_sample_id = 0u;
     double pkg_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
     double pkg_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0006 read-only APERF/MPERF cycle evidence (REQ-CPUEFF-01/03), copied
+    // from AmdSnapshot. Raw delivered (dAPERF) / reference (dMPERF) cycles per
+    // ~1 s window; the analyzer derives effective frequency. Same provenance
+    // states; deltas blank (NaN) on baseline / unavailable / guard-blank.
+    std::string cpu_cycles_acquisition = "disabled";
+    std::uint64_t cpu_cycles_sample_id = 0u;
+    double cpu_cycles_window_ms = std::numeric_limits<double>::quiet_NaN();
+    double cpu_aperf_delta = std::numeric_limits<double>::quiet_NaN();
+    double cpu_mperf_delta = std::numeric_limits<double>::quiet_NaN();
 };
 
 // Per-snapshot lookup cache for hot paths that need to query the same sampled

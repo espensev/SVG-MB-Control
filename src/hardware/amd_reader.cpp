@@ -7,6 +7,7 @@
 #include "amd_decode.h"
 #include "env_util.h"
 #include "pawnio_binary.h"
+#include "cpu_cycles.h"
 #include "rapl_energy.h"
 
 #include <array>
@@ -44,6 +45,11 @@ constexpr std::uint32_t kMaxCcds = 8u;
 constexpr double kEnergyCeilingW = 400.0;    // high-power blank branch
 constexpr double kEnergyDtCapMs = 3000.0;    // dt blank branch (k ~ 3 x 1 s)
 constexpr double kEnergyCadenceMs = 1000.0;  // ~1 s resource-window cadence
+// FEAT-0006 cycle (APERF/MPERF) guard constants; the allow-list and math live in
+// cpu_cycles.h. Same ~1 s resource-window cadence as energy.
+constexpr double kCycleDtCapMs = 3000.0;     // dt blank branch (~3 x 1 s)
+constexpr double kCycleRatioCap = 8.0;       // APERF/MPERF straddle/garbage cap
+constexpr double kCycleCadenceMs = 1000.0;   // ~1 s, same window as energy
 
 // Constant per-CCD sensor labels. Indexing this table avoids rebuilding the
 // label string ("CCD" + std::to_string(index+1) + " (Tdie)") on every CCD on
@@ -282,6 +288,27 @@ Status ReadAllowlistedMsr(HANDLE handle, std::uint32_t index,
     return Status::ok;
 }
 
+// Read-only MSR read for FEAT-0006 cycle evidence. Hard-locked to
+// `ioctl_read_msr` on the two-entry cycle allow-list (MPERF_RO / APERF_RO); it
+// never calls `ioctl_write_msr` and rejects any other index (REQ-CPUEFF-05/06).
+// APERF/MPERF are per-core, so the caller must hold a thread-affinity pin across
+// the paired reads; this helper only issues the read.
+Status ReadAllowlistedCycleMsr(HANDLE handle, std::uint32_t index,
+                               std::uint64_t* out_value) {
+    if (out_value == nullptr || !cycles::IsAllowlistedCycleMsr(index)) {
+        return Status::invalid_arg;
+    }
+    const std::int64_t input = static_cast<std::int64_t>(index);
+    std::int64_t output = 0;
+    const Status status =
+        ExecutePawnIo(handle, "ioctl_read_msr", &input, 1u, &output, 1u);
+    if (status != Status::ok) {
+        return status;
+    }
+    *out_value = static_cast<std::uint64_t>(output);
+    return Status::ok;
+}
+
 bool DetectAmdCpu(std::string* out_name,
                   std::uint32_t* out_family,
                   std::uint32_t* out_model) {
@@ -367,6 +394,19 @@ struct AmdReader::Impl {
     std::uint64_t last_energy_sample_id = 0u;
     double last_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
     double last_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0006 read-only APERF/MPERF cycle acquisition state (default off).
+    bool cycles_enabled = false;
+    bool have_prev_cycles = false;
+    std::uint64_t prev_aperf_raw = 0u;
+    std::uint64_t prev_mperf_raw = 0u;
+    std::chrono::steady_clock::time_point prev_cycle_time{};
+    std::uint64_t cycle_sample_id = 0u;
+    std::string last_cycle_acquisition = "disabled";
+    std::uint64_t last_cycle_sample_id = 0u;
+    double last_cycle_window_ms = std::numeric_limits<double>::quiet_NaN();
+    double last_cycle_aperf_delta = std::numeric_limits<double>::quiet_NaN();
+    double last_cycle_mperf_delta = std::numeric_limits<double>::quiet_NaN();
 
     ~Impl() {
         Close();
@@ -493,6 +533,8 @@ struct AmdReader::Impl {
         bin_hash_mismatch = load_hash_mismatch;
         energy_enabled = rapl::EnergyEnabledFromMode(
             GetEnvOrDefault("SVG_MB_CONTROL_RAPL_ENERGY_MODE", "disabled"));
+        cycles_enabled = cycles::CyclesEnabledFromMode(
+            GetEnvOrDefault("SVG_MB_CONTROL_CPU_CYCLES_MODE", "disabled"));
         if (energy_enabled && !bin_hash_mismatch) {
             std::uint64_t pwr_unit_raw = 0u;
             if (ReadAllowlistedMsr(handle, rapl::kMsrRaplPwrUnit,
@@ -601,6 +643,96 @@ struct AmdReader::Impl {
         snap->pkg_energy_window_ms = last_energy_window_ms;
         snap->pkg_energy_delta_uj = last_energy_delta_uj;
     }
+
+    // FEAT-0006 read-only APERF/MPERF cycle read (default off). Mirrors
+    // SamplePackageEnergy, but the two reads are per-core (APERF/MPERF are
+    // per-logical-processor), so they are taken under a brief thread-affinity pin
+    // to a single representative core (core 0) and the prior affinity is restored
+    // immediately -- a microsecond pin around two reads, the minimal disturbance
+    // the decision doc anticipates. Fully guarded; never throws, never gates
+    // temperature. Default off; never auto-promotes to "validated".
+    void SampleCpuCycles(AmdSnapshot* snap) {
+        if (snap == nullptr) {
+            return;
+        }
+        if (!cycles_enabled) {
+            snap->cpu_cycles_acquisition = "disabled";
+            return;
+        }
+        if (bin_hash_mismatch || handle == nullptr) {
+            snap->cpu_cycles_acquisition = "unavailable";
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const bool due =
+            !have_prev_cycles ||
+            std::chrono::duration<double, std::milli>(now - prev_cycle_time)
+                    .count() >= kCycleCadenceMs;
+        if (!due) {
+            // Mirror the latest window across intervening ~250 ms ticks; the
+            // analyzer de-duplicates on the sample id.
+            snap->cpu_cycles_acquisition = last_cycle_acquisition;
+            snap->cpu_cycles_sample_id = last_cycle_sample_id;
+            snap->cpu_cycles_window_ms = last_cycle_window_ms;
+            snap->cpu_aperf_delta = last_cycle_aperf_delta;
+            snap->cpu_mperf_delta = last_cycle_mperf_delta;
+            return;
+        }
+        // Per-core paired read under a transient affinity pin to core 0: with the
+        // thread restricted to one core both reads execute there (a coherent
+        // ratio), and the prior affinity is restored before returning.
+        std::uint64_t cur_mperf = 0u;
+        std::uint64_t cur_aperf = 0u;
+        const HANDLE thread = GetCurrentThread();
+        const DWORD_PTR prev_affinity =
+            SetThreadAffinityMask(thread, static_cast<DWORD_PTR>(1));
+        const bool pinned = prev_affinity != 0;
+        Status sm = Status::error;
+        Status sa = Status::error;
+        if (pinned) {
+            sm = ReadAllowlistedCycleMsr(handle, cycles::kMsrMperfRo, &cur_mperf);
+            sa = ReadAllowlistedCycleMsr(handle, cycles::kMsrAperfRo, &cur_aperf);
+            SetThreadAffinityMask(thread, prev_affinity);  // restore
+        }
+        if (!pinned || sm != Status::ok || sa != Status::ok) {
+            // No pin (a cross-core ratio is meaningless) or read error -> blank;
+            // re-baseline next window.
+            have_prev_cycles = false;
+            last_cycle_acquisition = "unavailable";
+            last_cycle_window_ms = std::numeric_limits<double>::quiet_NaN();
+            last_cycle_aperf_delta = std::numeric_limits<double>::quiet_NaN();
+            last_cycle_mperf_delta = std::numeric_limits<double>::quiet_NaN();
+            snap->cpu_cycles_acquisition = "unavailable";
+            snap->cpu_cycles_sample_id = last_cycle_sample_id;
+            return;
+        }
+        // The risky baseline/delta/sample-id/guard transition is a pure,
+        // unit-tested function (cycles::AdvanceCycleWindow); this method owns only
+        // the impure orchestration (cadence, the pinned read, the clock, mirror).
+        const double window_ms =
+            std::chrono::duration<double, std::milli>(now - prev_cycle_time)
+                .count();
+        const cycles::CycleWindowResult result = cycles::AdvanceCycleWindow(
+            &have_prev_cycles, &prev_aperf_raw, &prev_mperf_raw, &cycle_sample_id,
+            cur_aperf, cur_mperf, window_ms, kCycleDtCapMs, kCycleRatioCap);
+        prev_cycle_time = now;
+        last_cycle_acquisition = "quarantine";
+        last_cycle_sample_id = result.sample_id;
+        last_cycle_window_ms = result.window_ms;
+        // No false zero: emit empty deltas on baseline or a guard-blank.
+        const bool no_delta = result.baseline || result.blanked;
+        last_cycle_aperf_delta = no_delta
+            ? std::numeric_limits<double>::quiet_NaN()
+            : static_cast<double>(result.d_aperf);
+        last_cycle_mperf_delta = no_delta
+            ? std::numeric_limits<double>::quiet_NaN()
+            : static_cast<double>(result.d_mperf);
+        snap->cpu_cycles_acquisition = last_cycle_acquisition;
+        snap->cpu_cycles_sample_id = last_cycle_sample_id;
+        snap->cpu_cycles_window_ms = last_cycle_window_ms;
+        snap->cpu_aperf_delta = last_cycle_aperf_delta;
+        snap->cpu_mperf_delta = last_cycle_mperf_delta;
+    }
 };
 
 AmdReader::AmdReader() : impl_(std::make_unique<Impl>()) {
@@ -658,6 +790,11 @@ const AmdSnapshot& AmdReader::Sample() {
     snapshot.pkg_energy_sample_id = 0u;
     snapshot.pkg_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
     snapshot.pkg_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_cycles_acquisition = "disabled";
+    snapshot.cpu_cycles_sample_id = 0u;
+    snapshot.cpu_cycles_window_ms = std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_aperf_delta = std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_mperf_delta = std::numeric_limits<double>::quiet_NaN();
     if (impl_ == nullptr) {
         snapshot.last_warning = "not initialized";
         return snapshot;
@@ -702,6 +839,7 @@ const AmdSnapshot& AmdReader::Sample() {
     // independent of the temperature reads below -- a temperature failure must
     // not drop the energy fields, and vice versa.
     impl_->SamplePackageEnergy(&snapshot);
+    impl_->SampleCpuCycles(&snapshot);
 
     // Acquire the system-wide PCI mutex once for the whole Tctl + CCD
     // sequence rather than per SMN read. This drops a steady-state control

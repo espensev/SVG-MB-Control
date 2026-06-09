@@ -605,7 +605,12 @@ std::string BuildControlLoopCsvHeader() {
            << ",cpu_power_sample_id"
            << ",cpu_power_window_ms"
            << ",cpu_pkg_energy_delta_uj"
-           << ",cpu_pkg_energy_acquisition";
+           << ",cpu_pkg_energy_acquisition"
+           << ",cpu_cycles_sample_id"
+           << ",cpu_cycles_window_ms"
+           << ",cpu_aperf_delta"
+           << ",cpu_mperf_delta"
+           << ",cpu_cycles_acquisition";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
@@ -662,6 +667,15 @@ std::string BuildControlLoopCsvRow(
     AppendCsvFieldDouble(csv, snapshot.pkg_energy_window_ms);
     AppendCsvFieldDouble(csv, snapshot.pkg_energy_delta_uj);
     AppendCsvFieldString(csv, snapshot.pkg_energy_acquisition);
+    // FEAT-0006 read-only APERF/MPERF cycle evidence. sample_id blank when 0;
+    // window/deltas blank (NaN) on baseline / unavailable / guard-blank;
+    // acquisition is always a state string.
+    AppendCsvFieldIf(csv, snapshot.cpu_cycles_sample_id != 0u,
+                     snapshot.cpu_cycles_sample_id);
+    AppendCsvFieldDouble(csv, snapshot.cpu_cycles_window_ms);
+    AppendCsvFieldDouble(csv, snapshot.cpu_aperf_delta);
+    AppendCsvFieldDouble(csv, snapshot.cpu_mperf_delta);
+    AppendCsvFieldString(csv, snapshot.cpu_cycles_acquisition);
 
     static const RuntimeControlChannelLogState kEmptyChannel{};
     for (std::uint32_t channel = 0u;

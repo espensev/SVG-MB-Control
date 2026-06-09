@@ -348,6 +348,11 @@ plus:
 - CPU package-energy fields (additive, FEAT-0006, read-only, **off by
   default**): `cpu_power_sample_id`, `cpu_power_window_ms`,
   `cpu_pkg_energy_delta_uj`, and `cpu_pkg_energy_acquisition`
+- CPU cycle fields (additive, FEAT-0006, read-only, **off by default**,
+  `SVG_MB_CONTROL_CPU_CYCLES_MODE`): `cpu_cycles_sample_id`,
+  `cpu_cycles_window_ms`, `cpu_aperf_delta`, `cpu_mperf_delta`, and
+  `cpu_cycles_acquisition` (APERF/MPERF read per-core; the analyzer derives
+  effective frequency, not logged)
 - per-channel observed temperature, setpoint, feedforward demand, correction,
   thermal-pressure boost, primary temperature source, write count,
   active-write flag, and baseline flag

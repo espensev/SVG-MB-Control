@@ -87,6 +87,11 @@ void MergeAmdTelemetry(RuntimeSnapshot& snapshot,
     snapshot.pkg_energy_sample_id = amd_snapshot.pkg_energy_sample_id;
     snapshot.pkg_energy_window_ms = amd_snapshot.pkg_energy_window_ms;
     snapshot.pkg_energy_delta_uj = amd_snapshot.pkg_energy_delta_uj;
+    snapshot.cpu_cycles_acquisition = amd_snapshot.cpu_cycles_acquisition;
+    snapshot.cpu_cycles_sample_id = amd_snapshot.cpu_cycles_sample_id;
+    snapshot.cpu_cycles_window_ms = amd_snapshot.cpu_cycles_window_ms;
+    snapshot.cpu_aperf_delta = amd_snapshot.cpu_aperf_delta;
+    snapshot.cpu_mperf_delta = amd_snapshot.cpu_mperf_delta;
     if (!amd_snapshot.available || amd_snapshot.samples.empty()) {
         return;
     }
