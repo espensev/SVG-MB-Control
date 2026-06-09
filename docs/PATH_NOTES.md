@@ -309,3 +309,10 @@ before building.
 - **VBS/HVCI empirical check** — verify hardware-access behavior with Memory
   Integrity on via `--diagnose-amd` / `--diagnose-gpu` (labeled recommendation
   from `docs/BUILD_TARGETS_AND_DEPENDENCIES.md`).
+- **RAM temperature telemetry** — surface per-DIMM temps (`Agent0/1 DIMM0/1`
+  Nuvoton sources) into the read/control snapshot, CSV, status, and analyze.
+  Read path already exists: `evidence-log` reads all 23 SVG-MB-SIO temperature
+  sources (`read_sio_temperatures`); the gap is promoting the DIMM-labeled ones
+  into the normal telemetry surfaces. Captured in `FEAT-0007` (parked; candidate
+  for promotion only after the open gates clear); open item is confirming the
+  DIMM sources read `valid` on snd-desk from existing `evidence-log` output.
