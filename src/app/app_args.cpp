@@ -83,7 +83,7 @@ std::uint32_t ParseWriteHoldMs(const wchar_t* value) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--start|--status|--health|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>]\n"
+        << "  svg-mb-control [--start|--status|--health|--service-probe|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>]\n"
         << "                 [--reset-breaker-channel <n>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate|evidence-log>] [--config <path>] "
            << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
@@ -98,7 +98,12 @@ void PrintUsage() {
            << "[--db <path>] [--retain-days <days>] [--dry-run|--apply] [--quiet]\n"
         << "  svg-mb-control analyze report [--runtime-home <path>] "
            << "[--db <path>] [--run <id>|--session <ts>] [--idle-seconds <s>] "
-           << "[--load-threshold-c <c>] [--json]\n"
+           << "[--load-threshold-c <c>] [--gpu-load-threshold-c <c>] "
+           << "[--json] [--out <path>] "
+           << "[--manifest-out <path>] "
+           << "[--decision-record-out <path|auto>|--no-decision-record] "
+           << "[--profile <name>] [--hypothesis <text>] "
+           << "[--decision <text>] [--notes <text>]\n"
         << "  svg-mb-control --diagnose-amd\n"
         << "  svg-mb-control --diagnose-gpu\n"
         << "  svg-mb-control --confirm-start\n"

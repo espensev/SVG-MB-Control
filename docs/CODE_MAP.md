@@ -30,6 +30,8 @@ the same responsibility; otherwise they are listed separately.
 
 ## Control Loop (`src/control/`)
 
+- `src/control/boost_stage.{h,cpp}` — Per-stage smootherstep integrator
+  shared by thermal_pressure, midband_pressure, gpu_airflow, and cpu_low_soak.
 - `src/control/cadence_score.{h,cpp}` — Per-tick slew score and the
   upward-only cadence integrator that produces the effective tick
   interval.
@@ -53,6 +55,8 @@ the same responsibility; otherwise they are listed separately.
 - `src/control/control_loop_config.cpp` — Control-loop subtree and
   per-channel JSON parsing/validation (`LoadLowBandConfig`,
   `LoadChannelConfig`). Public declaration stays in `control_loop.h`.
+- `src/control/control_math.{h,cpp}` — Shared math primitives:
+  smootherstep, scale, rate-limited approach — used by cadence and low-band.
 - `src/control/control_runtime_context.{h,cpp}` — `ChannelState` and
   `ControlRuntimeContext` structs: per-channel mutable runtime state
   (duty, smoothed demand, boost terms, hold deadlines, primary-temp
@@ -145,6 +149,7 @@ the same responsibility; otherwise they are listed separately.
 - `src/hardware/amd_decode.h` — AMD SMN decode math (Tctl/Tdie and
   per-CCD Tdie with Zen2/Zen4 CCD-base layout selection), unit-tested by
   `amd_decode_tests.cpp`.
+- `src/hardware/cpu_cycles.h` — Pure math for AMD APERF/MPERF cycle evidence.
 - `src/hardware/fan_writer.{h,cpp}` — `FanWriter` abstraction, result
   codes, and strategy selection between SIO and simulation.
 - `src/hardware/fan_writer_internal.h` — Result-factory helpers and
@@ -155,6 +160,7 @@ the same responsibility; otherwise they are listed separately.
 - `src/hardware/pawnio_binary.{h,cpp}` — PawnIO module-binary
   resolver, loader, and SHA-256 verifier; provenance is in
   `third_party/pawnio/README.md`.
+- `src/hardware/rapl_energy.h` — Pure math for AMD RAPL package-energy evidence.
 - `src/hardware/simulated_fan_writer.cpp` — Simulation strategy used
   under `SVG_MB_CONTROL_SIM_DIRECT_WRITE_MODE` for hermetic tests.
 - `src/hardware/sio_fan_writer.cpp` — Production strategy backed by
@@ -239,6 +245,10 @@ the same responsibility; otherwise they are listed separately.
   per-channel write-evaluation path.
 - `tests/cpp/amd_decode_tests.cpp` — CTest coverage for the AMD SMN
   decode math in `amd_decode.h`.
+- `tests/cpp/cpu_cycles_tests.cpp` — CTest coverage for the AMD cycle
+  math in `cpu_cycles.h`.
+- `tests/cpp/rapl_energy_tests.cpp` — CTest coverage for the AMD RAPL
+  package-energy math in `rapl_energy.h`.
 - `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`,
   `analyze prune`, and native `analyze report` coverage.
 - `tests/test_analyzer.py` — Integration tests for the Python
