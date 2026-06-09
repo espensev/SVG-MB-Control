@@ -95,20 +95,36 @@
             "duty_pct": 15.5
           },
           {
-            "temp_c": 72,
+            "temp_c": 68,
             "duty_pct": 22
           },
           {
-            "temp_c": 82,
-            "duty_pct": 34
+            "temp_c": 72,
+            "duty_pct": 36
+          },
+          {
+            "temp_c": 76,
+            "duty_pct": 48
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 58
+          },
+          {
+            "temp_c": 84,
+            "duty_pct": 66
+          },
+          {
+            "temp_c": 88,
+            "duty_pct": 72
           },
           {
             "temp_c": 92,
-            "duty_pct": 50
+            "duty_pct": 78
           },
           {
             "temp_c": 98,
-            "duty_pct": 62
+            "duty_pct": 86
           }
         ]
       },
@@ -174,32 +190,36 @@
         ],
         "curve": [
           {
-            "temp_c": 45,
-            "duty_pct": 28
+            "temp_c": 35,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 50,
+            "duty_pct": 27
           },
           {
             "temp_c": 62,
-            "duty_pct": 28
+            "duty_pct": 31
           },
           {
-            "temp_c": 70,
-            "duty_pct": 34
+            "temp_c": 72,
+            "duty_pct": 38
           },
           {
             "temp_c": 78,
-            "duty_pct": 46
+            "duty_pct": 50
           },
           {
-            "temp_c": 86,
-            "duty_pct": 62
+            "temp_c": 84,
+            "duty_pct": 60
           },
           {
-            "temp_c": 94,
-            "duty_pct": 82
+            "temp_c": 90,
+            "duty_pct": 70
           },
           {
-            "temp_c": 98,
-            "duty_pct": 94
+            "temp_c": 96,
+            "duty_pct": 78
           }
         ]
       },
@@ -452,35 +472,43 @@
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 18
+            "duty_pct": 20
           },
           {
             "temp_c": 60,
-            "duty_pct": 19
+            "duty_pct": 21
           },
           {
-            "temp_c": 66,
-            "duty_pct": 22
+            "temp_c": 64,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 68,
+            "duty_pct": 31
           },
           {
             "temp_c": 72,
-            "duty_pct": 26
+            "duty_pct": 39
           },
           {
-            "temp_c": 78,
-            "duty_pct": 30
+            "temp_c": 76,
+            "duty_pct": 46
           },
           {
             "temp_c": 80,
-            "duty_pct": 32
+            "duty_pct": 52
           },
           {
-            "temp_c": 86,
-            "duty_pct": 40
+            "temp_c": 84,
+            "duty_pct": 56
+          },
+          {
+            "temp_c": 88,
+            "duty_pct": 58
           },
           {
             "temp_c": 94,
-            "duty_pct": 52
+            "duty_pct": 60
           },
           {
             "temp_c": 98,
@@ -567,35 +595,43 @@
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 20
-          },
-          {
-            "temp_c": 60,
             "duty_pct": 22
           },
           {
-            "temp_c": 66,
-            "duty_pct": 25
+            "temp_c": 60,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 64,
+            "duty_pct": 27
+          },
+          {
+            "temp_c": 68,
+            "duty_pct": 34
           },
           {
             "temp_c": 72,
-            "duty_pct": 29
+            "duty_pct": 42
           },
           {
-            "temp_c": 78,
-            "duty_pct": 33
+            "temp_c": 76,
+            "duty_pct": 49
           },
           {
             "temp_c": 80,
-            "duty_pct": 35
+            "duty_pct": 55
           },
           {
-            "temp_c": 86,
-            "duty_pct": 43
+            "temp_c": 84,
+            "duty_pct": 59
+          },
+          {
+            "temp_c": 88,
+            "duty_pct": 61
           },
           {
             "temp_c": 94,
-            "duty_pct": 55
+            "duty_pct": 63
           },
           {
             "temp_c": 98,

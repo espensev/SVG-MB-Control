@@ -67,7 +67,7 @@
       "channels": [1, 5],
       "intent": "radiator exhaust lanes; keep slightly above the rear exhaust at low load but do not mirror their curves",
       "allow_mirrored_response": false,
-      "gpu_airflow_assist": "Source-aware GPU response added 2026-06-09 so these exhausts ramp with GPU temperature (gentle from ~60 C, stronger toward ~80 C) and relieve case back-pressure as the front intakes ramp. Onset at ~60 C nominally touches the idle positive-pressure band (intake>exhaust until GPU 68 C), but the curve is near-zero there, so the idle bias is preserved in practice; the ramp engages in the high-load regime where pressure balance may relax."
+      "gpu_airflow_assist": "Source-aware GPU response added 2026-06-09 (curve retuned 2026-06-09, see docs/gpu-response-curve-retune-2026-06-09.md) so these exhausts ramp with GPU temperature as the front intakes ramp. The GPU-driven boosts (gpu_airflow + midband_pressure) start at 64 C; below that the curve is near its floor. The curve then climbs gradually to about half strength by ~75 C, strong by ~82 C, and stronger toward ~90 C, with the 86-90 C push carried by the time-gated thermal_pressure boost. Because the response is near-floor below ~64 C it does not disturb the idle positive-pressure band (intake>exhaust until GPU 68 C); it engages in the high-load regime where pressure balance may relax."
     },
     "controlled_airflow": {
       "channels": [0, 1, 2, 3, 4, 5]
@@ -109,7 +109,7 @@
         "idle_bias": "slightly_above_rear_exhaust",
         "cpu_assist": "strong",
         "gpu_airflow": "moderate",
-        "gpu_airflow_note": "Source-aware GPU response added 2026-06-09: gentle from ~60 C GPU, ramping toward ~80 C, to relieve case back-pressure while the front intakes ramp on GPU heat. CPU exhaust response preserved via cpu_override_curve. Curve shaped independently of channel 5 (not mirrored).",
+        "gpu_airflow_note": "Source-aware GPU response added 2026-06-09: near-floor below ~64 C GPU (gpu_airflow + midband_pressure boosts start at 64 C), then climbing gradually to about half strength by ~75 C, strong by ~82 C, and stronger toward ~90 C (the 86-90 C push carried by the time-gated thermal_pressure boost), following GPU temperature while the front intakes ramp on GPU heat. CPU exhaust response carried via cpu_override_curve. Curve shaped independently of channel 5 (not mirrored).",
         "mirror_group": null
       }
     },
@@ -197,7 +197,7 @@
         "idle_bias": "slightly_above_rear_exhaust",
         "cpu_assist": "strong",
         "gpu_airflow": "moderate",
-        "gpu_airflow_note": "Source-aware GPU response added 2026-06-09: gentle from ~60 C GPU, ramping toward ~80 C, to relieve case back-pressure while the front intakes ramp on GPU heat. CPU exhaust response preserved via cpu_override_curve. Curve shaped independently of channel 1 (not mirrored).",
+        "gpu_airflow_note": "Source-aware GPU response added 2026-06-09: near-floor below ~64 C GPU (gpu_airflow + midband_pressure boosts start at 64 C), then climbing gradually to about half strength by ~75 C, strong by ~82 C, and stronger toward ~90 C (the 86-90 C push carried by the time-gated thermal_pressure boost), following GPU temperature while the front intakes ramp on GPU heat. CPU exhaust response carried via cpu_override_curve. Curve shaped independently of channel 1 (not mirrored).",
         "mirror_group": null
       }
     },
