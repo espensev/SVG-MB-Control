@@ -172,7 +172,12 @@ class ConfigContractTests(unittest.TestCase):
                 item["channel"]: item
                 for item in payload["control_loop"]["channels"]
             }
-            for channel_id in (0, 2, 3, 4):
+            # All controlled lanes are source-aware: intakes (0,2,3,4) and the
+            # radiator exhausts (1,5), which gained a GPU-airflow assist curve
+            # on 2026-06-09 so they help relieve case back-pressure as the GPU
+            # intakes ramp. The CPU exhaust response is preserved through each
+            # lane's cpu_override_curve (see the decision record).
+            for channel_id in (0, 1, 2, 3, 4, 5):
                 channel = by_channel[channel_id]
                 self.assertEqual(
                     channel["temp_blend"],
@@ -184,8 +189,42 @@ class ConfigContractTests(unittest.TestCase):
                     75.0,
                     msg=f"{rel_path} channel {channel_id} guard drifted",
                 )
-            for channel_id in (1, 5):
-                self.assertEqual(by_channel[channel_id]["temp_blend"], "cpu_only")
+
+    def test_radiator_exhaust_gpu_curves_are_staggered_not_mirrored(self) -> None:
+        # CHA1/CHA5 are same-model NF-A14 radiator exhausts on one radiator;
+        # their GPU-airflow assist curves must not arrive at the same duty at
+        # the same temperature (same-RPM resonance). They share temp knots and
+        # channel 1 stays strictly above channel 5 by >= 2 pts at every knot.
+        # The intake pair has an analogous >= 4 pt guard in
+        # test_machine_cooling_policy; allow_mirrored_response=false has no
+        # teeth on the GPU curves without this comparison.
+        for rel_path in (
+            Path("config") / "control.example.json",
+            Path("config") / "control.release.json",
+        ):
+            payload = _read_json(REPO_ROOT / rel_path)
+            self.assertIsNotNone(payload, msg=f"missing config: {rel_path}")
+            by_channel = {
+                item["channel"]: item
+                for item in payload["control_loop"]["channels"]
+            }
+            c1 = by_channel[1]["curve"]
+            c5 = by_channel[5]["curve"]
+            self.assertEqual(
+                [point["temp_c"] for point in c1],
+                [point["temp_c"] for point in c5],
+                msg=f"{rel_path} radiator-exhaust GPU curves must share temp knots",
+            )
+            for p1, p5 in zip(c1, c5):
+                self.assertGreaterEqual(
+                    p1["duty_pct"] - p5["duty_pct"],
+                    2.0,
+                    msg=(
+                        f"{rel_path} CHA1/CHA5 GPU curves mirror at "
+                        f"{p1['temp_c']} C ({p1['duty_pct']} vs "
+                        f"{p5['duty_pct']}); stagger to avoid same-RPM resonance"
+                    ),
+                )
 
     def test_shipped_control_loop_configs_include_smooth_decay_controls(self) -> None:
         required = {

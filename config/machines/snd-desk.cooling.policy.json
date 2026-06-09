@@ -66,7 +66,8 @@
     "radiator_exhaust_pair": {
       "channels": [1, 5],
       "intent": "radiator exhaust lanes; keep slightly above the rear exhaust at low load but do not mirror their curves",
-      "allow_mirrored_response": false
+      "allow_mirrored_response": false,
+      "gpu_airflow_assist": "Source-aware GPU response added 2026-06-09 so these exhausts ramp with GPU temperature (gentle from ~60 C, stronger toward ~80 C) and relieve case back-pressure as the front intakes ramp. Onset at ~60 C nominally touches the idle positive-pressure band (intake>exhaust until GPU 68 C), but the curve is near-zero there, so the idle bias is preserved in practice; the ramp engages in the high-load regime where pressure balance may relax."
     },
     "controlled_airflow": {
       "channels": [0, 1, 2, 3, 4, 5]
@@ -107,6 +108,8 @@
       "response_intent": {
         "idle_bias": "slightly_above_rear_exhaust",
         "cpu_assist": "strong",
+        "gpu_airflow": "moderate",
+        "gpu_airflow_note": "Source-aware GPU response added 2026-06-09: gentle from ~60 C GPU, ramping toward ~80 C, to relieve case back-pressure while the front intakes ramp on GPU heat. CPU exhaust response preserved via cpu_override_curve. Curve shaped independently of channel 5 (not mirrored).",
         "mirror_group": null
       }
     },
@@ -193,6 +196,8 @@
       "response_intent": {
         "idle_bias": "slightly_above_rear_exhaust",
         "cpu_assist": "strong",
+        "gpu_airflow": "moderate",
+        "gpu_airflow_note": "Source-aware GPU response added 2026-06-09: gentle from ~60 C GPU, ramping toward ~80 C, to relieve case back-pressure while the front intakes ramp on GPU heat. CPU exhaust response preserved via cpu_override_curve. Curve shaped independently of channel 1 (not mirrored).",
         "mirror_group": null
       }
     },
