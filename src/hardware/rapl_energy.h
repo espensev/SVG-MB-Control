@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <string_view>
 
 namespace svg_mb_control {
 namespace rapl {
@@ -25,6 +26,16 @@ inline constexpr std::uint32_t kMsrPkgEnergyStat = 0xC001029Bu;  // pkg energy
 // is rejected by the helper that calls this.
 inline bool IsAllowlistedEnergyMsr(std::uint32_t index) {
     return index == kMsrRaplPwrUnit || index == kMsrPkgEnergyStat;
+}
+
+// Producer-side acquisition gate (REQ-CPUEFF-05: the energy read is opt-in).
+// The MSR is read only when the SVG_MB_CONTROL_RAPL_ENERGY_MODE environment
+// value is exactly "enabled"; anything else -- unset (the caller defaults to
+// "disabled"), empty, wrong case, or any other string -- stays off, so the
+// default is no read and null columns. Pure so the gate decision is testable
+// without hardware.
+inline bool EnergyEnabledFromMode(std::string_view mode) {
+    return mode == "enabled";
 }
 
 // Energy Status Unit is bits [12:8] of MSR_RAPL_PWR_UNIT. The energy unit is

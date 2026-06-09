@@ -491,9 +491,8 @@ struct AmdReader::Impl {
         // the energy unit once; a hash-mismatched bin or an implausible unit
         // leaves it 0 so SamplePackageEnergy reports "unavailable".
         bin_hash_mismatch = load_hash_mismatch;
-        energy_enabled =
-            GetEnvOrDefault("SVG_MB_CONTROL_RAPL_ENERGY_MODE", "disabled") ==
-            "enabled";
+        energy_enabled = rapl::EnergyEnabledFromMode(
+            GetEnvOrDefault("SVG_MB_CONTROL_RAPL_ENERGY_MODE", "disabled"));
         if (energy_enabled && !bin_hash_mismatch) {
             std::uint64_t pwr_unit_raw = 0u;
             if (ReadAllowlistedMsr(handle, rapl::kMsrRaplPwrUnit,

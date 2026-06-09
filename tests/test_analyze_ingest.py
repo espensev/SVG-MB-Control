@@ -1143,6 +1143,51 @@ class AnalyzeReportTests(unittest.TestCase):
                 "package_power: windows=3 avg_watts=15.000", text
             )
 
+    def test_report_degrades_when_energy_columns_missing(self) -> None:
+        # An old (schema-8) DB read by a schema-9 binary: report.cpp checks only
+        # that a schema is present (version > 0), not that it matches, and does
+        # not migrate -- so the package-power query references columns that do
+        # not exist and throws "no such column". The single try/catch in
+        # SummarisePackagePower must degrade that to an "unavailable" block (no
+        # false zero) without failing the whole report.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            # Downgrade the freshly-ingested v9 DB to look like a v8 one: drop the
+            # four additive cpu_power_* columns and reset the recorded version.
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                for col in (
+                    "cpu_power_sample_id",
+                    "cpu_power_window_ms",
+                    "cpu_pkg_energy_delta_uj",
+                    "cpu_pkg_energy_acquisition",
+                ):
+                    conn.execute(
+                        f"ALTER TABLE tick_samples DROP COLUMN {col}"
+                    )
+                conn.execute(
+                    "UPDATE schema_meta SET value='8' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            pp = json.loads(result.stdout)["package_power"]
+            # Missing columns -> query throws -> empty (unavailable) summary,
+            # not a crash and not a false zero.
+            self.assertEqual(pp["window_count"], 0)
+            self.assertIsNone(pp["avg_watts"])
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn("package_power: windows=0", text)
+
     def test_report_writes_native_analysis_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

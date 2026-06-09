@@ -191,10 +191,27 @@ void TestAllowlistGuard() {
     ExpectFalse(IsAllowlistedEnergyMsr(0xFFFFFFFFu), "bogus not allow-listed");
 }
 
+void TestEnergyEnabledFromMode() {
+    // Producer gate is opt-in (REQ-CPUEFF-05): only the exact literal "enabled"
+    // turns the read on; the default-off guarantee depends on everything else
+    // staying false.
+    ExpectTrue(EnergyEnabledFromMode("enabled"), "\"enabled\" enables the read");
+    ExpectFalse(EnergyEnabledFromMode("disabled"),
+                "\"disabled\" stays off (the default)");
+    ExpectFalse(EnergyEnabledFromMode(""), "empty/unset stays off");
+    ExpectFalse(EnergyEnabledFromMode("Enabled"),
+                "case-sensitive: \"Enabled\" stays off");
+    ExpectFalse(EnergyEnabledFromMode("enabled "),
+                "no trimming: trailing space stays off");
+    ExpectFalse(EnergyEnabledFromMode("1"),
+                "arbitrary truthy string stays off");
+}
+
 }  // namespace
 
 int main() {
     TestAllowlistGuard();
+    TestEnergyEnabledFromMode();
     TestAdvanceWindow_Baseline();
     TestAdvanceWindow_FirstDeltaAndIncrement();
     TestAdvanceWindow_GuardBlanksDeltaButKeepsId();
