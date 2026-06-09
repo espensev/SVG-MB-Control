@@ -162,10 +162,13 @@ remains.
    (c) APERF/MPERF effective frequency; (d) an unsupported MSR returns error →
    blank. Procedure: `docs/cpu-work-energy-live-validation-plan-2026-06-07.md`.
    **Outcome: PASS (energy-only).** RAPL energy works and is correctly encoded on
-   Family 1Ah; APERF/MPERF (and TSC_AUX) `#GP` through the shipped bin, so
-   effective frequency is unavailable in v1 and (a) is moot. This **supersedes**
-   the §Per-signal APERF/MPERF reachability row below. Results:
-   `docs/cpu-work-energy-live-validation-results-2026-06-07.md`.
+   Family 1Ah. The run also reported APERF/MPERF `#GP`, but that was a
+   **probe-index error** (corrected 2026-06-09): it read the architectural
+   `0xE7`/`0xE8`, which the module does not allow-list; the shipped bin **does**
+   serve the AMD read-only aliases `0xC00000E7`/`0xC00000E8`, so APERF/MPERF and
+   effective frequency are reachable (the §Per-signal reachability row stands).
+   Results: `docs/cpu-work-energy-live-validation-results-2026-06-07.md`;
+   resolution: `docs/cpu-cycle-counter-source-decision-2026-06-07.md`.
 4. **After validation:** the maintainer decides the energy-only re-scope
    (cycle-counter work proxy and effective-frequency context withheld) and
    authorizes the build; then implement the energy path per the decision doc

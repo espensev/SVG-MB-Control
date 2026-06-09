@@ -42,10 +42,13 @@ Governed by FEAT-0006 and the `REQ-CPUEFF-*` rows in `docs\TRACEABILITY.md`.
   not yet run in CI or on hardware, so it is not "validated".
 - The `quarantine` → `validated` Evaluation gate for `cpu_pkg_energy_acquisition`
   (this is never set automatically).
-- Cycle-counter / work-numerator source decision (stub:
-  `docs\cpu-cycle-counter-source-decision-2026-06-07.md`). The 2026-06-07 live
-  validation found the shipped PawnIO bin filters APERF/MPERF, so the work
-  numerator and effective frequency are not obtainable with the current bin
+- Cycle-counter / work-numerator: **resolved — no new module**
+  (`docs\cpu-cycle-counter-source-decision-2026-06-07.md`). The 2026-06-07 live
+  validation reported APERF/MPERF `#GP`, but that was a probe-index error: the
+  shipped bin allow-lists the AMD read-only aliases `0xC00000E7`/`0xC00000E8`, so
+  the work numerator (ΔAPERF) and effective frequency are reachable with the
+  current bin (corrected 2026-06-09). Remaining: a corrected per-core-pinned live
+  read (`tools\cpu_cycle_counter_probe.cpp`) then the cycle path
   (`docs\cpu-work-energy-live-validation-results-2026-06-07.md`).
 
 ### Include ownership — decision-gated, no action yet

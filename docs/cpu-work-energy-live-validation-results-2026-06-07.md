@@ -12,6 +12,19 @@ Evaluation, `cpu-work-energy-acquisition-decision-2026-06-07.md` §Evaluation),
 and it does **not** authorize the build (the maintainer authorizes that
 separately).
 
+> **⚠ CORRECTION (2026-06-09).** Finding 2 and the effective-frequency
+> conclusions in this record are **wrong**. The probe read the architectural
+> indices `IA32_MPERF 0xE7` / `IA32_APERF 0xE8` (and `TSC_AUX 0xC0000103`), which
+> `AMDFamily17.p` does not allow-list, so they returned `ACCESS_DENIED`. The
+> shipped bin **does** service the cycle counters — at the AMD read-only aliases
+> `MSR_MPERF_RO 0xC00000E7` / `MSR_APERF_RO 0xC00000E8` (verified in the 0.2.6
+> source we ship and 0.2.7; AMD OSRR 56255). So the work numerator (ΔAPERF) and
+> effective frequency (ΔAPERF/ΔMPERF × P0) **are obtainable with the bin already
+> shipped** — no new module. The **energy** results below stand; the
+> "energy-only, cycle counters need a new module" conclusion does not. Resolved
+> in `docs/cpu-cycle-counter-source-decision-2026-06-07.md`. The raw probe output
+> is kept verbatim as the record of what was (mis-)tested.
+
 **Companion to:**
 `docs/cpu-work-energy-live-validation-plan-2026-06-07.md`,
 `docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
@@ -35,7 +48,7 @@ separately).
 | reach | Which allow-list MSRs does the module service? | `pwr_unit=ok pkg_energy=ok aperf=#GP mperf=#GP` |
 | Q2 | RAPL available + ESU encoded as documented on Family 1Ah? | **PASS.** `0xC0010299` ESU=16 → 15.2588 µJ/unit (the documented default). Energy tracked load: baseline 58.9 W → all-core busy 111.7 W, monotonic, below the 400 W ceiling. |
 | Q1 | PawnIO honors caller affinity for `rdmsr`? | **Moot.** APERF/MPERF are not readable through this bin (below), so the cycle path does not exist in v1 regardless of affinity. |
-| Q3 | APERF/MPERF → plausible effective frequency? | **Not available.** `0xE7`/`0xE8` `#GP` through the shipped module. |
+| Q3 | APERF/MPERF → plausible effective frequency? | **Untested — wrong index (corrected 2026-06-09).** `0xE7`/`0xE8` `#GP` because the module allow-lists the AMD RO aliases `0xC00000E7`/`0xC00000E8`, which were not read. Reachable; a corrected per-core-pinned read is pending. |
 | Q4 | Absent/unsupported MSR → blank, no crash/false-zero? | **PASS.** A deliberate `0xFFFFFFFF` read returned an error (blank); no crash, no zero. |
 
 ### Raw probe output
@@ -68,61 +81,66 @@ load: ok
    with load. The Family-1Ah RAPL availability/encoding caveat carried since the
    verification doc is cleared for the energy signal.
 
-2. **APERF/MPERF are NOT reachable through the shipped bin (empirical).**
-   `0xE7`/`0xE8` (and the earlier-tried `0xC0000103` TSC_AUX) `#GP`/error, while
-   the RAPL MSRs on the **same** `ReadMsrRaw` / buffer / `DeviceIoControl` path
-   succeed (returning the documented ESU and load-tracking power) and the
-   deliberate bogus read errors as expected. So the rejection is index-specific
-   at the driver, not a probe/transport artifact. **Likely cause** (inferred, not
-   confirmed): the upstream `AMDFamily17.p` module restricts `ioctl_read_msr` to
-   a subset of indices that includes the RAPL energy MSRs but excludes the
-   architectural cycle counters — the vendored files
-   (`third_party/pawnio/README.md`, the `.bin`) document the read function but
-   not any per-index restriction, so the mechanism is not verifiable from
-   in-repo source. Either way, the **observable result** is what matters:
-   APERF/MPERF do not read through this bin. This **falsifies** the verification
-   doc's §Per-signal feasibility row that listed APERF/MPERF as reachable "via
-   `ioctl_read_msr`" — reachability was inferred from the module *exposing* the
-   read function and never tested live.
+2. **APERF/MPERF reachability — this conclusion was WRONG (corrected
+   2026-06-09).** The probe read `0xE7`/`0xE8` (and `0xC0000103` TSC_AUX); all
+   returned `ACCESS_DENIED` while the RAPL MSRs on the same path succeeded —
+   correctly observed as an index-specific driver rejection. The error was the
+   **inference** that the counters are therefore unreachable. The upstream
+   `AMDFamily17.p` source (the **0.2.6** bin we ship, and **0.2.7**) allow-lists
+   `ioctl_read_msr` for the AMD **read-only aliases** `MSR_MPERF_RO 0xC00000E7` /
+   `MSR_APERF_RO 0xC00000E8` — **not** the architectural `0xE7`/`0xE8`. So the
+   probe read the wrong indices; APERF/MPERF (and thus the work numerator and
+   effective frequency) **are reachable through this very bin** at the RO
+   aliases. This does **not** falsify the verification doc's reachability row —
+   they are reachable; only the index to read on AMD via this module differs. See
+   `docs/cpu-cycle-counter-source-decision-2026-06-07.md` (resolved) and AMD OSRR
+   56255.
 
 3. **`#GP` degrades to blank cleanly** (no crash, no false zero), confirming the
    decision doc §Counter-read safety review behavior on this driver.
 
 ## Outcome and implications
 
-**PASS (energy-only).** v1 acquires **RAPL package energy only**. The affinity
-question (Q1) is moot for v1 because the cycle counters are unreadable, not
-merely affinity-untrusted.
+**PASS (energy-only) for the energy signal.** As implemented, v1 acquires **RAPL
+package energy only**. (Corrected 2026-06-09: the cycle counters are **not**
+unreadable — they read at the AMD RO aliases `0xC00000E7`/`0xC00000E8`; the
+affinity question Q1 is therefore live again, not moot, and is part of the
+corrected cycle-path re-validation.)
 
 - This lands in the **energy-only branch the acquisition decision already
   anticipated** ("otherwise v1 ships energy-only and effective frequency stays
   withheld"), so the committed design does not need to be reopened to proceed —
-  but the *reason* is stronger than expected: effective frequency is not a
-  "validate affinity later" item, it is **not obtainable with the current bin
-  at all**.
-- **Recovering effective frequency is now a module problem, not an affinity
-  problem.** It would require a PawnIO module whose `read_msr` actually services
-  `0xE7`/`0xE8` (a different or patched bin), which is a separate source decision
-  touching `AGENTS.md` §Repo Boundary (vendoring/packaging a new module) — not in
-  this slice.
-- **Requirement impact:** REQ-CPUEFF-01 (a first-party **work** signal —
-  instructions retired and/or delivered cycles) has **no satisfying first-party
-  signal in v1**: delivered cycles (APERF) are filtered by the bin and
-  `INST_RETIRED` needs PMC writes. It is **deferred, not met**. Energy is the
-  *denominator* (REQ-CPUEFF-02), not a work signal — so **first-party
-  work-per-Joule (the §2 motivation) is not computable in v1**. What energy-only
-  v1 does deliver: package power = heat dissipated (cooling watts-per-RPM), and
-  score-per-Joule when an external fixed-workload score supplies the work term.
+  and (corrected 2026-06-09) the "stronger reason" recorded here — that
+  effective frequency was *not obtainable with the current bin at all* — was
+  itself wrong: the probe read the wrong indices (see the correction above).
+- **Recovering effective frequency needs no new module (corrected 2026-06-09).**
+  The shipped bin already allow-lists the AMD read-only aliases
+  `0xC00000E7`/`0xC00000E8`; the cycle path is a near-term addition to v1 gated on
+  a corrected per-core-pinned live read, not a separate source/module decision.
+  See `docs/cpu-cycle-counter-source-decision-2026-06-07.md`.
+- **Requirement impact (corrected 2026-06-09):** REQ-CPUEFF-01 (a first-party
+  **work** signal) is **achievable in v1**, not blocked: delivered cycles
+  (ΔAPERF) are readable via the RO alias `0xC00000E8` with the shipped bin
+  (`INST_RETIRED` still needs PMC writes and stays out of read-only scope, but it
+  is not required — APERF delivered-cycles is the v1 work proxy per FEAT-0006
+  §11). So first-party **work-per-Joule** (the §2 motivation) **is computable in
+  v1** once the cycle path is implemented. As **currently implemented**, v1 is
+  still energy-only (the cycle path is not yet built); package power = heat
+  dissipated and score-per-Joule (external score) are what the shipped logger
+  delivers today.
   REQ-CPUEFF-03's effective-frequency context is `unavailable` in v1 (correctly,
   not guessed). These are maintainer-authored spec/decision re-scopes to make
   before the energy-only build is scoped, separate from this results record.
 
 ## Next steps
 
-1. Maintainer decides whether to (a) authorize an **energy-only v1** build
-   (RAPL package energy, default-off, quarantined), and/or (b) open a separate
-   source decision for an APERF/MPERF-capable PawnIO module to recover effective
-   frequency later.
+1. **(a) Done** — the energy-only v1 build (RAPL package energy, default-off,
+   quarantined) was authorized and landed (commit 3d334d7). **(b) Resolved, not
+   needed (corrected 2026-06-09)** — no separate module source decision is
+   required: the shipped bin already serves APERF/MPERF at the RO aliases. Adding
+   the work numerator / effective frequency now needs only a corrected
+   per-core-pinned live read (`tools/cpu_cycle_counter_probe.cpp`) then the cycle
+   path, per `docs/cpu-cycle-counter-source-decision-2026-06-07.md`.
 2. If (a): implement the energy path per the decision doc §Apply order; the data
    ships `quarantine` and only the post-implementation Evaluation (≥ 3 sessions /
    ≥ 7 days, ±15% external cross-check) promotes it to `validated`.

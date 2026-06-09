@@ -147,10 +147,11 @@ logging replacement.
   sample ids — heat dissipated (average package watts); pairing it with fan RPM
   to get cooling watts-per-RPM is downstream analysis, not a logged or derived
   field. The CPU **work**
-  numerator (delivered cycles / instructions) and effective frequency are
-  **not in v1**: 2026-06-07 live validation found the shipped PawnIO bin filters
-  the APERF/MPERF reads, so first-party work-per-Joule is not yet computable (see
-  `docs/cpu-work-energy-live-validation-results-2026-06-07.md`).
+  numerator (delivered cycles) and effective frequency are **not emitted by this
+  first cut** but are reachable with the shipped bin (AMD read-only aliases
+  `0xC00000E7`/`0xC00000E8`; the 2026-06-07 `#GP` was a probe-index error) — a
+  near-term cycle-path addition (see
+  `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
   `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.

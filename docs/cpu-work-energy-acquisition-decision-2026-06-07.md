@@ -7,10 +7,13 @@ FEAT-0006 promotion **gate 3** (acquisition design record) and folds in the
 FEAT-0006's promotion gates are met. This decision is
 normative for the acquisition design. The one-shot read-only live MSR validation
 has since run (2026-06-07): PASS (energy-only) — RAPL package energy works on
-Family 1Ah; APERF/MPERF `#GP` through the shipped bin, so the work /
-effective-frequency path is deferred. Per `AGENTS.md` §Feature Intake Gate the
-maintainer authorized an energy-only v1 build; the cycle-counter work numerator
-remains deferred (see "Resolved live" below). FEAT-0004 is recommended
+Family 1Ah. (The run also reported APERF/MPERF `#GP`, but that was a probe-index
+error: the shipped bin serves the AMD read-only aliases `0xC00000E7`/`0xC00000E8`,
+not the architectural `0xE7`/`0xE8` the probe read — corrected 2026-06-09.) Per
+`AGENTS.md` §Feature Intake Gate the maintainer authorized an energy-only v1
+build; the work numerator / effective frequency are deferred from that first cut
+but reachable with the shipped bin, a near-term cycle-path addition (see
+"Resolved live" below). FEAT-0004 is recommended
 operational context, not a blocker.
 
 **Companion to:**
@@ -451,9 +454,10 @@ at ~200 W), and cooldown. Use the in-tree analyzer
 - **Implementation permission (energy-only).** FEAT-0006's promotion gates are
   met and the one-shot read-only live MSR validation passed 2026-06-07
   (energy-only); the maintainer authorized an energy-only v1 build. The
-  work-numerator / effective-frequency slice remains deferred (APERF/MPERF
-  filtered by the shipped bin). FEAT-0004 is recommended operational context,
-  not a blocker.
+  work-numerator / effective-frequency slice is deferred from that first cut but
+  reachable with the shipped bin (AMD RO aliases `0xC00000E7`/`0xC00000E8`;
+  corrected 2026-06-09) — a near-term cycle-path addition, not a new source.
+  FEAT-0004 is recommended operational context, not a blocker.
 - **Deferred signals.** `INST_RETIRED` (PMC writes), per-core energy (Tier 3),
   Vcore + PPT/TDC/EDC (SMU mailbox) — out of v1. They remain target context for
   a later source decision, not v1 pass/fail fields. Until those fields exist,
@@ -463,10 +467,14 @@ at ~200 W), and cooldown. Use the in-tree analyzer
 - **Resolved live (2026-06-07; see
   `docs/cpu-work-energy-live-validation-results-2026-06-07.md`):** RAPL
   availability/encoding on Family 1Ah is **confirmed working** (ESU=16 →
-  15.26 µJ/unit; power tracks load). The PawnIO affinity question is **moot for
-  v1**: APERF/MPERF `#GP` through the shipped bin (it filters the read set), so
-  the work/effective-frequency path is unavailable and **v1 is energy-only** (the
-  fallback this decision already names). Recovering cycles/effective frequency
-  needs a different PawnIO module — a separate source decision (FEAT-0006 §11).
+  15.26 µJ/unit; power tracks load). The 2026-06-07 run also reported APERF/MPERF
+  `#GP`, but that was a **probe-index error** (corrected 2026-06-09): it read the
+  architectural `0xE7`/`0xE8`, which the module does not allow-list; the shipped
+  bin **does** serve the AMD read-only aliases `0xC00000E7`/`0xC00000E8`. So the
+  work/effective-frequency path needs **no new module** — it is a near-term
+  cycle-path addition gated on a corrected per-core-pinned live read (the PawnIO
+  affinity question is live again, not moot). As **implemented**, v1 is still
+  energy-only. See `docs/cpu-cycle-counter-source-decision-2026-06-07.md`
+  (resolved).
 - **Still open:** the exact socket-ceiling constant for the implausibility guard
   (the validation plan proposes 400 W; finalize at implementation).

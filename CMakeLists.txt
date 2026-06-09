@@ -240,6 +240,36 @@ if(WIN32)
     configure_svg_mb_control_target(svg_mb_control_task_runner)
 endif()
 
+# Throwaway one-shot read-only probe confirming the shipped AMDFamily17 bin
+# services the AMD read-only APERF/MPERF aliases (0xC00000E7 / 0xC00000E8) -- the
+# corrected FEAT-0006 cycle-counter validation (the 2026-06-07 gate probe read
+# the wrong indices). OFF by default: not built by Test-LocalCI / Build-Release /
+# CTest, never shipped in release\, not part of the control loop. Build with
+#   cmake -DSVG_MB_CONTROL_BUILD_CYCLE_PROBE=ON ... && cmake --build ... \
+#         --target cpu_cycle_counter_probe
+# Reuses only the bin-load API (pawnio_binary) + env_util; does not link
+# svg_mb_control_core and does not touch src/hardware.
+option(SVG_MB_CONTROL_BUILD_CYCLE_PROBE
+    "Build the throwaway read-only CPU cycle-counter validation probe (FEAT-0006)" OFF)
+if(SVG_MB_CONTROL_BUILD_CYCLE_PROBE AND WIN32)
+    add_executable(cpu_cycle_counter_probe
+        tools/cpu_cycle_counter_probe.cpp
+        src/hardware/pawnio_binary.cpp
+        src/platform/env_util.cpp
+    )
+    target_include_directories(cpu_cycle_counter_probe PRIVATE
+        ${SVG_MB_CONTROL_INCLUDE_DIRS})
+    target_compile_features(cpu_cycle_counter_probe PRIVATE cxx_std_20)
+    target_compile_definitions(cpu_cycle_counter_probe PRIVATE
+        ${SVG_MB_CONTROL_COMMON_DEFINITIONS})
+    if(MSVC)
+        target_compile_options(cpu_cycle_counter_probe PRIVATE /W4 /permissive-)
+    endif()
+    target_link_libraries(cpu_cycle_counter_probe PRIVATE bcrypt)
+    set_target_properties(cpu_cycle_counter_probe PROPERTIES
+        OUTPUT_NAME "cpu-cycle-counter-probe")
+endif()
+
 if(BUILD_TESTING)
     add_executable(svg_mb_control_core_tests
         tests/cpp/core_smoke_tests.cpp
