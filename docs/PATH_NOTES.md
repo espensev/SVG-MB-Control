@@ -23,6 +23,21 @@ checkable.
 
 ---
 
+## 2026-06-09
+
+- **Done** — collapsed the nine duplicated core-linked CTest registration
+  blocks in `CMakeLists.txt` into a `svg_mb_control_add_core_test(name source)`
+  helper plus nine one-line calls; the two header-only tests (`rapl_energy` /
+  `cpu_cycles`) stay hand-rolled because they must not link
+  `svg_mb_control_core`. Behavior-preserving: the same eleven CTest targets,
+  names, and registration order, verified by `Test-LocalCI` (CTest 11/11,
+  Python hermetic lane green). Adding a future core-linked test is now one
+  line. Logged as `docs/STRUCTURE_AND_STABILITY.md` §Migration Order item 16.
+- **Fixed** — `docs/BUILD_TARGETS_AND_DEPENDENCIES.md` §Test executables said
+  "Each links `svg_mb_control_core`", which was untrue for the two header-only
+  tests added the same day; restated to name the two exceptions and the reason
+  (`rapl_energy.h` / `cpu_cycles.h` math is dependency-free).
+
 ## 2026-06-06
 
 - **Changed** — revised decision **D6** (profile hot-swap live authorization) to the

@@ -176,6 +176,13 @@ Completed:
     builders. `svg_mb_control_csv_rows_tests` now checks read-loop,
     evidence-log, and control-loop header/row alignment plus representative
     present/absent indexed values.
+16. Collapsed the nine duplicated core-linked CTest registration blocks in
+    `CMakeLists.txt` into one `svg_mb_control_add_core_test(name source)`
+    helper plus nine one-line calls. The two header-only tests
+    (`svg_mb_control_rapl_energy_tests`, `svg_mb_control_cpu_cycles_tests`)
+    stay hand-rolled because they must not link `svg_mb_control_core`. The
+    build graph is unchanged: the same eleven CTest targets, names, and
+    registration order, verified by `Test-LocalCI` (CTest 11/11).
 
 Remaining polish:
 
