@@ -33,7 +33,7 @@ Reference baseline for every pass (from `config\control.release.json` and
 - Authority bias for high-CPU response:
   `thermal_pressure_max_boost_pct = 20.0` on channels `1` and `5`
   (`cpu_only` radiator lanes) versus `14.0` on channel `4`
-  (`max_cpu_gpu` front radiator Noctua intake). CPU override curves jump
+  (`max_cpu_gpu_source_aware` front radiator Noctua intake). CPU override curves jump
   aggressively on channels `1` and `5` at `88-92 C` while channel `4`
   climbs more gradually.
 
@@ -191,7 +191,7 @@ curve cannot maintain pressure bias:
   `35C:42%`, `50C:46%`, `62C:54%`, `72C:64%`
 - channel `3` (PA602 stock front 200 mm intake): min `38%`, then
   `35C:38%`, `50C:42%`, `62C:50%`, `72C:60%`
-- channel `4` (front radiator Noctua intake, `max_cpu_gpu`): min `24%`,
+- channel `4` (front radiator Noctua intake, `max_cpu_gpu_source_aware`): min `24%`,
   then `35C:24%`, `50C:27%`, `62C:31%`, `72C:38%`
 - channel `5` (mid radiator Noctua, `cpu_only`): `20%`
 
@@ -233,9 +233,9 @@ CPU response is mandatory. Each controlled channel uses a separate
 - channel `0` carries a smaller rear-exhaust CPU assist — override
   climbs from `15.5%` floor to `18%` at `84 C`, `28%` at `88 C`, `42%`
   at `92 C`, and `58%` at `96 C`.
-- channel `4` (front radiator Noctua intake, `max_cpu_gpu`) carries the
+- channel `4` (front radiator Noctua intake, `max_cpu_gpu_source_aware`) carries the
   secondary radiator authority — `thermal_pressure_max_boost_pct = 14.0`,
-  override climbs more gradually (`32%` at `82 C`, `42%` at `86 C`,
+  override climbs more gradually (`42%` at `82 C`, `46%` at `86 C`,
   `54%` at `90 C`, `70%` at `95 C`). This is the deliberate "shift
   authority toward channels `1` and `5`, reduce channel `4` high-heat
   dominance" outcome recorded in `CONTROL_PIPELINE_MATH.md` §13.1.

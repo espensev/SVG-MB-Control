@@ -86,6 +86,9 @@ the same responsibility; otherwise they are listed separately.
   formatting helpers used by both the runtime logger and analyzer.
 - `src/runtime/evidence_log.{h,cpp}` — Foreground `evidence-log` mode:
   AMD/GPU/fan sampling and JSONL emission with no fan writes.
+- `src/runtime/evidence_signatures.{h,cpp}` — Pure change-detection /
+  signature helpers split out of `evidence_log`, used to set per-field
+  change flags without re-sampling.
 - `src/runtime/gpu_evidence_csv.{h,cpp}` — GPU-evidence CSV header
   builder and per-sample row appender used by `evidence-log`.
 - `src/runtime/json_io.{h,cpp}` — Defensive JSON accessors
@@ -139,6 +142,9 @@ the same responsibility; otherwise they are listed separately.
 
 - `src/hardware/amd_reader.{h,cpp}` — AMD SMN CPU telemetry reader
   (Tctl/Tdie) backed by the PawnIO driver.
+- `src/hardware/amd_decode.h` — AMD SMN decode math (Tctl/Tdie and
+  per-CCD Tdie with Zen2/Zen4 CCD-base layout selection), unit-tested by
+  `amd_decode_tests.cpp`.
 - `src/hardware/fan_writer.{h,cpp}` — `FanWriter` abstraction, result
   codes, and strategy selection between SIO and simulation.
 - `src/hardware/fan_writer_internal.h` — Result-factory helpers and
@@ -229,6 +235,10 @@ the same responsibility; otherwise they are listed separately.
   fields across read-loop, evidence-log, and control-loop rows.
 - `tests/cpp/pawnio_binary_tests.cpp` — CTest C++ coverage for PawnIO
   binary resolution, load, and SHA-256 verification.
+- `tests/cpp/channel_write_tests.cpp` — CTest coverage for the
+  per-channel write-evaluation path.
+- `tests/cpp/amd_decode_tests.cpp` — CTest coverage for the AMD SMN
+  decode math in `amd_decode.h`.
 - `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`,
   `analyze prune`, and native `analyze report` coverage.
 - `tests/test_analyzer.py` — Integration tests for the Python
@@ -238,6 +248,10 @@ the same responsibility; otherwise they are listed separately.
   step-wise execution coverage.
 - `tests/test_config_contracts.py` — `control.json` schema validation
   and required-field coverage.
+- `tests/test_feature_specs.py` — Feature-spec registry, traceability,
+  promotion-gate, and verification-log consistency checks.
+- `tests/test_machine_cooling_policy.py` — Coverage for the
+  `config/machines/snd-desk.cooling.policy.json` cooling-policy contract.
 - `tests/test_control_loop.py` — `control-loop` mode end-to-end
   hermetic coverage.
 - `tests/test_eval_dashboard.py` — `tools/eval_dashboard` HTTP API
@@ -267,6 +281,18 @@ the same responsibility; otherwise they are listed separately.
 - `scripts/analyze_control_run.py` — Thin wrapper that ingests a raw
   control-loop CSV into a temporary DB via the in-repo svg-mb-control.exe
   and forwards native `analyze report` output (no analysis of its own).
+- `scripts/Build.VsEnv.ps1`, `scripts/Build.Tools.ps1`,
+  `scripts/Build.Package.ps1`, `scripts/Build.Info.ps1`,
+  `scripts/Build.Tests.ps1` — dot-sourced helper modules of
+  `Build-Release.ps1` (VS-env bootstrap, tool resolution, dist packaging,
+  version/build-info and archive helpers, and the CTest/hermetic test lanes).
+- `scripts/Common-Python.ps1` — shared Python interpreter resolver,
+  dot-sourced by `Build-Release.ps1` and `Start-EvalDashboard.ps1`.
+- `scripts/Compare-CpuTemps.ps1` — read-only harness that bins control-loop
+  CSV `cpu_tctl_c` by sustained `system_cpu_busy_pct` into idle/low/high and
+  records a per-setting comparison ledger.
+- `scripts/Install-CpuTempBaselineTask.ps1` — registers/removes a scheduled
+  task that runs `Compare-CpuTemps.ps1` on a cadence for a long-term baseline.
 
 ## Top-Level PowerShell
 
