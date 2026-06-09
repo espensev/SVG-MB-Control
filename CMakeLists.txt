@@ -375,4 +375,19 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME svg_mb_control_rapl_energy_tests
              COMMAND svg_mb_control_rapl_energy_tests)
+
+    # cpu_cycles.h is header-only and dependency-free, so this test does not link
+    # svg_mb_control_core (keeps it fast and isolated like the math it covers).
+    add_executable(svg_mb_control_cpu_cycles_tests
+        tests/cpp/cpu_cycles_tests.cpp
+    )
+    target_include_directories(svg_mb_control_cpu_cycles_tests PRIVATE
+        src/hardware)
+    target_compile_features(svg_mb_control_cpu_cycles_tests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(svg_mb_control_cpu_cycles_tests PRIVATE
+            /W4 /permissive-)
+    endif()
+    add_test(NAME svg_mb_control_cpu_cycles_tests
+             COMMAND svg_mb_control_cpu_cycles_tests)
 endif()
