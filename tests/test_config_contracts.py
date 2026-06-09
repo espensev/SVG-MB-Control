@@ -174,8 +174,8 @@ class ConfigContractTests(unittest.TestCase):
             }
             # All controlled lanes are source-aware: intakes (0,2,3,4) and the
             # radiator exhausts (1,5), which gained a GPU-airflow assist curve
-            # on 2026-06-09 so they help relieve case back-pressure as the GPU
-            # intakes ramp. The CPU exhaust response is preserved through each
+            # on 2026-06-09 so their setpoint ramps with GPU temperature alongside
+            # the GPU intakes. The CPU exhaust response is carried through each
             # lane's cpu_override_curve (see the decision record).
             for channel_id in (0, 1, 2, 3, 4, 5):
                 channel = by_channel[channel_id]

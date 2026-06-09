@@ -12,13 +12,13 @@ the watchdog scheduled task relaunching the worker.
 Analysis of the 2026-06-09 07:06 GPU excursion (memory junction reached 78 C;
 `docs`/runtime analysis under `release/runtime/analysis/gpu-fan-response-20260609/`)
 showed the two front 200 mm case intakes (CHA2/CHA3) ramp hard on GPU heat
-(+20 pts of duty, to ~85 %/81 %). The two radiator **exhausts** (CHA1/CHA5) are
+(+20 pts of duty, to ~85 %/81 %). The two radiator **exhausts** (CHA1/CHA5) were
 `temp_blend = cpu_only`, so they reacted to that GPU heat only by ~+5 pts via the
-flat-ceiling `gpu_airflow` boost. The intent of this change: have the radiator
-exhausts ramp **with GPU temperature** — gentle from ~60 C, stronger toward
-~80 C — so they pull case air through and relieve the back-pressure the front
-intakes fight, rather than the intakes pressurising the case against static
-exhausts. This is desired even when it does not visibly lower a temperature.
+flat-ceiling `gpu_airflow` boost. This change reconfigures the radiator
+exhausts to ramp **with GPU temperature** — gentle from ~60 C, stronger toward
+~80 C — via the `max_cpu_gpu_source_aware` blend, so their setpoint follows GPU
+temperature rather than holding at the flat-ceiling boost. The response keys off
+the GPU temperature input regardless of whether a measured temperature falls.
 
 ## Why not the `gpu_airflow` boost alone
 
@@ -35,8 +35,8 @@ Switch CHA1/CHA5 to `temp_blend = max_cpu_gpu_source_aware`
 (`source_aware_cpu_hot_guard_c = 75.0`, matching CHA0/CHA2/CHA3/CHA4) and:
 
 - **`curve`** = a GPU-airflow assist curve, flat at the floor below ~60 C,
-  gentle 60–70 C, steep 70–80 C, peaking near the strong target. Applied to the
-  GPU envelope while CPU < 75 C (the source-aware primary input).
+  gentle 60–70 C, steep 70–80 C, rising to its top knots (see the table below).
+  Applied to the GPU envelope while CPU < 75 C (the source-aware primary input).
 - **`cpu_override_curve`** = the elementwise maximum of the prior CPU `curve`
   and the prior CPU-emergency override. Because the evaluator takes
   `max(curve(primary), cpu_override_curve(CPU))` every tick and sets
@@ -61,7 +61,15 @@ Release GPU `curve` (duty raw, before boosts; CHA1 leads CHA5 by >= 2 at every k
 | ch1 | 22 | 24 | 27 | 31 | 36 | 38 | 46 | 58 | 68 |
 | ch5 | 20 | 21 | 24 | 28 | 32 | 34 | 43 | 55 | 65 |
 
-## Validation (replay of the real 06:30–07:30 trace)
+> **Note — curve retuned later the same day (not redeployed).** The table above
+> is the GPU `curve` **deployed at 15:06** (what the live worker runs). The
+> `curve`s were subsequently retuned (steeper mid-band, higher top knots) in
+> `config/control.{release,example}.json`, described in
+> `docs/gpu-response-curve-retune-2026-06-09.md` and `docs/COOLING_STRATEGY.md`.
+> That retune is in config but has not been rebuilt or redeployed, so the table
+> and the replay/side-effect figures below still describe the live curve.
+
+## Simulated replay of the recorded 06:30–07:30 trace
 
 Simulated raw setpoint + the integrated boosts against the recorded
 `gpu_memjn_c`/`cpu_tctl_c` (curve_shape quintic smootherstep, matching
@@ -70,15 +78,15 @@ Simulated raw setpoint + the integrated boosts against the recorded
 - Idle (GPU 40–50, CPU 60–67): exhaust delta ≈ 0 — preserved.
 - CPU-96 emergency (06:47): 99.8 % → 100 % — CPU response preserved.
 - GPU-driven 07:00–07:06: exhaust total ramps ~31 % (GPU 66) → ~43–46 % (GPU 72)
-  → **CHA5 ~47 % / CHA1 ~51 % at GPU 76–78** — temperature-graded (more at 76
-  than 72 than 66), straddling the "strong ~48 %" target, with CHA1 leading
-  CHA5 by ~4 pts at the peak (staggered, no resonance).
-- Post-peak: boost overlays bleed off over ~minutes — a deliberate time response.
+  → **CHA5 ~47 % / CHA1 ~51 % at GPU 76–78** — duty rises with GPU temperature
+  (more at 76 than 72 than 66), with CHA1 above CHA5 by ~4 pts at the peak (the
+  configured stagger).
+- Post-peak: boost overlays bleed off over ~minutes at the configured fall rate.
 
-This is **simulation-validated against the recorded trace, not yet
-hardware-validated**. The first live GPU excursion after deployment should be
-checked against this expectation — including listening for any audible beat
-between CHA1 and CHA5, which the curve stagger is designed to avoid.
+This is a **replay against the recorded trace; it has not been checked on live
+hardware.** The first live GPU excursion after deployment can be checked against
+this simulated expectation — including listening for any audible beat between
+CHA1 and CHA5 (the curve stagger keeps CHA1 >= 2 pts above CHA5 at every knot).
 
 ## Deployment (2026-06-09 ~15:06)
 
@@ -89,20 +97,21 @@ Deployed live with operator authorization. `build-release.ps1` ran clean
 task relaunched the worker at 15:06:42; `control_runtime.json` reported status
 `running` with the tick advancing.
 
-Live verification: CHA1/CHA5 now report `primary_temp_source = gpu` (was
-`cpu`), confirming the source-aware blend loaded; at idle GPU the
-`cpu_override` path correctly carried the CPU response
-(`response = cpu_override`), confirming the CPU exhaust behaviour is preserved.
-Still **simulation-validated, not hardware-validated** — the first real GPU
-excursion after deployment should be checked against the ramp in **Validation**
-(CHA5 ~47 % / CHA1 ~51 % at GPU 78) and for any audible CHA1/CHA5 beat.
+Live readings: CHA1/CHA5 now report `primary_temp_source = gpu` (was
+`cpu`), so the source-aware blend is in effect; at idle GPU the
+`cpu_override` path carried the CPU response
+(`response = cpu_override`), so the CPU exhaust behaviour is unchanged.
+The GPU-driven ramp has been **replayed against the recorded trace but not
+checked on live hardware** — the first real GPU excursion after deployment can
+be checked against the ramp in **Simulated replay** (CHA5 ~47 % / CHA1 ~51 % at
+GPU 78) and for any audible CHA1/CHA5 beat.
 
 ## Known side effect (accepted)
 
 In the CPU 78–86 C guard zone with GPU cool, the source-aware path applies the
 (now steeper) GPU `curve` to `max(CPU, GPU)`, so the exhausts run ~+10 pts higher
-than before on high CPU-only load. For a radiator **exhaust** this is benign
-over-cooling, and the CPU-emergency override still dominates above ~88 C.
+than before on high CPU-only load. The CPU-emergency override still dominates
+above ~88 C.
 
 ## Apply / rollback
 
