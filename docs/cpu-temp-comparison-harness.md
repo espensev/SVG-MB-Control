@@ -116,7 +116,12 @@ location), `-Watch` / `-WatchIntervalSeconds`.
    exclusion counts, achieved mean busy%, and `cpu_tctl_c` p50 / p90 / max, plus
    a count of rows dropped during parsing (blank/NaN, bad timestamp, short row).
 2. An appended row per regime in the ledger CSV.
-3. A regenerated Markdown side-by-side comparison table across all recorded runs.
+3. A regenerated Markdown `comparison.md` with two tables: a **By setting**
+   rollup that aggregates every capture sharing a `label` + `config_sha256`
+   (median of each capture's p50/p90 as a typical value, worst single `max`,
+   and the capture count per band), and a **Recent captures** detail table
+   (latest 48 captures). The rollup is the view for comparing settings; the
+   detail table is the recent time series.
 
 Default output location (gitignored, preserved across publishes):
 `release\runtime\experiments\cpu-temp-comparison\`
@@ -124,6 +129,31 @@ Default output location (gitignored, preserved across publishes):
 
 All numeric parsing and output use invariant culture, so a decimal-comma locale
 does not corrupt the ledger.
+
+## Long-term baseline (scheduled task)
+
+`scripts\Install-CpuTempBaselineTask.ps1` registers a Windows scheduled task that
+runs the harness on a fixed cadence so a multi-day baseline accumulates the same
+way the controller's own logger runs. It is read-only (RunLevel Limited, no
+elevation at run time) and reuses the controller's `\SVG-MB Control\` task folder.
+
+```powershell
+# Record a data point every 15 min (30-min window) under label 'stock-preoc':
+.\scripts\Install-CpuTempBaselineTask.ps1 -AmbientC 22
+
+.\scripts\Install-CpuTempBaselineTask.ps1 -Status     # state, last run, capture count
+.\scripts\Install-CpuTempBaselineTask.ps1 -Remove     # when moving on to OC/UC
+```
+
+Defaults: `-Label stock-preoc`, `-IntervalMinutes 15`, `-WindowMinutes 30`,
+`-DwellSeconds 45`. The task triggers at logon plus a repetition interval (up to
+one year), with `StartWhenAvailable` and `MultipleInstances IgnoreNew`.
+
+`-AmbientC` is required and is recorded fixed on every run, because the harness
+cannot read room temperature. If the room temperature changes materially during
+the baseline, edit `ambient_c` in the ledger or re-install with a new value.
+Registering a task in the shared task folder can require an elevated PowerShell on
+some systems; `-Remove` unregisters it.
 
 ## Limitations
 

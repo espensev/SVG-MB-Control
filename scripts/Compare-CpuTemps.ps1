@@ -553,27 +553,78 @@ function Write-Ledger {
     return $runId
 }
 
+function Get-MedianOf {
+    param([double[]]$Values)
+    if ($Values.Count -eq 0) { return [double]::NaN }
+    $s = @($Values | Sort-Object)
+    return (Get-Percentile -Sorted $s -P 50)
+}
+
 function Write-ComparisonMarkdown {
     param([string]$LedgerCsv, [string]$MarkdownPath)
     if (-not (Test-Path -LiteralPath $LedgerCsv)) { return }
     $all = @(Import-Csv -LiteralPath $LedgerCsv)
     if ($all.Count -eq 0) { return }
 
+    $runIdsAll = @($all | ForEach-Object { $_.run_id } | Sort-Object -Unique)
+
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine('# CPU temperature by sustained load — setting comparison')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine(('_Generated {0} from `{1}`._' -f `
-        ((Get-Date).ToString('yyyy-MM-dd HH:mm', $Invariant)), (Split-Path -Leaf $LedgerCsv)))
+    [void]$sb.AppendLine(('_Generated {0} from `{1}` ({2} captures)._' -f `
+        ((Get-Date).ToString('yyyy-MM-dd HH:mm', $Invariant)), (Split-Path -Leaf $LedgerCsv), $runIdsAll.Count))
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('Bands are by `system_cpu_busy_pct`; each cell is `cpu_tctl_c` (C) over')
-    [void]$sb.AppendLine('load-settled samples (continuous in-band for the dwell window). `n` is the')
-    [void]$sb.AppendLine('settled sample count; an empty band (`-`) means that load was not sustained')
-    [void]$sb.AppendLine('long enough yet.')
+    [void]$sb.AppendLine('Bands are by `system_cpu_busy_pct`; values are `cpu_tctl_c` (C) over load-settled')
+    [void]$sb.AppendLine('samples (continuous in-band for the dwell window). `-` = that load was not')
+    [void]$sb.AppendLine('sustained long enough.')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('| Captured | Label | Amb C | git | cfg | idle p50/p90/max (n) | low p50/p90/max (n) | high p50/p90/max (n) | Notes |')
-    [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|---|')
 
-    $byRun = $all | Group-Object run_id | Sort-Object { $_.Group[0].captured_at }
+    # ── Aggregate by setting (label + config) ──
+    [void]$sb.AppendLine('## By setting (aggregated across captures)')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('`p50~`/`p90~` are the median of each capture''s p50/p90 (a typical value, not a')
+    [void]$sb.AppendLine('pooled percentile); `max` is the worst single capture; `caps` = captures with')
+    [void]$sb.AppendLine('settled data in that band.')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('| Setting | cfg | Amb C | Captures | Span | idle p50~/p90~/max (caps) | low p50~/p90~/max (caps) | high p50~/p90~/max (caps) |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|---|')
+
+    $bySetting = $all | Group-Object { "$($_.label)|$($_.config_sha256)" } |
+        Sort-Object { @($_.Group | ForEach-Object { $_.captured_at } | Sort-Object)[-1] }
+    foreach ($g in $bySetting) {
+        $rows = $g.Group
+        $any = $rows[0]
+        $caps = @($rows | ForEach-Object { $_.run_id } | Sort-Object -Unique).Count
+        $dates = @($rows | ForEach-Object { $_.captured_at } | Sort-Object)
+        $span = if ($dates.Count -gt 1) { "$($dates[0].Substring(0,10))..$($dates[-1].Substring(0,10))" } else { $dates[0].Substring(0,10) }
+        $aggCell = {
+            param($band)
+            $br = @($rows | Where-Object { $_.band -eq $band -and [int]$_.n -gt 0 })
+            if ($br.Count -eq 0) { return '-' }
+            $p50s = @($br | ForEach-Object { ConvertTo-InvDouble $_.tctl_p50 } | Where-Object { $null -ne $_ })
+            $p90s = @($br | ForEach-Object { ConvertTo-InvDouble $_.tctl_p90 } | Where-Object { $null -ne $_ })
+            $maxs = @($br | ForEach-Object { ConvertTo-InvDouble $_.tctl_max } | Where-Object { $null -ne $_ })
+            $mx = ($maxs | Measure-Object -Maximum).Maximum
+            return ('{0}/{1}/{2} ({3})' -f (Format-Inv (Get-MedianOf $p50s) 2), (Format-Inv (Get-MedianOf $p90s) 2), (Format-Inv $mx 2), $br.Count)
+        }
+        $cfgShort = if ($any.config_sha256) { $any.config_sha256.Substring(0, [math]::Min(8, $any.config_sha256.Length)) } else { '' }
+        [void]$sb.AppendLine(('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |' -f `
+            (Format-Cell $any.label), $cfgShort, $any.ambient_c, $caps, $span,
+            (& $aggCell 'idle'), (& $aggCell 'low'), (& $aggCell 'high')))
+    }
+    [void]$sb.AppendLine('')
+
+    # ── Recent captures detail (bounded) ──
+    $limit = 48
+    $shown = @(if ($runIdsAll.Count -gt $limit) { $runIdsAll[($runIdsAll.Count - $limit)..($runIdsAll.Count - 1)] } else { $runIdsAll })
+    $shownSet = @{}; foreach ($r in $shown) { $shownSet[$r] = $true }
+    [void]$sb.AppendLine(('## Recent captures (last {0} of {1})' -f $shown.Count, $runIdsAll.Count))
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('| Captured | Label | Amb C | idle p50/p90/max (n) | low p50/p90/max (n) | high p50/p90/max (n) | Notes |')
+    [void]$sb.AppendLine('|---|---|---|---|---|---|---|')
+
+    $byRun = $all | Where-Object { $shownSet.ContainsKey($_.run_id) } | Group-Object run_id |
+        Sort-Object { $_.Group[0].captured_at }
     foreach ($g in $byRun) {
         $rows = $g.Group
         $any = $rows[0]
@@ -583,9 +634,8 @@ function Write-ComparisonMarkdown {
             if ($null -eq $r -or [int]$r.n -eq 0) { return '-' }
             return ('{0}/{1}/{2} ({3})' -f $r.tctl_p50, $r.tctl_p90, $r.tctl_max, $r.n)
         }
-        $cfgShort = if ($any.config_sha256) { $any.config_sha256.Substring(0, [math]::Min(8, $any.config_sha256.Length)) } else { '' }
-        [void]$sb.AppendLine(('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} |' -f `
-            $any.captured_at, (Format-Cell $any.label), $any.ambient_c, $any.git_hash, $cfgShort,
+        [void]$sb.AppendLine(('| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f `
+            $any.captured_at, (Format-Cell $any.label), $any.ambient_c,
             (& $cell 'idle'), (& $cell 'low'), (& $cell 'high'), (Format-Cell $any.notes)))
     }
 
