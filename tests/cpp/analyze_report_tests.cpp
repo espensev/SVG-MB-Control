@@ -28,7 +28,10 @@ using svg_mb_control::analyze::report_detail::BandPercentiles;
 using svg_mb_control::analyze::report_detail::BuildDiagnosticFlags;
 using svg_mb_control::analyze::report_detail::ChannelStats;
 using svg_mb_control::analyze::report_detail::ComputeElapsedTime;
+using svg_mb_control::analyze::report_detail::ComputePackagePower;
 using svg_mb_control::analyze::report_detail::Median;
+using svg_mb_control::analyze::report_detail::PackageEnergyWindow;
+using svg_mb_control::analyze::report_detail::PackagePowerSummary;
 using svg_mb_control::analyze::report_detail::Percentile;
 using svg_mb_control::analyze::report_detail::ReportData;
 using svg_mb_control::analyze::report_detail::SummariseBand;
@@ -417,6 +420,54 @@ void TestBuildDiagnosticFlags_SlowResponse() {
                "slow_setpoint_response flag emitted when response_delay > 10s");
 }
 
+void TestComputePackagePower_EmptyIsUnavailable() {
+    // No windows -> unavailable, NOT a false zero. acquisition provenance is
+    // copied through so the report can still say why (RAPL off).
+    PackagePowerSummary pp =
+        ComputePackagePower({}, {{"disabled", 30}});
+    ExpectEqualInt(pp.window_count, 0, "empty -> window_count 0");
+    ExpectNullopt(pp.avg_watts, "empty -> avg_watts nullopt (no false zero)");
+    ExpectNear(pp.total_energy_j, 0.0, kEps, "empty -> total_energy_j 0");
+    ExpectNullopt(pp.watts_max, "empty -> watts_max nullopt");
+    ExpectEqualInt(pp.acquisition_counts["disabled"], 30,
+                   "empty -> acquisition provenance preserved");
+}
+
+void TestComputePackagePower_TimeWeighted() {
+    // 10 J over 1 s (10 W), 30 J over 1 s (30 W), 20 J over 2 s (10 W).
+    // delta is microjoules: 10 J = 1e7 uj.
+    std::vector<PackageEnergyWindow> windows{
+        {1000.0, 1.0e7},
+        {1000.0, 3.0e7},
+        {2000.0, 2.0e7},
+    };
+    PackagePowerSummary pp = ComputePackagePower(windows, {{"quarantine", 6}});
+    ExpectEqualInt(pp.window_count, 3, "three distinct windows counted");
+    ExpectNear(pp.total_energy_j, 60.0, 1e-6, "total energy 10+30+20 = 60 J");
+    ExpectNear(pp.total_window_s, 4.0, 1e-6, "total window 1+1+2 = 4 s");
+    // Time-weighted = 60 J / 4 s = 15 W, which is deliberately NOT the
+    // mean-of-per-window-watts (10+30+10)/3 = 16.667 W.
+    ExpectHasValue(pp.avg_watts, "avg_watts present for valid windows");
+    ExpectNear(*pp.avg_watts, 15.0, 1e-6,
+               "time-weighted avg = total energy / total window time");
+    ExpectTrue(std::fabs(*pp.avg_watts - (10.0 + 30.0 + 10.0) / 3.0) > 1.0,
+               "time-weighted avg differs from mean-of-means");
+    // Per-window watts {10, 30, 10}: nearest-rank p50=10, p90=max=30.
+    ExpectNear(*pp.watts_p50, 10.0, 1e-6, "per-window watts p50 == 10");
+    ExpectNear(*pp.watts_p90, 30.0, 1e-6, "per-window watts p90 == 30");
+    ExpectNear(*pp.watts_max, 30.0, 1e-6, "per-window watts max == 30");
+}
+
+void TestComputePackagePower_SingleWindow() {
+    // 20 J over 2 s = 10 W.
+    std::vector<PackageEnergyWindow> windows{{2000.0, 2.0e7}};
+    PackagePowerSummary pp = ComputePackagePower(windows, {});
+    ExpectEqualInt(pp.window_count, 1, "single window counted");
+    ExpectHasValue(pp.avg_watts, "single window avg present");
+    ExpectNear(*pp.avg_watts, 10.0, 1e-6, "single window 20 J / 2 s = 10 W");
+    ExpectNear(*pp.watts_max, 10.0, 1e-6, "single window watts_max == 10");
+}
+
 void TestBuildDiagnosticFlags_NoFlagsOnHealthyRun() {
     ReportOptions options;
     options.load_threshold_c = 75.0;
@@ -458,6 +509,9 @@ int main() {
     TestBuildDiagnosticFlags_RobustnessAndSlowResponse();
     TestBuildDiagnosticFlags_SlowResponse();
     TestBuildDiagnosticFlags_NoFlagsOnHealthyRun();
+    TestComputePackagePower_EmptyIsUnavailable();
+    TestComputePackagePower_TimeWeighted();
+    TestComputePackagePower_SingleWindow();
     if (g_failures > 0) {
         std::cerr << g_failures << " analyze_report helper test failure(s)\n";
         return 1;

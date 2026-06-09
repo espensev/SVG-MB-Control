@@ -70,6 +70,10 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     process_working_set_bytes INTEGER,
     process_private_bytes INTEGER,
     cadence_transient REAL,
+    cpu_power_sample_id INTEGER,
+    cpu_power_window_ms REAL,
+    cpu_pkg_energy_delta_uj REAL,
+    cpu_pkg_energy_acquisition TEXT,
     PRIMARY KEY (run_id, tick_count)
 );
 
@@ -576,6 +580,33 @@ void MigrateSchema(Database& db) {
                 "ADD COLUMN low_band_effective_boost_pct REAL");
         }
         SetSchemaVersion(db, 8);
+    }
+    if (version <= 8) {
+        // FEAT-0006 (REQ-CPUEFF-02): additive nullable RAPL package-energy
+        // evidence columns mirrored from the CSV (cpu_power_sample_id,
+        // cpu_power_window_ms, cpu_pkg_energy_delta_uj,
+        // cpu_pkg_energy_acquisition). Old archives lack them; ingest binds
+        // NULL, the report derivation skips absent windows (no false zero).
+        if (!ColumnExists(db, "tick_samples", "cpu_power_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_power_sample_id "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_power_window_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_power_window_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_pkg_energy_delta_uj")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_pkg_energy_delta_uj "
+                "REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_pkg_energy_acquisition")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_pkg_energy_acquisition "
+                "TEXT");
+        }
+        SetSchemaVersion(db, 9);
     }
 }
 

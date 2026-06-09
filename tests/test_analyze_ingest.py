@@ -97,6 +97,17 @@ CSV_FIELDS = (
 CSV_FIELD_SET = set(CSV_FIELDS)
 CSV_HEADER = ",".join(CSV_FIELDS)
 
+# FEAT-0006 read-only RAPL package-energy columns. The base CSV_FIELDS schema
+# deliberately omits them so the existing fixtures double as the "old archive
+# missing new fields" case (REQ-CPUEFF-04); the energy fixture appends them.
+ENERGY_FIELDS = [
+    "cpu_power_sample_id",
+    "cpu_power_window_ms",
+    "cpu_pkg_energy_delta_uj",
+    "cpu_pkg_energy_acquisition",
+]
+ENERGY_HEADER = ",".join(ENERGY_FIELDS)
+
 
 def _csv_row(values: dict[str, str]) -> str:
     missing = [field for field in CSV_FIELDS if field not in values]
@@ -557,7 +568,7 @@ class AnalyzeIngestTests(unittest.TestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "8")
+            self.assertEqual(schema[0], "9")
 
             run = _query_one(
                 db_path,
@@ -931,6 +942,72 @@ def _run_report(
     )
 
 
+# (sample_id, window_ms, delta_uj, acquisition) per tick. The logger mirrors one
+# energy window across the intervening ~250 ms ticks, so each sample_id repeats
+# across >=2 consecutive ticks and the report must de-duplicate on sample_id.
+# Tick 1 is a baseline read (no sample id yet) and tick 8 has a blank delta (the
+# log-time implausibility guard fired); both must be excluded. The 3 valid
+# windows are 10 W, 30 W, 10 W -> time-weighted 60 J / 4 s = 15 W.
+_ENERGY_WINDOWS = [
+    ("", "", "", "quarantine"),
+    ("1", "1000.000", "10000000", "quarantine"),
+    ("1", "1000.000", "10000000", "quarantine"),
+    ("2", "1000.000", "30000000", "quarantine"),
+    ("2", "1000.000", "30000000", "quarantine"),
+    ("3", "2000.000", "20000000", "quarantine"),
+    ("3", "2000.000", "20000000", "quarantine"),
+    ("4", "1000.000", "", "quarantine"),
+]
+
+
+def _write_energy_csv(path: Path, session_start: str) -> None:
+    lines = [
+        "# schema=svg_mb_control.log.v1",
+        "# mode=control-loop",
+        f"# session_start={session_start}",
+        CSV_HEADER + "," + ENERGY_HEADER,
+    ]
+    for i, (sid, win, delta, acq) in enumerate(_ENERGY_WINDOWS):
+        base = _control_loop_fixture_row(
+            wall=_ts(session_start, i),
+            tick=i + 1,
+            cpu_tctl_c=60.0,
+            fan0_duty_pct="43.92",
+            fan1_duty_pct="65.10",
+            channel0_setpoint_pct="30.000",
+            channel1_setpoint_pct="32.000",
+            channel0_midband_pressure_boost_pct="0.000",
+            channel0_gpu_airflow_boost_pct="0.000",
+            channel0_cpu_low_soak_boost_pct="0.000",
+            channel0_response_source="primary_curve",
+        )
+        lines.append(base + "," + ",".join([sid, win, delta, acq]))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _build_energy_fixture(
+    td: Path, session_start: str = "2026-05-15T04:00:00"
+) -> Path:
+    runtime_home = td / "runtime"
+    logs = runtime_home / "logs"
+    archive = logs / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    csv_path = archive / "svg_mb_control_control-loop_20260515_040000.csv"
+    manifest_path = (
+        archive / "svg_mb_control_control-loop_20260515_040000.manifest.json"
+    )
+    _write_energy_csv(csv_path, session_start)
+    _write_fixture_manifest(
+        manifest_path,
+        session_start=session_start,
+        csv_path=csv_path,
+        row_count=len(_ENERGY_WINDOWS),
+        event_count=5,
+    )
+    _write_fixture_events(logs / "svg_mb_control_events.jsonl", session_start)
+    return runtime_home
+
+
 class AnalyzeReportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -1025,6 +1102,45 @@ class AnalyzeReportTests(unittest.TestCase):
             self.assertEqual(
                 obj["diagnostic_flags"],
                 ["authority_reasserted_during_run"],
+            )
+            # FEAT-0006: the ramp fixture carries no energy columns, so the
+            # derivation must report unavailable -- avg_watts null, NOT a false
+            # zero -- and surface why via the acquisition provenance.
+            self.assertEqual(obj["package_power"]["window_count"], 0)
+            self.assertIsNone(obj["package_power"]["avg_watts"])
+            self.assertEqual(
+                obj["package_power"]["acquisition_counts"]["unavailable"], 30
+            )
+
+    def test_report_derives_time_weighted_package_power(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            pp = obj["package_power"]
+            # 8 ticks carry 4 sample-ids, but the baseline (tick 1, no id) and
+            # the blank-delta window (sample_id 4, tick 8) are excluded -> 3
+            # distinct de-duplicated windows, not 8 tick rows and not 4 ids.
+            self.assertEqual(pp["window_count"], 3)
+            self.assertEqual(pp["total_energy_j"], 60.0)
+            self.assertEqual(pp["total_window_s"], 4.0)
+            # Time-weighted 60 J / 4 s = 15 W, NOT mean-of-means (10+30+10)/3.
+            self.assertEqual(pp["avg_watts"], 15.0)
+            self.assertEqual(pp["watts"]["max"], 30.0)
+            self.assertEqual(pp["acquisition_counts"]["quarantine"], 8)
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn(
+                "package_power: windows=3 avg_watts=15.000", text
             )
 
     def test_report_writes_native_analysis_artifacts(self) -> None:

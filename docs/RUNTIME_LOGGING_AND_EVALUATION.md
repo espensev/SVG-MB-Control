@@ -2,7 +2,7 @@
 
 ## Status
 
-Current as of 2026-06-06.
+Current as of 2026-06-09.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
@@ -11,6 +11,18 @@ profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
 
 The completed implementation sequencing is summarized in
 `docs\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
+
+**Finding (closed 2026-06-09) - active package header drift (2026-06-07):** on
+2026-06-07 the live packaged runtime was a stale `2026-05-28T12:15:11Z` build
+(source commit `15606140c239`) whose active control-loop CSV session
+`2026-06-07T01:10:38` had `247` columns and no `system_cpu_*` columns, even
+though current source and tests define the FEAT-0002 whole-system CPU fields.
+The 2026-06-09 rebuild/publish closed this: the live session
+`2026-06-09T02:32:40` (git_hash `dd2c02214128`, `256` columns) contains all five
+`system_cpu_*` columns plus the off-by-default FEAT-0006 `cpu_pkg_energy_*`
+columns. Only genuinely older archives that predate the rebuild lack the
+`system_cpu_*` columns; bind columns by header name and treat only those as
+pre-FEAT-0002 for whole-system CPU analysis.
 
 Earlier local evidence from the previous `50 ms` profile:
 
@@ -117,15 +129,29 @@ logging replacement.
 
 - CSV chunk files have no closed/ready marker. A reader must treat the active
   archive path as mutable while Control is running.
-- The control-loop CSV has loop timing, process cost, and whole-system CPU busy
-  time (`system_cpu_busy_pct` plus the raw idle/kernel/user deltas and processor
-  count, FEAT-0002), but not per-sensor-group read durations. Use foreground
-  `evidence-log` for deeper backend timing/cadence diagnosis unless control-loop
-  evidence proves this must move into the hot path.
-- Whole-system CPU busy time measures *time* not idle, not CPU *work*. Comparing
-  CPU-setting changes by work-per-Joule (effective frequency + package energy)
-  is the separate FEAT-0006 layer; `system_cpu_busy_pct` is its
-  time-normalization context, not a substitute.
+- The current-source control-loop CSV has loop timing, process cost, and, after
+  FEAT-0002 is present in the packaged binary, whole-system CPU busy time
+  (`system_cpu_busy_pct` plus the raw idle/kernel/user deltas and processor
+  count). Older archives and stale packages can lack these columns; consumers
+  must bind by header and treat absent fields as unavailable, never as zero.
+  The control-loop CSV still does not have per-sensor-group read durations. Use
+  foreground `evidence-log` for deeper backend timing/cadence diagnosis unless
+  control-loop evidence proves this must move into the hot path.
+- Whole-system CPU busy time measures *time*, not CPU *work*. The FEAT-0006 layer
+  adds **read-only AMD RAPL package energy** (off by default; enable with
+  `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`): `cpu_pkg_energy_delta_uj` over
+  `cpu_power_window_ms`, keyed by `cpu_power_sample_id`, with provenance in
+  `cpu_pkg_energy_acquisition` (`disabled`/`unavailable`/`quarantine`/`validated`).
+  Average package power is derived, not logged:
+  `(cpu_pkg_energy_delta_uj / 1e6) / (cpu_power_window_ms / 1000)` over distinct
+  sample ids — heat dissipated (average package watts); pairing it with fan RPM
+  to get cooling watts-per-RPM is downstream analysis, not a logged or derived
+  field. The CPU **work**
+  numerator (delivered cycles / instructions) and effective frequency are
+  **not in v1**: 2026-06-07 live validation found the shipped PawnIO bin filters
+  the APERF/MPERF reads, so first-party work-per-Joule is not yet computable (see
+  `docs/cpu-work-energy-live-validation-results-2026-06-07.md`).
+  `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in

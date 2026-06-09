@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,6 +21,21 @@ struct AmdSnapshot {
     std::string cpu_name;
     std::string transport_path;
     std::string last_warning;
+
+    // FEAT-0006 read-only RAPL package-energy evidence (REQ-CPUEFF-02). Raw,
+    // quarantined, default off. Average watts is derived later by the analyzer,
+    // not here. acquisition is one of: "disabled" (off, the default),
+    // "unavailable" (enabled but the read failed / bin hash mismatched / RAPL
+    // absent), "quarantine" (collected but not yet trusted), "validated" (only
+    // after the post-implementation Evaluation; never set automatically in v1).
+    // The sample id increments only when a new ~1 s resource-window sample is
+    // taken; intervening control ticks mirror the latest, so the analyzer must
+    // de-duplicate on a distinct nonzero id. delta/window are blank (NaN) when
+    // unavailable or when the implausibility guard fires (no false zero).
+    std::string pkg_energy_acquisition = "disabled";
+    std::uint64_t pkg_energy_sample_id = 0u;
+    double pkg_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
+    double pkg_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
 };
 
 // RAII wrapper around the current private AMD SMN reader. Construction never

@@ -41,18 +41,22 @@ Result values:
 - **pending** = not implemented or not yet verified.
 - **pass** = implemented and verified in the owning spec's verification log.
 - **deferred** = explicitly split out of the implemented slice.
-- **not buildable** = the spec has open promotion gates.
+- **partial** = implemented and verified for a defined sub-scope; the remainder
+  is deferred or pending.
+- **not buildable** = the spec is not implementation-authorized yet because it
+  has open promotion gates, is a held Draft/design capture, is parked, or has an
+  explicit pre-implementation validation gate.
 
 ## 2. Feature status
 
 | Feature | Status | Buildability |
 |---|---|---|
 | `FEAT-0001` Hot-swap runtime write policy | Accepted | Buildable when implementation is explicitly authorized; verification pending. |
-| `FEAT-0002` CPU settings evidence logger | Implemented (source/test load layer; live package verification pending; label deferred) | Source/test requirements pass except `REQ-CPUSETTINGS-06`, which is deferred; the active `release\` package inspected on 2026-06-07 was stale and needs rebuilt CSV-header confirmation before live evidence counts for FEAT-0002. |
+| `FEAT-0002` CPU settings evidence logger | Implemented (source/test load layer; label deferred) | Source/test requirements pass except `REQ-CPUSETTINGS-06`, which is deferred; the 2026-06-09 rebuild confirmed the `system_cpu_*` columns in the live CSV header (git_hash `dd2c02214128`, session `2026-06-09T02:32:40`), closing the packaging-evidence gap. |
 | `FEAT-0003` Selectable control-law profile with hot-swap | Draft | Not buildable; design capture only. |
 | `FEAT-0004` Hardware-access dependency health signal | Draft | Not buildable; decision record gate open. |
 | `FEAT-0005` Write actuation confirmation | Reserved (body parked) | Not buildable; body parked in `docs/features/_parked/`, sequenced behind FEAT-0004. |
-| `FEAT-0006` CPU work and energy efficiency evidence | Draft | Not buildable; promoted to Draft 2026-06-07 with all promotion gates met. Implementation gated on a one-shot read-only live MSR validation (RAPL on Family 1Ah; PawnIO affinity; `#GP`→blank). FEAT-0004 recommended, not blocking. |
+| `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; APERF/MPERF `#GP` through the shipped bin, so the work numerator / effective frequency are deferred. Energy-only v1 build authorized; the enabled integration path is not yet hardware/CI-validated. The analyzer time-weighted average-power derivation (schema v9, `analyze report`) landed 2026-06-09 with unit + end-to-end tests green; live runtime-CSV (M) evidence still pending. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
 
 ## 3. Requirement map
@@ -76,7 +80,7 @@ Result values:
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
 | `REQ-CPUSETTINGS-01` | T, R | CSV/header compatibility tests and `RUNTIME_HOME.md` review. | pass |
-| `REQ-CPUSETTINGS-02` | T | System CPU delta calculation unit/smoke test; live package header recheck pending after rebuild. | pass |
+| `REQ-CPUSETTINGS-02` | T | System CPU delta calculation unit/smoke test; live package header confirmed by the 2026-06-09 rebuild. | pass |
 | `REQ-CPUSETTINGS-03` | T, R | Analyzer ingest compatibility with old archives missing new fields. | pass |
 | `REQ-CPUSETTINGS-04` | R | Review confirms Win32 first-party source only; no tool/subprocess/sibling dependency. | pass |
 | `REQ-CPUSETTINGS-05` | R | Review confirms logger records raw values only, with no activity classification. | pass |
@@ -112,14 +116,14 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | not buildable |
-| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | not buildable |
-| `REQ-CPUEFF-03` | T, R | Context-field propagation test; review vs `RUNTIME_HOME.md`. | not buildable |
-| `REQ-CPUEFF-04` | T, R | Analyzer-ingest tests with old archives missing the new fields; no-false-zero test. | not buildable |
-| `REQ-CPUEFF-05` | R | Review confirms read paths only; no CPU-control write. | not buildable |
-| `REQ-CPUEFF-06` | R | Review of the enumerated register/counter read set vs `AGENTS.md`. | not buildable |
-| `REQ-CPUEFF-07` | R | Review logger code/docs: no baked-in efficiency scoring. | not buildable |
-| `REQ-CPUEFF-08` | T, R | CPU-settings label-propagation test/config review. | not buildable |
+| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | deferred — no first-party work source in v1 (2026-06-07 live: shipped bin filters APERF/MPERF) |
+| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | partial — energy logger landed 2026-06-07; analyzer time-weighted avg-power derivation landed 2026-06-09 (schema v9, sample-id de-duplication, no-false-zero; `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end). Enabled integration path + live-CSV (M) evidence pending |
+| `REQ-CPUEFF-03` | T, R | Context/provenance propagation test, explicit deferred-signal unavailable handling, and review vs `RUNTIME_HOME.md`. | pass (v1 scope) — temperature stays aligned with the window; effective-frequency inputs unavailable (APERF/MPERF filtered), not guessed |
+| `REQ-CPUEFF-04` | T, R | Analyzer-ingest tests with old archives missing the new fields; no-false-zero test. | pass — additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility guard |
+| `REQ-CPUEFF-05` | R | Review confirms read paths only; no CPU-control write. | pass — `ReadAllowlistedMsr` issues `ioctl_read_msr` only; no write in the energy path |
+| `REQ-CPUEFF-06` | R | Review of the enumerated register/counter read set vs `AGENTS.md`. | pass — enumerated read set `{0xC0010299, 0xC001029B}` via `rapl::IsAllowlistedEnergyMsr` + allow-list guard test |
+| `REQ-CPUEFF-07` | R | Review logger code/docs: no baked-in efficiency scoring. | pass — logger records raw delta+window only; no efficiency scoring (review) |
+| `REQ-CPUEFF-08` | T, R | CPU-settings label-propagation test/config review. | deferred — workload/CPU-setting label is the shared open question with FEAT-0002 §8; not in v1 |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 

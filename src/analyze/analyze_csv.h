@@ -77,6 +77,12 @@ struct ParsedTickRow {
     std::optional<std::int64_t> process_working_set_bytes;
     std::optional<std::int64_t> process_private_bytes;
     std::optional<double> cadence_transient;
+    // FEAT-0006 read-only RAPL package-energy evidence (nullable; blank in old
+    // archives and whenever the logger reports disabled/unavailable).
+    std::optional<std::int64_t> cpu_power_sample_id;
+    std::optional<double> cpu_power_window_ms;
+    std::optional<double> cpu_pkg_energy_delta_uj;
+    std::optional<std::string> cpu_pkg_energy_acquisition;
     std::vector<ParsedFanSample> fans;
     std::vector<ParsedChannelSample> channels;
 };

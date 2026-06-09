@@ -5,7 +5,10 @@ Status: verification findings for
 evidence-gathering input to FEAT-0006 §9 (the acquisition decision and the
 counter-read safety review). It is **not** an authorization to read MSRs live:
 no live MSR read was performed for this verification, and none must be until the
-safety review (FEAT-0006 REQ-CPUEFF-06) is written and marked current.
+safety review (FEAT-0006 REQ-CPUEFF-06) is written and marked current. The
+2026-06-07 acquisition decision later folded in that safety review; the one-shot
+read-only live MSR validation that was the remaining pre-implementation gate ran
+2026-06-07 (PASS, energy-only) — see §Follow-up status.
 
 **Companion to:** `docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
 `third_party/pawnio/README.md`, `docs/features/FEAT-0004-hardware-access-health-signal.md`.
@@ -24,10 +27,13 @@ new or different module is required to reach the Tier 1/Tier 2 MSR signals. The
 read path is reachable through the existing transport with no driver change and
 no transport-layer code change.
 
-The remaining work is not "get a capable module"; it is (a) a safety review of
-the exact read set, (b) handling two counter-format caveats (32-bit energy
-wraparound; per-core APERF/MPERF affinity), and (c) deciding the work proxy
-(delivered cycles vs instructions retired).
+The remaining work is not "get a capable module." At the time of this
+verification, the follow-up design items were: (a) a safety review of the exact
+read set, (b) handling two counter-format caveats (32-bit energy wraparound;
+per-core APERF/MPERF affinity), and (c) deciding the work proxy (delivered
+cycles vs instructions retired). Those design items were later settled by
+`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`; live validation
+remains.
 
 ## Evidence
 
@@ -82,7 +88,7 @@ wraparound; per-core APERF/MPERF affinity), and (c) deciding the work proxy
 
 | FEAT-0006 need | Source | Reachable via shipped bin? | Caveat |
 |---|---|---|---|
-| Effective frequency / delivered cycles (Tier 1/2) | APERF `0xE8`, MPERF `0xE7` (read-only, free-running) | Yes — `ioctl_read_msr` | **Per-core, and the ratio can be invalid, not merely coarse.** `ioctl_read_msr` takes only an MSR index (no affinity input), so two separate calls can be serviced on different cores; a ΔAPERF/ΔMPERF ratio whose reads straddle a core migration is meaningless. The standard fix is caller-side `SetThreadAffinityMask` before the IOCTL (no module change) — **but only if PawnIO executes the `rdmsr` on the calling thread** rather than marshaling to its own context. Which is true is unconfirmed and must be validated before trusting effective frequency (live-validation item). |
+| Effective frequency / delivered cycles (Tier 1/2) | APERF `0xE8`, MPERF `0xE7` (read-only, free-running) | ~~Yes — `ioctl_read_msr`~~ **superseded 2026-06-07: live `#GP`** (see results doc) | **Per-core, and the ratio can be invalid, not merely coarse.** `ioctl_read_msr` takes only an MSR index (no affinity input), so two separate calls can be serviced on different cores; a ΔAPERF/ΔMPERF ratio whose reads straddle a core migration is meaningless. The standard fix is caller-side `SetThreadAffinityMask` before the IOCTL (no module change) — **but only if PawnIO executes the `rdmsr` on the calling thread** rather than marshaling to its own context. Which is true is unconfirmed and must be validated before trusting effective frequency (live-validation item). |
 | Package energy → Joules + avg power (Tier 1) | `MSR_PKG_ENERGY_STAT` `0xC001029B` + unit `0xC0010299` | Likely — `ioctl_read_msr` (RAPL availability on Family 1Ah to confirm) | **32-bit accumulator → wraps.** At 15.3 µJ/unit, 2^32 units ≈ 65.7 kJ (~5–6 min at 200 W). Delta math must use 32-bit modular subtraction, unlike the 64-bit CPU-time counters. Package-scoped: any core returns the socket total, so no affinity issue. |
 | Instructions retired (Tier 1, "ideal" work) | PMC (`PERF_CTL`/`PERF_CTR`, AMD `0xC0010000`+) | **No, not read-only.** Programming a PMC requires `ioctl_write_msr`. | Collides with REQ-CPUEFF-05 (read-only). Defer; use APERF delivered-cycles as the read-only work proxy for v1 (matches FEAT-0006 §11 default). |
 | Vcore / VID (Tier 2) | SVI2/SVI3 telemetry / SMU — not a plain architectural MSR | Not via these MSRs | Needs SMU/SMN path; best-effort, firmware-specific (FEAT-0006 §11). |
@@ -141,21 +147,29 @@ wraparound; per-core APERF/MPERF affinity), and (c) deciding the work proxy
   package-energy and APERF/MPERF deltas (work-per-Joule north-star), with busy
   time (FEAT-0002) as the time-normalization context.
 
-## Next steps
+## Follow-up status (updated 2026-06-07)
 
-1. Write `docs/cpu-work-energy-acquisition-decision-2026-06-04.md` committing to
+1. **Done:** `docs/cpu-work-energy-acquisition-decision-2026-06-07.md` commits
    the v1 path above (FEAT-0006 §9, gate 3).
-2. Write the counter-read safety review (FEAT-0006 §9, REQ-CPUEFF-06):
-   read-only-only enforcement, the MSR allow-list, `strict` verification, and the
-   `#GP`/wrap degrade-to-blank behavior. May be folded into the decision doc.
-3. Only after both are current: a one-shot, read-only **live read validation**
-   on the 9950X3D, respecting `AGENTS.md` §Live Runtime Safety, confirming
-   specifically: (a) **does PawnIO honor caller `SetThreadAffinityMask`** for the
-   `rdmsr` (decides whether effective frequency is trustworthy); (b) **RAPL
-   availability/encoding on Family 1Ah** (`0xC0010299`/`0xC001029B` return
-   plausible, monotonic values); (c) APERF/MPERF return a plausible effective
-   frequency; (d) an unsupported MSR returns error → blank, not a crash or zero.
-4. Then implement against FEAT-0006 REQ-CPUEFF-01..08.
+2. **Done:** the counter-read safety review (FEAT-0006 §9,
+   REQ-CPUEFF-05/06) is folded into that decision: read-only enforcement, the
+   MSR allow-list, field-level strict hash gating, and `#GP`/wrap
+   degrade-to-blank behavior.
+3. **Done (2026-06-07):** the one-shot, read-only **live read validation** on the
+   9950X3D, respecting `AGENTS.md` §Live Runtime Safety, checking: (a) **does
+   PawnIO honor caller `SetThreadAffinityMask`** for the `rdmsr`; (b) **RAPL
+   availability/encoding on Family 1Ah** (`0xC0010299`/`0xC001029B`);
+   (c) APERF/MPERF effective frequency; (d) an unsupported MSR returns error →
+   blank. Procedure: `docs/cpu-work-energy-live-validation-plan-2026-06-07.md`.
+   **Outcome: PASS (energy-only).** RAPL energy works and is correctly encoded on
+   Family 1Ah; APERF/MPERF (and TSC_AUX) `#GP` through the shipped bin, so
+   effective frequency is unavailable in v1 and (a) is moot. This **supersedes**
+   the §Per-signal APERF/MPERF reachability row below. Results:
+   `docs/cpu-work-energy-live-validation-results-2026-06-07.md`.
+4. **After validation:** the maintainer decides the energy-only re-scope
+   (cycle-counter work proxy and effective-frequency context withheld) and
+   authorizes the build; then implement the energy path per the decision doc
+   §Apply order.
 
 ## Sources
 

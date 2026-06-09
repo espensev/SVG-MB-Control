@@ -375,6 +375,18 @@ void EmitJsonReport(const ReportOptions& options,
          stats_json(tr.process_working_set_bytes)},
         {"process_private_bytes", stats_json(tr.process_private_bytes)},
     };
+    const auto& pp = data.package_power;
+    doc["package_power"] = {
+        {"window_count", pp.window_count},
+        {"avg_watts", OptToJson(pp.avg_watts)},
+        {"total_energy_j", pp.total_energy_j},
+        {"total_window_s", pp.total_window_s},
+        {"watts",
+         {{"p50", OptToJson(pp.watts_p50)},
+          {"p90", OptToJson(pp.watts_p90)},
+          {"max", OptToJson(pp.watts_max)}}},
+        {"acquisition_counts", pp.acquisition_counts},
+    };
     doc["robustness"] = {
         {"authority_reasserted", data.authority_reasserted},
         {"write_failures", data.write_failures},
@@ -504,6 +516,17 @@ void EmitTextReport(const ReportOptions& options,
     stats_text(os, "process_cpu_pct", tr.process_cpu_pct);
     stats_text(os, "process_working_set_bytes", tr.process_working_set_bytes);
     stats_text(os, "process_private_bytes", tr.process_private_bytes);
+    const auto& pp = data.package_power;
+    os << "package_power: windows=" << pp.window_count
+       << " avg_watts=" << OptToText(pp.avg_watts)
+       << " total_energy_j="
+       << OptToText(std::optional<double>(pp.total_energy_j))
+       << " total_window_s="
+       << OptToText(std::optional<double>(pp.total_window_s))
+       << " watts_p50=" << OptToText(pp.watts_p50)
+       << " watts_p90=" << OptToText(pp.watts_p90)
+       << " watts_max=" << OptToText(pp.watts_max)
+       << " acquisition=" << CountsToText(pp.acquisition_counts) << '\n';
     os << "events: severity_counts="
        << CountsToText(data.event_severity_counts)
        << " error_code_counts="

@@ -1,7 +1,7 @@
 # FEAT-0002: CPU settings evidence logger
 
 **Project:** svg-mb-control
-**Status:** Implemented (load layer; `cpu_settings_label` / REQ-CPUSETTINGS-06 deferred)   **Version:** 0.2   **Updated:** 2026-06-04
+**Status:** Implemented (source/test load layer; `cpu_settings_label` / REQ-CPUSETTINGS-06 deferred)   **Version:** 0.2   **Updated:** 2026-06-09
 **Namespace:** `REQ-CPUSETTINGS-*`
 **Companion to:** `AGENTS.md`, `docs/RUNTIME_HOME.md`,
 `docs/RUNTIME_LOGGING_AND_EVALUATION.md`, `docs/READ_LOOP.md`,
@@ -18,6 +18,13 @@ make non-benchmark CPU behavior derivable from raw data: at comparable
 low/near-idle, background, or interactive activity, an operator can later compare
 CPU temperature, CPU busy time, GPU context, and fan context before and after CPU
 setting changes.
+
+Runtime package finding (closed 2026-06-09): on 2026-06-07 the active `release\`
+package was a stale `2026-05-28T12:15:11Z` build (source commit `15606140c239`)
+whose control-loop CSV header lacked the `system_cpu_*` fields. The 2026-06-09
+rebuild/publish closed this: the live session `2026-06-09T02:32:40` (git_hash
+`dd2c02214128`) emits the five `system_cpu_*` columns, so live package evidence
+is now available.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
 
@@ -103,7 +110,7 @@ Proposed behavior, not implemented yet:
 
 ## 7. Data / schema deltas
 
-- New runtime CSV/status fields, additive:
+- New runtime CSV fields, additive:
   - `system_cpu_idle_delta_ms`
   - `system_cpu_kernel_delta_ms`
   - `system_cpu_user_delta_ms`
@@ -186,19 +193,21 @@ Verify legend:
   the minimum version.
 
 > Gate 3 is settled (decision dated 2026-06-04). The whole-system CPU **load**
-> layer (REQ-CPUSETTINGS-01..05) is implemented and verified (§14). The operator
-> `cpu_settings_label` (REQ-CPUSETTINGS-06) is deferred — it carries its own
-> open question (config key vs runtime marker, §8) and is the shared label with
-> FEAT-0006. The **work/energy** layer (work-per-Joule, package power) is out of
-> scope here and is specified separately in the `FEAT-0006`
-> (cpu-work-energy-efficiency-evidence) spec.
+> layer (REQ-CPUSETTINGS-01..05) is implemented and verified in source/tests
+> (§14). The operator `cpu_settings_label` (REQ-CPUSETTINGS-06) is deferred — it
+> carries its own open question (config key vs runtime marker, §8) and is the
+> shared label with FEAT-0006. The **work/energy** layer (work-per-Joule,
+> package power) is out of scope here and is specified separately in the
+> `FEAT-0006` (cpu-work-energy-efficiency-evidence) spec. The 2026-06-07 live
+> package/header finding (a packaging evidence gap, not a source/test failure)
+> was closed by the 2026-06-09 rebuild.
 
 ## 14. Verification log  *(fill in after the feature is built)*
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
 | REQ-CPUSETTINGS-01 | pass | `process_cpu_*`, GPU, fan, and temperature columns unchanged; only additive columns added in `BuildControlLoopCsvHeader`/`Row`. `Test-LocalCI.ps1` 7/7 ctest + 114 pytest pass. | 2026-06-04 |
-| REQ-CPUSETTINGS-02 | pass | `system_cpu_idle/kernel/user_delta_ms`, `system_cpu_processor_count`, `system_cpu_busy_pct` from `GetSystemTimes` (`control_scheduler.cpp`). Derivation unit-tested in `core_smoke_tests.cpp::TestSystemCpuBusyDerivation` (66.667% from synthetic counters; not divided by processor count). | 2026-06-04 |
+| REQ-CPUSETTINGS-02 | pass | `system_cpu_idle/kernel/user_delta_ms`, `system_cpu_processor_count`, `system_cpu_busy_pct` from `GetSystemTimes` (`control_scheduler.cpp`). Derivation unit-tested in `core_smoke_tests.cpp::TestSystemCpuBusyDerivation` (66.667% from synthetic counters; not divided by processor count). Live package confirmed by the 2026-06-09 rebuild: session `2026-06-09T02:32:40` (git_hash `dd2c02214128`) emits the five `system_cpu_*` columns. | 2026-06-09 |
 | REQ-CPUSETTINGS-03 | pass | Columns additive; consumers bind by header name (`analyze_csv.cpp` `GetField`, `dashboard.js` header map). `tests/test_analyze_ingest.py` ingests a control-loop CSV with none of the new columns and passes. | 2026-06-04 |
 | REQ-CPUSETTINGS-04 | pass | No third-party tool / subprocess / sibling repo; uses Win32 `GetSystemTimes` only, beside the existing `GetProcessTimes` sample. | 2026-06-04 |
 | REQ-CPUSETTINGS-05 | pass | Logger records raw deltas + derived busy percent only; no idle/near-idle/background/thermal-residual classification in the logger. | 2026-06-04 |
@@ -211,3 +220,11 @@ was deferred per the 2026-06-04 decision; the spec's load layer
 `system_cpu_busy_pct` is intentionally not added this change (the status surface
 uses a 0-on-unavailable convention that conflicts with the CSV's blank-on-
 unavailable "no false zero" rule). Status-JSON parity is a candidate follow-up.
+
+**Runtime package finding (closed 2026-06-09):** on 2026-06-07 the active
+packaged runtime was still the 2026-05-28 build (`release/build-info.json` source
+commit `15606140c239`), and its CSV session lacked all `system_cpu_*` columns.
+The 2026-06-09 rebuild/publish closed this: the live session
+`2026-06-09T02:32:40` (git_hash `dd2c02214128`, 256-column header) carries the
+five `system_cpu_*` columns, so live data from the current package is valid for
+FEAT-0002 comparisons.

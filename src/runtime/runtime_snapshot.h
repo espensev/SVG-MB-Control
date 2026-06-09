@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -47,6 +48,17 @@ struct RuntimeSnapshot {
     std::vector<RuntimeAmdSensor> amd_sensors;
     RuntimeGpuSnapshot gpu;
     std::vector<RuntimeFanSnapshot> fans;
+
+    // FEAT-0006 read-only RAPL package-energy evidence (REQ-CPUEFF-02), copied
+    // from AmdSnapshot. Raw and quarantined; average watts is derived later by
+    // the analyzer. acquisition: "disabled" | "unavailable" | "quarantine" |
+    // "validated". sample id increments only on a new ~1 s window (de-dup key);
+    // window/delta are blank (NaN) when unavailable or guard-blanked. Carried
+    // in-memory to the control-loop CSV; not part of the snapshot JSON sidecar.
+    std::string pkg_energy_acquisition = "disabled";
+    std::uint64_t pkg_energy_sample_id = 0u;
+    double pkg_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
+    double pkg_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
 };
 
 // Per-snapshot lookup cache for hot paths that need to query the same sampled

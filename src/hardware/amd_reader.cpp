@@ -7,6 +7,7 @@
 #include "amd_decode.h"
 #include "env_util.h"
 #include "pawnio_binary.h"
+#include "rapl_energy.h"
 
 #include <array>
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,6 +37,13 @@ enum class Status {
 
 constexpr std::uint32_t kTctlTdieAddress = 0x00059800u;
 constexpr std::uint32_t kMaxCcds = 8u;
+
+// FEAT-0006 read-only RAPL package-energy implausibility-guard constants
+// (docs/cpu-work-energy-acquisition-decision-2026-06-07.md). The MSR indices and
+// the allow-list predicate live in rapl_energy.h (single source of truth).
+constexpr double kEnergyCeilingW = 400.0;    // high-power blank branch
+constexpr double kEnergyDtCapMs = 3000.0;    // dt blank branch (k ~ 3 x 1 s)
+constexpr double kEnergyCadenceMs = 1000.0;  // ~1 s resource-window cadence
 
 // Constant per-CCD sensor labels. Indexing this table avoids rebuilding the
 // label string ("CCD" + std::to_string(index+1) + " (Tdie)") on every CCD on
@@ -252,6 +261,27 @@ Status ExecutePawnIo(HANDLE handle,
     return Status::ok;
 }
 
+// Read-only MSR read for FEAT-0006 energy evidence. Hard-locked to
+// `ioctl_read_msr` on a two-entry allow-list (RAPL energy unit + package
+// energy); it never calls `ioctl_write_msr` and rejects any other index
+// (REQ-CPUEFF-05/06). An absent / unsupported MSR faults #GP -> driver error ->
+// Status::error, which the caller degrades to blank (no crash, no false zero).
+Status ReadAllowlistedMsr(HANDLE handle, std::uint32_t index,
+                          std::uint64_t* out_value) {
+    if (out_value == nullptr || !rapl::IsAllowlistedEnergyMsr(index)) {
+        return Status::invalid_arg;
+    }
+    const std::int64_t input = static_cast<std::int64_t>(index);
+    std::int64_t output = 0;
+    const Status status =
+        ExecutePawnIo(handle, "ioctl_read_msr", &input, 1u, &output, 1u);
+    if (status != Status::ok) {
+        return status;
+    }
+    *out_value = static_cast<std::uint64_t>(output);
+    return Status::ok;
+}
+
 bool DetectAmdCpu(std::string* out_name,
                   std::uint32_t* out_family,
                   std::uint32_t* out_model) {
@@ -325,6 +355,19 @@ struct AmdReader::Impl {
     std::vector<double> sim_tctl_sequence;
     std::size_t sim_tctl_index = 0u;
 
+    // FEAT-0006 read-only RAPL package-energy acquisition state (default off).
+    bool energy_enabled = false;
+    bool bin_hash_mismatch = false;
+    double energy_uj_per_unit = 0.0;
+    bool have_prev_energy = false;
+    std::uint64_t prev_energy_raw = 0u;
+    std::chrono::steady_clock::time_point prev_energy_time{};
+    std::uint64_t energy_sample_id = 0u;
+    std::string last_energy_acquisition = "disabled";
+    std::uint64_t last_energy_sample_id = 0u;
+    double last_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
+    double last_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
+
     ~Impl() {
         Close();
     }
@@ -369,6 +412,7 @@ struct AmdReader::Impl {
 
         HANDLE pawnio_handle = INVALID_HANDLE_VALUE;
         std::string load_warning;
+        bool load_hash_mismatch = false;
         DWORD last_open_error = ERROR_SUCCESS;
         PawnIoStatus last_load_status = PawnIoStatus::error;
         Status last_status = Status::error;
@@ -394,9 +438,10 @@ struct AmdReader::Impl {
             }
 
             load_warning.clear();
+            load_hash_mismatch = false;
             last_load_status = LoadPawnIoBinary(
                 pawnio_handle, kPawnIoSpecAmdFamily17V1, pawnio_bin,
-                &load_warning);
+                &load_warning, &load_hash_mismatch);
             if (last_load_status == PawnIoStatus::ok) {
                 break;
             }
@@ -441,6 +486,24 @@ struct AmdReader::Impl {
         supports_ccd = amd::SelectCcdLayout(cpu_model, &ccd_base);
         ccd_count_hint = 0u;
         initialized = true;
+
+        // FEAT-0006: opt-in read-only RAPL package energy (default off). Cache
+        // the energy unit once; a hash-mismatched bin or an implausible unit
+        // leaves it 0 so SamplePackageEnergy reports "unavailable".
+        bin_hash_mismatch = load_hash_mismatch;
+        energy_enabled =
+            GetEnvOrDefault("SVG_MB_CONTROL_RAPL_ENERGY_MODE", "disabled") ==
+            "enabled";
+        if (energy_enabled && !bin_hash_mismatch) {
+            std::uint64_t pwr_unit_raw = 0u;
+            if (ReadAllowlistedMsr(handle, rapl::kMsrRaplPwrUnit,
+                                   &pwr_unit_raw) == Status::ok) {
+                const double uj = rapl::EnergyUnitMicrojoules(pwr_unit_raw);
+                if (uj > 0.0 && uj < 1.0e3) {  // rejects ESU=0 / coarse units
+                    energy_uj_per_unit = uj;
+                }
+            }
+        }
         if (warning_text != nullptr) {
             // Preserve warn_only hash-mismatch text so AmdReader::init_warning
             // surfaces it even when the load itself succeeded.
@@ -471,6 +534,73 @@ struct AmdReader::Impl {
         }
         *out_value = static_cast<std::uint32_t>(output);
         return Status::ok;
+    }
+
+    // FEAT-0006: read package energy read-only, OUTSIDE the PCI mutex (rdmsr does
+    // not use PCI config space), self-gated to ~1 s so a steady-state tick adds
+    // no MSR work between windows. Fully guarded: never throws, never aborts the
+    // tick, never gates temperature. Default off; never auto-promotes to
+    // "validated" (that is the separate post-implementation Evaluation).
+    void SamplePackageEnergy(AmdSnapshot* snap) {
+        if (snap == nullptr) {
+            return;
+        }
+        if (!energy_enabled) {
+            snap->pkg_energy_acquisition = "disabled";
+            return;
+        }
+        // Field-level strict gate: never report MSR-derived values from an
+        // unverified (hash-mismatched) bin or an undecoded energy unit, even
+        // though temperature still reads.
+        if (bin_hash_mismatch || !(energy_uj_per_unit > 0.0) ||
+            handle == nullptr) {
+            snap->pkg_energy_acquisition = "unavailable";
+            return;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        const bool due =
+            !have_prev_energy ||
+            std::chrono::duration<double, std::milli>(now - prev_energy_time)
+                    .count() >= kEnergyCadenceMs;
+        if (!due) {
+            // Mirror the latest window across intervening ~250 ms ticks; the
+            // analyzer de-duplicates on the sample id.
+            snap->pkg_energy_acquisition = last_energy_acquisition;
+            snap->pkg_energy_sample_id = last_energy_sample_id;
+            snap->pkg_energy_window_ms = last_energy_window_ms;
+            snap->pkg_energy_delta_uj = last_energy_delta_uj;
+            return;
+        }
+        std::uint64_t cur_raw = 0u;
+        if (ReadAllowlistedMsr(handle, rapl::kMsrPkgEnergyStat, &cur_raw) !=
+            Status::ok) {
+            // #GP / unsupported / read error -> blank; re-baseline next window.
+            have_prev_energy = false;
+            last_energy_acquisition = "unavailable";
+            last_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
+            last_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
+            snap->pkg_energy_acquisition = "unavailable";
+            snap->pkg_energy_sample_id = last_energy_sample_id;
+            return;
+        }
+        // The risky baseline/delta/sample-id/guard transition is a pure,
+        // unit-tested function (rapl::AdvanceEnergyWindow); this method owns only
+        // the impure orchestration (cadence, the read, the clock, the mirror).
+        const double window_ms =
+            std::chrono::duration<double, std::milli>(now - prev_energy_time)
+                .count();
+        const rapl::EnergyWindowResult result = rapl::AdvanceEnergyWindow(
+            &have_prev_energy, &prev_energy_raw, &energy_sample_id, cur_raw,
+            window_ms, energy_uj_per_unit, kEnergyCeilingW, kEnergyDtCapMs);
+        prev_energy_time = now;
+        last_energy_acquisition = "quarantine";
+        last_energy_sample_id = result.sample_id;
+        last_energy_window_ms = result.window_ms;
+        last_energy_delta_uj = result.delta_uj;
+        snap->pkg_energy_acquisition = last_energy_acquisition;
+        snap->pkg_energy_sample_id = last_energy_sample_id;
+        snap->pkg_energy_window_ms = last_energy_window_ms;
+        snap->pkg_energy_delta_uj = last_energy_delta_uj;
     }
 };
 
@@ -525,6 +655,10 @@ const AmdSnapshot& AmdReader::Sample() {
     snapshot.cpu_name.clear();
     snapshot.transport_path.clear();
     snapshot.last_warning.clear();
+    snapshot.pkg_energy_acquisition = "disabled";
+    snapshot.pkg_energy_sample_id = 0u;
+    snapshot.pkg_energy_window_ms = std::numeric_limits<double>::quiet_NaN();
+    snapshot.pkg_energy_delta_uj = std::numeric_limits<double>::quiet_NaN();
     if (impl_ == nullptr) {
         snapshot.last_warning = "not initialized";
         return snapshot;
@@ -563,6 +697,12 @@ const AmdSnapshot& AmdReader::Sample() {
         snapshot.available = true;
         return snapshot;
     }
+
+    // FEAT-0006: read package energy BEFORE acquiring the PCI mutex (rdmsr does
+    // not use PCI config space, so it stays out of that critical section) and
+    // independent of the temperature reads below -- a temperature failure must
+    // not drop the energy fields, and vice versa.
+    impl_->SamplePackageEnergy(&snapshot);
 
     // Acquire the system-wide PCI mutex once for the whole Tctl + CCD
     // sequence rather than per SMN read. This drops a steady-state control

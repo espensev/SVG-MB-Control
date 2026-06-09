@@ -4,11 +4,14 @@ Status: **accepted** by the maintainer 2026-06-07. Design decision for
 `docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`; settles
 FEAT-0006 promotion **gate 3** (acquisition design record) and folds in the
 **gate 6** counter-read safety review (§"Counter-read safety review" below).
-FEAT-0006 is now `Draft` with its promotion gates met. This decision is
-normative for the acquisition design, but it does **not** authorize
-implementation: per `AGENTS.md` §Feature Intake Gate, building awaits the
-one-shot read-only live MSR validation (RAPL on Family 1Ah; PawnIO affinity;
-`#GP`→blank). FEAT-0004 is recommended operational context, not a blocker.
+FEAT-0006's promotion gates are met. This decision is
+normative for the acquisition design. The one-shot read-only live MSR validation
+has since run (2026-06-07): PASS (energy-only) — RAPL package energy works on
+Family 1Ah; APERF/MPERF `#GP` through the shipped bin, so the work /
+effective-frequency path is deferred. Per `AGENTS.md` §Feature Intake Gate the
+maintainer authorized an energy-only v1 build; the cycle-counter work numerator
+remains deferred (see "Resolved live" below). FEAT-0004 is recommended
+operational context, not a blocker.
 
 **Companion to:**
 `docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
@@ -65,17 +68,17 @@ acquisition path and the safeguards around it.
 core returns the socket total, updated ~every 1 ms) scaled by
 `MSR_RAPL_PWR_UNIT 0xC0010299` (energy unit `1/2^ESU` J; ESU default `0b10000`
 → 15.26 µJ/unit). Read-only, no PMC programming, no thread affinity (package
-scope). Reachable through the shipped bin (verification doc L67-70, L86).
+scope). Reachable through the shipped bin (verification doc §Per-signal feasibility, package-energy row).
 
 - Caveat carried as a quarantine item: RAPL availability/encoding on this part
   (Ryzen 9 9950X3D, Family 1Ah / Zen 5, model `0x44`) is documented only for
   Family 17h+; it is not confirmed for Family 1Ah and is validated live before
-  the data is trusted (verification doc L74-79).
+  the data is trusted (verification doc §Per-signal feasibility, package-energy row).
 
 **Option B — SMU power-reporting table (PPT) over SMN mailbox.** Rejected for
 v1: the SMU mailbox layout is firmware-version-specific and fragile, and it
 adds a write-then-read mailbox sequence on the SMN/PCI path that the energy MSR
-avoids (verification doc L89, FEAT-0006 §11). Deferred with Vcore/PPT/TDC/EDC.
+avoids (verification doc §Per-signal feasibility, PPT/TDC/EDC row; FEAT-0006 §11). Deferred with Vcore/PPT/TDC/EDC.
 
 **Option C — SVI2/SVI3 voltage × current (rejected).** AMD exposes per-domain
 core (VDDCR_CPU) and SoC (VDDCR_SOC) voltage and current through the SMU SVI
@@ -84,7 +87,7 @@ sensor (distinct from its SMU-table "CPU Package Power (PPT)" sensor). Rejected
 for v1 for three reasons:
 
 - It rides the same SMU-mailbox / SMN telemetry path as Option B, which is
-  firmware-version-specific and fragile (verification doc L88-89).
+  firmware-version-specific and fragile (verification doc §Per-signal feasibility, Vcore/VID and PPT/TDC/EDC rows).
 - The SVI **current** reading is meaningless without a **per-motherboard**
   telemetry scaling factor (the VRM telemetry-current reference baked into board
   firmware). That factor is not discoverable first-party from the CPU, and
@@ -98,7 +101,7 @@ to Joules by the on-chip energy unit `0xC0010299`, with no voltage, current, or
 per-board factor — so `V × I` is the more fragile path for a worse-scoped
 number. CPU voltage as Tier-2 *context* (not as the power signal) stays a
 deferred SMU-mailbox best-effort item, blank when the firmware layout is
-unknown (verification doc Vcore/VID row, L88).
+unknown (verification doc §Per-signal feasibility, Vcore/VID row).
 
 **Option D — none / status quo.** Rejected: leaves raw cooling performance
 unmeasurable (the Problem).
@@ -148,6 +151,12 @@ Effective frequency is included **only if** live validation confirms PawnIO
 honors caller thread affinity for `rdmsr` (see Evaluation §4); otherwise v1
 ships energy-only and effective frequency stays withheld.
 
+This means FEAT-0006's Tier 2 context is intentionally split for v1:
+already-logged CPU temperature remains available with the work/energy window,
+APERF/MPERF inputs are recorded only after affinity validation, and Vcore/VID
+plus PPT/TDC/EDC throttle context remain unavailable/deferred rather than
+guessed or represented as measured values.
+
 New control-loop fields (additive, nullable; final names settled at
 implementation per FEAT-0006 §7), proposed:
 
@@ -177,7 +186,7 @@ analyzer**, not logged.
 ## Counter-read safety review (FEAT-0006 gate 6 / REQ-CPUEFF-05, REQ-CPUEFF-06)
 
 This section is the counter-read safety review the verification doc allows to be
-folded into the decision (verification doc L148).
+folded into the decision (verification doc §Follow-up status).
 
 - **Read-only allow-list.** All MSR access goes through one helper that accepts
   only a fixed allow-list of indices: `0xC001029B`, `0xC0010299`, and (when
@@ -233,7 +242,7 @@ effective_freq = (Δaperf / Δmperf) * reference_freq    # architectural ratio
   window). Wrapping in ~1 s would require > ~65 kW, which is physically
   impossible for this socket, so one modular subtraction is exact within a
   normal window. The counter wraps about every 5–6 min at 200 W — relevant only
-  across windows, not within one (verification doc L86, L121-124). These
+  across windows, not within one (verification doc §Per-signal feasibility, package-energy row; §Key risks and required safeguards). These
   constants assume the default ESU = 16 (15.26 µJ/unit) and are recomputed from
   the runtime-read `0xC0010299`, so they are provisional until the live ESU read
   confirms the encoding on Family 1Ah (Evaluation §5).
@@ -403,16 +412,11 @@ at ~200 W), and cooldown. Use the in-tree analyzer
 - `docs/RUNTIME_HOME.md` and `docs/RUNTIME_LOGGING_AND_EVALUATION.md` gain the
   new columns and the per-signal quarantine markers at implementation
   (`AGENTS.md` §Change Checklist).
-- On maintainer acceptance, FEAT-0006 §9 (acquisition-decision row → this doc)
-  and §13 gates 3 **and 6** update, the `REQ-CPUEFF-*` IDs become normative
-  (gate 4), and `docs/TRACEABILITY.md` gains the `REQ-CPUEFF-*` rows (`AGENTS.md`
-  §Change Checklist). Specifically: (a) this decision **supersedes** FEAT-0006 §9
-  row 2 (its "loaded `strict`" wording) with "bin stays `warn_only`; MSR-derived
-  fields gated strict at field level," and that row text is corrected on
-  acceptance; (b) both §9 "Needed" rows — the acquisition decision and the
-  counter-read safety review — resolve to this single doc, the safety-review row
-  marked folded-in, not left open. This doc does not perform those edits while
-  FEAT-0006 is parked.
+- Maintainer acceptance on 2026-06-07 updated FEAT-0006 §9 and §13: the
+  acquisition-decision row points to this doc, the counter-read safety review is
+  folded into this doc, and the `REQ-CPUEFF-*` rows are mirrored in
+  `docs/TRACEABILITY.md`. The accepted rule is "bin stays `warn_only`;
+  MSR-derived fields are gated strict at field level."
 
 ## Verification
 
@@ -436,22 +440,33 @@ at ~200 W), and cooldown. Use the in-tree analyzer
 - Code review vs this decision and `AGENTS.md` §Live Runtime Safety / §Repo
   Boundary: reads only, strict gate on MSR-derived fields only, default-off,
   per-signal quarantine markers present, no control consumption.
-- Manual (read-only, post-acceptance): the one-shot live validation from the
-  verification doc next-steps (RAPL on Family 1Ah; PawnIO affinity honoring;
-  `#GP`→blank), feeding the Evaluation.
+- Manual (read-only, post-decision/pre-implementation): the one-shot live
+  validation from the verification doc follow-up status (RAPL on Family 1Ah;
+  PawnIO affinity honoring;
+  `#GP`→blank), feeding the Evaluation. Its procedure is
+  `docs/cpu-work-energy-live-validation-plan-2026-06-07.md`.
 
 ## What this does not authorize / open items
 
-- **Not implementation permission.** FEAT-0006 is `Reserved`; building needs it
-  promoted to an implementation-authorized state and FEAT-0004 shipped
-  (`AGENTS.md` §Feature Intake Gate).
+- **Implementation permission (energy-only).** FEAT-0006's promotion gates are
+  met and the one-shot read-only live MSR validation passed 2026-06-07
+  (energy-only); the maintainer authorized an energy-only v1 build. The
+  work-numerator / effective-frequency slice remains deferred (APERF/MPERF
+  filtered by the shipped bin). FEAT-0004 is recommended operational context,
+  not a blocker.
 - **Deferred signals.** `INST_RETIRED` (PMC writes), per-core energy (Tier 3),
-  Vcore + PPT/TDC/EDC (SMU mailbox) — out of v1. This leaves REQ-CPUEFF-03
-  partially unmet: with Vcore/VID and the throttle/limit reason deferred, the
-  already-logged temperature is the only interim confounder check, so a
-  quarantined efficiency read cannot yet separate a genuinely more-efficient
-  window from a power- or thermally-throttled one.
+  Vcore + PPT/TDC/EDC (SMU mailbox) — out of v1. They remain target context for
+  a later source decision, not v1 pass/fail fields. Until those fields exist,
+  analyzer/reporting must make clear that efficiency evidence lacks those
+  confounder checks.
 - **No control/feedforward use** of this data — a separate future feature.
-- **Open, resolved live:** RAPL availability/encoding on Family 1Ah; whether
-  PawnIO honors caller thread affinity for `rdmsr` (gates effective frequency);
-  the exact socket-ceiling constant for the implausibility guard.
+- **Resolved live (2026-06-07; see
+  `docs/cpu-work-energy-live-validation-results-2026-06-07.md`):** RAPL
+  availability/encoding on Family 1Ah is **confirmed working** (ESU=16 →
+  15.26 µJ/unit; power tracks load). The PawnIO affinity question is **moot for
+  v1**: APERF/MPERF `#GP` through the shipped bin (it filters the read set), so
+  the work/effective-frequency path is unavailable and **v1 is energy-only** (the
+  fallback this decision already names). Recovering cycles/effective frequency
+  needs a different PawnIO module — a separate source decision (FEAT-0006 §11).
+- **Still open:** the exact socket-ceiling constant for the implausibility guard
+  (the validation plan proposes 400 W; finalize at implementation).

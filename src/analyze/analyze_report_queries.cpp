@@ -453,6 +453,52 @@ GpuResponseSummary SummariseGpuResponse(
     return summary;
 }
 
+// FEAT-0006 (REQ-CPUEFF-02) derived package power. Collapses the mirrored
+// per-tick energy rows to one window per cpu_power_sample_id (GROUP BY), keeps
+// only windows with a non-null delta (the log-time implausibility guard blanks
+// the rest -> no false zero), and hands the distinct windows plus the
+// acquisition-state provenance to the pure ComputePackagePower. Both queries
+// reference the v9 energy columns, so a schema-8 DB read by a schema-9 binary
+// throws "no such column"; the single try/catch degrades that to an empty
+// (unavailable) summary rather than failing the whole report -- report.cpp
+// verifies the schema version but does not migrate.
+PackagePowerSummary SummarisePackagePower(Database& db, std::int64_t run_id) {
+    std::map<std::string, int> acquisition_counts;
+    std::vector<PackageEnergyWindow> windows;
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(cpu_pkg_energy_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+        Statement win = db.Prepare(
+            "SELECT MAX(cpu_power_window_ms), MAX(cpu_pkg_energy_delta_uj) "
+            "FROM tick_samples WHERE run_id = ?1 "
+            "AND cpu_power_sample_id IS NOT NULL AND cpu_power_sample_id > 0 "
+            "AND cpu_power_window_ms IS NOT NULL "
+            "AND cpu_pkg_energy_delta_uj IS NOT NULL "
+            "GROUP BY cpu_power_sample_id");
+        win.BindInt(1, run_id);
+        while (win.Step()) {
+            if (win.ColumnIsNull(0) || win.ColumnIsNull(1)) {
+                continue;
+            }
+            PackageEnergyWindow w;
+            w.window_ms = win.ColumnDouble(0);
+            w.delta_uj = win.ColumnDouble(1);
+            windows.push_back(w);
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: package-power query failed: " << ex.what() << '\n';
+        return ComputePackagePower({}, {});
+    }
+    return ComputePackagePower(windows, std::move(acquisition_counts));
+}
+
 // Loads tick_channel_samples for run_id and aggregates per-channel stats:
 // setpoint/boost maxima, reversal count via the kReversalDeadbandPct gate,
 // primary-source counts, and total_writes range. Channels are created

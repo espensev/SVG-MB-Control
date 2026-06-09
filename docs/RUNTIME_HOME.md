@@ -18,6 +18,7 @@ Control owns these files:
 - `control_health.json`
 - `pending_writes.json`
 - `stop.request.json`
+- `circuit_breaker_reset.request.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
 - `logs\svg_mb_control_manifest.json`
@@ -335,7 +336,8 @@ The supervisor logs its own startup failures to the supervisor stderr log and
 the worker's attached-mode startup/runtime output to the worker logs. Structured
 runtime events remain in `logs\svg_mb_control_events.jsonl`.
 
-Control-loop CSV rows include the common telemetry/fan columns plus:
+Current-source control-loop CSV rows include the common telemetry/fan columns
+plus:
 
 - loop tick and timing-quality fields
 - process CPU and memory fields
@@ -343,6 +345,9 @@ Control-loop CSV rows include the common telemetry/fan columns plus:
   `system_cpu_idle_delta_ms`, `system_cpu_kernel_delta_ms`,
   `system_cpu_user_delta_ms`, `system_cpu_processor_count`, and
   `system_cpu_busy_pct`
+- CPU package-energy fields (additive, FEAT-0006, read-only, **off by
+  default**): `cpu_power_sample_id`, `cpu_power_window_ms`,
+  `cpu_pkg_energy_delta_uj`, and `cpu_pkg_energy_acquisition`
 - per-channel observed temperature, setpoint, feedforward demand, correction,
   thermal-pressure boost, primary temperature source, write count,
   active-write flag, and baseline flag
@@ -355,7 +360,32 @@ busy time and is already core-normalized to `[0, 100]` (it is not divided by
 all logical processors, a `system_cpu_*_delta_ms` value can exceed the wall-clock
 window. All five fields are blank when a system-CPU sample is unavailable; older
 archives without these columns remain valid (consumers bind columns by header
-name). See `docs/cpu-settings-evidence-logger-decision-2026-06-04.md`.
+name).
+
+The CPU package-energy fields (FEAT-0006) come from the AMD RAPL package-energy
+MSR (`0xC001029B`, scaled by the energy unit `0xC0010299`), read-only through the
+existing PawnIO transport and **off by default** (enable with
+`SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`). `cpu_pkg_energy_acquisition` is one of
+`disabled` (the default), `unavailable` (enabled but the read failed, the bin
+hash mismatched, or RAPL is absent), `quarantine` (collected but not trusted), or
+`validated` (set only after the post-implementation Evaluation; never automatic).
+`cpu_power_sample_id` increments only when a new ~1 s energy window is sampled;
+intervening control ticks repeat the latest id, so a consumer must de-duplicate
+on a distinct nonzero id. `cpu_power_window_ms` and `cpu_pkg_energy_delta_uj` are
+blank when energy is unavailable or when the implausibility guard fires (a window
+longer than ~3 s, or an implied average power above a 400 W ceiling) — no false
+zero. Average package power is **not logged**; it is derived later as
+`(cpu_pkg_energy_delta_uj / 1e6) / (cpu_power_window_ms / 1000)` over distinct
+sample ids. Older archives without these columns remain valid (name-bound).
+
+The 2026-06-09 rebuild/publish confirms these columns in the live header: the
+session `2026-06-09T02:32:40` (git_hash `dd2c02214128`, `256` columns) contains
+the five `system_cpu_*` columns and the off-by-default FEAT-0006
+`cpu_pkg_energy_*` columns. Only genuinely older archives that predate the
+rebuild (for example the prior `2026-05-28` package) lack the `system_cpu_*`
+columns; bind columns by header name and treat only those as pre-FEAT-0002 for
+whole-system CPU analysis. See
+`docs/cpu-settings-evidence-logger-decision-2026-06-04.md`.
 
 The JSONL event stream uses schema `svg_mb_control.event.v1`. It is the source
 for discrete operational events such as startup, rotation, write attempts,

@@ -97,6 +97,30 @@ struct ChannelStats {
     int last_direction = 0;  // -1, 0, +1
 };
 
+// One de-duplicated RAPL package-energy window (the logger mirrors one window
+// across intervening ticks; the analyzer collapses by cpu_power_sample_id).
+struct PackageEnergyWindow {
+    double window_ms = 0.0;
+    double delta_uj = 0.0;
+};
+
+// FEAT-0006 (REQ-CPUEFF-02) derived package-power evidence. avg_watts is the
+// time-weighted average (total energy / total window time) over distinct
+// sample-id windows — NOT a mean of per-window watts. nullopt avg_watts means
+// no valid window was ingested (RAPL off/unavailable, or old archive): the
+// report says "unavailable", never a false zero. acquisition_counts is the raw
+// provenance breakdown over all ticks of the run.
+struct PackagePowerSummary {
+    int window_count = 0;
+    double total_energy_j = 0.0;
+    double total_window_s = 0.0;
+    std::optional<double> avg_watts;
+    std::optional<double> watts_p50;
+    std::optional<double> watts_p90;
+    std::optional<double> watts_max;
+    std::map<std::string, int> acquisition_counts;
+};
+
 struct RuntimeManifestEvidence {
     std::filesystem::path config_path;
     std::string config_sha256;
@@ -134,6 +158,7 @@ struct ReportData {
     std::optional<double> response_delay_s;
     GpuResponseSummary gpu_response;
     TimingResourceStats timing_resources;
+    PackagePowerSummary package_power;
     int authority_reasserted = 0;
     int write_failures = 0;
     int restore_failures = 0;
@@ -145,5 +170,12 @@ std::optional<double> Percentile(std::vector<double> values, double pct);
 std::optional<double> Median(std::vector<double> values);
 std::optional<double> Mean(const std::vector<double>& values);
 BandPercentiles SummariseBand(const std::vector<TickRow>& ticks, Band band);
+
+// Pure: time-weighted average package power + per-window watt distribution from
+// already-deduplicated windows (one per sample id). acquisition_counts is
+// provenance, copied through unchanged. Empty windows -> avg_watts nullopt.
+PackagePowerSummary ComputePackagePower(
+    const std::vector<PackageEnergyWindow>& windows,
+    std::map<std::string, int> acquisition_counts);
 
 }  // namespace svg_mb_control::analyze::report_detail

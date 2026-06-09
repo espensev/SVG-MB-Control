@@ -1,15 +1,24 @@
 # FEAT-0006: CPU work & energy efficiency evidence
 
-> **Promoted to Draft 2026-06-07** from Reserved. The v1 acquisition path is
-> committed by the accepted
-> [`cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md),
-> which also folds in the counter-read safety review. `REQ-CPUEFF-*` are now
-> mirrored in `docs/TRACEABILITY.md` and this body is in the enforced feature set
-> (`tests/test_feature_specs.py`). Implementation is **not** yet authorized: it
-> awaits a one-shot read-only live MSR validation on the target part (see §13).
+> **Promoted to Accepted 2026-06-07** (it reached Draft from Reserved the same
+> day). All seven promotion gates (§13) are met, so per
+> `docs/features/README.md` §2 the spec is Accepted: agreed and authorizable. The
+> v1 acquisition path and the folded counter-read safety review are settled by the
+> accepted
+> [`cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md);
+> `REQ-CPUEFF-*` are mirrored in `docs/TRACEABILITY.md` and this body is in the
+> enforced feature set (`tests/test_feature_specs.py`). The **full** work+energy
+> feature is not build-authorized, but the **energy-only v1 subset** was
+> authorized 2026-06-07 after the one-shot read-only live MSR validation passed
+> (energy-only) and **has landed**: the RAPL package-energy logger (2026-06-07)
+> and the analyzer time-weighted average-power derivation (2026-06-09). Status
+> stays **Accepted** (not `Implemented`): the **enabled** integration path is
+> unrun (§14), and the work numerator / effective frequency stay deferred to a
+> later cycle-counter-module slice (§11). The logged energy ships `quarantine`
+> until the post-implementation Evaluation promotes it (§13, §14).
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.2   **Updated:** 2026-06-07
+**Status:** Accepted   **Version:** 0.4   **Updated:** 2026-06-07
 **Namespace:** `REQ-CPUEFF-*`
 **Companion to:** `AGENTS.md`, `docs/RUNTIME_HOME.md`,
 `docs/RUNTIME_LOGGING_AND_EVALUATION.md`, `docs/READ_LOOP.md`,
@@ -35,6 +44,17 @@ layer above FEAT-0002: FEAT-0002 logs whole-system busy *time*; this feature add
 the *work* numerator and the *energy* denominator that time-utilization cannot
 provide.
 
+> **v1 scope (2026-06-07 live validation, energy-only).** The shipped PawnIO
+> `AMDFamily17.bin` filters `ioctl_read_msr` so the CPU **work** counters
+> `#GP` (APERF/MPERF unreadable; `INST_RETIRED` needs PMC writes). So v1 can
+> acquire **package energy / average power only** — *heat dissipated*
+> (cooling watts-per-RPM) and *score-per-Joule* against an external fixed-workload
+> score. First-party **work-per-Joule** (the §2 motivation) and effective
+> frequency are **deferred** until a cycle-counter-capable PawnIO module exists
+> (§11 open decision). The need/target below is unchanged; only what v1 can
+> acquire is narrowed. Evidence:
+> [`docs/cpu-work-energy-live-validation-results-2026-06-07.md`](../cpu-work-energy-live-validation-results-2026-06-07.md).
+
 ## 2. Problem & motivation  *(promotion gate 1)*
 
 This is a named contract/capability gap, not an observed runtime-log failure.
@@ -59,9 +79,12 @@ first-party source is designed and reviewed." This feature is that design.
 **Goals**
 - Define and capture the minimum raw fields needed to derive **work per Joule**
   per comparable workload window (§5 Tier 1).
-- Capture the validity-context fields that keep an efficiency comparison honest —
-  effective frequency, voltage, temperature, and the throttle/limit reason
-  (§5 Tier 2) — so a lower-power result is distinguishable from a throttled one.
+- Capture the v1 validity context that the accepted read-only MSR path can
+  support: APERF/MPERF-derived effective-frequency inputs when live validation
+  passes, already-logged CPU temperature, per-signal acquisition/provenance, and
+  workload/setting labels. Vcore/VID and PPT/TDC/EDC throttle context remain
+  Tier 2 target signals, but are deferred from v1 because the accepted
+  acquisition decision keeps SMU-mailbox work out of this slice.
 - Keep all logged data raw, so the efficiency ratio and average power are derived
   by analyzer/reporting later, not baked into the logger.
 - Carry an operator workload + CPU-setting label so before/after windows group
@@ -76,6 +99,8 @@ first-party source is designed and reviewed." This feature is that design.
   control. Reading counters is in scope; **actuating CPU state is not**.
 - No analyzer scoring or "good/bad efficiency" verdict in the logger; the ratio
   and its interpretation are analyzer/reporting work.
+- No Vcore/VID or PPT/TDC/EDC throttle/limit acquisition in v1. Those require a
+  separate SMU/SVI source decision before they can become measured fields.
 - Tier 3 resolution (per-core/per-CCD energy and cycles, C-state and
   P-state/boost residency, uncore/SoC power split, energy-delay product) is out
   of scope for the committed need and is listed for later (§11).
@@ -93,27 +118,29 @@ first-party source is designed and reviewed." This feature is that design.
 
 ## 5. The need — target measurement set
 
-The committed need is **Tier 1 + Tier 2**. The north-star derived metric is
-work-per-Joule with average power and effective frequency as context. The logger
-records raw counters/samples; the ratios below are derived later.
+The committed need is **Tier 1 + the v1 Tier 2 subset**. The north-star derived
+metric is work-per-Joule with average power and effective frequency as context.
+The logger records raw counters/samples; the ratios below are derived later.
+The broader Tier 2 context remains the target model, but only fields with a
+reviewed first-party source are part of v1.
 
 ### Tier 1 — irreducible (efficiency is not computable without these)
 
 | Need | Raw signal (proposed) | Derivation it enables |
 |---|---|---|
-| Work done | instructions retired (PMC `INST_RETIRED`) — ideal; and/or delivered cycles (APERF) | numerator of work-per-Joule |
-| Time normalization | reference cycles (MPERF) + window duration + busy time (`system_cpu_busy_pct`, FEAT-0002) | effective frequency; idle vs active fraction |
+| Work done | instructions retired (PMC `INST_RETIRED`) — ideal; and/or delivered cycles (APERF) | numerator of work-per-Joule. **v1: unavailable** — APERF `#GP` (shipped bin filters the read), `INST_RETIRED` needs PMC writes; no first-party work numerator in v1 (deferred, §11). |
+| Time normalization | reference cycles (MPERF) + window duration + busy time (`system_cpu_busy_pct`, FEAT-0002) | effective frequency; idle vs active fraction. **v1: MPERF unavailable** (`#GP`); window duration + FEAT-0002 busy time remain the only time-normalization context. |
 | Energy cost | package energy counter (RAPL-class, monotonic, differenced over the window) | Joules and average power (ΔEnergy ÷ Δtime) |
 
 ### Tier 2 — validity context (without these the efficiency number misleads)
 
-| Need | Why it is required |
-|---|---|
-| Effective frequency (from APERF/MPERF) | the realized clock — the variable a CPU setting moves |
-| Vcore / VID | the primary lever for "same work, less power" |
-| Temperature (already logged: Tctl/CCD) | leakage rises with temperature; thermal throttling confounds the comparison |
-| Throttle / limit reason — PPT/TDC/EDC-limited, or thermal (HTC/PROCHOT) | distinguishes a genuinely more-efficient window from a power- or thermally-throttled one |
-| Workload label + CPU-setting label | groups before/after windows of the same workload class apples-to-apples |
+| Need | Why it is required | v1 disposition |
+|---|---|---|
+| Effective frequency (from APERF/MPERF) | the realized clock — the variable a CPU setting moves | Include inputs only when live validation confirms APERF/MPERF affinity correctness; otherwise leave unavailable. |
+| Vcore / VID | the primary lever for "same work, less power" | Deferred from v1; needs a separate SMU/SVI source decision. |
+| Temperature (already logged: Tctl/CCD) | leakage rises with temperature; thermal throttling confounds the comparison | Already logged; keep aligned with the work/energy window. |
+| Throttle / limit reason — PPT/TDC/EDC-limited, or thermal (HTC/PROCHOT) | distinguishes a genuinely more-efficient window from a power- or thermally-throttled one | Deferred from v1; needs a separate SMU/firmware source decision. |
+| Workload label + CPU-setting label | groups before/after windows of the same workload class apples-to-apples | Include as operator labels, not measured sensor values. |
 
 ### Derived later (analyzer/reporting, not the logger)
 
@@ -128,17 +155,21 @@ records raw counters/samples; the ratios below are derived later.
 A window with any unavailable Tier 1 source leaves the dependent fields
 blank/null and emits no false zero, per FEAT-0002's logging rule.
 
-## 6. Requirements  *(promotion gate 4 — assign after the acquisition decision picks a direction)*
+## 6. Requirements  *(promotion gate 4)*
 
-> These IDs are reserved in this feature's `REQ-CPUEFF-*` namespace. They are not
-> normative until the §9 acquisition design decision is written and marked
-> current and the §13 gates pass.
+> These IDs are active planning requirements for this enforced, Accepted spec.
+> They are mirrored in `docs/TRACEABILITY.md`. The energy-only subset was build-
+> authorized 2026-06-07 after the live validation and is implemented and tested
+> (REQ-CPUEFF-02/04/05/06/07, and REQ-CPUEFF-03 in its v1 scope — see §14);
+> REQ-CPUEFF-01 (first-party work numerator) and the effective-frequency context
+> stay deferred to a later cycle-counter-module slice (§11), and REQ-CPUEFF-08
+> (operator label) is unimplemented in v1.
 
 | ID | Requirement |
 |---|---|
-| REQ-CPUEFF-01 | The logger must record a first-party CPU **work** signal per window — instructions retired and/or delivered cycles (APERF) with reference cycles (MPERF) — sufficient to derive a work numerator. |
+| REQ-CPUEFF-01 | The logger must record a first-party CPU **work** signal per window — instructions retired and/or delivered cycles (APERF) with reference cycles (MPERF) — sufficient to derive a work numerator. **Deferred / unmet in v1 (2026-06-07 live validation):** the shipped `AMDFamily17.bin` filters `ioctl_read_msr` so APERF/MPERF `#GP`, and `INST_RETIRED` needs PMC writes (outside read-only scope). v1 has **no first-party work numerator**, so first-party work-per-Joule is not computable; recovering it requires a cycle-counter-capable module (§11). Energy (REQ-CPUEFF-02) is the denominator, not a substitute for this signal. |
 | REQ-CPUEFF-02 | The logger must record a first-party CPU **package energy** signal per window, as a differenced monotonic counter, sufficient to derive Joules and average power. |
-| REQ-CPUEFF-03 | The logger must record Tier 2 validity context: effective frequency, Vcore/VID, and a throttle/limit reason, alongside the already-logged temperature. |
+| REQ-CPUEFF-03 | The v1 logger must preserve available validity context for efficiency analysis: existing CPU temperature remains available with the work/energy window; effective-frequency inputs from APERF/MPERF are **unavailable in v1** (2026-06-07 live validation: the shipped bin filters those reads); Vcore/VID and throttle/limit reasons remain unavailable/deferred rather than guessed or emitted as measured values. |
 | REQ-CPUEFF-04 | All new fields must be additive and nullable/blank when unavailable; existing CSV archives and runtime-home files must remain valid. A window with an unavailable source must emit no false zero. |
 | REQ-CPUEFF-05 | Acquisition must be read-only: counter/register **reads** only. The controller must not write CPU control MSRs, SMU control mailboxes, or any CPU power/clock/voltage actuation. |
 | REQ-CPUEFF-06 | The exact set of readable registers/counters must be enumerated and reviewed against `AGENTS.md` §Live Runtime Safety / §Repo Boundary before implementation. |
@@ -152,10 +183,13 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
   (instructions retired and/or APERF/MPERF deltas), package-energy delta
   (Joules) and/or raw energy-counter delta, and per-signal acquisition markers
   so package energy and cycles can be `disabled`, `unavailable`, `quarantine`,
-  or `validated` independently; Tier 2 — effective frequency, Vcore,
-  throttle/limit reason; plus workload/setting labels. The sample id/window are
-  required so an analyzer can avoid double-counting one resource-window delta
-  repeated across multiple 250 ms control-loop rows.
+  or `validated` independently; v1 context — the APERF/MPERF inputs needed for
+  analyzer-derived effective frequency when validated, already-logged
+  temperature aligned with the window, optional blank-reason fields, and
+  workload/setting labels. Vcore and throttle/limit reason fields are deferred
+  until a separate source decision exists. The sample id/window are required so
+  an analyzer can avoid double-counting one resource-window delta repeated
+  across multiple 250 ms control-loop rows.
 - Config impact: undecided; a workload/setting label may come from config or a
   runtime marker (shared open question with FEAT-0002 §8).
 - Schema/version impact: update `docs/RUNTIME_HOME.md` and
@@ -167,9 +201,9 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
 - A workload label and a CPU-setting label, supplied by the operator (static
   config first; runtime marker later if needed). UI is out of scope
   (`docs/MEASUREMENT_GATE.md`).
-- A diagnostic surface that reports which Tier 1 / Tier 2 sources are available on
-  the current machine may be useful, mirroring FEAT-0004's hardware-access health
-  signal; decided at implementation.
+- A diagnostic surface that reports which Tier 1 / Tier 2 sources are available,
+  unavailable, or deferred on the current machine may be useful, mirroring
+  FEAT-0004's hardware-access health signal; decided at implementation.
 
 ## 9. Design decision record(s)  *(promotion gate 3 — write before implementation)*
 
@@ -177,7 +211,7 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
 |---|---|---|
 | [`docs/cpu-work-energy-acquisition-verification-2026-06-04.md`](../cpu-work-energy-acquisition-verification-2026-06-04.md) | Feasibility input: is `read_msr` reachable? **Done (2026-06-04): yes** — the shipped `AMDFamily17.bin` already exposes `ioctl_read_msr`; APERF/MPERF + RAPL package energy are reachable read-only via the existing transport. Surfaces the 32-bit energy wrap, APERF/MPERF affinity, and INST_RETIRED-needs-writes caveats. | Current |
 | [`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md) | Proposed acquisition path and folded safety review: v1 = package energy (`0xC001029B` + unit `0xC0010299`) plus APERF/MPERF if affinity validates, through a read-only MSR allow-list; bin stays `warn_only` for temperature while MSR-derived fields are field-gated strict; sample id/window prevent resource-window double-counting; per-signal provenance lets energy validate independently from cycles. | Accepted 2026-06-07 |
-| `docs/cpu-counter-read-safety-review-YYYY-MM-DD.md` | A Live Runtime Safety review confirming the read set is read-only and bounded (only `ioctl_read_msr` on a fixed MSR allow-list; never `ioctl_write_msr`), that no CPU-control write path is introduced, and how an unsupported (`#GP`) or wrapped counter degrades to blank. May be folded into the acquisition decision. | Accepted — folded into the 2026-06-07 decision |
+| Counter-read Live Runtime Safety review — folded into [`cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md) | Confirms the read set is read-only and bounded (only `ioctl_read_msr` on a fixed MSR allow-list; never `ioctl_write_msr`), that no CPU-control write path is introduced, and how an unsupported (`#GP`) or wrapped counter degrades to blank. | Accepted — folded into the 2026-06-07 decision |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -185,7 +219,7 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
 |---|---|---|
 | REQ-CPUEFF-01 | T, M | unit/smoke test for work-counter delta math; runtime CSV evidence on a supported machine |
 | REQ-CPUEFF-02 | T, M | unit/smoke test for energy-counter delta → Joules/avg-power; sample-id/window de-duplication; runtime CSV evidence |
-| REQ-CPUEFF-03 | T, R | test for context-field propagation; review vs `docs/RUNTIME_HOME.md` |
+| REQ-CPUEFF-03 | T, R | test context/provenance propagation and explicit deferred-signal unavailable handling; review vs `docs/RUNTIME_HOME.md` |
 | REQ-CPUEFF-04 | T, R | analyzer-ingest tests with old archives missing the new fields; no-false-zero test |
 | REQ-CPUEFF-05 | R | code review: read paths only; no CPU-control write |
 | REQ-CPUEFF-06 | R | review of the enumerated register/counter read set vs `AGENTS.md` |
@@ -201,9 +235,10 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 | Decision | Needed before | Current default |
 |---|---|---|
 | Does a PawnIO module exposing `read_msr` exist or is it packageable for the target machines? | acquisition decision | **Resolved (2026-06-04):** yes — the already-shipped `AMDFamily17.bin` exposes `ioctl_read_msr`; no new module needed. See the verification doc. PMC programming for `INST_RETIRED` is the exception (needs MSR writes) and stays deferred. |
-| Work proxy: instructions retired (PMC) vs delivered cycles (APERF) for v1? | implementation | APERF cycles first (no PMC programming); add `INST_RETIRED` if the PMC path is clean. |
+| Work proxy: instructions retired (PMC) vs delivered cycles (APERF) for v1? | a cycle-capable module slice | **Both unavailable in v1 (2026-06-07):** APERF `#GP` (shipped bin filters the read) and `INST_RETIRED` needs PMC writes. No first-party work proxy in v1; recover via the cycle-counter source decision below. |
+| Cycle-counter MSR source (recover the work numerator, and effective frequency as a secondary gain) | before any v2 cycle/eff-freq slice | **Open** — find or package a PawnIO module whose `read_msr` actually services the cycle/instruction counters (APERF/MPERF, ideally a retired-instructions counter). Stub: `docs/cpu-cycle-counter-source-decision-2026-06-07.md`. Main tension: the repo-boundary cost of vendoring a new/patched bin (`AGENTS.md` §Repo Boundary). |
 | Energy source: RAPL MSR vs SMU power-reporting over SMN? | acquisition decision | RAPL MSR if reachable (monotonic energy counter); SMU mailbox is firmware-version-specific and fragile. |
-| PPT/TDC/EDC + voltage source | acquisition decision | SMU mailbox over SMN; treat as best-effort context, blank when the firmware layout is unknown. |
+| PPT/TDC/EDC + voltage source | later source decision before adding those measured fields | Deferred from v1; SMU mailbox over SMN is the likely source, but firmware-layout risk remains. |
 | Where the workload/setting label lives | implementation | Static config label first; runtime marker later (shared with FEAT-0002). |
 | Tier 3 (per-core/per-CCD energy+cycles, C-state/P-state residency, uncore split, EDP) | a later feature | Out of scope here; revisit after Tier 1+2 ships. |
 
@@ -239,27 +274,70 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 - [x] 7. Doctrine check: current behavior is grounded; proposed behavior is
   labeled proposed; Tier 3 named as out of scope.
 
-> All seven promotion gates are met. The spec is held at `Draft` rather than
-> `Accepted` because implementation is intentionally not authorized until a
-> one-shot **read-only live MSR validation** on the target part (Ryzen 9 9950X3D,
-> Family 1Ah) passes: RAPL availability/encoding on Family 1Ah, whether PawnIO
-> honors caller thread affinity for `rdmsr`, and `#GP`→blank. FEAT-0004 is
-> recommended operational context, not a build blocker. The committed target
-> (Tier 1 + Tier 2, work-per-Joule) and the v1 acquisition path are agreed.
+> All seven promotion gates are met, so the spec is **Accepted** (agreed and
+> authorizable per `docs/features/README.md` §2). Acceptance did not by itself
+> authorize the build; implementation was gated on a one-shot **read-only live MSR
+> validation** on the target part (Ryzen 9 9950X3D, Family 1Ah) — RAPL
+> availability/encoding on Family 1Ah, whether PawnIO honors caller thread
+> affinity for `rdmsr`, and `#GP`→blank — and on the maintainer explicitly
+> authorizing build work. FEAT-0004 is recommended operational context, not a
+> build blocker. The committed target (Tier 1 + v1 Tier 2 context, work-per-Joule)
+> and the v1 acquisition path are agreed. The executable procedure for that
+> one-shot validation — read sets, the affinity-honoring test, plausibility
+> bounds, and the PASS/energy-only/FAIL outcome tree — is
+> [`docs/cpu-work-energy-live-validation-plan-2026-06-07.md`](../cpu-work-energy-live-validation-plan-2026-06-07.md).
+>
+> **Live validation ran 2026-06-07 — outcome PASS (energy-only):** RAPL package
+> energy is available and correctly encoded on Family 1Ah, but APERF/MPERF `#GP`
+> through the shipped bin, so effective frequency is unavailable in v1. Results:
+> [`docs/cpu-work-energy-live-validation-results-2026-06-07.md`](../cpu-work-energy-live-validation-results-2026-06-07.md).
+> **Build authorized (energy-only) 2026-06-07** by the maintainer, after the live
+> validation and the energy-only re-scope (REQ-CPUEFF-01/03 updated; the
+> delivered-cycles work proxy and effective-frequency context are withheld to a
+> later cycle-counter-capable-module slice, §11). v1 implements the **RAPL
+> package-energy path only**, per
+> [`cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md)
+> §Apply order; data ships `quarantine` and is promoted to `validated` only by the
+> separate post-implementation Evaluation (decision §Evaluation).
 
 ## 14. Verification log  *(fill in after the feature is built)*
 
+> **Partial — v1 energy-logger source/test layer landed 2026-06-07; analyzer
+> average-watts derivation landed 2026-06-09.** The status stays **Accepted**
+> (not yet `Implemented`). What is verified: it compiles in the full build, the
+> pure math **and** the baseline/delta/sample-id/guard transition are unit-tested
+> (`rapl_energy.h` / `AdvanceEnergyWindow`), the **default-off** path is inert
+> (CTest 10/10 + hermetic lane via `.\scripts\Test-LocalCI.ps1`), and `analyze
+> report` now derives time-weighted average package power from the
+> `cpu_pkg_energy_*` columns — schema v9, sample-id de-duplication, no-false-zero
+> "unavailable" path — covered by `ComputePackagePower` unit tests and the
+> `test_analyze_ingest` end-to-end fixture. What is **not** yet verified: the
+> **enabled** integration path (`SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`) —
+> cadence gating, the real MSR read, and mirror-across-ticks — has run **nowhere**
+> (CI is default-off; the live run that proved RAPL was the separate throwaway
+> probe). Also pending: the live runtime-CSV (M) evidence, the quarantine-exit
+> Evaluation, and REQ-CPUEFF-01/08 (deferred). Promotion to `Implemented`
+> additionally requires reconciling the §14 and `docs/TRACEABILITY.md`
+> REQ-CPUEFF result cells to byte-identical text (then enforced by
+> `test_traceability_results_match_implemented_verification_logs`).
+
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-CPUEFF-01 | | | |
-| REQ-CPUEFF-02 | | | |
-| REQ-CPUEFF-03 | | | |
-| REQ-CPUEFF-04 | | | |
-| REQ-CPUEFF-05 | | | |
-| REQ-CPUEFF-06 | | | |
-| REQ-CPUEFF-07 | | | |
-| REQ-CPUEFF-08 | | | |
+| REQ-CPUEFF-01 | deferred | No first-party work source in v1 — APERF/MPERF filtered by the shipped bin (live validation); `INST_RETIRED` needs PMC writes. Deferred to a cycle-counter-module slice (§11). | 2026-06-07 |
+| REQ-CPUEFF-02 | partial (logger + analyzer derivation landed & tested; enabled path + live CSV unrun) | `rapl_energy` unit tests — ESU decode, 32-bit modular wrap, multi-wrap→guard-blank, avg-watts, and the `AdvanceEnergyWindow` transition (baseline / id-increment / guard-blank-keeps-id / wrap) — + CTest 10/10 via Test-LocalCI; logger landed (`amd_reader.cpp`, `runtime_csv_rows.cpp`). Analyzer landed 2026-06-09: schema v9 columns (`analyze_db`, `analyze_csv`, `analyze_ingest_db`), time-weighted `ComputePackagePower` with sample-id de-duplication + per-window watt percentiles (`analyze_report_*`), `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end (dedup over mirrored ticks, blank-delta exclusion, no-false-zero "unavailable"). **Enabled integration path not exercised in CI (default-off) or on hardware**; live runtime-CSV (M) evidence pending. | 2026-06-09 |
+| REQ-CPUEFF-03 | pass (v1 scope) | Temperature stays aligned with the window; effective-frequency inputs reported `unavailable` (filtered), not guessed; control-loop / `csv_rows` tests pass. | 2026-06-07 |
+| REQ-CPUEFF-04 | pass | Additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility-guard tests. | 2026-06-07 |
+| REQ-CPUEFF-05 | pass | `ReadAllowlistedMsr` issues `ioctl_read_msr` only; no `ioctl_write_msr` in the energy path (code review + grep). | 2026-06-07 |
+| REQ-CPUEFF-06 | pass | Enumerated read set `{0xC0010299, 0xC001029B}` via `rapl::IsAllowlistedEnergyMsr` + allow-list guard test; field-level strict hash gate consumes the structured loader mismatch flag. | 2026-06-07 |
+| REQ-CPUEFF-07 | pass | Logger records raw delta + window only; no efficiency scoring/verdict in the logger (code review). | 2026-06-07 |
+| REQ-CPUEFF-08 | deferred | Workload / CPU-setting label is the shared open question with FEAT-0002 §8; not implemented in v1. | 2026-06-07 |
 
-**Spec vs. implementation deltas:** <record anything built differently from this
-spec, and why. Update §5/§6 and the cited contract docs if behavior changes, and
-bump **Updated**.>
+**Spec vs. implementation deltas:** v1 lands **energy-only** (RAPL package energy),
+not the original Tier-1 work numerator: 2026-06-07 live validation found the
+shipped PawnIO bin filters APERF/MPERF, so delivered-cycles work and effective
+frequency are deferred (REQ-CPUEFF-01/03 updated; §11 cycle-counter source
+decision). The energy read rides **AmdReader's own ~1 s cadence in the snapshot
+path** (it owns the PawnIO handle), not literally adjacent to `GetSystemTimes` in
+`tick_runner` as the decision §Apply order sketched — same ~1 s, 1-read/s
+disturbance profile, read outside the `Global\Access_PCI` mutex. Average watts is
+derived (analyzer/manual), not logged. Build authorized energy-only 2026-06-07.
