@@ -58,6 +58,61 @@ current build keeps compatibility include roots" (`SVG_MB_CONTROL_INCLUDE_DIRS` 
 `CMakeLists.txt`). This is a team decision, not a standalone next step; do nothing
 until that decision is made.
 
+### Docs archive / merge / compact pass — deferred until the GPU retune lands
+
+A read-only assessment of all 63 `docs\*.md` (2026-06-09) found the historical
+layer is cleanable, but the move is deferred: it churns ~20 cross-references
+(`AGENTS.md`, `CODE_MAP.md`, `README.md`, `PATH_NOTES.md`, and several maintained
+docs), and should not be stacked on the uncommitted GPU-curve retune
+(`docs\gpu-response-curve-retune-2026-06-09.md`, `config\control.release.json`).
+Run it as its own reviewable pass after that retune is committed/redeployed. Same
+churn caution as the closed-records bullet below; this plan keeps those three
+closed records flat.
+
+When picked up:
+
+- **Archive** dead point-in-time snapshots (no maintained inbound reference) into
+  a new `docs\archive\`: `build-optimization-results.md`,
+  `code-quality-pass-2026-05-19.md`, `evaluation-and-optimization-recommendations.md`.
+- **Merge** the five overlapping Bench-vs-Control logging notes
+  (`discovery-bench-cpp-priority`, `discovery-bench-logger-gap`,
+  `discovery-control-bench-logging`, `discovery-current-vs-earlier`,
+  `discovery-logging-parity`) into one `docs\bench-logging-history.md`, keeping the
+  repo line-count census, the Bench export/no-import boundary, the two-plane
+  controller-vs-evidence model, and the "don't copy the heavy stack yet" rule.
+- **Compact**: `modular-profile-hotswap-discussion-2026-06-06.md` (88 KB → short
+  held-design pointer; FEAT-0003 is held Draft) and its `-plan` (lighter — keep the
+  §5 primitive table); fold `profile-hot-swap-allow-live-decision-2026-06-06.md`
+  into the decision doc's D6; consolidate the five `cpu-work-energy-*` files to ~2
+  (merge the live-validation plan into the results doc; fold the resolved
+  `cpu-cycle-counter-source-decision` into `cpu-work-energy-acquisition-decision`),
+  preserving the live forward-gates (quarantine-exit Evaluation, remaining cycle
+  path, open 400 W ceiling); reduce `discovery-control-optimization-options`,
+  `discovery-dashboard-health-polling`, `discovery-next-logging-targets`, and
+  `discovery-gpu-response-refinement` to closed stubs.
+- **Keep as-is** (load-bearing or open work): `adaptive-cadence-design`
+  (CONTROL_LOOP), `discovery-polling-logging-state` + `discovery-steady-response-control`
+  (MEASUREMENT_GATE), `discovery-control-math-performance`
+  (CONTROL_SIMPLIFICATION_TARGETS), `discovery-recovery-gap-audit-2026-06-04`
+  (open remediations 1 & 2), `testing-harness-evaluation-2026-06-06` (open §5
+  coverage gaps), and `discovery-gpu-temp-envelope` (sole record of the RTX 5090
+  zero-hotspot envelope constraint — lift that fact into `CONTROL_PIPELINE_MATH.md`
+  or `COOLING_STRATEGY.md` before removing it, if ever).
+- Then refresh `CODE_MAP.md`'s "## Docs" taxonomy (stale — missing the decision
+  records, `cpu-temp-comparison-harness`, `testing-harness-evaluation`,
+  `next_steps`, and others) and the `AGENTS.md` / `README.md` inventory lists for
+  any moved or merged files.
+
+Two content-drift items from the same assessment, fixable independently of the
+file moves:
+
+- `docs\source-aware-blend-decision-2026-05-26.md` (lines 101, 167) still says
+  "channels `1` and `5` remain `cpu_only`" — true as of 2026-05-26 but superseded
+  by the 2026-06-09 source-aware switch; add a supersession note.
+- `docs\response-evaluation-tuning-plan.md` (line 145 and the 213-218 tuning
+  direction) predates the 2026-06-09 GPU curves on channels `1`/`4`/`5`; refresh
+  alongside the retune writeup.
+
 ### Optional housekeeping — low priority, defer
 - Archiving closed implementation records (`docs\CONTROL_SIMPLIFICATION_TARGETS.md`,
   `docs\LOGGING_IMPROVEMENT_PLAN.md`, `docs\SCRIPT_STACK_REVIEW.md`) into a
