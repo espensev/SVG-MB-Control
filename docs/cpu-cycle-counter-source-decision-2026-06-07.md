@@ -64,14 +64,14 @@ hash-pin + signing" cost this stub was created to weigh **does not apply.**
 This is no longer a separate v2 source decision; it is a near-term addition to
 the FEAT-0006 energy-only v1, gated on the same discipline the energy path used:
 
-1. **Corrected one-shot live read (read-only).** Read `0xC00000E7`/`0xC00000E8`
-   on the target part under a **per-core affinity pin**, confirming the reads
-   succeed and that ΔAPERF/ΔMPERF yields a plausible effective frequency that
-   tracks load (idle vs busy). This answers the original Q1 (does PawnIO honor
-   caller affinity for `rdmsr`?) and Q3 (plausible effective frequency?) that the
-   2026-06-07 run wrongly treated as moot. Harness:
-   `tools/cpu_cycle_counter_probe.cpp` (throwaway, read-only, default-off
-   `SVG_MB_CONTROL_BUILD_CYCLE_PROBE`). Run elevated, controller monitor-only.
+1. **Corrected one-shot live read — DONE 2026-06-09, PASS.** The corrected probe
+   (`tools/cpu_cycle_counter_probe.cpp`, read-only) read `0xC00000E7`/`0xC00000E8`
+   `ok` (architectural `0xE7`/`0xE8` `DENIED`) under a confirmed per-core pin;
+   ΔAPERF/ΔMPERF ≈ 1.28 (plausible ~5.5 GHz at the 4.3 GHz base, stable), with
+   load tracking in the MPERF C0-residency. This clears the original Q1 (affinity
+   honored) and Q3 (plausible effective frequency). Record:
+   `docs/cpu-work-energy-live-validation-results-2026-06-07.md` §Corrected
+   re-validation.
 2. **Implement the cycle path** by mirroring the energy path: extend the
    read-only MSR allow-list to the two RO aliases, derive ΔAPERF/ΔMPERF over the
    existing `cpu_power_sample_id` windows, log raw deltas (additive nullable
@@ -93,7 +93,8 @@ the FEAT-0006 energy-only v1, gated on the same discipline the energy path used:
 
 ## Status / gating
 
-**Resolved.** The cycle path is a near-term FEAT-0006 **v1** addition (not a
-separate v2 module slice). It is gated only on the corrected one-shot live read
-above and the maintainer's build authorization — not on any new module, source,
-or signing decision.
+**Resolved; live-confirmed 2026-06-09.** The corrected one-shot live read passed
+(above), so the cycle path is now gated only on maintainer build authorization
+and the implementation itself — not on any new module, source, signing, or
+further validation. It is a near-term FEAT-0006 **v1** addition (not a separate
+v2 slice).

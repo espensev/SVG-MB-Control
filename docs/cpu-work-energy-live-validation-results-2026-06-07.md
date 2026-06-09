@@ -149,3 +149,45 @@ corrected cycle-path re-validation.)
    accepted and the energy-only slice landed. It was never committed (throwaway);
    its method and output stay recorded here (§Setup, the raw probe output above)
    and in the validation plan §9.
+
+## Corrected re-validation (2026-06-09) — APERF/MPERF reachable, PASS
+
+Run with the corrected probe (`tools/cpu_cycle_counter_probe.cpp`) reading the
+AMD read-only aliases, elevated, controller monitor-only, on the same part
+(Ryzen 9 9950X3D, Family 1Ah).
+
+```
+== FEAT-0006 cycle-counter probe (read-only, corrected indices) ==
+bin:  ...\resources\pawnio\AMDFamily17.bin
+load: ok
+[sanity] pkg_energy   0xC001029B: ok
+[reach]  MPERF_RO     0xC00000E7: ok
+[reach]  APERF_RO     0xC00000E8: ok
+[reach]  IA32_MPERF   0x000000E7: DENIED (expect DENIED)
+[reach]  IA32_APERF   0x000000E8: DENIED (expect DENIED)
+[affinity] pinned to core 0 (confirmed)
+[idle]  dMPERF=745832893 dAPERF=961169284  APERF/MPERF=1.289
+[busy]  dMPERF=2145984445 dAPERF=2746900132  APERF/MPERF=1.280
+```
+
+**Result: PASS.**
+
+- **Reachability (the correction):** `MSR_MPERF_RO 0xC00000E7` / `MSR_APERF_RO
+  0xC00000E8` read `ok`; the architectural `0xE7`/`0xE8` are `DENIED` — confirming
+  live that the 2026-06-07 `#GP` was a wrong-index artifact, not a module limit.
+- **Affinity (original Q1):** the read pinned to core 0 (confirmed) and returned
+  large, monotonic per-core deltas with a stable ratio across both samples —
+  consistent with PawnIO honoring caller affinity for `rdmsr` (an unhonored
+  affinity would straddle cores and yield an erratic/implausible ratio).
+- **Plausible effective frequency (original Q3):** ΔAPERF/ΔMPERF ≈ 1.28–1.29 →
+  effective ≈ 1.28 × P0 (~5.5 GHz at the 4.3 GHz base), within [idle, rated boost
+  ~5.7 GHz] and stable. Load tracking shows in the **MPERF C0-residency**, not the
+  ratio: idle ΔMPERF ≈ 0.75e9 (~35% of a 4.3 GHz × 0.5 s window) vs busy ΔMPERF ≈
+  2.15e9 (~full C0). The ratio (effective multiplier) is ~boost in both because
+  the core boosts whenever active; the load signal is the residency.
+
+**Implication:** the work numerator (ΔAPERF = delivered cycles) and effective
+frequency (ΔAPERF/ΔMPERF × P0) are read-only reachable and **live-confirmed** with
+the **shipped** bin. The cycle path is unblocked for implementation (mirror the
+energy path); cycle data, once logged, still ships `quarantine` and is promoted
+only by the per-signal Evaluation (decision §Evaluation #4).
