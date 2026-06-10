@@ -241,8 +241,10 @@ void TestControlLoopAligned() {
     // Channels 1..6 absent: exercises the absent path, including the
     // correction_pct gate when setpoint/feedforward are NaN.
     const std::string header = BuildControlLoopCsvHeader();
+    RuntimeSnapshotIndex snapshot_index;
+    snapshot_index.Rebuild(snapshot);
     const std::string row =
-        BuildControlLoopCsvRow(snapshot, 7u, timing, channels);
+        BuildControlLoopCsvRow(snapshot, snapshot_index, 7u, timing, channels);
     ExpectAligned(header, row, "control-loop");
     const std::vector<std::string> header_fields = SplitFields(header);
     const std::vector<std::string> row_fields = SplitFields(row);

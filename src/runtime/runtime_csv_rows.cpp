@@ -695,15 +695,4 @@ std::string BuildControlLoopCsvRow(
     return csv.str();
 }
 
-std::string BuildControlLoopCsvRow(
-    const RuntimeSnapshot& snapshot,
-    std::uint64_t tick_count,
-    const RuntimeControlLoopTimingState& timing,
-    const std::vector<RuntimeControlChannelLogState>& channels) {
-    RuntimeSnapshotIndex snapshot_index;
-    snapshot_index.Rebuild(snapshot);
-    return BuildControlLoopCsvRow(snapshot, snapshot_index, tick_count,
-                                  timing, channels);
-}
-
 }  // namespace svg_mb_control
