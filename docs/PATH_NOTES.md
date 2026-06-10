@@ -25,6 +25,16 @@ checkable.
 
 ## 2026-06-10
 
+- **Added** — `docs/cpu-energy-quarantine-exit-capture-runbook-2026-06-10.md`:
+  operational runbook for one enabled-path CPU-energy evidence session
+  (enable via env var + scheduled-task restart, capture an
+  idle/load/cooldown profile, revert to default-off, analyze, score against
+  the quarantine-exit Evaluation). Includes the criterion-6 loop-slip
+  baseline from the 2026-06-09/10 disabled session (p95 `1.56 ms`,
+  ~6.5 overrun rows/h) and a RAPL-independence classification of the
+  available external power references for criterion 3. Prepared, not yet
+  executed; the criteria stay normative in
+  `docs/cpu-work-energy-acquisition-decision-2026-06-07.md`.
 - **Done** — resolved GPU-heat review finding F-DES1 (maintainer, option C):
   the channels `1`/`5` `thermal_pressure` boost firing on GPU heat at
   `>= 85.5 C` is accepted and documented as case-pressure headroom rather than
