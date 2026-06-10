@@ -58,28 +58,19 @@ current build keeps compatibility include roots" (`SVG_MB_CONTROL_INCLUDE_DIRS` 
 `CMakeLists.txt`). This is a team decision, not a standalone next step; do nothing
 until that decision is made.
 
-### Docs archive / merge / compact pass — deferred until the GPU retune lands
+### Docs archive / merge / compact pass
 
-A read-only assessment of all 63 `docs\*.md` (2026-06-09) found the historical
-layer is cleanable, but the move is deferred: it churns ~20 cross-references
-(`AGENTS.md`, `CODE_MAP.md`, `README.md`, `PATH_NOTES.md`, and several maintained
-docs), and should not be stacked on the uncommitted GPU-curve retune
-(`docs\gpu-response-curve-retune-2026-06-09.md`, `config\control.release.json`).
-Run it as its own reviewable pass after that retune is committed/redeployed. Same
-churn caution as the closed-records bullet below; this plan keeps those three
-closed records flat.
+Partly completed 2026-06-09:
 
-When picked up:
+- **Done** — archived dead point-in-time snapshots under `docs\archive\`:
+  `build-optimization-results.md`, `code-quality-pass-2026-05-19.md`,
+  `evaluation-and-optimization-recommendations.md`.
+- **Done** — merged the five overlapping Bench-vs-Control logging notes into
+  `docs\bench-logging-history.md`; the archived originals remain under
+  `docs\archive\` for audit history.
 
-- **Archive** dead point-in-time snapshots (no maintained inbound reference) into
-  a new `docs\archive\`: `build-optimization-results.md`,
-  `code-quality-pass-2026-05-19.md`, `evaluation-and-optimization-recommendations.md`.
-- **Merge** the five overlapping Bench-vs-Control logging notes
-  (`discovery-bench-cpp-priority`, `discovery-bench-logger-gap`,
-  `discovery-control-bench-logging`, `discovery-current-vs-earlier`,
-  `discovery-logging-parity`) into one `docs\bench-logging-history.md`, keeping the
-  repo line-count census, the Bench export/no-import boundary, the two-plane
-  controller-vs-evidence model, and the "don't copy the heavy stack yet" rule.
+Still open:
+
 - **Compact**: `modular-profile-hotswap-discussion-2026-06-06.md` (88 KB → short
   held-design pointer; FEAT-0003 is held Draft) and its `-plan` (lighter — keep the
   §5 primitive table); fold `profile-hot-swap-allow-live-decision-2026-06-06.md`
@@ -98,20 +89,19 @@ When picked up:
   coverage gaps), and `discovery-gpu-temp-envelope` (sole record of the RTX 5090
   zero-hotspot envelope constraint — lift that fact into `CONTROL_PIPELINE_MATH.md`
   or `COOLING_STRATEGY.md` before removing it, if ever).
-- Then refresh `CODE_MAP.md`'s "## Docs" taxonomy (stale — missing the decision
-  records, `cpu-temp-comparison-harness`, `testing-harness-evaluation`,
-  `next_steps`, and others) and the `AGENTS.md` / `README.md` inventory lists for
-  any moved or merged files.
+- Then refresh `CODE_MAP.md`'s "## Docs" taxonomy more broadly for decision
+  records, feature-design notes, `cpu-temp-comparison-harness`, `next_steps`,
+  and other secondary docs not yet listed. The 2026-06-09 archive/merge pass only
+  updated the moved/merged file references.
 
-Two content-drift items from the same assessment, fixable independently of the
-file moves:
+Content-drift items from the same assessment were fixed 2026-06-09:
 
-- `docs\source-aware-blend-decision-2026-05-26.md` (lines 101, 167) still says
-  "channels `1` and `5` remain `cpu_only`" — true as of 2026-05-26 but superseded
-  by the 2026-06-09 source-aware switch; add a supersession note.
-- `docs\response-evaluation-tuning-plan.md` (line 145 and the 213-218 tuning
-  direction) predates the 2026-06-09 GPU curves on channels `1`/`4`/`5`; refresh
-  alongside the retune writeup.
+- `docs\source-aware-blend-decision-2026-05-26.md` now states that the
+  channels `1`/`5` `cpu_only` claim was true for the 2026-05-26 deployment and
+  later superseded by the 2026-06-09 radiator-exhaust GPU response decision.
+- `docs\response-evaluation-tuning-plan.md` now distinguishes the deployed
+  `release\control.json` baseline from the pending, not-yet-deployed 2026-06-09
+  repo-config GPU retune.
 
 ### Optional housekeeping — low priority, defer
 - Archiving closed implementation records (`docs\CONTROL_SIMPLIFICATION_TARGETS.md`,

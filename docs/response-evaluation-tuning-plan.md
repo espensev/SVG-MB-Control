@@ -1,6 +1,6 @@
 # Response Evaluation and Tuning Plan
 
-Status: current as of 2026-05-27. Maintained alongside
+Status: current as of 2026-06-09. Maintained alongside
 `docs\COOLING_STRATEGY.md` (strategy, fan inventory, floor philosophy,
 fan-relationship rules),
 `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` (adopted airflow profile and
@@ -14,8 +14,12 @@ not treat that older evidence as a description of current shipped behavior.
 
 ## Currently Shipped Profile
 
-Reference baseline for every pass (from `config\control.release.json` and
-`release\control.json`, schema_version 4):
+Reference deployed baseline for every pass is the last published
+`release\control.json` (schema_version 4). The repo configs
+(`config\control.release.json` and `config\control.example.json`) also contain
+the later 2026-06-09 GPU-response retune from
+`docs\gpu-response-curve-retune-2026-06-09.md`; that retune is applied in the
+repo but not yet rebuilt or redeployed in the live release package.
 
 - Control cadence: `poll_tick_ms = 250`, `write_cooldown_ms = 250`.
 - Deadband: `deadband_pct = 0.25`.
@@ -30,12 +34,17 @@ Reference baseline for every pass (from `config\control.release.json` and
   `docs\COOLING_STRATEGY.md` and
   `config\machines\snd-desk.cooling.policy.json`; this plan applies
   those roles rather than redefining them.
-- Authority bias for high-CPU response:
+- Authority bias for high-CPU response in the deployed profile:
   `thermal_pressure_max_boost_pct = 20.0` on channels `1` and `5`
   (`max_cpu_gpu_source_aware` radiator lanes) versus `14.0` on channel `4`
   (`max_cpu_gpu_source_aware` front radiator Noctua intake). CPU override curves jump
   aggressively on channels `1` and `5` at `88-92 C` while channel `4`
   climbs more gradually.
+- Pending repo-config GPU retune, not yet deployed: channels `0`, `1`, `5`,
+  and the high end of channel `4` have steeper GPU curve points so the exhausts
+  and radiator intake reach higher duty sooner from roughly `72-82 C`. See
+  `docs\gpu-response-curve-retune-2026-06-09.md` before interpreting future
+  runs against checked-out config instead of the live package.
 
 ## Recent Validation Evidence
 
@@ -212,10 +221,13 @@ Tuning direction:
 
 - channels `2`, `3`: keep the dynamic low/medium intake curve and let them
   lead GPU response.
-- channels `0`, `4`, `5`: add airflow later, only as GPU memory moves
-  past the mid `60 C` range.
-- channel `1`: radiator lane can rise earlier than `0`, `4`, `5` if
-  GPU load also warms coolant or case air.
+- channels `0`, `1`, `5`: the pending 2026-06-09 repo-config retune already
+  raises exhaust response through the `72-82 C` GPU band while preserving low
+  idle duty; the next GPU pass should validate those knots before another curve
+  increase.
+- channel `4`: the pending retune preserves the machine-policy soft-floor
+  points through `72 C` and raises only the higher GPU knots; validate it as the
+  secondary radiator-intake assist before changing its CPU override path.
 
 Do not collapse channels `2` or `3` back into a shared curve or remove
 their `4%` low-end spacing for the next pass.

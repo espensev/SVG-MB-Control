@@ -286,9 +286,9 @@ under-instrumented to justify rate changes yet.
   current CSV schemas capture values and control state, but not timing quality.
 - `src/read_loop.cpp:244-314` and `src/control_loop.cpp:565-799` — current loop
   timing is fixed-delay-after-work, not measured fixed-period scheduling.
-- `docs/discovery-logging-parity.md:24` — still describes the repo as
+- `docs/archive/discovery-logging-parity.md:24` — still describes the repo as
   state-only and says it does not maintain append-only logs.
-- `docs/discovery-logging-parity.md:130-132` — still presents `runtime\logs\`
+- `docs/archive/discovery-logging-parity.md:130-132` — still presents `runtime\logs\`
   as future work even though it is now implemented.
 
 **Implications:**
@@ -321,7 +321,7 @@ under-instrumented to justify rate changes yet.
 | Mistaking configured cadence for achieved cadence | H | H | `wait_for` occurs after the work, so true period is longer than configured. |
 | Letting per-tick file I/O distort future high-rate tests | H | M | CSV rows flush every write, and status JSON is rewritten every loop. |
 | Choosing CPU/GPU blend timing without GPU cadence evidence | H | M | GPU diagnostics exist, but no GPU rate probe exists in this MB stack. |
-| Trusting `docs/discovery-logging-parity.md` as current design truth | H | M | That document predates the implemented runtime logging subsystem. |
+| Trusting `docs/archive/discovery-logging-parity.md` as current design truth | H | M | That document predates the implemented runtime logging subsystem. |
 
 ### Open Questions
 

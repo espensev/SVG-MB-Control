@@ -380,23 +380,27 @@ do not merge them into operator docs unless the topic is reopened):
   implementation record.
 - `docs/SCRIPT_STACK_REVIEW.md` — Completed script-stack
   simplification record.
+- `docs/bench-logging-history.md` — Consolidated history of the older
+  Bench-vs-Control logging discovery notes.
 
 Historical / discovery (per `AGENTS.md`, treat as context, not
 current contract, unless re-validated):
 
 - `docs/adaptive-cadence-design-2026-05-19.md`
-- `docs/build-optimization-results.md`
-- `docs/code-quality-pass-2026-05-19.md`
-- `docs/evaluation-and-optimization-recommendations.md`
-- `docs/discovery-bench-cpp-priority.md`
-- `docs/discovery-bench-logger-gap.md`
-- `docs/discovery-control-bench-logging.md`
 - `docs/discovery-control-optimization-options.md`
-- `docs/discovery-current-vs-earlier.md`
 - `docs/discovery-dashboard-health-polling.md`
 - `docs/discovery-gpu-response-refinement.md`
 - `docs/discovery-gpu-temp-envelope.md`
-- `docs/discovery-logging-parity.md`
 - `docs/discovery-next-logging-targets.md`
 - `docs/discovery-polling-logging-state.md`
+- `docs/discovery-recovery-gap-audit-2026-06-04.md`
 - `docs/discovery-steady-response-control.md`
+- `docs/testing-harness-evaluation-2026-06-06.md`
+- `docs/archive/build-optimization-results.md`
+- `docs/archive/code-quality-pass-2026-05-19.md`
+- `docs/archive/evaluation-and-optimization-recommendations.md`
+- `docs/archive/discovery-bench-cpp-priority.md`
+- `docs/archive/discovery-bench-logger-gap.md`
+- `docs/archive/discovery-control-bench-logging.md`
+- `docs/archive/discovery-current-vs-earlier.md`
+- `docs/archive/discovery-logging-parity.md`

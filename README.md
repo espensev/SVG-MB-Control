@@ -536,6 +536,7 @@ workflow:
 - `docs\CONTROL_SIMPLIFICATION_TARGETS.md`
 - `docs\LOGGING_IMPROVEMENT_PLAN.md`
 - `docs\SCRIPT_STACK_REVIEW.md`
+- `docs\bench-logging-history.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
 `docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow.
@@ -549,3 +550,5 @@ require fresh measurement evidence before changing defaults.
 Do not merge completed implementation records into the operator docs unless a
 topic is reopened; keep the current docs as the source of truth and keep closed
 records short.
+
+Older point-in-time review and discovery notes live under `docs\archive\`.

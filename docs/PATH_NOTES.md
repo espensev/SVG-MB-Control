@@ -25,6 +25,20 @@ checkable.
 
 ## 2026-06-09
 
+- **Done** — docs cleanup pass: archived three dead point-in-time review
+  snapshots under `docs/archive/` (`build-optimization-results`,
+  `code-quality-pass-2026-05-19`,
+  `evaluation-and-optimization-recommendations`) and consolidated the five
+  overlapping Bench-vs-Control logging discovery notes into
+  `docs/bench-logging-history.md`. The originals were moved to
+  `docs/archive/` for audit history; `AGENTS.md`, `README.md`, `CODE_MAP.md`,
+  and `next_steps.md` now point at the consolidated/current shape.
+- **Fixed** — docs drift from the 2026-06-09 GPU-response work:
+  `source-aware-blend-decision-2026-05-26.md` now marks the channels `1`/`5`
+  `cpu_only` statements as true for the 2026-05-26 deployment but superseded by
+  the radiator-exhaust GPU response decision; `response-evaluation-tuning-plan.md`
+  now separates the deployed `release\control.json` baseline from the pending
+  repo-config GPU retune.
 - **Done** — collapsed the nine duplicated core-linked CTest registration
   blocks in `CMakeLists.txt` into a `svg_mb_control_add_core_test(name source)`
   helper plus nine one-line calls; the two header-only tests (`rapl_energy` /
