@@ -26,48 +26,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-WALL_FMT = "%Y-%m-%dT%H:%M:%S"
+# scripts/ is not a package; make the shared helpers importable under the
+# by-file-path loaders too (tests, scheduled tasks).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from control_csv import (  # noqa: E402
+    WALL_CLOCK_FMT as WALL_FMT,
+    column as col,
+    parse_control_csv,
+    to_float as to_f,
+)
+
 CEILING_W = 400.0          # socket sanity ceiling (decision criterion 2)
 WRAP_JOULES = 2 ** 32 * 15.26e-6   # ESU=16 -> 15.26 uJ/unit -> ~65.5 kJ per wrap
 TOL_PCT = 15.0             # criterion 3 tolerance
-
-
-def parse_control_csv(path):
-    meta, header, rows = {}, [], []
-    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            line = raw.rstrip("\r\n")
-            if not line:
-                continue
-            if line.startswith("#"):
-                body = line.lstrip("#").strip()
-                if "=" in body:
-                    k, _, v = body.partition("=")
-                    meta[k.strip()] = v.strip()
-                continue
-            if not header:
-                header = next(csv.reader([line]))
-                continue
-            rows.append(next(csv.reader([line])))
-    return meta, header, rows
-
-
-def col(header, rows, name):
-    try:
-        i = header.index(name)
-    except ValueError:
-        return [""] * len(rows)
-    return [r[i] if i < len(r) else "" for r in rows]
-
-
-def to_f(x):
-    if x is None or x == "":
-        return None
-    try:
-        v = float(x)
-    except ValueError:
-        return None
-    return v if math.isfinite(v) else None
 
 
 def parse_wall(x):
