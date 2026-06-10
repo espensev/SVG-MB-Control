@@ -65,11 +65,15 @@ A core library gives three stability benefits:
 - boost overlays (`boost_stage.cpp`: per-stage smootherstep integrator shared by thermal_pressure, midband_pressure, gpu_airflow, cpu_low_soak),
 - channel-write gates (`channel_write.cpp`: deadband, cooldown, breaker, hold restore),
 - adaptive cadence (`cadence_score.cpp`: slew score, effective tick interval),
+- tick scheduling, timer resolution, and process resource sampling (`control_scheduler.cpp`),
 - shared math primitives (`control_math.{h,cpp}`: smootherstep, scale, rate-limited approach — used by cadence + low-band),
 - low-band integrator (`low_band_integrator.cpp`: signal, debt, stage activation),
+- low-band evidence serialization (`low_band_evidence.cpp`),
 - control status publication shape (`control_status_writer.cpp`),
 - supervisor and run-mode dispatch (`control_supervisor.cpp`),
-- config loading and validation (`control_loop_config.cpp`, `control_config.cpp`).
+- config loading, validation, and CLI formatting (`control_loop_config.cpp`, `control_config.cpp`, `control_config_print.cpp`),
+- mutable runtime state and shared context (`control_runtime_context.cpp`),
+- calibration sequence parsing and execution (`calibration.cpp`).
 
 `runtime/`
 
@@ -96,12 +100,15 @@ A core library gives three stability benefits:
 
 `platform/`
 
-- Windows timer resolution,
-- process resource sampling,
+- cross-process named mutex (`runtime_singleton.{h,cpp}`),
+- environment and ISO-8601 helpers (`env_util.{h,cpp}`, `runtime_util.{h,cpp}`),
+- direct runtime sampling (`direct_runtime_snapshot.{h,cpp}`),
 - Win32 handle wrappers,
 - mutex/driver-handle RAII,
 - shared streaming SHA-256 helper (`file_hash.{h,cpp}`,
-  `Sha256FileHex`) consumed by the analyze report and the CSV archive.
+  `Sha256FileHex`) consumed by the analyze report and the CSV archive,
+- read-only feasibility probe (`service_probe.{h,cpp}`),
+- task runner binary (`task_runner.cpp`).
 
 `policy/`
 
@@ -176,6 +183,13 @@ Completed:
     builders. `svg_mb_control_csv_rows_tests` now checks read-loop,
     evidence-log, and control-loop header/row alignment plus representative
     present/absent indexed values.
+16. Collapsed the nine duplicated core-linked CTest registration blocks in
+    `CMakeLists.txt` into one `svg_mb_control_add_core_test(name source)`
+    helper plus nine one-line calls. The two header-only tests
+    (`svg_mb_control_rapl_energy_tests`, `svg_mb_control_cpu_cycles_tests`)
+    stay hand-rolled because they must not link `svg_mb_control_core`. The
+    build graph is unchanged: the same eleven CTest targets, names, and
+    registration order, verified by `Test-LocalCI` (CTest 11/11).
 
 Remaining polish:
 

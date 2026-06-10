@@ -1,6 +1,6 @@
 # Response Evaluation and Tuning Plan
 
-Status: current as of 2026-05-27. Maintained alongside
+Status: current as of 2026-06-09. Maintained alongside
 `docs\COOLING_STRATEGY.md` (strategy, fan inventory, floor philosophy,
 fan-relationship rules),
 `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` (adopted airflow profile and
@@ -14,8 +14,12 @@ not treat that older evidence as a description of current shipped behavior.
 
 ## Currently Shipped Profile
 
-Reference baseline for every pass (from `config\control.release.json` and
-`release\control.json`, schema_version 4):
+Reference deployed baseline for every pass is the last published
+`release\control.json` (schema_version 4). Since 2026-06-09 it includes the
+GPU-response retune from `docs\gpu-response-curve-retune-2026-06-09.md` and is
+byte-identical to `config\control.release.json` (both sha256 `b51e542a...`);
+the live worker's CSV session header records the same `config_sha256`, so runs
+from 2026-06-09 on reflect the retuned curves.
 
 - Control cadence: `poll_tick_ms = 250`, `write_cooldown_ms = 250`.
 - Deadband: `deadband_pct = 0.25`.
@@ -30,20 +34,26 @@ Reference baseline for every pass (from `config\control.release.json` and
   `docs\COOLING_STRATEGY.md` and
   `config\machines\snd-desk.cooling.policy.json`; this plan applies
   those roles rather than redefining them.
-- Authority bias for high-CPU response:
+- Authority bias for high-CPU response in the deployed profile:
   `thermal_pressure_max_boost_pct = 20.0` on channels `1` and `5`
-  (`cpu_only` radiator lanes) versus `14.0` on channel `4`
-  (`max_cpu_gpu` front radiator Noctua intake). CPU override curves jump
+  (`max_cpu_gpu_source_aware` radiator lanes) versus `14.0` on channel `4`
+  (`max_cpu_gpu_source_aware` front radiator Noctua intake). CPU override curves jump
   aggressively on channels `1` and `5` at `88-92 C` while channel `4`
   climbs more gradually.
+- GPU retune (deployed 2026-06-09): channels `0`, `1`, `5`, and the high end
+  of channel `4` have steeper GPU curve points so the exhausts and radiator
+  intake reach higher duty sooner from roughly `72-82 C`. See
+  `docs\gpu-response-curve-retune-2026-06-09.md`; runs recorded before
+  2026-06-09 used the earlier, shallower GPU curves.
 
 ## Recent Validation Evidence
 
 - **2026-05-24 Cinebench R23 (pre-adoption)**: CPU-heavy segment held
   CPU/Tctl at p50 `87.625 C`, p90 `88.25 C`, max `89.25 C`; GPU memory
   stayed cool (p90 `48 C`, max `50 C`). The release config was
-  subsequently adjusted to shift high-CPU authority toward channels `1`
-  and `5` and reduce channel `4` high-heat dominance. Full record in
+  subsequently adjusted to raise `thermal_pressure_max_boost_pct` to `20.0`
+  on channels `1` and `5` and lower it to `14.0` on channel `4`, with steeper
+  `cpu_override_curve` knees on `1`/`5` than on `4`. Full record in
   `docs\CONTROL_PIPELINE_MATH.md` §13.1 (config sha256
   `51a16ea6…fbc78`, git hash `94a1d4c6a34c`).
 - **2026-05-26 idle steady-state (static-floor reference)**: confirmation of
@@ -186,14 +196,14 @@ the old static profile unless Pass 1 / 2 / 3 evidence proves the dynamic
 curve cannot maintain pressure bias:
 
 - channel `0` (rear exhaust): `15.5%`
-- channel `1` (radiator Noctua, `cpu_only`): `22%`
+- channel `1` (radiator Noctua, `max_cpu_gpu_source_aware`): `22%`
 - channel `2` (PA602 stock front 200 mm intake): min `42%`, then
   `35C:42%`, `50C:46%`, `62C:54%`, `72C:64%`
 - channel `3` (PA602 stock front 200 mm intake): min `38%`, then
   `35C:38%`, `50C:42%`, `62C:50%`, `72C:60%`
-- channel `4` (front radiator Noctua intake, `max_cpu_gpu`): min `24%`,
+- channel `4` (front radiator Noctua intake, `max_cpu_gpu_source_aware`): min `24%`,
   then `35C:24%`, `50C:27%`, `62C:31%`, `72C:38%`
-- channel `5` (mid radiator Noctua, `cpu_only`): `20%`
+- channel `5` (mid radiator Noctua, `max_cpu_gpu_source_aware`): `20%`
 
 The front 200 mm pair keeps `≥ 4%` spacing between channels `2` and `3`
 at every low/medium point. This is enforced by
@@ -211,10 +221,13 @@ Tuning direction:
 
 - channels `2`, `3`: keep the dynamic low/medium intake curve and let them
   lead GPU response.
-- channels `0`, `4`, `5`: add airflow later, only as GPU memory moves
-  past the mid `60 C` range.
-- channel `1`: radiator lane can rise earlier than `0`, `4`, `5` if
-  GPU load also warms coolant or case air.
+- channels `0`, `1`, `5`: the deployed 2026-06-09 retune already raises
+  exhaust response through the `72-82 C` GPU band while preserving low idle
+  duty; the next GPU pass should validate those knots before another curve
+  increase.
+- channel `4`: the deployed retune preserves the machine-policy soft-floor
+  points through `72 C` and raises only the higher GPU knots; validate it as the
+  secondary radiator-intake assist before changing its CPU override path.
 
 Do not collapse channels `2` or `3` back into a shared curve or remove
 their `4%` low-end spacing for the next pass.
@@ -226,19 +239,19 @@ CPU response is mandatory. Each controlled channel uses a separate
 `max(primary_curve, cpu_override_curve)` (see
 `CONTROL_PIPELINE_MATH.md` §4.4). Currently shipped behavior:
 
-- channels `1`, `5` carry the strongest CPU response — `cpu_only`
+- channels `1`, `5` carry the highest-authority CPU override — `max_cpu_gpu_source_aware`
   blend, `thermal_pressure_max_boost_pct = 20.0`, override curve jumps
   from the floor to `58%` at `88 C`, `74%` at `90 C`, `88%` at `92 C`,
   and `100%` at `96 C`.
 - channel `0` carries a smaller rear-exhaust CPU assist — override
   climbs from `15.5%` floor to `18%` at `84 C`, `28%` at `88 C`, `42%`
   at `92 C`, and `58%` at `96 C`.
-- channel `4` (front radiator Noctua intake, `max_cpu_gpu`) carries the
+- channel `4` (front radiator Noctua intake, `max_cpu_gpu_source_aware`) carries the
   secondary radiator authority — `thermal_pressure_max_boost_pct = 14.0`,
-  override climbs more gradually (`32%` at `82 C`, `42%` at `86 C`,
-  `54%` at `90 C`, `70%` at `95 C`). This is the deliberate "shift
-  authority toward channels `1` and `5`, reduce channel `4` high-heat
-  dominance" outcome recorded in `CONTROL_PIPELINE_MATH.md` §13.1.
+  override climbs more gradually (`42%` at `82 C`, `46%` at `86 C`,
+  `54%` at `90 C`, `70%` at `95 C`) — a lower boost ceiling and gentler
+  `cpu_override_curve` knee than channels `1` and `5` (`20.0` boost, steeper
+  knees). This config difference is recorded in `CONTROL_PIPELINE_MATH.md` §13.1.
 - channels `2`, `3` keep the 200 mm front-intake free-airflow baseline and add
   moderate CPU assist under high Tctl (override climbs from the floor
   at `75 C` to `86%` at `95 C` on channel `2`, `82%` at `95 C` on

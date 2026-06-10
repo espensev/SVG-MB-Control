@@ -6,6 +6,9 @@
 // future refactor moves them.
 
 #include "analyze/analyze_report.h"
+
+#include "test_helpers.h"
+
 #include "analyze/analyze_report_data.h"
 #include "analyze/analyze_report_emit.h"
 #include "analyze/analyze_report_queries.h"
@@ -27,34 +30,21 @@ using svg_mb_control::analyze::report_detail::Band;
 using svg_mb_control::analyze::report_detail::BandPercentiles;
 using svg_mb_control::analyze::report_detail::BuildDiagnosticFlags;
 using svg_mb_control::analyze::report_detail::ChannelStats;
+using svg_mb_control::analyze::report_detail::ComputeCpuCycles;
 using svg_mb_control::analyze::report_detail::ComputeElapsedTime;
+using svg_mb_control::analyze::report_detail::ComputePackagePower;
+using svg_mb_control::analyze::report_detail::CpuCyclesSummary;
+using svg_mb_control::analyze::report_detail::CycleEvidenceWindow;
 using svg_mb_control::analyze::report_detail::Median;
+using svg_mb_control::analyze::report_detail::PackageEnergyWindow;
+using svg_mb_control::analyze::report_detail::PackagePowerSummary;
 using svg_mb_control::analyze::report_detail::Percentile;
 using svg_mb_control::analyze::report_detail::ReportData;
 using svg_mb_control::analyze::report_detail::SummariseBand;
 using svg_mb_control::analyze::report_detail::TickRow;
 
-int g_failures = 0;
-
-void ExpectTrue(bool condition, const std::string& message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
-
 void ExpectEqualInt(int actual, int expected, const std::string& message) {
     if (actual != expected) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected
-                  << " got " << actual << '\n';
-    }
-}
-
-void ExpectNear(double actual, double expected, double tolerance,
-                const std::string& message) {
-    if (std::isnan(actual) && std::isnan(expected)) return;
-    if (std::fabs(actual - expected) > tolerance) {
         ++g_failures;
         std::cerr << "FAIL: " << message << " expected " << expected
                   << " got " << actual << '\n';
@@ -417,6 +407,142 @@ void TestBuildDiagnosticFlags_SlowResponse() {
                "slow_setpoint_response flag emitted when response_delay > 10s");
 }
 
+void TestComputePackagePower_EmptyIsUnavailable() {
+    // No windows -> unavailable, NOT a false zero. acquisition provenance is
+    // copied through so the report can still say why (RAPL off).
+    PackagePowerSummary pp =
+        ComputePackagePower({}, {{"disabled", 30}});
+    ExpectEqualInt(pp.window_count, 0, "empty -> window_count 0");
+    ExpectNullopt(pp.avg_watts, "empty -> avg_watts nullopt (no false zero)");
+    ExpectNear(pp.total_energy_j, 0.0, kEps, "empty -> total_energy_j 0");
+    ExpectNullopt(pp.watts_max, "empty -> watts_max nullopt");
+    ExpectEqualInt(pp.acquisition_counts["disabled"], 30,
+                   "empty -> acquisition provenance preserved");
+}
+
+void TestComputePackagePower_TimeWeighted() {
+    // 10 J over 1 s (10 W), 30 J over 1 s (30 W), 20 J over 2 s (10 W).
+    // delta is microjoules: 10 J = 1e7 uj.
+    std::vector<PackageEnergyWindow> windows{
+        {1000.0, 1.0e7},
+        {1000.0, 3.0e7},
+        {2000.0, 2.0e7},
+    };
+    PackagePowerSummary pp = ComputePackagePower(windows, {{"quarantine", 6}});
+    ExpectEqualInt(pp.window_count, 3, "three distinct windows counted");
+    ExpectNear(pp.total_energy_j, 60.0, 1e-6, "total energy 10+30+20 = 60 J");
+    ExpectNear(pp.total_window_s, 4.0, 1e-6, "total window 1+1+2 = 4 s");
+    // Time-weighted = 60 J / 4 s = 15 W, which is deliberately NOT the
+    // mean-of-per-window-watts (10+30+10)/3 = 16.667 W.
+    ExpectHasValue(pp.avg_watts, "avg_watts present for valid windows");
+    ExpectNear(*pp.avg_watts, 15.0, 1e-6,
+               "time-weighted avg = total energy / total window time");
+    ExpectTrue(std::fabs(*pp.avg_watts - (10.0 + 30.0 + 10.0) / 3.0) > 1.0,
+               "time-weighted avg differs from mean-of-means");
+    // Per-window watts {10, 30, 10}: nearest-rank p50=10, p90=max=30.
+    ExpectNear(*pp.watts_p50, 10.0, 1e-6, "per-window watts p50 == 10");
+    ExpectNear(*pp.watts_p90, 30.0, 1e-6, "per-window watts p90 == 30");
+    ExpectNear(*pp.watts_max, 30.0, 1e-6, "per-window watts max == 30");
+}
+
+void TestComputePackagePower_SingleWindow() {
+    // 20 J over 2 s = 10 W.
+    std::vector<PackageEnergyWindow> windows{{2000.0, 2.0e7}};
+    PackagePowerSummary pp = ComputePackagePower(windows, {});
+    ExpectEqualInt(pp.window_count, 1, "single window counted");
+    ExpectHasValue(pp.avg_watts, "single window avg present");
+    ExpectNear(*pp.avg_watts, 10.0, 1e-6, "single window 20 J / 2 s = 10 W");
+    ExpectNear(*pp.watts_max, 10.0, 1e-6, "single window watts_max == 10");
+}
+
+void TestComputeCpuCycles_EmptyIsUnavailable() {
+    // No windows -> unavailable, NOT a false zero. acquisition provenance is
+    // copied through so the report can still say why (cycles off).
+    CpuCyclesSummary cc = ComputeCpuCycles({}, {{"disabled", 30}}, std::nullopt);
+    ExpectEqualInt(cc.window_count, 0, "empty -> window_count 0");
+    ExpectNullopt(cc.aperf_mperf_ratio,
+                  "empty -> ratio nullopt (no false zero)");
+    ExpectNullopt(cc.effective_mhz, "empty -> effective_mhz nullopt");
+    ExpectNullopt(cc.ratio_max, "empty -> ratio_max nullopt");
+    ExpectNear(cc.total_aperf_cycles, 0.0, kEps,
+               "empty -> total_aperf_cycles 0");
+    ExpectEqualInt(cc.acquisition_counts["disabled"], 30,
+                   "empty -> acquisition provenance preserved");
+}
+
+void TestComputeCpuCycles_CycleWeighted() {
+    // Per-window ratios 1.25, 1.5, 1.0; cycle-weighted aggregate is
+    // sum(dAPERF)/sum(dMPERF) = 10.75e6 / 8e6 = 1.34375, deliberately NOT the
+    // mean-of-per-window-ratios (1.25 + 1.5 + 1.0)/3 = 1.25.
+    std::vector<CycleEvidenceWindow> windows{
+        {1000.0, 1.25e6, 1.0e6},
+        {1000.0, 7.5e6, 5.0e6},
+        {2000.0, 2.0e6, 2.0e6},
+    };
+    CpuCyclesSummary cc = ComputeCpuCycles(windows, {{"quarantine", 6}},
+                                           std::nullopt);
+    ExpectEqualInt(cc.window_count, 3, "three distinct windows counted");
+    ExpectNear(cc.total_aperf_cycles, 1.075e7, 1e-3,
+               "total dAPERF 1.25e6+7.5e6+2e6");
+    ExpectNear(cc.total_mperf_cycles, 8.0e6, 1e-3,
+               "total dMPERF 1e6+5e6+2e6");
+    ExpectNear(cc.total_window_s, 4.0, 1e-6, "total window 1+1+2 = 4 s");
+    ExpectHasValue(cc.aperf_mperf_ratio, "ratio present for valid windows");
+    ExpectNear(*cc.aperf_mperf_ratio, 1.34375, 1e-9,
+               "cycle-weighted ratio = total dAPERF / total dMPERF");
+    ExpectTrue(std::fabs(*cc.aperf_mperf_ratio - 1.25) > 0.05,
+               "cycle-weighted ratio differs from mean-of-ratios");
+    // Per-window ratios sorted {1.0, 1.25, 1.5}: nearest-rank p50=1.25,
+    // p90=max=1.5.
+    ExpectNear(*cc.ratio_p50, 1.25, 1e-9, "per-window ratio p50 == 1.25");
+    ExpectNear(*cc.ratio_p90, 1.5, 1e-9, "per-window ratio p90 == 1.5");
+    ExpectNear(*cc.ratio_max, 1.5, 1e-9, "per-window ratio max == 1.5");
+    // No operator-supplied P0 -> no effective MHz, never a guessed base.
+    ExpectNullopt(cc.p0_mhz, "no --p0-mhz -> p0 not echoed");
+    ExpectNullopt(cc.effective_mhz, "no --p0-mhz -> effective_mhz nullopt");
+}
+
+void TestComputeCpuCycles_P0DerivesEffectiveMhz() {
+    std::vector<CycleEvidenceWindow> windows{
+        {1000.0, 1.25e6, 1.0e6},
+        {1000.0, 7.5e6, 5.0e6},
+        {2000.0, 2.0e6, 2.0e6},
+    };
+    CpuCyclesSummary cc = ComputeCpuCycles(windows, {}, 4000.0);
+    ExpectHasValue(cc.p0_mhz, "supplied P0 echoed for provenance");
+    ExpectNear(*cc.p0_mhz, 4000.0, kEps, "p0_mhz == supplied value");
+    ExpectHasValue(cc.effective_mhz, "effective MHz derived with P0");
+    ExpectNear(*cc.effective_mhz, 5375.0, 1e-6,
+               "effective = aggregate ratio 1.34375 x 4000 MHz");
+    // A non-positive P0 is rejected, not multiplied through.
+    CpuCyclesSummary bad = ComputeCpuCycles(windows, {}, -4000.0);
+    ExpectNullopt(bad.p0_mhz, "non-positive P0 ignored");
+    ExpectNullopt(bad.effective_mhz, "non-positive P0 -> no effective MHz");
+}
+
+void TestComputeCpuCycles_SkipsImplausibleStragglers() {
+    // The log-time guard should have blanked these, but the pure compute must
+    // also skip non-finite / non-positive stragglers so one bad row cannot
+    // poison the totals: NaN window, zero window, zero dMPERF (ratio
+    // undefined), negative dAPERF, NaN delta.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<CycleEvidenceWindow> windows{
+        {nan, 1.0e6, 1.0e6},
+        {0.0, 1.0e6, 1.0e6},
+        {1000.0, 1.0e6, 0.0},
+        {1000.0, -1.0e6, 1.0e6},
+        {1000.0, nan, 1.0e6},
+        {1000.0, 1.2e6, 1.0e6},
+    };
+    CpuCyclesSummary cc = ComputeCpuCycles(windows, {}, std::nullopt);
+    ExpectEqualInt(cc.window_count, 1, "only the plausible window counted");
+    ExpectHasValue(cc.aperf_mperf_ratio, "ratio from the surviving window");
+    ExpectNear(*cc.aperf_mperf_ratio, 1.2, 1e-9,
+               "ratio reflects only the surviving window");
+    ExpectNear(cc.total_window_s, 1.0, 1e-9,
+               "skipped windows contribute no window time");
+}
+
 void TestBuildDiagnosticFlags_NoFlagsOnHealthyRun() {
     ReportOptions options;
     options.load_threshold_c = 75.0;
@@ -458,6 +584,13 @@ int main() {
     TestBuildDiagnosticFlags_RobustnessAndSlowResponse();
     TestBuildDiagnosticFlags_SlowResponse();
     TestBuildDiagnosticFlags_NoFlagsOnHealthyRun();
+    TestComputePackagePower_EmptyIsUnavailable();
+    TestComputePackagePower_TimeWeighted();
+    TestComputePackagePower_SingleWindow();
+    TestComputeCpuCycles_EmptyIsUnavailable();
+    TestComputeCpuCycles_CycleWeighted();
+    TestComputeCpuCycles_P0DerivesEffectiveMhz();
+    TestComputeCpuCycles_SkipsImplausibleStragglers();
     if (g_failures > 0) {
         std::cerr << g_failures << " analyze_report helper test failure(s)\n";
         return 1;

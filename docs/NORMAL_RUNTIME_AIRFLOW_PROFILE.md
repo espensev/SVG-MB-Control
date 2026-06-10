@@ -27,11 +27,16 @@ keeps the prior floors as a reference starting point for other hardware.
 | Channel | Role | Reference static low-load duty | Current release min | Current low/medium curve |
 |---:|---|---:|---:|---|
 | 0 | Rear exhaust | 15.5% | 15.5% | unchanged rear-exhaust curve |
-| 1 | Radiator exhaust A | 22% | 22% | unchanged CPU/radiator curve |
+| 1 | Radiator exhaust A | 22% | 22% | CPU/radiator response preserved via `cpu_override_curve`; added GPU-airflow assist `curve` (near-floor below ~64 C, steep ~66-70 C, ~half-strength at 80 C, strong toward ~90 C) |
 | 2 | Front 200 mm intake | 60% | 42% | `35C:42%`, `50C:46%`, `62C:54%`, `72C:64%` |
 | 3 | Front 200 mm intake | 56% | 38% | `35C:38%`, `50C:42%`, `62C:50%`, `72C:60%` |
 | 4 | Front radiator Noctua intake | 31% | 24% | `35C:24%`, `50C:27%`, `62C:31%`, `72C:38%` |
-| 5 | Radiator exhaust B | 20% | 20% | unchanged CPU/radiator curve |
+| 5 | Radiator exhaust B | 20% | 20% | CPU/radiator response preserved via `cpu_override_curve`; added GPU-airflow assist `curve` (near-floor below ~64 C, steep ~66-70 C, ~half-strength at 80 C, strong toward ~90 C) |
+
+The channel `1`/`5` GPU-airflow assist `curve` above is the retuned curve in
+`config\control.release.json` (2026-06-09); it has not been rebuilt or
+redeployed, so the live worker still runs the prior curve. See
+`docs\gpu-response-curve-retune-2026-06-09.md`.
 
 For channels `2`, `3`, and `4`, the same low/medium points are present in
 both the primary `curve` and the `cpu_override_curve`. This preserves CPU

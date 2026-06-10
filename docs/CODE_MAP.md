@@ -30,6 +30,8 @@ the same responsibility; otherwise they are listed separately.
 
 ## Control Loop (`src/control/`)
 
+- `src/control/boost_stage.{h,cpp}` — Per-stage smootherstep integrator
+  shared by thermal_pressure, midband_pressure, gpu_airflow, and cpu_low_soak.
 - `src/control/cadence_score.{h,cpp}` — Per-tick slew score and the
   upward-only cadence integrator that produces the effective tick
   interval.
@@ -53,6 +55,8 @@ the same responsibility; otherwise they are listed separately.
 - `src/control/control_loop_config.cpp` — Control-loop subtree and
   per-channel JSON parsing/validation (`LoadLowBandConfig`,
   `LoadChannelConfig`). Public declaration stays in `control_loop.h`.
+- `src/control/control_math.{h,cpp}` — Shared math primitives:
+  smootherstep, scale, rate-limited approach — used by cadence and low-band.
 - `src/control/control_runtime_context.{h,cpp}` — `ChannelState` and
   `ControlRuntimeContext` structs: per-channel mutable runtime state
   (duty, smoothed demand, boost terms, hold deadlines, primary-temp
@@ -86,6 +90,9 @@ the same responsibility; otherwise they are listed separately.
   formatting helpers used by both the runtime logger and analyzer.
 - `src/runtime/evidence_log.{h,cpp}` — Foreground `evidence-log` mode:
   AMD/GPU/fan sampling and JSONL emission with no fan writes.
+- `src/runtime/evidence_signatures.{h,cpp}` — Pure change-detection /
+  signature helpers split out of `evidence_log`, used to set per-field
+  change flags without re-sampling.
 - `src/runtime/gpu_evidence_csv.{h,cpp}` — GPU-evidence CSV header
   builder and per-sample row appender used by `evidence-log`.
 - `src/runtime/json_io.{h,cpp}` — Defensive JSON accessors
@@ -139,6 +146,10 @@ the same responsibility; otherwise they are listed separately.
 
 - `src/hardware/amd_reader.{h,cpp}` — AMD SMN CPU telemetry reader
   (Tctl/Tdie) backed by the PawnIO driver.
+- `src/hardware/amd_decode.h` — AMD SMN decode math (Tctl/Tdie and
+  per-CCD Tdie with Zen2/Zen4 CCD-base layout selection), unit-tested by
+  `amd_decode_tests.cpp`.
+- `src/hardware/cpu_cycles.h` — Pure math for AMD APERF/MPERF cycle evidence.
 - `src/hardware/fan_writer.{h,cpp}` — `FanWriter` abstraction, result
   codes, and strategy selection between SIO and simulation.
 - `src/hardware/fan_writer_internal.h` — Result-factory helpers and
@@ -149,6 +160,7 @@ the same responsibility; otherwise they are listed separately.
 - `src/hardware/pawnio_binary.{h,cpp}` — PawnIO module-binary
   resolver, loader, and SHA-256 verifier; provenance is in
   `third_party/pawnio/README.md`.
+- `src/hardware/rapl_energy.h` — Pure math for AMD RAPL package-energy evidence.
 - `src/hardware/simulated_fan_writer.cpp` — Simulation strategy used
   under `SVG_MB_CONTROL_SIM_DIRECT_WRITE_MODE` for hermetic tests.
 - `src/hardware/sio_fan_writer.cpp` — Production strategy backed by
@@ -229,6 +241,14 @@ the same responsibility; otherwise they are listed separately.
   fields across read-loop, evidence-log, and control-loop rows.
 - `tests/cpp/pawnio_binary_tests.cpp` — CTest C++ coverage for PawnIO
   binary resolution, load, and SHA-256 verification.
+- `tests/cpp/channel_write_tests.cpp` — CTest coverage for the
+  per-channel write-evaluation path.
+- `tests/cpp/amd_decode_tests.cpp` — CTest coverage for the AMD SMN
+  decode math in `amd_decode.h`.
+- `tests/cpp/cpu_cycles_tests.cpp` — CTest coverage for the AMD cycle
+  math in `cpu_cycles.h`.
+- `tests/cpp/rapl_energy_tests.cpp` — CTest coverage for the AMD RAPL
+  package-energy math in `rapl_energy.h`.
 - `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`,
   `analyze prune`, and native `analyze report` coverage.
 - `tests/test_analyzer.py` — Integration tests for the Python
@@ -238,6 +258,10 @@ the same responsibility; otherwise they are listed separately.
   step-wise execution coverage.
 - `tests/test_config_contracts.py` — `control.json` schema validation
   and required-field coverage.
+- `tests/test_feature_specs.py` — Feature-spec registry, traceability,
+  promotion-gate, and verification-log consistency checks.
+- `tests/test_machine_cooling_policy.py` — Coverage for the
+  `config/machines/snd-desk.cooling.policy.json` cooling-policy contract.
 - `tests/test_control_loop.py` — `control-loop` mode end-to-end
   hermetic coverage.
 - `tests/test_eval_dashboard.py` — `tools/eval_dashboard` HTTP API
@@ -267,6 +291,18 @@ the same responsibility; otherwise they are listed separately.
 - `scripts/analyze_control_run.py` — Thin wrapper that ingests a raw
   control-loop CSV into a temporary DB via the in-repo svg-mb-control.exe
   and forwards native `analyze report` output (no analysis of its own).
+- `scripts/Build.VsEnv.ps1`, `scripts/Build.Tools.ps1`,
+  `scripts/Build.Package.ps1`, `scripts/Build.Info.ps1`,
+  `scripts/Build.Tests.ps1` — dot-sourced helper modules of
+  `Build-Release.ps1` (VS-env bootstrap, tool resolution, dist packaging,
+  version/build-info and archive helpers, and the CTest/hermetic test lanes).
+- `scripts/Common-Python.ps1` — shared Python interpreter resolver,
+  dot-sourced by `Build-Release.ps1` and `Start-EvalDashboard.ps1`.
+- `scripts/Compare-CpuTemps.ps1` — read-only harness that bins control-loop
+  CSV `cpu_tctl_c` by sustained `system_cpu_busy_pct` into idle/low/high and
+  records a per-setting comparison ledger.
+- `scripts/Install-CpuTempBaselineTask.ps1` — registers/removes a scheduled
+  task that runs `Compare-CpuTemps.ps1` on a cadence for a long-term baseline.
 
 ## Top-Level PowerShell
 
@@ -344,23 +380,27 @@ do not merge them into operator docs unless the topic is reopened):
   implementation record.
 - `docs/SCRIPT_STACK_REVIEW.md` — Completed script-stack
   simplification record.
+- `docs/bench-logging-history.md` — Consolidated history of the older
+  Bench-vs-Control logging discovery notes.
 
 Historical / discovery (per `AGENTS.md`, treat as context, not
 current contract, unless re-validated):
 
 - `docs/adaptive-cadence-design-2026-05-19.md`
-- `docs/build-optimization-results.md`
-- `docs/code-quality-pass-2026-05-19.md`
-- `docs/evaluation-and-optimization-recommendations.md`
-- `docs/discovery-bench-cpp-priority.md`
-- `docs/discovery-bench-logger-gap.md`
-- `docs/discovery-control-bench-logging.md`
 - `docs/discovery-control-optimization-options.md`
-- `docs/discovery-current-vs-earlier.md`
 - `docs/discovery-dashboard-health-polling.md`
 - `docs/discovery-gpu-response-refinement.md`
 - `docs/discovery-gpu-temp-envelope.md`
-- `docs/discovery-logging-parity.md`
 - `docs/discovery-next-logging-targets.md`
 - `docs/discovery-polling-logging-state.md`
+- `docs/discovery-recovery-gap-audit-2026-06-04.md`
 - `docs/discovery-steady-response-control.md`
+- `docs/testing-harness-evaluation-2026-06-06.md`
+- `docs/archive/build-optimization-results.md`
+- `docs/archive/code-quality-pass-2026-05-19.md`
+- `docs/archive/evaluation-and-optimization-recommendations.md`
+- `docs/archive/discovery-bench-cpp-priority.md`
+- `docs/archive/discovery-bench-logger-gap.md`
+- `docs/archive/discovery-control-bench-logging.md`
+- `docs/archive/discovery-current-vs-earlier.md`
+- `docs/archive/discovery-logging-parity.md`

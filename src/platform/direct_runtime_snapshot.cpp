@@ -80,6 +80,18 @@ const SimRuntimeOverrides& CachedSimRuntimeOverrides() {
 
 void MergeAmdTelemetry(RuntimeSnapshot& snapshot,
                        const AmdSnapshot& amd_snapshot) {
+    // FEAT-0006 package energy is independent of temperature availability, so
+    // copy it before the temperature early-return. AmdReader resets these every
+    // Sample(), so nothing stale carries over when AMD is unavailable.
+    snapshot.pkg_energy_acquisition = amd_snapshot.pkg_energy_acquisition;
+    snapshot.pkg_energy_sample_id = amd_snapshot.pkg_energy_sample_id;
+    snapshot.pkg_energy_window_ms = amd_snapshot.pkg_energy_window_ms;
+    snapshot.pkg_energy_delta_uj = amd_snapshot.pkg_energy_delta_uj;
+    snapshot.cpu_cycles_acquisition = amd_snapshot.cpu_cycles_acquisition;
+    snapshot.cpu_cycles_sample_id = amd_snapshot.cpu_cycles_sample_id;
+    snapshot.cpu_cycles_window_ms = amd_snapshot.cpu_cycles_window_ms;
+    snapshot.cpu_aperf_delta = amd_snapshot.cpu_aperf_delta;
+    snapshot.cpu_mperf_delta = amd_snapshot.cpu_mperf_delta;
     if (!amd_snapshot.available || amd_snapshot.samples.empty()) {
         return;
     }

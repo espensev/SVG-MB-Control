@@ -5,33 +5,13 @@
 
 #include "control_math.h"
 
-#include <cmath>
+#include "test_helpers.h"
+
 #include <iostream>
 #include <limits>
 #include <string>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectNear(double actual, double expected, double tolerance,
-                const std::string& message) {
-    if (std::isnan(actual) && std::isnan(expected)) {
-        return;
-    }
-    if (std::fabs(actual - expected) > tolerance) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected
-                  << " got " << actual << '\n';
-    }
-}
-
-void ExpectTrue(bool condition, const std::string& message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
 
 constexpr double kEps = 1e-12;
 

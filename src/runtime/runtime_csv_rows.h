@@ -148,10 +148,5 @@ std::string BuildControlLoopCsvRow(
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
     const std::vector<RuntimeControlChannelLogState>& channels);
-std::string BuildControlLoopCsvRow(
-    const RuntimeSnapshot& snapshot,
-    std::uint64_t tick_count,
-    const RuntimeControlLoopTimingState& timing,
-    const std::vector<RuntimeControlChannelLogState>& channels);
 
 }  // namespace svg_mb_control

@@ -19,6 +19,42 @@ bool IsStartEvent(const std::string& event_type) {
            event_type == "write_orchestrator.start";
 }
 
+constexpr const char* kInsertEventSql =
+    "INSERT INTO events("
+    "run_id, event_time, event_type, severity, error_code, mode, success, "
+    "channel, setpoint_pct, observed_temp_c, tick_count, detail, extra_json"
+    ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)";
+
+// Binds one event row against the prepared kInsertEventSql statement, steps,
+// and resets. nullopt run_id stores NULL (event outside any run window).
+void InsertEventRow(Statement& insert,
+                    const std::optional<std::int64_t>& run_id,
+                    const EventData& e) {
+    if (run_id.has_value()) {
+        insert.BindInt(1, *run_id);
+    } else {
+        insert.BindNull(1);
+    }
+    insert.BindText(2, e.event_time);
+    insert.BindText(3, e.event_type);
+    insert.BindOptionalText(4, e.severity);
+    insert.BindOptionalText(5, e.error_code);
+    insert.BindOptionalText(6, e.mode);
+    insert.BindOptionalInt(7, e.success);
+    insert.BindOptionalInt(8, e.channel);
+    insert.BindOptionalDouble(9, e.setpoint_pct);
+    insert.BindOptionalDouble(10, e.observed_temp_c);
+    insert.BindOptionalInt(11, e.tick_count);
+    insert.BindOptionalText(12, e.detail);
+    if (e.extra_json.empty()) {
+        insert.BindNull(13);
+    } else {
+        insert.BindText(13, e.extra_json);
+    }
+    insert.Step();
+    insert.Reset();
+}
+
 }  // namespace
 
 bool IsManifestPathInDb(Database& db, const std::string& canonical_path) {
@@ -129,9 +165,14 @@ void InsertTickRows(Database& db,
         "loop_achieved_interval_ms, loop_slip_ms, loop_overrun,"
         "process_cpu_delta_ms, process_cpu_pct,"
         "process_working_set_bytes, process_private_bytes,"
-        "cadence_transient"
+        "cadence_transient,"
+        "cpu_power_sample_id, cpu_power_window_ms, cpu_pkg_energy_delta_uj,"
+        "cpu_pkg_energy_acquisition,"
+        "cpu_cycles_sample_id, cpu_cycles_window_ms, cpu_aperf_delta,"
+        "cpu_mperf_delta, cpu_cycles_acquisition"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,"
-        "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)");
+        "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,"
+        "?33,?34,?35,?36,?37,?38,?39,?40,?41)");
 
     Statement fan = db.Prepare(
         "INSERT INTO tick_fan_samples("
@@ -175,6 +216,15 @@ void InsertTickRows(Database& db,
         tick.BindOptionalInt(30, row.process_working_set_bytes);
         tick.BindOptionalInt(31, row.process_private_bytes);
         tick.BindOptionalDouble(32, row.cadence_transient);
+        tick.BindOptionalInt(33, row.cpu_power_sample_id);
+        tick.BindOptionalDouble(34, row.cpu_power_window_ms);
+        tick.BindOptionalDouble(35, row.cpu_pkg_energy_delta_uj);
+        tick.BindOptionalText(36, row.cpu_pkg_energy_acquisition);
+        tick.BindOptionalInt(37, row.cpu_cycles_sample_id);
+        tick.BindOptionalDouble(38, row.cpu_cycles_window_ms);
+        tick.BindOptionalDouble(39, row.cpu_aperf_delta);
+        tick.BindOptionalDouble(40, row.cpu_mperf_delta);
+        tick.BindOptionalText(41, row.cpu_cycles_acquisition);
         tick.Step();
         tick.Reset();
 
@@ -214,11 +264,7 @@ int InsertEventsAttributed(Database& db,
         start_to_run.emplace(r.session_start, r.run_id);
     }
 
-    Statement insert = db.Prepare(
-        "INSERT INTO events("
-        "run_id, event_time, event_type, severity, error_code, mode, success, "
-        "channel, setpoint_pct, observed_temp_c, tick_count, detail, extra_json"
-        ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)");
+    Statement insert = db.Prepare(kInsertEventSql);
 
     std::optional<std::int64_t> current_run;
     int inserted = 0;
@@ -231,29 +277,7 @@ int InsertEventsAttributed(Database& db,
                 current_run.reset();
             }
         }
-        if (current_run.has_value()) {
-            insert.BindInt(1, *current_run);
-        } else {
-            insert.BindNull(1);
-        }
-        insert.BindText(2, e.event_time);
-        insert.BindText(3, e.event_type);
-        insert.BindOptionalText(4, e.severity);
-        insert.BindOptionalText(5, e.error_code);
-        insert.BindOptionalText(6, e.mode);
-        insert.BindOptionalInt(7, e.success);
-        insert.BindOptionalInt(8, e.channel);
-        insert.BindOptionalDouble(9, e.setpoint_pct);
-        insert.BindOptionalDouble(10, e.observed_temp_c);
-        insert.BindOptionalInt(11, e.tick_count);
-        insert.BindOptionalText(12, e.detail);
-        if (e.extra_json.empty()) {
-            insert.BindNull(13);
-        } else {
-            insert.BindText(13, e.extra_json);
-        }
-        insert.Step();
-        insert.Reset();
+        InsertEventRow(insert, current_run, e);
         ++inserted;
     }
     return inserted;
@@ -262,32 +286,10 @@ int InsertEventsAttributed(Database& db,
 int InsertEventsForRun(Database& db,
                        const std::vector<EventData>& events,
                        std::int64_t run_id) {
-    Statement insert = db.Prepare(
-        "INSERT INTO events("
-        "run_id, event_time, event_type, severity, error_code, mode, success, "
-        "channel, setpoint_pct, observed_temp_c, tick_count, detail, extra_json"
-        ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)");
+    Statement insert = db.Prepare(kInsertEventSql);
     int inserted = 0;
     for (const auto& e : events) {
-        insert.BindInt(1, run_id);
-        insert.BindText(2, e.event_time);
-        insert.BindText(3, e.event_type);
-        insert.BindOptionalText(4, e.severity);
-        insert.BindOptionalText(5, e.error_code);
-        insert.BindOptionalText(6, e.mode);
-        insert.BindOptionalInt(7, e.success);
-        insert.BindOptionalInt(8, e.channel);
-        insert.BindOptionalDouble(9, e.setpoint_pct);
-        insert.BindOptionalDouble(10, e.observed_temp_c);
-        insert.BindOptionalInt(11, e.tick_count);
-        insert.BindOptionalText(12, e.detail);
-        if (e.extra_json.empty()) {
-            insert.BindNull(13);
-        } else {
-            insert.BindText(13, e.extra_json);
-        }
-        insert.Step();
-        insert.Reset();
+        InsertEventRow(insert, run_id, e);
         ++inserted;
     }
     return inserted;

@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.1   **Updated:** 2026-06-06
+**Status:** Accepted   **Version:** 0.1   **Updated:** 2026-06-07
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -41,18 +41,23 @@ Result values:
 - **pending** = not implemented or not yet verified.
 - **pass** = implemented and verified in the owning spec's verification log.
 - **deferred** = explicitly split out of the implemented slice.
-- **not buildable** = the spec has open promotion gates.
+- **partial** = implemented and verified for a defined sub-scope; the remainder
+  is deferred or pending.
+- **not buildable** = the spec is not implementation-authorized yet because it
+  has open promotion gates, is a held Draft/design capture, is parked, or has an
+  explicit pre-implementation validation gate.
 
 ## 2. Feature status
 
 | Feature | Status | Buildability |
 |---|---|---|
 | `FEAT-0001` Hot-swap runtime write policy | Accepted | Buildable when implementation is explicitly authorized; verification pending. |
-| `FEAT-0002` CPU settings evidence logger | Implemented (load layer; label deferred) | Implemented requirements pass except `REQ-CPUSETTINGS-06`, which is deferred. |
+| `FEAT-0002` CPU settings evidence logger | Implemented (source/test load layer; label deferred) | Source/test requirements pass except `REQ-CPUSETTINGS-06`, which is deferred; the 2026-06-09 rebuild confirmed the `system_cpu_*` columns in the live CSV header (git_hash `dd2c02214128`, session `2026-06-09T02:32:40`), closing the packaging-evidence gap. |
 | `FEAT-0003` Selectable control-law profile with hot-swap | Draft | Not buildable; design capture only. |
 | `FEAT-0004` Hardware-access dependency health signal | Draft | Not buildable; decision record gate open. |
 | `FEAT-0005` Write actuation confirmation | Reserved (body parked) | Not buildable; body parked in `docs/features/_parked/`, sequenced behind FEAT-0004. |
-| `FEAT-0006` CPU work and energy efficiency evidence | Reserved (body parked) | Not buildable; body parked pending FEAT-0004 and a read-only live MSR feasibility check. |
+| `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; APERF/MPERF `#GP` through the shipped bin, so the work numerator / effective frequency are deferred. Energy-only v1 build authorized; the enabled integration path is not yet hardware/CI-validated. The analyzer time-weighted average-power derivation (schema v9, `analyze report`) landed 2026-06-09 with unit + end-to-end tests green; live runtime-CSV (M) evidence still pending. FEAT-0004 recommended, not blocking. |
+| `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
 
 ## 3. Requirement map
 
@@ -75,7 +80,7 @@ Result values:
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
 | `REQ-CPUSETTINGS-01` | T, R | CSV/header compatibility tests and `RUNTIME_HOME.md` review. | pass |
-| `REQ-CPUSETTINGS-02` | T | System CPU delta calculation unit/smoke test. | pass |
+| `REQ-CPUSETTINGS-02` | T | System CPU delta calculation unit/smoke test; live package header confirmed by the 2026-06-09 rebuild. | pass |
 | `REQ-CPUSETTINGS-03` | T, R | Analyzer ingest compatibility with old archives missing new fields. | pass |
 | `REQ-CPUSETTINGS-04` | R | Review confirms Win32 first-party source only; no tool/subprocess/sibling dependency. | pass |
 | `REQ-CPUSETTINGS-05` | R | Review confirms logger records raw values only, with no activity classification. | pass |
@@ -91,8 +96,8 @@ Result values:
 | `REQ-PROFILE-04` | T | Profile request applies at tick boundary; validation failure retains running profile and emits rejection. | not buildable |
 | `REQ-PROFILE-05` | T | Swap resets new controller dynamic state by default. | not buildable |
 | `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, and write gates behave identically by controller kind. | not buildable |
-| `REQ-PROFILE-07` | R, M | Review `MEASUREMENT_GATE.md`; runtime evidence that PID runs shadow/dry-run before live writes. | not buildable |
-| `REQ-PROFILE-08` | T | CSV/status tests assert per-channel controller-kind field. | not buildable |
+| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision record D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded `allow_live` crossing. | not buildable |
+| `REQ-PROFILE-08` | T | CSV/status tests assert per-channel controller-kind field and kind-aware/nullable law-specific reporting fields. | not buildable |
 | `REQ-PROFILE-09` | T, R | Differing channel-set candidate rejected until FEAT-0001 restore/capture path exists. | not buildable |
 | `REQ-PROFILE-10` | R | Review control-identity docs for curve-overlay scope and PID identity reference. | not buildable |
 
@@ -107,11 +112,24 @@ Result values:
 | `REQ-HWHEALTH-05` | R | Review confirms no driver load/start/restart path. | not buildable |
 | `REQ-HWHEALTH-06` | T | No successful open means unknown/unavailable, never healthy. | not buildable |
 
-### FEAT-0005 / FEAT-0006 — Reserved (parked)
+### FEAT-0006 - CPU work and energy efficiency evidence
 
-`REQ-ACTCONFIRM-*` (FEAT-0005) and `REQ-CPUEFF-*` (FEAT-0006) are **not mirrored
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | partial — cycle logger landed default-off (cpu_cycles.h math + cpu_cycles_tests, CTest 11/11; amd_reader per-core APERF/MPERF read logging cpu_aperf_delta/cpu_mperf_delta; reachability+affinity live-confirmed 2026-06-09). Analyzer effective-freq derivation + enabled-path/live CSV pending |
+| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | partial — energy logger landed 2026-06-07; analyzer time-weighted avg-power derivation landed 2026-06-09 (schema v9, sample-id de-duplication, no-false-zero; `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end). Enabled integration path + live-CSV (M) evidence pending |
+| `REQ-CPUEFF-03` | T, R | Context/provenance propagation test, explicit deferred-signal unavailable handling, and review vs `RUNTIME_HOME.md`. | pass (v1 scope) — temperature stays aligned with the window; the first cut reports effective-frequency inputs unavailable (not guessed), but they are reachable with the shipped bin (AMD RO aliases; the 2026-06-07 #GP was a probe-index error) |
+| `REQ-CPUEFF-04` | T, R | Analyzer-ingest tests with old archives missing the new fields; no-false-zero test. | pass — additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility guard |
+| `REQ-CPUEFF-05` | R | Review confirms read paths only; no CPU-control write. | pass — `ReadAllowlistedMsr` issues `ioctl_read_msr` only; no write in the energy path |
+| `REQ-CPUEFF-06` | R | Review of the enumerated register/counter read set vs `AGENTS.md`. | pass — enumerated read set `{0xC0010299, 0xC001029B}` via `rapl::IsAllowlistedEnergyMsr` + allow-list guard test |
+| `REQ-CPUEFF-07` | R | Review logger code/docs: no baked-in efficiency scoring. | pass — logger records raw delta+window only; no efficiency scoring (review) |
+| `REQ-CPUEFF-08` | T, R | CPU-settings label-propagation test/config review. | deferred — workload/CPU-setting label is the shared open question with FEAT-0002 §8; not in v1 |
+
+### FEAT-0005 / FEAT-0007 — Reserved (parked)
+
+`REQ-ACTCONFIRM-*` (FEAT-0005) and `REQ-RAMTEMP-*` (FEAT-0007) are **not mirrored
 here while their specs are Reserved.** Their requirement rows live in the parked
-bodies under `docs/features/_parked/` and rejoin this map when either spec is
-promoted back to `Draft` (see `docs/features/README.md` §5). This map mirrors
-only the `REQ-*` IDs of the active, enforced feature specs, which is what
+bodies under `docs/features/_parked/` and rejoin this map when a spec is promoted
+back to `Draft` (see `docs/features/README.md` §5). This map mirrors only the
+`REQ-*` IDs of the active, enforced feature specs, which is what
 `tests/test_feature_specs.py` requires.

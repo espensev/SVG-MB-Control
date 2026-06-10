@@ -46,10 +46,15 @@ extern const PawnIoBinarySpec kPawnIoSpecAmdFamily17V1;
 
 std::filesystem::path ResolvePawnIoBinaryPath(const PawnIoBinarySpec& spec);
 
+// out_hash_mismatch (optional): set to true when the bin's SHA-256 does not
+// match spec.expected_sha256_hex, even under warn_only (where the load still
+// succeeds). Lets a caller field-gate MSR-derived values on an unverified bin
+// without string-matching out_warning (FEAT-0006 §9 counter-read safety review).
 PawnIoStatus LoadPawnIoBinary(HANDLE device_handle,
                               const PawnIoBinarySpec& spec,
                               const std::filesystem::path& bin_path,
-                              std::string* out_warning);
+                              std::string* out_warning,
+                              bool* out_hash_mismatch = nullptr);
 
 bool ComputeSha256Hex(const std::uint8_t* data,
                       std::size_t size,

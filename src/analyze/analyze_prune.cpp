@@ -26,10 +26,6 @@ struct ArchiveBundle {
     std::uintmax_t bytes = 0u;
 };
 
-std::string NormalizePathForOutput(const std::filesystem::path& path) {
-    return path.string();
-}
-
 std::filesystem::path CanonicalizeForLookup(
     const std::filesystem::path& path) {
     std::error_code ec;
@@ -263,9 +259,9 @@ void PrintBundleDecision(const char* action,
                          const ArchiveBundle& bundle,
                          const char* reason) {
     std::cout << "prune " << action
-              << " manifest=" << NormalizePathForOutput(bundle.manifest_path);
+              << " manifest=" << bundle.manifest_path.string();
     if (!bundle.csv_path.empty()) {
-        std::cout << " csv=" << NormalizePathForOutput(bundle.csv_path);
+        std::cout << " csv=" << bundle.csv_path.string();
     }
     std::cout << " status=" << bundle.manifest.status
               << " bytes=" << bundle.bytes

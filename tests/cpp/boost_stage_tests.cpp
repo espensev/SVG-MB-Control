@@ -7,6 +7,9 @@
 // rise, hold, decay, dead-band, max-clamp, and unavailable-input zones.
 
 #include "boost_stage.h"
+
+#include "test_helpers.h"
+
 #include "control_policy.h"
 
 #include <algorithm>
@@ -18,24 +21,6 @@
 #include <vector>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectNear(double actual,
-                double expected,
-                double tolerance,
-                const std::string& message) {
-    if (std::isnan(actual) && std::isnan(expected)) {
-        return;
-    }
-    if (std::fabs(actual - expected) > tolerance) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message
-                  << " expected " << expected
-                  << " got " << actual
-                  << " diff " << (actual - expected) << '\n';
-    }
-}
 
 // ---------------- Legacy reference (verbatim copies) -----------------
 

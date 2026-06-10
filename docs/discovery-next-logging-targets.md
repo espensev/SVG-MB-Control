@@ -5,6 +5,10 @@
 **Status:** complete - evidence logger includes SIO voltage/temperature, fan tach hi/lo fields, configurable GPU sample modes, richer GPU row fields, per-backend read timing, poll cadence, change flags, analyzer-generated compact decision records, and normalized event severity/error codes; focused evidence/analyzer tests and full no-publish local CI passed
 **Recommended next:** Refactor `RunUntilStopped()` only after current response tuning stabilizes and analyzer-backed behavior baselines exist.
 
+> Historical note (2026-06-09): the `50 ms control path` references below describe the
+> prior shipped cadence. The current shipped profile is `poll_tick_ms = 250` /
+> `write_cooldown_ms = 250` (see `config/control.release.json`).
+
 ---
 
 ## Questions

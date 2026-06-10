@@ -294,6 +294,24 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         GetField(fields, header, "process_private_bytes"));
     row.cadence_transient = AsDouble(
         GetField(fields, header, "cadence_transient"));
+    row.cpu_power_sample_id = AsInt(
+        GetField(fields, header, "cpu_power_sample_id"));
+    row.cpu_power_window_ms = AsDouble(
+        GetField(fields, header, "cpu_power_window_ms"));
+    row.cpu_pkg_energy_delta_uj = AsDouble(
+        GetField(fields, header, "cpu_pkg_energy_delta_uj"));
+    row.cpu_pkg_energy_acquisition = AsText(
+        GetField(fields, header, "cpu_pkg_energy_acquisition"));
+    row.cpu_cycles_sample_id = AsInt(
+        GetField(fields, header, "cpu_cycles_sample_id"));
+    row.cpu_cycles_window_ms = AsDouble(
+        GetField(fields, header, "cpu_cycles_window_ms"));
+    row.cpu_aperf_delta = AsDouble(
+        GetField(fields, header, "cpu_aperf_delta"));
+    row.cpu_mperf_delta = AsDouble(
+        GetField(fields, header, "cpu_mperf_delta"));
+    row.cpu_cycles_acquisition = AsText(
+        GetField(fields, header, "cpu_cycles_acquisition"));
 
     for (std::uint32_t fi = 0u; fi < 64u; ++fi) {
         const std::string prefix = "fan" + std::to_string(fi) + "_";
@@ -321,13 +339,11 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         row.fans.push_back(std::move(fan));
     }
 
+    const char* const observed_temp_name = TickChannelSampleColumnById(
+        TickChannelSampleColumn::ObservedTempC).name;
     for (std::uint32_t ci = 0u; ci < 64u; ++ci) {
-        if (!HasColumn(
-                header,
-                TickChannelCsvFieldName(
-                    ci,
-                    TickChannelSampleColumnById(
-                        TickChannelSampleColumn::ObservedTempC).name))) {
+        if (!HasColumn(header,
+                       TickChannelCsvFieldName(ci, observed_temp_name))) {
             break;
         }
         ParsedChannelSample ch;

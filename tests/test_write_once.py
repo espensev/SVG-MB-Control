@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class WriteOnceTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class WriteOnceTests(WindowsExeTestCase):
     def test_malformed_numeric_cli_values_are_rejected(self) -> None:
         cases = [
             ("--write-channel", "-1"),

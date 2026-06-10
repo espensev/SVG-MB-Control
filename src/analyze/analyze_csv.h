@@ -77,6 +77,19 @@ struct ParsedTickRow {
     std::optional<std::int64_t> process_working_set_bytes;
     std::optional<std::int64_t> process_private_bytes;
     std::optional<double> cadence_transient;
+    // FEAT-0006 read-only RAPL package-energy evidence (nullable; blank in old
+    // archives and whenever the logger reports disabled/unavailable).
+    std::optional<std::int64_t> cpu_power_sample_id;
+    std::optional<double> cpu_power_window_ms;
+    std::optional<double> cpu_pkg_energy_delta_uj;
+    std::optional<std::string> cpu_pkg_energy_acquisition;
+    // FEAT-0006 read-only APERF/MPERF cycle evidence (nullable; blank in old
+    // archives, on the baseline read, and on guard-blanked windows).
+    std::optional<std::int64_t> cpu_cycles_sample_id;
+    std::optional<double> cpu_cycles_window_ms;
+    std::optional<double> cpu_aperf_delta;
+    std::optional<double> cpu_mperf_delta;
+    std::optional<std::string> cpu_cycles_acquisition;
     std::vector<ParsedFanSample> fans;
     std::vector<ParsedChannelSample> channels;
 };
@@ -84,11 +97,6 @@ struct ParsedTickRow {
 struct CsvHeader {
     std::vector<std::string> columns;
     std::unordered_map<std::string, std::size_t> column_index;
-};
-
-struct ParseError {
-    std::string message;
-    std::size_t line_number = 0;
 };
 
 // Splits a single CSV line per RFC 4180-ish rules: fields may be wrapped in

@@ -98,6 +98,12 @@ in one change.
 - `Reset()` becomes a controller rebuild; no `ChannelState` field-zeroing path is
   needed.
 
+Clarification (2026-06-06): `last_raw_demand_pct` is not law-agnostic merely
+because it is reported. It is written by the curve law and published as
+`feedforward_pct`, so a future decouple should treat it as curve-controller-owned
+or publish it through a kind-aware/nullable reporting field rather than keeping it
+as a generic `ChannelState` reporting field.
+
 Rationale: removes the config+state welding (Problem #2) in the same change that
 introduces the seam, so there is one end state rather than an interim with welded
 curve state. Cost: the larger first change must reproduce today's
@@ -166,20 +172,39 @@ first post-swap setpoint, so reset does not produce an unbounded step.
 
 ## D6 — Live authorization and the measurement gate
 
-**Selected direction (maintainer, 2026-06-03): shadow/dry-run default; live PID
-via an explicit per-channel opt-in.** A PID channel with `pid.allow_live` absent
-or false computes and logs its setpoint but suppresses the write (shadow/dry-run),
-so PID can be exercised and evidenced without moving the baseline.
-`pid.allow_live: true` authorizes live PID writes immediately, without first
-requiring the characterization evidence.
+**Selected direction (maintainer, 2026-06-03; revised 2026-06-06): shadow/dry-run
+default; live PID via an explicit per-channel opt-in gated on evidence and a slew
+bound.** A PID channel with `pid.allow_live` absent or false computes and logs its
+setpoint but suppresses the write (shadow/dry-run), so PID can be exercised and
+evidenced without moving the baseline. `pid.allow_live: true` authorizes a live PID
+write only when **both** hold: (a) the channel has the characterization evidence
+`docs/MEASUREMENT_GATE.md` requires — a shadow-log comparison of the PID trajectory
+against the curve baseline for that channel is accepted as that evidence; and
+(b) the channel sets a non-NaN, positive slew cap (`max_setpoint_step_pct` and/or
+the rise/fall rate fields). Both are enforced as a config-load precondition: with
+either missing, `allow_live: true` is rejected at load and the channel stays in
+shadow/dry-run.
 
-This stays inside the `docs/MEASUREMENT_GATE.md` invariant because the crossing is
-**explicit and recorded**, not silent: `allow_live` is an operator opt-in in
-config and must emit a `control_loop.profile_applied` event naming the channel and
-the law, so the baseline move is auditable. The shared output guards (clamp to
-`[min_duty_pct, 100]`, the slew cap, sensor-safe mode, the circuit breaker) remain
-the safety floor regardless. The maintainer accepts that live PID under
-`allow_live` runs off the characterized curve baseline before evidence exists.
+A live `allow_live` crossing must still emit a `control_loop.profile_applied` event
+naming the channel and the law, so the baseline move is recorded as well as
+evidenced. The shared output guards (clamp to `[min_duty_pct, 100]`, the slew cap,
+sensor-safe mode, the circuit breaker) remain the safety floor regardless.
+
+**Revised 2026-06-06 (why).** The original 2026-06-03 form authorized `allow_live`
+*immediately, without first requiring the characterization evidence*, on the ground
+that the crossing was explicit and recorded. A 2026-06-06 review
+(`docs/profile-hot-swap-allow-live-decision-2026-06-06.md`; the measurement-gate
+section of `docs/modular-profile-hotswap-discussion-2026-06-06.md`) found that
+`docs/MEASUREMENT_GATE.md` Exit Criteria are measurements, not authorizations, so a
+recorded crossing is *consent, not evidence*; and that the slew cap the floor
+relies on defaults to NaN/off in code (`src/control/control_loop.h:29-31`;
+`src/control/channel_evaluator.cpp:55-57`), so the floor was not guaranteed
+present. The revised form requires both the evidence (lever B1) and the slew-cap
+precondition (lever B2). B1 and B2 are complementary, not redundant: a shadow-log
+comparison is the best pre-live evidence available, but it cannot exhibit the
+closed-loop modes (limit cycle, overshoot, integral windup) that appear only once
+PID drives the loop it reads, so B2's slew cap is the standing bound on exactly what
+B1's evidence cannot catch.
 
 ## D7 — Apply order (normative for implementation)
 
@@ -226,8 +251,9 @@ a valid request:
 1. **D3a:** selectable — `pid.feedforward: "curve" | "fixed"`.
 2. **D2:** full decouple in one pass — the controller owns its dynamic state and
    `ChannelState` is slimmed to law-agnostic fields.
-3. **D6:** shadow/dry-run default; live PID via an explicit `pid.allow_live`
-   per-channel opt-in.
+3. **D6 (revised 2026-06-06):** shadow/dry-run default; live PID via an explicit
+   `pid.allow_live` per-channel opt-in that requires both characterization evidence
+   (shadow-log comparison accepted) and a non-NaN slew cap, enforced at config load.
 
 These record what a demonstration build would do. They are not a commitment to
 build; per the status above the feature is not scheduled and is not believed to be
@@ -246,3 +272,14 @@ control law may be from the current feed-forward curve.
   identity documented.
 - Runtime evidence for `control_loop.profile_*` events and PID shadow/dry-run
   behavior when exercised live (respecting `AGENTS.md` §Live Runtime Safety).
+
+## Reconsideration (2026-06-06) — resolved
+
+A 2026-06-06 review questioned whether **D6**'s original
+`allow_live`-without-evidence posture satisfied `docs/MEASUREMENT_GATE.md` (read as
+an evidence gate, not a consent gate), and noted that the slew-cap floor D6 relies
+on defaults to NaN/off in code (`src/control/control_loop.h:29-31`;
+`src/control/channel_evaluator.cpp:55-57`). **Resolved 2026-06-06:** the maintainer
+selected B1+B2 — `allow_live` now requires both the characterization evidence and a
+non-NaN slew cap (the D6 text above is the revised form). The options considered are
+in `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.

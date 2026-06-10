@@ -43,11 +43,9 @@
   philosophy, and fan-relationship rules behind the shipped curves. The
   machine-readable companion is
   `config\machines\snd-desk.cooling.policy.json`.
-- Treat `docs\discovery-*.md`, `docs\code-quality-pass-*.md`,
-  `docs\evaluation-and-optimization-recommendations.md`,
-  `docs\build-optimization-results.md`, and other older recommendation files
-  as historical context unless they explicitly say they are current and
-  agree with README, current docs, source, and tests.
+- Treat `docs\discovery-*.md`, `docs\archive\*.md`, and other older
+  recommendation files as historical context unless they explicitly say they
+  are current and agree with README, current docs, source, and tests.
   `docs\COOLING_STRATEGY.md`,
   `docs\response-evaluation-tuning-plan.md`, and
   `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` are maintained as current.

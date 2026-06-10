@@ -43,6 +43,13 @@ std::optional<std::string> ColumnOptionalText(Statement& stmt, int idx) {
     return stmt.ColumnText(idx);
 }
 
+// Shared load predicate for band assignment and response-delay onset: a tick
+// is hot when CPU Tctl or the GPU envelope reaches the load threshold.
+bool TickIsHot(const TickRow& t, double threshold_c) {
+    return (t.cpu_tctl_c && *t.cpu_tctl_c >= threshold_c) ||
+           (t.gpu_envelope_c && *t.gpu_envelope_c >= threshold_c);
+}
+
 // Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's
 // days_from_civil). Valid for the date ranges this tool sees.
 std::int64_t DaysFromCivil(int y, unsigned m, unsigned d) {
@@ -273,11 +280,8 @@ void AssignBands(std::vector<TickRow>& ticks, const ReportOptions& options) {
     std::optional<std::size_t> last_hot;
     for (std::size_t i = 0; i < ticks.size(); ++i) {
         const auto& t = ticks[i];
-        const bool hot =
-            (t.cpu_tctl_c && *t.cpu_tctl_c >= options.load_threshold_c) ||
-            (t.gpu_envelope_c &&
-             *t.gpu_envelope_c >= options.load_threshold_c);
-        if (hot && t.elapsed_s >= idle_cut) {
+        if (TickIsHot(t, options.load_threshold_c) &&
+            t.elapsed_s >= idle_cut) {
             last_hot = i;
         }
     }
@@ -453,6 +457,103 @@ GpuResponseSummary SummariseGpuResponse(
     return summary;
 }
 
+// FEAT-0006 (REQ-CPUEFF-02) derived package power. Collapses the mirrored
+// per-tick energy rows to one window per cpu_power_sample_id (GROUP BY), keeps
+// only windows with a non-null delta (the log-time implausibility guard blanks
+// the rest -> no false zero), and hands the distinct windows plus the
+// acquisition-state provenance to the pure ComputePackagePower. Both queries
+// reference the v9 energy columns, so a pre-v9 DB read by this binary throws
+// "no such column"; the single try/catch degrades that to an empty
+// (unavailable) summary rather than failing the whole report -- report.cpp
+// verifies the schema version but does not migrate.
+PackagePowerSummary SummarisePackagePower(Database& db, std::int64_t run_id) {
+    std::map<std::string, int> acquisition_counts;
+    std::vector<PackageEnergyWindow> windows;
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(cpu_pkg_energy_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+        Statement win = db.Prepare(
+            "SELECT MAX(cpu_power_window_ms), MAX(cpu_pkg_energy_delta_uj) "
+            "FROM tick_samples WHERE run_id = ?1 "
+            "AND cpu_power_sample_id IS NOT NULL AND cpu_power_sample_id > 0 "
+            "AND cpu_power_window_ms IS NOT NULL "
+            "AND cpu_pkg_energy_delta_uj IS NOT NULL "
+            "GROUP BY cpu_power_sample_id");
+        win.BindInt(1, run_id);
+        while (win.Step()) {
+            if (win.ColumnIsNull(0) || win.ColumnIsNull(1)) {
+                continue;
+            }
+            PackageEnergyWindow w;
+            w.window_ms = win.ColumnDouble(0);
+            w.delta_uj = win.ColumnDouble(1);
+            windows.push_back(w);
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: package-power query failed: " << ex.what() << '\n';
+        return ComputePackagePower({}, {});
+    }
+    return ComputePackagePower(windows, std::move(acquisition_counts));
+}
+
+// FEAT-0006 (REQ-CPUEFF-01/-03) derived cycle evidence, mirroring
+// SummarisePackagePower: collapses the mirrored per-tick APERF/MPERF rows to
+// one window per cpu_cycles_sample_id (GROUP BY), keeps only windows with
+// non-null deltas (the log-time implausibility guard blanks the rest -> no
+// false zero), and hands the distinct windows plus the acquisition-state
+// provenance to the pure ComputeCpuCycles. Both queries reference the v10
+// cycle columns, so a pre-v10 DB read by this binary throws "no such column";
+// the single try/catch degrades that to an empty (unavailable) summary rather
+// than failing the whole report.
+CpuCyclesSummary SummariseCpuCycles(Database& db, std::int64_t run_id,
+                                    std::optional<double> p0_mhz) {
+    std::map<std::string, int> acquisition_counts;
+    std::vector<CycleEvidenceWindow> windows;
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(cpu_cycles_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+        Statement win = db.Prepare(
+            "SELECT MAX(cpu_cycles_window_ms), MAX(cpu_aperf_delta), "
+            "MAX(cpu_mperf_delta) "
+            "FROM tick_samples WHERE run_id = ?1 "
+            "AND cpu_cycles_sample_id IS NOT NULL AND cpu_cycles_sample_id > 0 "
+            "AND cpu_cycles_window_ms IS NOT NULL "
+            "AND cpu_aperf_delta IS NOT NULL "
+            "AND cpu_mperf_delta IS NOT NULL "
+            "GROUP BY cpu_cycles_sample_id");
+        win.BindInt(1, run_id);
+        while (win.Step()) {
+            if (win.ColumnIsNull(0) || win.ColumnIsNull(1) ||
+                win.ColumnIsNull(2)) {
+                continue;
+            }
+            CycleEvidenceWindow w;
+            w.window_ms = win.ColumnDouble(0);
+            w.d_aperf = win.ColumnDouble(1);
+            w.d_mperf = win.ColumnDouble(2);
+            windows.push_back(w);
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: cpu-cycles query failed: " << ex.what() << '\n';
+        return ComputeCpuCycles({}, {}, p0_mhz);
+    }
+    return ComputeCpuCycles(windows, std::move(acquisition_counts), p0_mhz);
+}
+
 // Loads tick_channel_samples for run_id and aggregates per-channel stats:
 // setpoint/boost maxima, reversal count via the kReversalDeadbandPct gate,
 // primary-source counts, and total_writes range. Channels are created
@@ -487,6 +588,19 @@ bool LoadChannelStats(Database& db, std::int64_t run_id,
             TickChannelSampleColumn::WriteReason);
         const int total_writes_idx = TickChannelSampleSelectIndex(
             TickChannelSampleColumn::TotalWrites);
+        // NULL and empty TEXT both count as "unavailable" so the report never
+        // shows a blank source/reason label.
+        auto count_text_or_unavailable =
+            [&stmt](int idx, std::map<std::string, int>& counts) {
+                std::string value = "unavailable";
+                if (!stmt.ColumnIsNull(idx)) {
+                    value = stmt.ColumnText(idx);
+                    if (value.empty()) {
+                        value = "unavailable";
+                    }
+                }
+                ++counts[value];
+            };
         while (stmt.Step()) {
             const int channel = static_cast<int>(stmt.ColumnInt(1));
             ChannelStats& cs = channels[channel];
@@ -495,30 +609,12 @@ bool LoadChannelStats(Database& db, std::int64_t run_id,
             auto mid = ColumnOptionalDouble(stmt, midband_pressure_idx);
             auto gpu = ColumnOptionalDouble(stmt, gpu_airflow_idx);
             auto soak = ColumnOptionalDouble(stmt, cpu_low_soak_idx);
-            std::string primary_source = "unavailable";
-            if (!stmt.ColumnIsNull(primary_source_idx)) {
-                primary_source = stmt.ColumnText(primary_source_idx);
-                if (primary_source.empty()) {
-                    primary_source = "unavailable";
-                }
-            }
-            ++cs.primary_source_counts[primary_source];
-            std::string response_source = "unavailable";
-            if (!stmt.ColumnIsNull(response_source_idx)) {
-                response_source = stmt.ColumnText(response_source_idx);
-                if (response_source.empty()) {
-                    response_source = "unavailable";
-                }
-            }
-            ++cs.response_source_counts[response_source];
-            std::string write_reason = "unavailable";
-            if (!stmt.ColumnIsNull(write_reason_idx)) {
-                write_reason = stmt.ColumnText(write_reason_idx);
-                if (write_reason.empty()) {
-                    write_reason = "unavailable";
-                }
-            }
-            ++cs.write_reason_counts[write_reason];
+            count_text_or_unavailable(primary_source_idx,
+                                      cs.primary_source_counts);
+            count_text_or_unavailable(response_source_idx,
+                                      cs.response_source_counts);
+            count_text_or_unavailable(write_reason_idx,
+                                      cs.write_reason_counts);
             auto writes = ColumnOptionalInt(stmt, total_writes_idx);
             if (setpoint) {
                 cs.setpoint_pct.push_back(*setpoint);
@@ -733,11 +829,7 @@ ResponseDelay DetectResponseDelay(
     ResponseDelay result;
     std::optional<double> onset_elapsed;
     for (const auto& t : ticks) {
-        const bool hot =
-            (t.cpu_tctl_c && *t.cpu_tctl_c >= options.load_threshold_c) ||
-            (t.gpu_envelope_c &&
-             *t.gpu_envelope_c >= options.load_threshold_c);
-        if (hot) {
+        if (TickIsHot(t, options.load_threshold_c)) {
             result.onset_tick = t.tick;
             onset_elapsed = t.elapsed_s;
             break;

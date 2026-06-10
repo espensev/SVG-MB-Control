@@ -728,8 +728,9 @@ math check as code/config validation only.
   `5` were much lower at `57.23/57.51%` and `59.71/60.09%`. The high-heat
   response therefore over-relied on intake/front lanes relative to the
   remaining exhaust headroom.
-- The release config was adjusted to shift high-CPU authority toward channels
-  `1` and `5` and reduce channel `4` high-heat dominance. The next validation
+- The release config was adjusted to raise `thermal_pressure_max_boost_pct` to
+  `20.0` on channels `1` and `5` and lower it to `14.0` on channel `4`, with
+  steeper `cpu_override_curve` knees on `1`/`5` than on `4`. The next validation
   pass should compare the same CPU-heavy workload against this config and
   inspect CPU p90/max, ch1/ch5 RPM, ch4 setpoint, subjective noise, and any
   sidecar/logging errors.

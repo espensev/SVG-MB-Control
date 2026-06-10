@@ -241,9 +241,13 @@ bool ComputeSha256Hex(const std::uint8_t* data,
 PawnIoStatus LoadPawnIoBinary(HANDLE device_handle,
                               const PawnIoBinarySpec& spec,
                               const std::filesystem::path& bin_path,
-                              std::string* out_warning) {
+                              std::string* out_warning,
+                              bool* out_hash_mismatch) {
     if (out_warning != nullptr) {
         out_warning->clear();
+    }
+    if (out_hash_mismatch != nullptr) {
+        *out_hash_mismatch = false;
     }
     if (device_handle == nullptr || device_handle == INVALID_HANDLE_VALUE ||
         bin_path.empty()) {
@@ -275,6 +279,9 @@ PawnIoStatus LoadPawnIoBinary(HANDLE device_handle,
                                " sha256 could not be computed; loading anyway";
             }
         } else if (actual_hex != ToLowerCopy(spec.expected_sha256_hex)) {
+            if (out_hash_mismatch != nullptr) {
+                *out_hash_mismatch = true;
+            }
             if (mode == PawnIoVerification::strict) {
                 if (out_warning != nullptr) {
                     *out_warning = std::string(spec.display_name) +

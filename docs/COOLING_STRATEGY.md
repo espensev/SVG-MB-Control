@@ -67,12 +67,12 @@ the source of truth for tests and packaging.
 
 | Channel | Header | Model | Diameter | Direction | Role | Release min (%) | Reference RPM | Response intent |
 |---:|---|---|---:|---|---|---:|---:|---|
-| 0 | CHA0 | Noctua NF-A14 industrialPPC-3000 PWM | 140 mm | exhaust | `rear_case_exhaust` | 15.5 | 609 | Lowest exhaust floor; small CPU assist via `cpu_override_curve` |
-| 1 | CHA1 | Noctua NF-A14 industrialPPC PWM (140 mm) | 140 mm | exhaust | `radiator_exhaust` | 22.0 | 457 | Strong CPU response; `cpu_only` blend; not mirrored with channel 5 |
+| 0 | CHA0 | Noctua NF-A14 industrialPPC-3000 PWM | 140 mm | exhaust | `rear_case_exhaust` | 15.5 | 609 | Lowest exhaust floor at low load (positive-pressure bias); `max_cpu_gpu_source_aware` blend whose GPU `curve` ramps under medium+ load to match the radiator exhausts; CPU assist via `cpu_override_curve` |
+| 1 | CHA1 | Noctua NF-A14 industrialPPC PWM (140 mm) | 140 mm | exhaust | `radiator_exhaust` | 22.0 | 457 | CPU response carried by `cpu_override_curve`; `max_cpu_gpu_source_aware` blend with a GPU-airflow assist `curve` (near-floor below ~64 C, ~half-strength by ~75 C, strong by ~82 C, stronger toward ~90 C); not mirrored with channel 5 |
 | 2 | CHA2 | ASUS ProArt PA602 stock 200 x 38 mm PWM | 200 mm | intake | `front_case_intake` | 42.0 | 730 | Dynamic low/medium intake leader; strong GPU airflow; moderate CPU assist |
 | 3 | CHA3 | ASUS ProArt PA602 stock 200 x 38 mm PWM | 200 mm | intake | `front_case_intake` | 38.0 | 700 | Dynamic low/medium intake leader; resonance-spaced 4% below channel 2 |
 | 4 | CHA4 | Noctua NF-A14 industrialPPC-3000 PWM | 140 mm | intake | `front_radiator_intake` | 24.0 | 1081 | Dynamic low/medium intake support; `max_cpu_gpu_source_aware` blend; secondary radiator authority |
-| 5 | CHA5 | Noctua NF-A14 industrialPPC PWM (140 mm) | 140 mm | exhaust | `radiator_exhaust` | 20.0 | 735 | Strong CPU response; `cpu_only` blend; not mirrored with channel 1 |
+| 5 | CHA5 | Noctua NF-A14 industrialPPC PWM (140 mm) | 140 mm | exhaust | `radiator_exhaust` | 20.0 | 735 | CPU response carried by `cpu_override_curve`; `max_cpu_gpu_source_aware` blend with a GPU-airflow assist `curve` (near-floor below ~64 C, ~half-strength by ~75 C, strong by ~82 C, stronger toward ~90 C); not mirrored with channel 1 |
 | 6 | CHA6 | AIO/pump scope | n/a | excluded | `aio_pump_scope` | n/a | n/a | Not controlled by this loop; excluded from case pressure math |
 
 Release minimum and reference RPM are the `release_min_duty_pct` and
@@ -204,17 +204,40 @@ across channels. The policy JSON encodes this as:
 
 ### Radiator Exhaust Pair (Channels 1, 5)
 
-- Both fans drive the AIO radiator and both use `temp_blend = cpu_only`,
-  but their curves must not be a single shape applied twice.
-- Differentiation should appear in at least one of:
-  curve breakpoints, `decay_latch_above_pct`,
-  `cpu_low_soak_*` band, or `thermal_pressure_*` start/full points.
-  The shipped configs differentiate via floor (`22 %` vs `20 %`) and
-  `decay_latch_above_pct` (`38 %` vs `32 %`), which is the minimum
-  acceptable separation. Curve breakpoints today are nearly identical
-  and are candidates for further differentiation in the next tuning
-  pass (e.g., staggering ch5's `82 C` curve point against ch1's so they
-  do not arrive at the same RPM at the same temperature).
+- Both fans drive the AIO radiator. As of 2026-06-09 both use
+  `temp_blend = max_cpu_gpu_source_aware` (guard `75 C`): their primary
+  `curve` is a GPU-airflow assist that is near-floor below ~64 C (the
+  GPU-driven `gpu_airflow` and `midband_pressure` boosts start at 64 C),
+  then climbs gradually to about half strength by ~75 C (ch1 ~63 %,
+  ch5 ~60 %), strong by ~82 C (~70 %), and stronger toward ~90 C
+  (ch1 ~96 %, ch5 ~93 %) — the 86->90 C push carried by the time-gated
+  `thermal_pressure` boost. Their setpoint ramps with GPU temperature
+  alongside the front intakes; their CPU/radiator response is carried
+  through `cpu_override_curve`, which is the elementwise maximum of the
+  prior CPU curve and CPU-emergency override. The GPU curve was retuned
+  2026-06-09 to reach higher sooner and more gradually; see
+  `docs/gpu-response-curve-retune-2026-06-09.md` and
+  `docs/radiator-exhaust-gpu-response-decision-2026-06-09.md`.
+- The `thermal_pressure` boost on these two channels (`start 85.5 C`,
+  `max 20 %`) is radiator CPU-spike headroom by origin, but under the
+  `max_cpu_gpu_source_aware` blend its `observed_temp` input is the GPU
+  envelope while CPU is below the `75 C` guard, so it also fires on GPU heat
+  alone at GPU `>= 85.5 C`. This is accepted as case-pressure headroom
+  (maintainer decision 2026-06-10, review finding F-DES1): exhausting
+  GPU-heated case air is the correct direction; the rear exhaust (channel `0`)
+  curve was retuned 2026-06-09 to reach parity under load, so the unobstructed
+  lane is not under-driven relative to these radiator lanes; and a GPU
+  memory-junction envelope at or above `85.5 C` is uncommon on this build. No
+  case-air temperature sensor is logged, so the choice is judged on these
+  merits, not measured against intake-air temperature. The boost is left
+  unchanged so the CPU response stays identical.
+- Their curves must not be a single shape applied twice. On the GPU assist
+  `curve` the two lanes share temperature knots but channel `1` stays strictly
+  above channel `5` by `>= 2 %` at every knot (no crossing), enforced by
+  `test_radiator_exhaust_gpu_curves_are_staggered_not_mirrored` — the analogue
+  of the intake pair's `>= 4 %` spacing guard. On the CPU path the
+  `cpu_override_curve`s remain near-identical; CPU-side separation rests on the
+  floor (`22 %` vs `20 %`) and `decay_latch_above_pct` (`38 %` vs `32 %`).
 - `test_radiator_exhaust_pair_is_not_mirrored_and_stays_above_rear_exhaust`
   fixes the no-mirror flag and requires both radiator-exhaust floors to
   exceed the rear-exhaust floor.
@@ -224,10 +247,12 @@ across channels. The policy JSON encodes this as:
 - Channel `4` (front radiator Noctua intake) uses
   `temp_blend = max_cpu_gpu_source_aware` with
   `thermal_pressure_max_boost_pct = 14.0`. Channels `1` and `5` use
-  `cpu_only` with `thermal_pressure_max_boost_pct = 20.0`. This is the
-  deliberate "shift CPU authority toward channels 1 and 5, reduce
-  channel 4 high-heat dominance" outcome and must not be re-merged into
-  a single curve shape across the three radiator lanes.
+  `max_cpu_gpu_source_aware` (since 2026-06-09) with
+  `thermal_pressure_max_boost_pct = 20.0`; their CPU authority is carried
+  by `cpu_override_curve`. Channels `1` and `5` therefore hold a higher
+  high-load CPU duty ceiling than channel `4` (the `20.0` versus `14.0`
+  boost plus steeper `cpu_override_curve` knees), and the three radiator
+  lanes must not be re-merged into a single curve shape.
 - Channel `0` carries a different curve role (smallest exhaust assist).
   Its `cpu_override_curve` knee is below those on channels `1` and `5`
   by design.
@@ -267,8 +292,8 @@ Before adjusting a curve point, floor, or boost term, check:
    `thermal_pressure_*`, or `cpu_low_soak_*` field differ between the
    two channels after the change?
 4. **Channel role respected?** Does the change agree with the
-   channel's `response_intent` (e.g., do not give channel `4` strong
-   CPU authority — that role belongs to channels `1` and `5`; do not
+   channel's `response_intent` (e.g., do not give channel `4` the
+   high-load CPU authority carried by channels `1` and `5`; do not
    lower channel `2` or `3` below their idle-leader floor unless the
    intake bias still clears the ratio).
 5. **Floor change has spike-response justification?** If the change

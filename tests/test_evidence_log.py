@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class EvidenceLogTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class EvidenceLogTests(WindowsExeTestCase):
     def test_evidence_log_writes_separate_runtime_artifacts_only(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

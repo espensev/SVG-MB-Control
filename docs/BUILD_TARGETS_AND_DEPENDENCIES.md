@@ -7,7 +7,7 @@ boundaries). `AGENTS.md` remains the canonical agent contract.
 
 `SVG-MB-Control` is a standalone Windows x64 C++ application for motherboard,
 CPU, and GPU telemetry and fan control on the NCT6701D Super-I/O family with
-AMD Family 17h CPUs. It owns process lifetime, config, control policy, runtime
+AMD Family 17h/19h/1Ah CPUs (Zen2 through Zen5). It owns process lifetime, config, control policy, runtime
 state, and recovery, and does not depend on sibling repos at runtime.
 
 All targets below are produced by `.\build-release.ps1` (release publish) or
@@ -53,8 +53,12 @@ CMake target names map to release output names via `OUTPUT_NAME`.
 
 ### Test executables
 
-Built only under `BUILD_TESTING` and registered with CTest. Each links
-`svg_mb_control_core`. They are not part of the release package.
+Built only under `BUILD_TESTING` and registered with CTest. They are not part
+of the release package. Each links `svg_mb_control_core`, except the two
+header-only tests (`svg_mb_control_rapl_energy_tests`,
+`svg_mb_control_cpu_cycles_tests`), which deliberately do not link the core
+library because the `rapl_energy.h` / `cpu_cycles.h` math they cover is
+dependency-free.
 
 - `svg_mb_control_core_tests` — `tests\cpp\core_smoke_tests.cpp`
 - `svg_mb_control_pawnio_binary_tests` — `tests\cpp\pawnio_binary_tests.cpp`
@@ -63,6 +67,13 @@ Built only under `BUILD_TESTING` and registered with CTest. Each links
 - `svg_mb_control_analyze_report_tests` — `tests\cpp\analyze_report_tests.cpp`
 - `svg_mb_control_loop_config_tests` — `tests\cpp\control_loop_config_tests.cpp`
 - `svg_mb_control_csv_rows_tests` — `tests\cpp\csv_rows_tests.cpp`
+- `svg_mb_control_channel_write_tests` — `tests\cpp\channel_write_tests.cpp`
+- `svg_mb_control_amd_decode_tests` — `tests\cpp\amd_decode_tests.cpp`
+- `svg_mb_control_power_anticipation_tests` —
+  `tests\cpp\power_anticipation_tests.cpp` (covers the design-support
+  `src\control\power_anticipation.h`; core-linked for `SmoothStep`)
+- `svg_mb_control_rapl_energy_tests` — `tests\cpp\rapl_energy_tests.cpp`
+- `svg_mb_control_cpu_cycles_tests` — `tests\cpp\cpu_cycles_tests.cpp`
 
 ## Runtime Processes
 

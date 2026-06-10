@@ -275,16 +275,18 @@ void IngestEvents(Database& db,
             db, events, windows_for_attribution);
         summary.events_ingested += n;
 
+        Statement count = db.Prepare(
+            "SELECT COUNT(*) FROM events WHERE run_id = ?1");
+        Statement update = db.Prepare(
+            "UPDATE runs SET event_count_ingested = ?1 WHERE id = ?2");
         for (const auto& w : windows_for_attribution) {
-            Statement count = db.Prepare(
-                "SELECT COUNT(*) FROM events WHERE run_id = ?1");
             count.BindInt(1, w.run_id);
             count.Step();
-            Statement update = db.Prepare(
-                "UPDATE runs SET event_count_ingested = ?1 WHERE id = ?2");
             update.BindInt(1, count.ColumnInt(0));
             update.BindInt(2, w.run_id);
             update.Step();
+            count.Reset();
+            update.Reset();
         }
         txn.Commit();
     } catch (const std::exception& error) {

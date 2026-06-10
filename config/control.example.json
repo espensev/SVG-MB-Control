@@ -95,20 +95,36 @@
             "duty_pct": 15.5
           },
           {
-            "temp_c": 72,
+            "temp_c": 68,
             "duty_pct": 22
           },
           {
-            "temp_c": 82,
-            "duty_pct": 34
+            "temp_c": 72,
+            "duty_pct": 36
+          },
+          {
+            "temp_c": 76,
+            "duty_pct": 48
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 58
+          },
+          {
+            "temp_c": 84,
+            "duty_pct": 66
+          },
+          {
+            "temp_c": 88,
+            "duty_pct": 72
           },
           {
             "temp_c": 92,
-            "duty_pct": 50
+            "duty_pct": 78
           },
           {
             "temp_c": 98,
-            "duty_pct": 62
+            "duty_pct": 86
           }
         ]
       },
@@ -174,32 +190,36 @@
         ],
         "curve": [
           {
-            "temp_c": 45,
-            "duty_pct": 28
+            "temp_c": 35,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 50,
+            "duty_pct": 27
           },
           {
             "temp_c": 62,
-            "duty_pct": 28
+            "duty_pct": 31
           },
           {
-            "temp_c": 70,
-            "duty_pct": 34
+            "temp_c": 72,
+            "duty_pct": 38
           },
           {
             "temp_c": 78,
-            "duty_pct": 46
+            "duty_pct": 50
           },
           {
-            "temp_c": 86,
-            "duty_pct": 62
+            "temp_c": 84,
+            "duty_pct": 60
           },
           {
-            "temp_c": 94,
-            "duty_pct": 82
+            "temp_c": 90,
+            "duty_pct": 70
           },
           {
-            "temp_c": 98,
-            "duty_pct": 94
+            "temp_c": 96,
+            "duty_pct": 78
           }
         ]
       },
@@ -375,7 +395,8 @@
       },
       {
         "channel": 5,
-        "temp_blend": "cpu_only",
+        "temp_blend": "max_cpu_gpu_source_aware",
+        "source_aware_cpu_hot_guard_c": 75.0,
         "min_duty_pct": 18.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 60.0,
@@ -412,16 +433,28 @@
         "low_band_max_boost_pct": 1.2,
         "cpu_override_curve": [
           {
-            "temp_c": 75,
+            "temp_c": 50,
             "duty_pct": 18
           },
           {
+            "temp_c": 64,
+            "duty_pct": 18
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 82,
+            "duty_pct": 38
+          },
+          {
             "temp_c": 84,
-            "duty_pct": 28
+            "duty_pct": 43
           },
           {
             "temp_c": 88,
-            "duty_pct": 46
+            "duty_pct": 49
           },
           {
             "temp_c": 90,
@@ -439,33 +472,54 @@
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 18
+            "duty_pct": 20
+          },
+          {
+            "temp_c": 60,
+            "duty_pct": 21
           },
           {
             "temp_c": 64,
-            "duty_pct": 18
-          },
-          {
-            "temp_c": 72,
             "duty_pct": 24
           },
           {
-            "temp_c": 82,
-            "duty_pct": 38
+            "temp_c": 68,
+            "duty_pct": 31
           },
           {
-            "temp_c": 92,
+            "temp_c": 72,
+            "duty_pct": 39
+          },
+          {
+            "temp_c": 76,
+            "duty_pct": 46
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 52
+          },
+          {
+            "temp_c": 84,
             "duty_pct": 56
           },
           {
+            "temp_c": 88,
+            "duty_pct": 58
+          },
+          {
+            "temp_c": 94,
+            "duty_pct": 60
+          },
+          {
             "temp_c": 98,
-            "duty_pct": 70
+            "duty_pct": 62
           }
         ]
       },
       {
         "channel": 1,
-        "temp_blend": "cpu_only",
+        "temp_blend": "max_cpu_gpu_source_aware",
+        "source_aware_cpu_hot_guard_c": 75.0,
         "min_duty_pct": 20.0,
         "curve_shape": "smootherstep",
         "rise_rate_pct_per_min": 60.0,
@@ -502,16 +556,28 @@
         "low_band_max_boost_pct": 1.8,
         "cpu_override_curve": [
           {
-            "temp_c": 75,
+            "temp_c": 50,
             "duty_pct": 20
           },
           {
+            "temp_c": 64,
+            "duty_pct": 20
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 24
+          },
+          {
+            "temp_c": 82,
+            "duty_pct": 38
+          },
+          {
             "temp_c": 84,
-            "duty_pct": 28
+            "duty_pct": 42
           },
           {
             "temp_c": 88,
-            "duty_pct": 46
+            "duty_pct": 47
           },
           {
             "temp_c": 90,
@@ -529,27 +595,47 @@
         "curve": [
           {
             "temp_c": 50,
-            "duty_pct": 20
+            "duty_pct": 22
           },
           {
-            "temp_c": 64,
-            "duty_pct": 20
-          },
-          {
-            "temp_c": 72,
+            "temp_c": 60,
             "duty_pct": 24
           },
           {
-            "temp_c": 82,
-            "duty_pct": 38
+            "temp_c": 64,
+            "duty_pct": 27
           },
           {
-            "temp_c": 92,
-            "duty_pct": 52
+            "temp_c": 68,
+            "duty_pct": 34
+          },
+          {
+            "temp_c": 72,
+            "duty_pct": 42
+          },
+          {
+            "temp_c": 76,
+            "duty_pct": 49
+          },
+          {
+            "temp_c": 80,
+            "duty_pct": 55
+          },
+          {
+            "temp_c": 84,
+            "duty_pct": 59
+          },
+          {
+            "temp_c": 88,
+            "duty_pct": 61
+          },
+          {
+            "temp_c": 94,
+            "duty_pct": 63
           },
           {
             "temp_c": 98,
-            "duty_pct": 64
+            "duty_pct": 65
           }
         ]
       }

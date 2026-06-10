@@ -34,13 +34,7 @@ def _runtime_archive_files_released(runtime_home: Path) -> bool:
     return True
 
 
-class RuntimeSingletonTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class RuntimeSingletonTests(WindowsExeTestCase):
     def test_second_worker_against_same_runtime_home_refuses_to_start(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

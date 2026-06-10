@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class ReadLoopTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class ReadLoopTests(WindowsExeTestCase):
     def test_read_loop_publishes_control_owned_current_state_and_mirror(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

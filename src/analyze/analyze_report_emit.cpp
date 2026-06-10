@@ -375,6 +375,33 @@ void EmitJsonReport(const ReportOptions& options,
          stats_json(tr.process_working_set_bytes)},
         {"process_private_bytes", stats_json(tr.process_private_bytes)},
     };
+    const auto& pp = data.package_power;
+    doc["package_power"] = {
+        {"window_count", pp.window_count},
+        {"avg_watts", OptToJson(pp.avg_watts)},
+        {"total_energy_j", pp.total_energy_j},
+        {"total_window_s", pp.total_window_s},
+        {"watts",
+         {{"p50", OptToJson(pp.watts_p50)},
+          {"p90", OptToJson(pp.watts_p90)},
+          {"max", OptToJson(pp.watts_max)}}},
+        {"acquisition_counts", pp.acquisition_counts},
+    };
+    const auto& cc = data.cpu_cycles;
+    doc["cpu_cycles"] = {
+        {"window_count", cc.window_count},
+        {"aperf_mperf_ratio", OptToJson(cc.aperf_mperf_ratio)},
+        {"effective_mhz", OptToJson(cc.effective_mhz)},
+        {"p0_mhz", OptToJson(cc.p0_mhz)},
+        {"total_aperf_cycles", cc.total_aperf_cycles},
+        {"total_mperf_cycles", cc.total_mperf_cycles},
+        {"total_window_s", cc.total_window_s},
+        {"ratio",
+         {{"p50", OptToJson(cc.ratio_p50)},
+          {"p90", OptToJson(cc.ratio_p90)},
+          {"max", OptToJson(cc.ratio_max)}}},
+        {"acquisition_counts", cc.acquisition_counts},
+    };
     doc["robustness"] = {
         {"authority_reasserted", data.authority_reasserted},
         {"write_failures", data.write_failures},
@@ -504,6 +531,32 @@ void EmitTextReport(const ReportOptions& options,
     stats_text(os, "process_cpu_pct", tr.process_cpu_pct);
     stats_text(os, "process_working_set_bytes", tr.process_working_set_bytes);
     stats_text(os, "process_private_bytes", tr.process_private_bytes);
+    const auto& pp = data.package_power;
+    os << "package_power: windows=" << pp.window_count
+       << " avg_watts=" << OptToText(pp.avg_watts)
+       << " total_energy_j="
+       << OptToText(std::optional<double>(pp.total_energy_j))
+       << " total_window_s="
+       << OptToText(std::optional<double>(pp.total_window_s))
+       << " watts_p50=" << OptToText(pp.watts_p50)
+       << " watts_p90=" << OptToText(pp.watts_p90)
+       << " watts_max=" << OptToText(pp.watts_max)
+       << " acquisition=" << CountsToText(pp.acquisition_counts) << '\n';
+    const auto& cc = data.cpu_cycles;
+    os << "cpu_cycles: windows=" << cc.window_count
+       << " aperf_mperf_ratio=" << OptToText(cc.aperf_mperf_ratio)
+       << " effective_mhz=" << OptToText(cc.effective_mhz)
+       << " p0_mhz=" << OptToText(cc.p0_mhz)
+       << " total_aperf_cycles="
+       << OptToText(std::optional<double>(cc.total_aperf_cycles))
+       << " total_mperf_cycles="
+       << OptToText(std::optional<double>(cc.total_mperf_cycles))
+       << " total_window_s="
+       << OptToText(std::optional<double>(cc.total_window_s))
+       << " ratio_p50=" << OptToText(cc.ratio_p50)
+       << " ratio_p90=" << OptToText(cc.ratio_p90)
+       << " ratio_max=" << OptToText(cc.ratio_max)
+       << " acquisition=" << CountsToText(cc.acquisition_counts) << '\n';
     os << "events: severity_counts="
        << CountsToText(data.event_severity_counts)
        << " error_code_counts="

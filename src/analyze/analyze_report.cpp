@@ -131,6 +131,8 @@ int RunAnalyzeReport(const ReportOptions& options) {
     data.response_delay_s = response.response_delay_s;
     data.timing_resources = SummariseTimingResources(data.ticks);
     data.gpu_response = SummariseGpuResponse(db, run_id, data.ticks, options);
+    data.package_power = SummarisePackagePower(db, run_id);
+    data.cpu_cycles = SummariseCpuCycles(db, run_id, options.p0_mhz);
     data.authority_reasserted = robustness.authority_reasserted;
     data.write_failures = robustness.write_failures;
     data.restore_failures = robustness.restore_failures;

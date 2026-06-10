@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class ServiceProbeTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class ServiceProbeTests(WindowsExeTestCase):
     def test_service_probe_json_passes_under_simulation(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

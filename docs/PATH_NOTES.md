@@ -23,8 +23,171 @@ checkable.
 
 ---
 
+## 2026-06-10
+
+- **Done** — applied all four finding groups of
+  `docs/testing-and-hotpath-simplification-review-2026-06-10.md`, one commit
+  per group: TS-1/TS-2 (`tests/cpp/test_helpers.h` shared
+  `g_failures`/`ExpectTrue`/`ExpectFalse`/`ExpectNear`/`ExpectEqual`/
+  `UniqueTempSuffix`; 11 test files migrated; `csv_rows_tests` keeps its
+  field-matcher variants by design), TS-3 (`WindowsExeTestCase` base in
+  `tests/helpers.py`; 11 files / 12 classes — incl. `test_analyzer.py`, which
+  the original grep missed via its variant skip message), HP-1 (3-arg
+  `BuildControlLoopCsvRow` overload deleted; sole test caller builds the
+  index explicitly), HP-2 (status-JSON boost keys precomputed once,
+  byte-identical). Deliberate deviation: shared `ExpectNear` now FAILS
+  NaN-vs-number (historical copies silently passed it); suite-verified
+  unchanged outcomes. Executed as a 24-agent workflow over disjoint files +
+  4 adversarial diff lenses (0 blockers); gated by `Test-LocalCI` (CTest
+  12/12, Python lane 133 tests, counts unchanged). Review doc now carries
+  per-finding Applied notes + an execution record.
+- **Added** — power-anticipation design-support increment (no control wiring;
+  the live path stays gated per the feed-forward plan):
+  `src/control/power_anticipation.h` (pure watts-derivation + hold/stale
+  input + decay-on-unavailable integrator math),
+  `tests/cpp/power_anticipation_tests.cpp` (CTest 12/12 now), and the Gate 2
+  measurement tool `scripts/analyze_power_lead.py` (+
+  `tests/test_power_lead.py`; lag-scanned power→Tctl and busy→Tctl lead,
+  idle-floor watts, window coverage — busy legs usable on existing disabled
+  CSVs). `BUILD_TARGETS_AND_DEPENDENCIES.md` §Test executables and the plan
+  doc §4/§5/§7 updated. Validated: `Test-LocalCI` exit 0 (CTest 12/12,
+  hermetic Python lane 133 tests).
+- **Added** — `docs/testing-and-hotpath-simplification-review-2026-06-10.md`:
+  two-sweep simplification review (test/script stack + runtime hot paths),
+  every kept finding re-verified at the cited lines. Net: no critical
+  findings; actionable cleanups are TS-1/TS-2 (shared C++ test helper header,
+  ~120 LOC), TS-3 (shared Windows-gate test base, ~40 LOC), HP-1 (delete the
+  test-only 3-arg `BuildControlLoopCsvRow` overload); one sweep claim
+  rejected (Build-Release double hash is deliberate copy verification).
+- **Added / Idea** — `docs/cpu-power-feedforward-plan-2026-06-10.md`: planning
+  scaffold for a CPU package-power anticipation boost (a fifth
+  `kBoostStageSpecs` stage keyed on derived watts), explicitly NOT authorized
+  work — the v1 energy decision bans control use, so the path is gated:
+  quarantine exit (Gate 0) → default-on decision (Gate 1) → lead-time
+  characterization with an explicit no-go and a `system_cpu_busy_pct`
+  alternative comparison (Gate 2) → new FEAT intake (Gate 3), then
+  shadow-mode → replay → capped live phases.
+- **Fixed** — stale deployment claims about the 2026-06-09 GPU retune:
+  `gpu-response-curve-retune-2026-06-09.md` §5 said the retuned config was
+  "not built, published, or restarted on the live worker", and
+  `response-evaluation-tuning-plan.md` framed the retune as "pending ... not
+  yet deployed" (including in yesterday's drift-fix pass). Both predate the
+  2026-06-09 live publish. Verified read-only: `release\control.json` is
+  byte-identical to `config\control.release.json` (sha256 `b51e542a...`), and
+  the live worker's CSV session header records the same `config_sha256` with
+  exe `git_hash=c4b6986` — the config was published before the retune commit
+  `767a901` existed, a provenance-stamp mismatch only.
+- **Added** — `docs/cpu-energy-quarantine-exit-capture-runbook-2026-06-10.md`:
+  operational runbook for one enabled-path CPU-energy evidence session
+  (enable via env var + scheduled-task restart, capture an
+  idle/load/cooldown profile, revert to default-off, analyze, score against
+  the quarantine-exit Evaluation). Includes the criterion-6 loop-slip
+  baseline from the 2026-06-09/10 disabled session (p95 `1.56 ms`,
+  ~6.5 overrun rows/h) and a RAPL-independence classification of the
+  available external power references for criterion 3. Prepared, not yet
+  executed; the criteria stay normative in
+  `docs/cpu-work-energy-acquisition-decision-2026-06-07.md`.
+- **Done** — resolved GPU-heat review finding F-DES1 (maintainer, option C):
+  the channels `1`/`5` `thermal_pressure` boost firing on GPU heat at
+  `>= 85.5 C` is accepted and documented as case-pressure headroom rather than
+  capped. Rationale and limits are recorded in `docs/COOLING_STRATEGY.md`
+  (Radiator Exhaust Pair); the open question is marked resolved in
+  `docs/gpu-heat-response-chain-review-2026-06-09.md` and
+  `docs/gpu-response-curve-retune-2026-06-09.md`.
+  `config/control.release.json` is unchanged, so the CPU response path is
+  untouched.
+
+## 2026-06-09
+
+- **Done** — docs cleanup pass: archived three dead point-in-time review
+  snapshots under `docs/archive/` (`build-optimization-results`,
+  `code-quality-pass-2026-05-19`,
+  `evaluation-and-optimization-recommendations`) and consolidated the five
+  overlapping Bench-vs-Control logging discovery notes into
+  `docs/bench-logging-history.md`. The originals were moved to
+  `docs/archive/` for audit history; `AGENTS.md`, `README.md`, `CODE_MAP.md`,
+  and `next_steps.md` now point at the consolidated/current shape.
+- **Fixed** — docs drift from the 2026-06-09 GPU-response work:
+  `source-aware-blend-decision-2026-05-26.md` now marks the channels `1`/`5`
+  `cpu_only` statements as true for the 2026-05-26 deployment but superseded by
+  the radiator-exhaust GPU response decision; `response-evaluation-tuning-plan.md`
+  now separates the deployed `release\control.json` baseline from the pending
+  repo-config GPU retune.
+- **Done** — collapsed the nine duplicated core-linked CTest registration
+  blocks in `CMakeLists.txt` into a `svg_mb_control_add_core_test(name source)`
+  helper plus nine one-line calls; the two header-only tests (`rapl_energy` /
+  `cpu_cycles`) stay hand-rolled because they must not link
+  `svg_mb_control_core`. Behavior-preserving: the same eleven CTest targets,
+  names, and registration order, verified by `Test-LocalCI` (CTest 11/11,
+  Python hermetic lane green). Adding a future core-linked test is now one
+  line. Logged as `docs/STRUCTURE_AND_STABILITY.md` §Migration Order item 16.
+- **Fixed** — `docs/BUILD_TARGETS_AND_DEPENDENCIES.md` §Test executables said
+  "Each links `svg_mb_control_core`", which was untrue for the two header-only
+  tests added the same day; restated to name the two exceptions and the reason
+  (`rapl_energy.h` / `cpu_cycles.h` math is dependency-free).
+
 ## 2026-06-06
 
+- **Changed** — revised decision **D6** (profile hot-swap live authorization) to the
+  **B1+B2** posture (maintainer, 2026-06-06): `pid.allow_live: true` is rejected at
+  config load unless the channel has characterization evidence (a shadow-log
+  comparison against the curve baseline is accepted) *and* a non-NaN slew cap. This
+  reverses, by intent, the align-`REQ-PROFILE-07`-to-D6 direction recorded below —
+  the review found `MEASUREMENT_GATE.md` reads as an evidence (not consent) gate and
+  the slew-cap floor is NaN-by-default (`control_loop.h:29-31`;
+  `channel_evaluator.cpp:55-57`). Propagated source-of-truth-first: D6 →
+  `REQ-PROFILE-07` (FEAT-0003 §4/§5/§6/§7/§9/§10/§11/§12; verify now `T,R,M`) →
+  `docs/TRACEABILITY.md` → modular plan §6/§7-8; the brief
+  `docs/profile-hot-swap-allow-live-decision-2026-06-06.md` is marked **Resolved
+  (B1+B2)**. Refreshed the discussion doc's measurement-gate section (its
+  evidence-vs-consent argument was *adopted*; added a resolution note and fixed
+  drifted decision-doc citations). Citation sweep + line→section de-drift: converted
+  doc-to-doc cites in the plan and brief to section refs, and fixed the cites my D6
+  expansion drifted (decision §D7 / §Consequences / §Selected directions; FEAT-0003
+  §6). `tests/test_feature_specs.py` green (5/5). The discussion doc stays unstaged
+  (its other in-flight de-drift edits are the user's).
+- **Fixed** — reconciled three cross-doc inconsistencies in the `FEAT-0003`
+  profile-hot-swap design-capture (surfaced by review). **High:**
+  `REQ-PROFILE-07` carried the pre-decision "characterization evidence before any
+  live PID write" lean, contradicting decision `D6`, which authorizes live PID via
+  an explicit per-channel `pid.allow_live` opt-in *without* prior evidence. Aligned
+  the requirement to `D6` (a requirement derives from its decision —
+  `docs/features/README.md` §3 gate 4) across FEAT-0003 §4/§5/§6/§10/§12 and
+  `docs/TRACEABILITY.md`, and named the decision record the source of truth for
+  this path. That resolves the *requirement-vs-decision divergence* (the
+  requirement no longer contradicts `D6`); whether `D6`'s `allow_live` actually
+  *satisfies* `docs/MEASUREMENT_GATE.md` is a separate, open maintainer call — the
+  discussion doc's measurement-gate section argues the gate is evidence-not-consent
+  and that the slew-cap floor is NaN-by-default (`control_loop.h:29-31`;
+  `channel_evaluator.cpp:55-57`). Tightening to evidence-first is a change to `D6`,
+  not the requirement. **Medium:** FEAT-0003 §7 proposed a `runtime/requests/profile.json`
+  subdir while claiming to model the breaker-reset file; corrected to the flat-root
+  `profile.request.json`, the only implemented convention
+  (`circuit_breaker_reset.request.json` / `stop.request.json`,
+  `src/runtime/runtime_lifecycle.cpp:17,22`). **Low:** FEAT-0003 §9 decision-row
+  status said "Proposed — awaits maintainer acceptance"; updated to the selected
+  `D2`/`D3a`/`D6` directions, consistent with §11/§13 and the decision doc's
+  "Selected directions." Reframed
+  `docs/modular-profile-hotswap-plan-2026-06-06.md` §6/§7-4/§7-8: the
+  requirement-vs-decision divergence is resolved, the substantive D6-vs-gate
+  question is flagged open, and FEAT-0001's matching `runtime/requests/` subdir is
+  corrected the same way (flat-root `write_policy.request.json`). Corrected the
+  drifted FEAT-0003 line citation in the plan (`:192`→`:198`)
+  and converted the discussion doc's drifted citation to a section ref
+  (`:197-202`→`§7`). `tests/test_feature_specs.py` green (5/5). D6's *decision* is
+  unchanged (only a dated reconsideration pointer appended to the decision doc);
+  the discussion doc's other in-flight edits are the user's, left untouched.
+- **Added** — `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`: a
+  reconsideration brief for D6's `pid.allow_live` posture (Status: Open), drafting
+  **accept-as-is vs tighten** after the discussion doc's measurement-gate section
+  argued `MEASUREMENT_GATE.md` reads as an evidence gate, not a consent gate.
+  Recommends a non-NaN slew-cap parse precondition (B2) unconditionally +
+  shadow-default; B1 (evidence-before-live, which re-tightens REQ-PROFILE-07) is the
+  maintainer's read of the gate. Linked from D6 (a "Reconsideration (2026-06-06)"
+  note) and plan §7-8. **Checked:** the slew cap is NaN-by-default in code
+  (`control_loop.h:29-31`; `channel_evaluator.cpp:55-57` returns unmodified on NaN),
+  but shipped `config/control.release.json` sets it for all live channels 0–5 — a
+  latent precondition gap, not an active live defect.
 - **Changed** — acted on a multi-agent review of the feature-governance batch
   (verdict: the system is sound and CI-enforced; the excess is concentrated in
   speculative specs, not the machinery). Demoted `FEAT-0005`/`FEAT-0006` from
@@ -37,6 +200,16 @@ checkable.
   `docs/features/README.md` §2 names the "Draft with all gates checked, held as
   design-capture" state (`FEAT-0003`). `tests/test_feature_specs.py` stays green
   (5/5) after the demotion.
+- **Added** — `docs/modular-profile-hotswap-discussion-2026-06-06.md`: a
+  non-normative design-commentary companion to the plan doc — a grounded,
+  two-sided discussion of each element (premise, skeptic's case, seam, state
+  decouple, conditioning split, PID-as-example, measurement gate, Proposals A/B,
+  reuse machinery, dependency order, the 8 questions), each closing with the one
+  fact that would flip its judgment. Net position: the seam is worth *designing*
+  and step-1 conditioning-extraction has standalone merit, but not worth
+  *building* under FEAT-0003's current status. Authorizes nothing. Adversarially
+  reviewed (5 agents) for doctrine + ref accuracy; cross-doc citations to the
+  plan are by section (not line) to resist drift.
 - **Added** — `docs/modular-profile-hotswap-plan-2026-06-06.md`: deepens
   `FEAT-0003` design-capture on the "change the entire per-channel control
   function at runtime" idea — the *modular* angle the existing D1–D7 decisions
@@ -239,3 +412,10 @@ before building.
 - **VBS/HVCI empirical check** — verify hardware-access behavior with Memory
   Integrity on via `--diagnose-amd` / `--diagnose-gpu` (labeled recommendation
   from `docs/BUILD_TARGETS_AND_DEPENDENCIES.md`).
+- **RAM temperature telemetry** — surface per-DIMM temps (`Agent0/1 DIMM0/1`
+  Nuvoton sources) into the read/control snapshot, CSV, status, and analyze.
+  Read path already exists: `evidence-log` reads all 23 SVG-MB-SIO temperature
+  sources (`read_sio_temperatures`); the gap is promoting the DIMM-labeled ones
+  into the normal telemetry surfaces. Captured in `FEAT-0007` (parked; candidate
+  for promotion only after the open gates clear); open item is confirming the
+  DIMM sources read `valid` on snd-desk from existing `evidence-log` output.

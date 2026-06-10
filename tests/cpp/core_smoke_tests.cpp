@@ -1,4 +1,7 @@
 #include "control_policy.h"
+
+#include "test_helpers.h"
+
 #include "control_scheduler.h"
 #include "csv_util.h"
 #include "runtime_snapshot.h"
@@ -10,36 +13,6 @@
 #include <vector>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectTrue(bool condition, const char* message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
-
-void ExpectNear(double actual,
-                double expected,
-                double tolerance,
-                const char* message) {
-    if (std::fabs(actual - expected) > tolerance) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected
-                  << " got " << actual << '\n';
-    }
-}
-
-void ExpectEqual(const std::string& actual,
-                 const std::string& expected,
-                 const char* message) {
-    if (actual != expected) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected [" << expected
-                  << "] got [" << actual << "]\n";
-    }
-}
 
 void TestLookupCurve() {
     const std::vector<svg_mb_control::CurvePoint> curve{

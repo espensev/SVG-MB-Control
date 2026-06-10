@@ -240,94 +240,119 @@ if(WIN32)
     configure_svg_mb_control_target(svg_mb_control_task_runner)
 endif()
 
+# Throwaway one-shot read-only probe confirming the shipped AMDFamily17 bin
+# services the AMD read-only APERF/MPERF aliases (0xC00000E7 / 0xC00000E8) -- the
+# corrected FEAT-0006 cycle-counter validation (the 2026-06-07 gate probe read
+# the wrong indices). OFF by default: not built by Test-LocalCI / Build-Release /
+# CTest, never shipped in release\, not part of the control loop. Build with
+#   cmake -DSVG_MB_CONTROL_BUILD_CYCLE_PROBE=ON ... && cmake --build ... \
+#         --target cpu_cycle_counter_probe
+# Reuses only the bin-load API (pawnio_binary) + env_util; does not link
+# svg_mb_control_core and does not touch src/hardware.
+option(SVG_MB_CONTROL_BUILD_CYCLE_PROBE
+    "Build the throwaway read-only CPU cycle-counter validation probe (FEAT-0006)" OFF)
+if(SVG_MB_CONTROL_BUILD_CYCLE_PROBE AND WIN32)
+    add_executable(cpu_cycle_counter_probe
+        tools/cpu_cycle_counter_probe.cpp
+        src/hardware/pawnio_binary.cpp
+        src/platform/env_util.cpp
+    )
+    target_include_directories(cpu_cycle_counter_probe PRIVATE
+        ${SVG_MB_CONTROL_INCLUDE_DIRS})
+    target_compile_features(cpu_cycle_counter_probe PRIVATE cxx_std_20)
+    target_compile_definitions(cpu_cycle_counter_probe PRIVATE
+        ${SVG_MB_CONTROL_COMMON_DEFINITIONS})
+    if(MSVC)
+        target_compile_options(cpu_cycle_counter_probe PRIVATE /W4 /permissive-)
+    endif()
+    target_link_libraries(cpu_cycle_counter_probe PRIVATE bcrypt)
+    set_target_properties(cpu_cycle_counter_probe PROPERTIES
+        OUTPUT_NAME "cpu-cycle-counter-probe")
+endif()
+
+# Throwaway synthetic CPU load generator for the FEAT-0006 CPU-energy
+# quarantine-exit capture: drives a controlled all-core load so a session has a
+# clean idle->load->cooldown step. OFF by default: not built by Test-LocalCI /
+# Build-Release / CTest, never shipped in release\, not part of the control
+# loop. Self-contained (no svg_mb_control_core link, no src/hardware, no MSR).
+# Build with
+#   cmake -DSVG_MB_CONTROL_BUILD_SYNTH_LOAD=ON ... && cmake --build ... \
+#         --target cpu_synth_load
+option(SVG_MB_CONTROL_BUILD_SYNTH_LOAD
+    "Build the throwaway synthetic CPU load generator (FEAT-0006 capture)" OFF)
+if(SVG_MB_CONTROL_BUILD_SYNTH_LOAD AND WIN32)
+    add_executable(cpu_synth_load tools/cpu_synth_load.cpp)
+    target_compile_features(cpu_synth_load PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(cpu_synth_load PRIVATE /W4 /permissive- /arch:AVX2)
+    endif()
+    set_target_properties(cpu_synth_load PROPERTIES
+        OUTPUT_NAME "cpu-synth-load")
+endif()
+
 if(BUILD_TESTING)
-    add_executable(svg_mb_control_core_tests
-        tests/cpp/core_smoke_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_core_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_core_tests)
-    add_test(NAME svg_mb_control_core_tests
-             COMMAND svg_mb_control_core_tests)
+    # Every core-linked C++ test shares identical wiring: one executable built
+    # from a tests/cpp/*.cpp, linked against svg_mb_control_core, configured with
+    # the shared include/warning/PCH/define settings, and registered with CTest.
+    # This helper keeps each registration to a single line and removes the
+    # copy-paste-rename footgun (cloning a block but missing one of the name
+    # substitutions). Header-only tests that must not link the core library
+    # (rapl_energy / cpu_cycles below) stay hand-rolled.
+    function(svg_mb_control_add_core_test name source)
+        add_executable(${name} ${source})
+        target_link_libraries(${name} PRIVATE svg_mb_control_core)
+        configure_svg_mb_control_target(${name})
+        add_test(NAME ${name} COMMAND ${name})
+    endfunction()
 
-    add_executable(svg_mb_control_pawnio_binary_tests
-        tests/cpp/pawnio_binary_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_pawnio_binary_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_pawnio_binary_tests)
-    add_test(NAME svg_mb_control_pawnio_binary_tests
-             COMMAND svg_mb_control_pawnio_binary_tests)
+    svg_mb_control_add_core_test(svg_mb_control_core_tests
+        tests/cpp/core_smoke_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_pawnio_binary_tests
+        tests/cpp/pawnio_binary_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_boost_stage_tests
+        tests/cpp/boost_stage_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_math_tests
+        tests/cpp/control_math_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_analyze_report_tests
+        tests/cpp/analyze_report_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_loop_config_tests
+        tests/cpp/control_loop_config_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_csv_rows_tests
+        tests/cpp/csv_rows_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_channel_write_tests
+        tests/cpp/channel_write_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests
+        tests/cpp/amd_decode_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_power_anticipation_tests
+        tests/cpp/power_anticipation_tests.cpp)
 
-    add_executable(svg_mb_control_boost_stage_tests
-        tests/cpp/boost_stage_tests.cpp
+    # rapl_energy.h is header-only and dependency-free, so this test does not
+    # link svg_mb_control_core (keeps it fast and isolated like the math it covers).
+    add_executable(svg_mb_control_rapl_energy_tests
+        tests/cpp/rapl_energy_tests.cpp
     )
-    target_link_libraries(svg_mb_control_boost_stage_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_boost_stage_tests)
-    add_test(NAME svg_mb_control_boost_stage_tests
-             COMMAND svg_mb_control_boost_stage_tests)
+    target_include_directories(svg_mb_control_rapl_energy_tests PRIVATE
+        src/hardware)
+    target_compile_features(svg_mb_control_rapl_energy_tests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(svg_mb_control_rapl_energy_tests PRIVATE
+            /W4 /permissive-)
+    endif()
+    add_test(NAME svg_mb_control_rapl_energy_tests
+             COMMAND svg_mb_control_rapl_energy_tests)
 
-    add_executable(svg_mb_control_math_tests
-        tests/cpp/control_math_tests.cpp
+    # cpu_cycles.h is header-only and dependency-free, so this test does not link
+    # svg_mb_control_core (keeps it fast and isolated like the math it covers).
+    add_executable(svg_mb_control_cpu_cycles_tests
+        tests/cpp/cpu_cycles_tests.cpp
     )
-    target_link_libraries(svg_mb_control_math_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_math_tests)
-    add_test(NAME svg_mb_control_math_tests
-             COMMAND svg_mb_control_math_tests)
-
-    add_executable(svg_mb_control_analyze_report_tests
-        tests/cpp/analyze_report_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_analyze_report_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_analyze_report_tests)
-    add_test(NAME svg_mb_control_analyze_report_tests
-             COMMAND svg_mb_control_analyze_report_tests)
-
-    add_executable(svg_mb_control_loop_config_tests
-        tests/cpp/control_loop_config_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_loop_config_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_loop_config_tests)
-    add_test(NAME svg_mb_control_loop_config_tests
-             COMMAND svg_mb_control_loop_config_tests)
-
-    add_executable(svg_mb_control_csv_rows_tests
-        tests/cpp/csv_rows_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_csv_rows_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_csv_rows_tests)
-    add_test(NAME svg_mb_control_csv_rows_tests
-             COMMAND svg_mb_control_csv_rows_tests)
-
-    add_executable(svg_mb_control_channel_write_tests
-        tests/cpp/channel_write_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_channel_write_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_channel_write_tests)
-    add_test(NAME svg_mb_control_channel_write_tests
-             COMMAND svg_mb_control_channel_write_tests)
-
-    add_executable(svg_mb_control_amd_decode_tests
-        tests/cpp/amd_decode_tests.cpp
-    )
-    target_link_libraries(svg_mb_control_amd_decode_tests PRIVATE
-        svg_mb_control_core
-    )
-    configure_svg_mb_control_target(svg_mb_control_amd_decode_tests)
-    add_test(NAME svg_mb_control_amd_decode_tests
-             COMMAND svg_mb_control_amd_decode_tests)
+    target_include_directories(svg_mb_control_cpu_cycles_tests PRIVATE
+        src/hardware)
+    target_compile_features(svg_mb_control_cpu_cycles_tests PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(svg_mb_control_cpu_cycles_tests PRIVATE
+            /W4 /permissive-)
+    endif()
+    add_test(NAME svg_mb_control_cpu_cycles_tests
+             COMMAND svg_mb_control_cpu_cycles_tests)
 endif()

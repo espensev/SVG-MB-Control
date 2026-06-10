@@ -1,6 +1,14 @@
 # Source-Aware Blend Decision - 2026-05-26
 
-Status: current implementation decision.
+Status: current implementation decision, partially superseded for channels `1`
+and `5` by
+`docs\radiator-exhaust-gpu-response-decision-2026-06-09.md`.
+
+Supersession note, 2026-06-09: this record remains the source-aware blend
+decision and rollout record for the 2026-05-26 change. Its statements that
+channels `1` and `5` remain `cpu_only` describe the 2026-05-26 deployment. The
+2026-06-09 radiator-exhaust decision later switched channels `1` and `5` to
+`max_cpu_gpu_source_aware` while preserving their CPU override path.
 
 ## Problem
 
@@ -98,7 +106,7 @@ Implementation verification on 2026-05-26:
 - `build\x64-release\svg-mb-control.exe --show-config --json --config
   config\control.example.json` shows channels `0`, `2`, `3`, and `4` as
   `max_cpu_gpu_source_aware` with `source_aware_cpu_hot_guard_c = 75.0`;
-  channels `1` and `5` remain `cpu_only`.
+  channels `1` and `5` remain `cpu_only` in this 2026-05-26 deployment.
 - `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed with CTest `2/2` and
   hermetic unittest discovery `101/101`.
 - The live release was checked read-only and was not published or restarted;
@@ -164,7 +172,8 @@ Done:
 - Added CPU fallback when GPU telemetry is unavailable but CPU telemetry is
   usable.
 - Shipped source-aware blend on channels `0`, `2`, `3`, and `4`; channels `1`
-  and `5` remain `cpu_only`.
+  and `5` remained `cpu_only` until the 2026-06-09 radiator-exhaust GPU
+  response decision superseded that part of the deployment.
 - Added `last_primary_temp_source` to runtime status and
   `channelN_primary_temp_source` to CSV.
 - Added analyzer ingestion and report support for primary source counts.
