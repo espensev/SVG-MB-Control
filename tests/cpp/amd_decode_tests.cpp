@@ -8,35 +8,13 @@
 
 #include "amd_decode.h"
 
-#include <cmath>
+#include "test_helpers.h"
+
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
-#include <string>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectNear(double actual, double expected, double tolerance,
-                const std::string& message) {
-    if (std::fabs(actual - expected) > tolerance) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected
-                  << " got " << actual << '\n';
-    }
-}
-
-void ExpectTrue(bool condition, const std::string& message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
-
-void ExpectFalse(bool condition, const std::string& message) {
-    ExpectTrue(!condition, message);
-}
 
 constexpr double kEps = 1e-9;
 

@@ -7,6 +7,8 @@
 
 #include "power_anticipation.h"
 
+#include "test_helpers.h"
+
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -14,24 +16,6 @@
 #include <string>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectNear(double actual, double expected, double tolerance,
-                const std::string& message) {
-    if (std::fabs(actual - expected) > tolerance) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected << " got "
-                  << actual << '\n';
-    }
-}
-
-void ExpectTrue(bool condition, const std::string& message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
 
 using namespace svg_mb_control::power_anticipation;
 

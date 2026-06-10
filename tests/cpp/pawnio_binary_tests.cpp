@@ -1,5 +1,7 @@
 #include "pawnio_binary.h"
 
+#include "test_helpers.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -9,25 +11,6 @@
 #include <string_view>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectTrue(bool condition, const char* message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
-
-void ExpectEqual(const std::string& actual,
-                 const std::string& expected,
-                 const char* message) {
-    if (actual != expected) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected [" << expected
-                  << "] got [" << actual << "]\n";
-    }
-}
 
 // Test vectors from FIPS 180-4 / RFC 6234.
 constexpr const char* kSha256EmptyHex =

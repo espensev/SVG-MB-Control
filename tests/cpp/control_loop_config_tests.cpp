@@ -15,6 +15,8 @@
 #include "boost_stage.h"
 #include "control_loop.h"
 
+#include "test_helpers.h"
+
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -23,36 +25,12 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectTrue(bool condition, const std::string& message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
-
-void ExpectFalse(bool condition, const std::string& message) {
-    ExpectTrue(!condition, message);
-}
-
-void ExpectNear(double actual, double expected, double tolerance,
-                const std::string& message) {
-    if (std::isnan(actual) && std::isnan(expected)) return;
-    if (std::fabs(actual - expected) > tolerance) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected
-                  << " got " << actual << '\n';
-    }
-}
 
 void ExpectThrowsContaining(const std::function<void()>& thunk,
                             std::string_view needle,
@@ -71,22 +49,6 @@ void ExpectThrowsContaining(const std::function<void()>& thunk,
                       << needle << "], got [" << what << "]\n";
         }
     }
-}
-
-// A per-process-unique filename component so two concurrent test processes
-// (for example two Test-LocalCI runs) never share a %TEMP% path. A per-process
-// counter alone is insufficient: it resets to the same value in every process,
-// so every process would reuse svg_mb_control_config_test_1.json and one run
-// could truncate the file mid-read in another. random_device yields a distinct
-// salt per process; the counter disambiguates files within one process.
-std::string UniqueTempSuffix() {
-    static const unsigned long long kProcessSalt = [] {
-        std::random_device rd;
-        return (static_cast<unsigned long long>(rd()) << 32) ^
-               static_cast<unsigned long long>(rd());
-    }();
-    static unsigned long long counter = 0;
-    return std::to_string(kProcessSalt) + "_" + std::to_string(++counter);
 }
 
 // Writes the given JSON text to a temp file and removes the file on scope

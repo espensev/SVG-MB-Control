@@ -12,6 +12,9 @@
 // files are proven to connect end to end.
 
 #include "channel_evaluator.h"
+
+#include "test_helpers.h"
+
 #include "channel_write.h"
 #include "control_policy.h"
 #include "control_runtime_context.h"
@@ -23,21 +26,11 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
-#include <random>
 #include <string>
 #include <system_error>
 #include <vector>
 
 namespace {
-
-int g_failures = 0;
-
-void ExpectTrue(bool condition, const char* message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
 
 // Records every ApplyDuty call and returns a configurable result. All other
 // FanWriter methods are inert defaults — the write-gate path only calls
@@ -78,20 +71,6 @@ class RecordingFanWriter : public svg_mb_control::FanWriter {
     }
     std::string BackendLabel() const override { return "recording"; }
 };
-
-// A per-process-unique component so two concurrent test processes (for example
-// two Test-LocalCI runs) never share a %TEMP% directory. A fixed name lets a
-// second process remove_all the dir mid-test in the first; random_device yields
-// a distinct salt per process and the counter disambiguates within one.
-std::string UniqueTempSuffix() {
-    static const unsigned long long kProcessSalt = [] {
-        std::random_device rd;
-        return (static_cast<unsigned long long>(rd()) << 32) ^
-               static_cast<unsigned long long>(rd());
-    }();
-    static unsigned long long counter = 0;
-    return std::to_string(kProcessSalt) + "_" + std::to_string(++counter);
-}
 
 // A fresh, empty runtime-home directory for the pending-writes sidecar and the
 // control-loop event log. The name carries a per-process salt (UniqueTempSuffix)

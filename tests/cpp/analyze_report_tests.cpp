@@ -6,6 +6,9 @@
 // future refactor moves them.
 
 #include "analyze/analyze_report.h"
+
+#include "test_helpers.h"
+
 #include "analyze/analyze_report_data.h"
 #include "analyze/analyze_report_emit.h"
 #include "analyze/analyze_report_queries.h"
@@ -37,27 +40,8 @@ using svg_mb_control::analyze::report_detail::ReportData;
 using svg_mb_control::analyze::report_detail::SummariseBand;
 using svg_mb_control::analyze::report_detail::TickRow;
 
-int g_failures = 0;
-
-void ExpectTrue(bool condition, const std::string& message) {
-    if (!condition) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << '\n';
-    }
-}
-
 void ExpectEqualInt(int actual, int expected, const std::string& message) {
     if (actual != expected) {
-        ++g_failures;
-        std::cerr << "FAIL: " << message << " expected " << expected
-                  << " got " << actual << '\n';
-    }
-}
-
-void ExpectNear(double actual, double expected, double tolerance,
-                const std::string& message) {
-    if (std::isnan(actual) && std::isnan(expected)) return;
-    if (std::fabs(actual - expected) > tolerance) {
         ++g_failures;
         std::cerr << "FAIL: " << message << " expected " << expected
                   << " got " << actual << '\n';
