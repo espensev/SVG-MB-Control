@@ -99,6 +99,25 @@ band $[a,b]$), so the stage would be:
   once Tctl catches up; the spec must size the caps so the intended joint
   ceiling holds (or define a composition rule). Unresolved here.
 
+**Design-support artifacts (landed 2026-06-10, still no control wiring):**
+
+- `src/control/power_anticipation.h` — the sketch above as pure, unit-tested
+  math: `PackageWattsFromWindow` (µJ/ms → W, NaN-not-zero on bad windows),
+  `UpdateWattsInput` (per-tick hold across mirrored ~1 s windows with a
+  stale-age-out so a stalled producer cannot pin the boost), `EmaUpdate`
+  (the optional Gate 2 smoothing), and `UpdatePowerAnticipation` (the §6.1
+  integrator shape with the decay-on-unavailable release). Nothing in the
+  runtime includes this header; it exists so the semantics are pinned by
+  tests before any FEAT intake argues about them.
+- `tests/cpp/power_anticipation_tests.cpp`
+  (`svg_mb_control_power_anticipation_tests`, CTest) — pins the guard
+  clause, band scaling, clamps, watts derivation, hold/stale/blank input
+  transitions, decay-on-NaN (the deliberate divergence from
+  `UpdateBoostStage`), and a tick-by-tick idle → step-load → fault → release
+  scenario at the shipped 250 ms cadence.
+- `scripts/analyze_power_lead.py` + `tests/test_power_lead.py` — the Gate 2
+  measurement tool (see §5).
+
 ## 5. Gates, in order (each blocks the next)
 
 - **Gate 0 — quarantine exit (already planned, no new authorization):** run
@@ -114,6 +133,11 @@ band $[a,b]$), so the stage would be:
   (cross-correlation), (b) steady-state watts↔Tctl↔duty relation, (c) idle
   floor and window noise, (d) blank/wrap frequency. Also run the same
   analysis against `system_cpu_busy_pct` (see §6).
+  Tooling landed 2026-06-10: `scripts/analyze_power_lead.py` computes (a),
+  (c), (d), and the busy-pct comparison from a control-loop CSV (lag-scanned
+  Pearson correlation against Tctl and a smoothed dTctl/dt; idle/load watts
+  distributions; window coverage). The busy-pct legs run on existing
+  disabled-session CSVs today; the power legs need a runbook capture.
   **Go/no-go: if the measured lead time does not exceed the fan-side response
   latency (rate limiter + spin-up) by a useful margin, stop here — the
   feature has no benefit to deliver.**
@@ -154,11 +178,11 @@ band $[a,b]$), so the stage would be:
   own rollout. Exit evidence: on real load steps the shadow term rises a
   measured lead ahead of `thermal_pressure`; zero firings at idle across
   sessions; bounded magnitude.
-- **Phase B — replay validation:** unit-test the stage math as a pure
-  function (pattern: `rapl_energy.h` / `cpu_cycles.h`), and replay captured
-  CSVs through it to compare shadow output against observed Tctl outcomes;
-  fix quantitative exit criteria (e.g. predicted overshoot reduction in C on
-  the captured steps) in the spec.
+- **Phase B — replay validation:** the stage math is already a pure,
+  unit-tested function (`src/control/power_anticipation.h`, landed
+  2026-06-10); replay captured CSVs through it to compare shadow output
+  against observed Tctl outcomes, and fix quantitative exit criteria (e.g.
+  predicted overshoot reduction in C on the captured steps) in the spec.
 - **Phase C — live additive enable:** per-channel rollout with a low initial
   cap, quarantine-style multi-session evaluation (reduced Tctl peak overshoot
   on load steps, no idle duty increase, no oscillation, no regression of the

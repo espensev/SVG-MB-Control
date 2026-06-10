@@ -303,6 +303,8 @@ if(BUILD_TESTING)
         tests/cpp/channel_write_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests
         tests/cpp/amd_decode_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_power_anticipation_tests
+        tests/cpp/power_anticipation_tests.cpp)
 
     # rapl_energy.h is header-only and dependency-free, so this test does not
     # link svg_mb_control_core (keeps it fast and isolated like the math it covers).

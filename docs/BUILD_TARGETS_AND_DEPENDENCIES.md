@@ -69,6 +69,9 @@ dependency-free.
 - `svg_mb_control_csv_rows_tests` — `tests\cpp\csv_rows_tests.cpp`
 - `svg_mb_control_channel_write_tests` — `tests\cpp\channel_write_tests.cpp`
 - `svg_mb_control_amd_decode_tests` — `tests\cpp\amd_decode_tests.cpp`
+- `svg_mb_control_power_anticipation_tests` —
+  `tests\cpp\power_anticipation_tests.cpp` (covers the design-support
+  `src\control\power_anticipation.h`; core-linked for `SmoothStep`)
 - `svg_mb_control_rapl_energy_tests` — `tests\cpp\rapl_energy_tests.cpp`
 - `svg_mb_control_cpu_cycles_tests` — `tests\cpp\cpu_cycles_tests.cpp`
 
