@@ -25,6 +25,16 @@ checkable.
 
 ## 2026-06-10
 
+- **Fixed** — stale deployment claims about the 2026-06-09 GPU retune:
+  `gpu-response-curve-retune-2026-06-09.md` §5 said the retuned config was
+  "not built, published, or restarted on the live worker", and
+  `response-evaluation-tuning-plan.md` framed the retune as "pending ... not
+  yet deployed" (including in yesterday's drift-fix pass). Both predate the
+  2026-06-09 live publish. Verified read-only: `release\control.json` is
+  byte-identical to `config\control.release.json` (sha256 `b51e542a...`), and
+  the live worker's CSV session header records the same `config_sha256` with
+  exe `git_hash=c4b6986` — the config was published before the retune commit
+  `767a901` existed, a provenance-stamp mismatch only.
 - **Added** — `docs/cpu-energy-quarantine-exit-capture-runbook-2026-06-10.md`:
   operational runbook for one enabled-path CPU-energy evidence session
   (enable via env var + scheduled-task restart, capture an

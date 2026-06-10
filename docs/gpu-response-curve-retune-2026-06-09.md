@@ -87,8 +87,15 @@ and hand/independent recompute (±0.3 pt). Duty is not RPM/airflow; >80 °C
 - Full local CI (`scripts/Test-LocalCI.ps1 -KeepBuildDir`): [recorded in the
   session; build + CTest + pytest].
 - Applied to `config/control.release.json` and `config/control.example.json`
-  (curve points only; every other field byte-identical). **Not** built,
-  published, or restarted on the live worker.
+  (curve points only; every other field byte-identical).
+- Deployed live 2026-06-09: the published `release/control.json` (18,550 bytes,
+  sha256 `b51e542a...726616`) carries these curves and is byte-identical to
+  `config/control.release.json`, and the running worker's CSV session header
+  records the same `config_sha256`, so the live controller loaded the retuned
+  config (verified read-only 2026-06-10). The live executable stamps
+  `git_hash=c4b6986` because the config was published before the retune commit
+  `767a901` existed — a provenance-stamp mismatch only; the retune is config
+  data, with no code change involved.
 
 ## 6. Follow-ups
 
