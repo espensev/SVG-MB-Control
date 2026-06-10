@@ -92,11 +92,6 @@ struct CsvHeader {
     std::unordered_map<std::string, std::size_t> column_index;
 };
 
-struct ParseError {
-    std::string message;
-    std::size_t line_number = 0;
-};
-
 // Splits a single CSV line per RFC 4180-ish rules: fields may be wrapped in
 // double quotes, internal "" escapes a literal quote. Embedded commas inside
 // quoted fields are preserved.

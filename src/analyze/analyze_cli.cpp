@@ -153,14 +153,18 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
     bool config_path_explicit = false;
     bool retain_days_explicit = false;
 
-    auto report_only = [&](const char* flag) -> bool {
-        if (verb != L"report") {
-            std::cerr << "Error: " << flag
-                      << " is only valid for analyze report.\n";
+    auto only_for = [&](const wchar_t* required_verb, const char* verb_label,
+                        const char* flag) -> bool {
+        if (verb != required_verb) {
+            std::cerr << "Error: " << flag << " is only valid for analyze "
+                      << verb_label << ".\n";
             PrintAnalyzeUsage();
             return false;
         }
         return true;
+    };
+    auto report_only = [&](const char* flag) -> bool {
+        return only_for(L"report", "report", flag);
     };
 
     auto require_value = [&](int& index) -> const wchar_t* {
@@ -185,32 +189,16 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
             config_path = std::filesystem::path(require_value(index));
             config_path_explicit = true;
         } else if (arg == L"--force") {
-            if (verb != L"ingest") {
-                std::cerr << "Error: --force is only valid for analyze ingest.\n";
-                PrintAnalyzeUsage();
-                return 1;
-            }
+            if (!only_for(L"ingest", "ingest", "--force")) return 1;
             options.force = true;
         } else if (arg == L"--csv") {
-            if (verb != L"ingest") {
-                std::cerr << "Error: --csv is only valid for analyze ingest.\n";
-                PrintAnalyzeUsage();
-                return 1;
-            }
+            if (!only_for(L"ingest", "ingest", "--csv")) return 1;
             options.csv_path = std::filesystem::path(require_value(index));
         } else if (arg == L"--events") {
-            if (verb != L"ingest") {
-                std::cerr << "Error: --events is only valid for analyze ingest.\n";
-                PrintAnalyzeUsage();
-                return 1;
-            }
+            if (!only_for(L"ingest", "ingest", "--events")) return 1;
             options.events_path = std::filesystem::path(require_value(index));
         } else if (arg == L"--retain-days") {
-            if (verb != L"prune") {
-                std::cerr << "Error: --retain-days is only valid for analyze prune.\n";
-                PrintAnalyzeUsage();
-                return 1;
-            }
+            if (!only_for(L"prune", "prune", "--retain-days")) return 1;
             std::uint32_t retain_days = 0u;
             if (!ParseUint32Option(require_value(index), retain_days)) {
                 std::cerr << "Error: invalid --retain-days value.\n";
@@ -219,18 +207,10 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
             prune_options.retain_days = retain_days;
             retain_days_explicit = true;
         } else if (arg == L"--apply") {
-            if (verb != L"prune") {
-                std::cerr << "Error: --apply is only valid for analyze prune.\n";
-                PrintAnalyzeUsage();
-                return 1;
-            }
+            if (!only_for(L"prune", "prune", "--apply")) return 1;
             prune_options.apply = true;
         } else if (arg == L"--dry-run") {
-            if (verb != L"prune") {
-                std::cerr << "Error: --dry-run is only valid for analyze prune.\n";
-                PrintAnalyzeUsage();
-                return 1;
-            }
+            if (!only_for(L"prune", "prune", "--dry-run")) return 1;
             prune_options.apply = false;
         } else if (arg == L"--run") {
             if (!report_only("--run")) return 1;

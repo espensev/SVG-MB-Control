@@ -329,13 +329,11 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         row.fans.push_back(std::move(fan));
     }
 
+    const char* const observed_temp_name = TickChannelSampleColumnById(
+        TickChannelSampleColumn::ObservedTempC).name;
     for (std::uint32_t ci = 0u; ci < 64u; ++ci) {
-        if (!HasColumn(
-                header,
-                TickChannelCsvFieldName(
-                    ci,
-                    TickChannelSampleColumnById(
-                        TickChannelSampleColumn::ObservedTempC).name))) {
+        if (!HasColumn(header,
+                       TickChannelCsvFieldName(ci, observed_temp_name))) {
             break;
         }
         ParsedChannelSample ch;

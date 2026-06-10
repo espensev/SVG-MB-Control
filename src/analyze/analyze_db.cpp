@@ -365,9 +365,7 @@ Database::~Database() {
 
 void Database::Open(const std::filesystem::path& path) {
     Close();
-    const std::string utf8 = path.u8string().empty()
-                                 ? path.string()
-                                 : path.string();
+    const std::string utf8 = path.string();
     const int rc = sqlite3_open_v2(
         utf8.c_str(),
         &db_,

@@ -42,18 +42,16 @@ std::optional<double> Mean(const std::vector<double>& values) {
 }
 
 BandPercentiles SummariseBand(const std::vector<TickRow>& ticks, Band band) {
+    BandPercentiles bp;
     std::vector<double> cpu, mem, env;
     for (const auto& t : ticks) {
         if (t.band != band) {
             continue;
         }
+        ++bp.n;
         if (t.cpu_tctl_c) cpu.push_back(*t.cpu_tctl_c);
         if (t.gpu_memjn_c) mem.push_back(*t.gpu_memjn_c);
         if (t.gpu_envelope_c) env.push_back(*t.gpu_envelope_c);
-    }
-    BandPercentiles bp;
-    for (const auto& t : ticks) {
-        if (t.band == band) ++bp.n;
     }
     bp.cpu_tctl_p50 = Percentile(cpu, 50.0);
     bp.cpu_tctl_p90 = Percentile(cpu, 90.0);

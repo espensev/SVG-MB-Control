@@ -30,17 +30,10 @@ enum class TickChannelSampleColumn {
     LowBandEffectiveBoostPct,
 };
 
-enum class TickChannelSampleValueKind {
-    Real,
-    Integer,
-    Text,
-};
-
 struct TickChannelSampleColumnSpec {
     TickChannelSampleColumn id;
     const char* name;
     const char* sql_type;
-    TickChannelSampleValueKind value_kind;
 };
 
 constexpr std::size_t kTickChannelSampleColumnCount = 16u;
