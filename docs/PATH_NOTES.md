@@ -23,6 +23,18 @@ checkable.
 
 ---
 
+## 2026-06-10
+
+- **Done** — resolved GPU-heat review finding F-DES1 (maintainer, option C):
+  the channels `1`/`5` `thermal_pressure` boost firing on GPU heat at
+  `>= 85.5 C` is accepted and documented as case-pressure headroom rather than
+  capped. Rationale and limits are recorded in `docs/COOLING_STRATEGY.md`
+  (Radiator Exhaust Pair); the open question is marked resolved in
+  `docs/gpu-heat-response-chain-review-2026-06-09.md` and
+  `docs/gpu-response-curve-retune-2026-06-09.md`.
+  `config/control.release.json` is unchanged, so the CPU response path is
+  untouched.
+
 ## 2026-06-09
 
 - **Done** — docs cleanup pass: archived three dead point-in-time review

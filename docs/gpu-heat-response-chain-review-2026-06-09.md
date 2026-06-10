@@ -218,6 +218,16 @@ on GPU. *Recommendation: decide deliberately — (A) leave thermal/midband CPU-
 only on these channels, (B) cap them lower on the GPU path, or (C) accept and
 rename as case-pressure headroom and document it.*
 
+> **Resolved 2026-06-10 (maintainer): option (C)** — accepted as case-pressure
+> headroom, documented in `docs/COOLING_STRATEGY.md` (Radiator Exhaust Pair).
+> Rationale: the ch0-vs-ch1/ch5 inversion that motivated capping was fixed by
+> the 2026-06-09 retune (ch0 reaches parity under load); a GPU memory-junction
+> envelope `>= 85.5 C` is uncommon on this build; no case-air sensor is logged,
+> so the empirical "validate against case-air-temperature" leg (F-DES3, C1) is
+> closed and the call is on merits; and `thermal_pressure` is shared with the
+> CPU path, so capping it on the GPU path risks the CPU response the retune
+> deliberately preserved. `config/control.release.json` is unchanged.
+
 **F-DES2 [medium, open question] — ch4 (front radiator intake) runs ~95 % on
 GPU-only heat — is that intended?** At GPU 90 °C / CPU 40 °C, ch4 reaches 95 %
 while the CPU radiator it feeds is cool. Two readings exist and this review
@@ -302,7 +312,8 @@ What is numerically pinned, and what is not:
 
 1. Is "~60 °C" the intended exhaust onset (fix config) or a stale doc (fix prose)? (F-DOC1)
 2. Should `thermal_pressure`/`midband_pressure` fire on GPU heat at all for the
-   CPU-radiator exhausts ch1/ch5? (F-DES1)
+   CPU-radiator exhausts ch1/ch5? (F-DES1) — **Resolved 2026-06-10: (C) accept +
+   document** (see F-DES1 above; `docs/COOLING_STRATEGY.md`).
 3. Is GPU-driving the radiator **intake** ch4 coherent with the back-pressure-
    relief rationale? (F-DES2)
 4. Is 84–87 % sustained exhaust duty on GPU-only load acceptable for noise/power,

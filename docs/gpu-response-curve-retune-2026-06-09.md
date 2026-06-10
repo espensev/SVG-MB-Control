@@ -95,6 +95,8 @@ and hand/independent recompute (±0.3 pt). Duty is not RPM/airflow; >80 °C
 - Capture a real GPU-load CSV (logging `core`, `memjn`, `hotspot` separately)
   and refine the exact knot %s against it; confirm the time-gated build and the
   ch0-vs-ch1/ch5 ordering on hardware.
-- Open question still standing from the review: whether `thermal_pressure`'s
-  20-pt GPU contribution on ch1/ch5 should be capped (it is preserved here so as
-  not to touch the CPU response).
+- Open question from the review (whether `thermal_pressure`'s 20-pt GPU
+  contribution on ch1/ch5 should be capped) — **resolved 2026-06-10: (C) accept +
+  document** as case-pressure headroom; it stays preserved so the CPU response is
+  untouched. See `docs/gpu-heat-response-chain-review-2026-06-09.md` F-DES1 and
+  `docs/COOLING_STRATEGY.md` (Radiator Exhaust Pair).

@@ -218,6 +218,19 @@ across channels. The policy JSON encodes this as:
   2026-06-09 to reach higher sooner and more gradually; see
   `docs/gpu-response-curve-retune-2026-06-09.md` and
   `docs/radiator-exhaust-gpu-response-decision-2026-06-09.md`.
+- The `thermal_pressure` boost on these two channels (`start 85.5 C`,
+  `max 20 %`) is radiator CPU-spike headroom by origin, but under the
+  `max_cpu_gpu_source_aware` blend its `observed_temp` input is the GPU
+  envelope while CPU is below the `75 C` guard, so it also fires on GPU heat
+  alone at GPU `>= 85.5 C`. This is accepted as case-pressure headroom
+  (maintainer decision 2026-06-10, review finding F-DES1): exhausting
+  GPU-heated case air is the correct direction; the rear exhaust (channel `0`)
+  curve was retuned 2026-06-09 to reach parity under load, so the unobstructed
+  lane is not under-driven relative to these radiator lanes; and a GPU
+  memory-junction envelope at or above `85.5 C` is uncommon on this build. No
+  case-air temperature sensor is logged, so the choice is judged on these
+  merits, not measured against intake-air temperature. The boost is left
+  unchanged so the CPU response stays identical.
 - Their curves must not be a single shape applied twice. On the GPU assist
   `curve` the two lanes share temperature knots but channel `1` stays strictly
   above channel `5` by `>= 2 %` at every knot (no crossing), enforced by
