@@ -25,6 +25,24 @@ checkable.
 
 ## 2026-06-10
 
+- **Added** — power-anticipation design-support increment (no control wiring;
+  the live path stays gated per the feed-forward plan):
+  `src/control/power_anticipation.h` (pure watts-derivation + hold/stale
+  input + decay-on-unavailable integrator math),
+  `tests/cpp/power_anticipation_tests.cpp` (CTest 12/12 now), and the Gate 2
+  measurement tool `scripts/analyze_power_lead.py` (+
+  `tests/test_power_lead.py`; lag-scanned power→Tctl and busy→Tctl lead,
+  idle-floor watts, window coverage — busy legs usable on existing disabled
+  CSVs). `BUILD_TARGETS_AND_DEPENDENCIES.md` §Test executables and the plan
+  doc §4/§5/§7 updated. Validated: `Test-LocalCI` exit 0 (CTest 12/12,
+  hermetic Python lane 133 tests).
+- **Added** — `docs/testing-and-hotpath-simplification-review-2026-06-10.md`:
+  two-sweep simplification review (test/script stack + runtime hot paths),
+  every kept finding re-verified at the cited lines. Net: no critical
+  findings; actionable cleanups are TS-1/TS-2 (shared C++ test helper header,
+  ~120 LOC), TS-3 (shared Windows-gate test base, ~40 LOC), HP-1 (delete the
+  test-only 3-arg `BuildControlLoopCsvRow` overload); one sweep claim
+  rejected (Build-Release double hash is deliberate copy verification).
 - **Added / Idea** — `docs/cpu-power-feedforward-plan-2026-06-10.md`: planning
   scaffold for a CPU package-power anticipation boost (a fifth
   `kBoostStageSpecs` stage keyed on derived watts), explicitly NOT authorized
