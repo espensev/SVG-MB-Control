@@ -83,6 +83,8 @@ GpuResponseSummary SummariseGpuResponse(
     const std::vector<TickRow>& ticks,
     const ReportOptions& options);
 PackagePowerSummary SummarisePackagePower(Database& db, std::int64_t run_id);
+CpuCyclesSummary SummariseCpuCycles(Database& db, std::int64_t run_id,
+                                    std::optional<double> p0_mhz);
 
 }  // namespace report_detail
 }  // namespace svg_mb_control::analyze

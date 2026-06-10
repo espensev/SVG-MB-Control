@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     cpu_power_window_ms REAL,
     cpu_pkg_energy_delta_uj REAL,
     cpu_pkg_energy_acquisition TEXT,
+    cpu_cycles_sample_id INTEGER,
+    cpu_cycles_window_ms REAL,
+    cpu_aperf_delta REAL,
+    cpu_mperf_delta REAL,
+    cpu_cycles_acquisition TEXT,
     PRIMARY KEY (run_id, tick_count)
 );
 
@@ -605,6 +610,37 @@ void MigrateSchema(Database& db) {
                 "TEXT");
         }
         SetSchemaVersion(db, 9);
+    }
+    if (version <= 9) {
+        // FEAT-0006 (REQ-CPUEFF-01/-03): additive nullable APERF/MPERF cycle
+        // evidence columns mirrored from the CSV (cpu_cycles_sample_id,
+        // cpu_cycles_window_ms, cpu_aperf_delta, cpu_mperf_delta,
+        // cpu_cycles_acquisition). Old archives lack them; ingest binds NULL,
+        // the report derivation skips absent windows (no false zero).
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_cycles_sample_id "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_window_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_cycles_window_ms "
+                "REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_aperf_delta")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_aperf_delta REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_mperf_delta")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_mperf_delta REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_acquisition")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_cycles_acquisition "
+                "TEXT");
+        }
+        SetSchemaVersion(db, 10);
     }
 }
 

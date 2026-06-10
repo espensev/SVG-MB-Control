@@ -30,8 +30,11 @@ using svg_mb_control::analyze::report_detail::Band;
 using svg_mb_control::analyze::report_detail::BandPercentiles;
 using svg_mb_control::analyze::report_detail::BuildDiagnosticFlags;
 using svg_mb_control::analyze::report_detail::ChannelStats;
+using svg_mb_control::analyze::report_detail::ComputeCpuCycles;
 using svg_mb_control::analyze::report_detail::ComputeElapsedTime;
 using svg_mb_control::analyze::report_detail::ComputePackagePower;
+using svg_mb_control::analyze::report_detail::CpuCyclesSummary;
+using svg_mb_control::analyze::report_detail::CycleEvidenceWindow;
 using svg_mb_control::analyze::report_detail::Median;
 using svg_mb_control::analyze::report_detail::PackageEnergyWindow;
 using svg_mb_control::analyze::report_detail::PackagePowerSummary;
@@ -452,6 +455,94 @@ void TestComputePackagePower_SingleWindow() {
     ExpectNear(*pp.watts_max, 10.0, 1e-6, "single window watts_max == 10");
 }
 
+void TestComputeCpuCycles_EmptyIsUnavailable() {
+    // No windows -> unavailable, NOT a false zero. acquisition provenance is
+    // copied through so the report can still say why (cycles off).
+    CpuCyclesSummary cc = ComputeCpuCycles({}, {{"disabled", 30}}, std::nullopt);
+    ExpectEqualInt(cc.window_count, 0, "empty -> window_count 0");
+    ExpectNullopt(cc.aperf_mperf_ratio,
+                  "empty -> ratio nullopt (no false zero)");
+    ExpectNullopt(cc.effective_mhz, "empty -> effective_mhz nullopt");
+    ExpectNullopt(cc.ratio_max, "empty -> ratio_max nullopt");
+    ExpectNear(cc.total_aperf_cycles, 0.0, kEps,
+               "empty -> total_aperf_cycles 0");
+    ExpectEqualInt(cc.acquisition_counts["disabled"], 30,
+                   "empty -> acquisition provenance preserved");
+}
+
+void TestComputeCpuCycles_CycleWeighted() {
+    // Per-window ratios 1.25, 1.5, 1.0; cycle-weighted aggregate is
+    // sum(dAPERF)/sum(dMPERF) = 10.75e6 / 8e6 = 1.34375, deliberately NOT the
+    // mean-of-per-window-ratios (1.25 + 1.5 + 1.0)/3 = 1.25.
+    std::vector<CycleEvidenceWindow> windows{
+        {1000.0, 1.25e6, 1.0e6},
+        {1000.0, 7.5e6, 5.0e6},
+        {2000.0, 2.0e6, 2.0e6},
+    };
+    CpuCyclesSummary cc = ComputeCpuCycles(windows, {{"quarantine", 6}},
+                                           std::nullopt);
+    ExpectEqualInt(cc.window_count, 3, "three distinct windows counted");
+    ExpectNear(cc.total_aperf_cycles, 1.075e7, 1e-3,
+               "total dAPERF 1.25e6+7.5e6+2e6");
+    ExpectNear(cc.total_mperf_cycles, 8.0e6, 1e-3,
+               "total dMPERF 1e6+5e6+2e6");
+    ExpectNear(cc.total_window_s, 4.0, 1e-6, "total window 1+1+2 = 4 s");
+    ExpectHasValue(cc.aperf_mperf_ratio, "ratio present for valid windows");
+    ExpectNear(*cc.aperf_mperf_ratio, 1.34375, 1e-9,
+               "cycle-weighted ratio = total dAPERF / total dMPERF");
+    ExpectTrue(std::fabs(*cc.aperf_mperf_ratio - 1.25) > 0.05,
+               "cycle-weighted ratio differs from mean-of-ratios");
+    // Per-window ratios sorted {1.0, 1.25, 1.5}: nearest-rank p50=1.25,
+    // p90=max=1.5.
+    ExpectNear(*cc.ratio_p50, 1.25, 1e-9, "per-window ratio p50 == 1.25");
+    ExpectNear(*cc.ratio_p90, 1.5, 1e-9, "per-window ratio p90 == 1.5");
+    ExpectNear(*cc.ratio_max, 1.5, 1e-9, "per-window ratio max == 1.5");
+    // No operator-supplied P0 -> no effective MHz, never a guessed base.
+    ExpectNullopt(cc.p0_mhz, "no --p0-mhz -> p0 not echoed");
+    ExpectNullopt(cc.effective_mhz, "no --p0-mhz -> effective_mhz nullopt");
+}
+
+void TestComputeCpuCycles_P0DerivesEffectiveMhz() {
+    std::vector<CycleEvidenceWindow> windows{
+        {1000.0, 1.25e6, 1.0e6},
+        {1000.0, 7.5e6, 5.0e6},
+        {2000.0, 2.0e6, 2.0e6},
+    };
+    CpuCyclesSummary cc = ComputeCpuCycles(windows, {}, 4000.0);
+    ExpectHasValue(cc.p0_mhz, "supplied P0 echoed for provenance");
+    ExpectNear(*cc.p0_mhz, 4000.0, kEps, "p0_mhz == supplied value");
+    ExpectHasValue(cc.effective_mhz, "effective MHz derived with P0");
+    ExpectNear(*cc.effective_mhz, 5375.0, 1e-6,
+               "effective = aggregate ratio 1.34375 x 4000 MHz");
+    // A non-positive P0 is rejected, not multiplied through.
+    CpuCyclesSummary bad = ComputeCpuCycles(windows, {}, -4000.0);
+    ExpectNullopt(bad.p0_mhz, "non-positive P0 ignored");
+    ExpectNullopt(bad.effective_mhz, "non-positive P0 -> no effective MHz");
+}
+
+void TestComputeCpuCycles_SkipsImplausibleStragglers() {
+    // The log-time guard should have blanked these, but the pure compute must
+    // also skip non-finite / non-positive stragglers so one bad row cannot
+    // poison the totals: NaN window, zero window, zero dMPERF (ratio
+    // undefined), negative dAPERF, NaN delta.
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::vector<CycleEvidenceWindow> windows{
+        {nan, 1.0e6, 1.0e6},
+        {0.0, 1.0e6, 1.0e6},
+        {1000.0, 1.0e6, 0.0},
+        {1000.0, -1.0e6, 1.0e6},
+        {1000.0, nan, 1.0e6},
+        {1000.0, 1.2e6, 1.0e6},
+    };
+    CpuCyclesSummary cc = ComputeCpuCycles(windows, {}, std::nullopt);
+    ExpectEqualInt(cc.window_count, 1, "only the plausible window counted");
+    ExpectHasValue(cc.aperf_mperf_ratio, "ratio from the surviving window");
+    ExpectNear(*cc.aperf_mperf_ratio, 1.2, 1e-9,
+               "ratio reflects only the surviving window");
+    ExpectNear(cc.total_window_s, 1.0, 1e-9,
+               "skipped windows contribute no window time");
+}
+
 void TestBuildDiagnosticFlags_NoFlagsOnHealthyRun() {
     ReportOptions options;
     options.load_threshold_c = 75.0;
@@ -496,6 +587,10 @@ int main() {
     TestComputePackagePower_EmptyIsUnavailable();
     TestComputePackagePower_TimeWeighted();
     TestComputePackagePower_SingleWindow();
+    TestComputeCpuCycles_EmptyIsUnavailable();
+    TestComputeCpuCycles_CycleWeighted();
+    TestComputeCpuCycles_P0DerivesEffectiveMhz();
+    TestComputeCpuCycles_SkipsImplausibleStragglers();
     if (g_failures > 0) {
         std::cerr << g_failures << " analyze_report helper test failure(s)\n";
         return 1;

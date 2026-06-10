@@ -152,9 +152,13 @@ logging replacement.
   over `cpu_cycles_window_ms`, keyed by `cpu_cycles_sample_id`, with provenance in
   `cpu_cycles_acquisition`. Read per-core under a transient affinity pin from the
   AMD read-only aliases `0xC00000E7`/`0xC00000E8` (the 2026-06-07 `#GP` was a
-  probe-index error). Effective frequency = `(cpu_aperf_delta / cpu_mperf_delta)
-  x P0` and cycles-per-Joule are derived later by the analyzer, not logged (see
-  `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
+  probe-index error). Effective frequency is derived by `analyze report`
+  (schema v10), not logged: the cycle-weighted `cpu_aperf_delta /
+  cpu_mperf_delta` ratio over distinct `cpu_cycles_sample_id` windows always,
+  multiplied to MHz only when `--p0-mhz <mhz>` supplies the base frequency (no
+  logged field records P0). Cycles-per-Joule remains a later derivation — the
+  energy and cycle windows carry separate sample ids and no join rule is
+  specified yet (see `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
   `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.

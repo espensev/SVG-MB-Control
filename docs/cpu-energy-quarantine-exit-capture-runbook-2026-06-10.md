@@ -141,9 +141,11 @@ python scripts\analyze_control_run.py --csv <enabled-session>.csv --format markd
 
 The report derives time-weighted average package power from
 `cpu_pkg_energy_delta_uj` over **distinct** `cpu_power_sample_id` windows (mirrored
-250 ms rows are de-duplicated). Effective frequency from the cycle columns is a
-separate, not-yet-landed analyzer increment (schema v9→v10); if cycles were
-captured, derive `ΔAPERF/ΔMPERF × reference` manually for criterion 4 until then.
+250 ms rows are de-duplicated). The cycle derivation landed as analyze schema
+v10 (2026-06-10): the same report emits a `cpu_cycles` block with the
+cycle-weighted `ΔAPERF/ΔMPERF` ratio over distinct `cpu_cycles_sample_id`
+windows, and effective MHz when `--p0-mhz <base>` is passed (no logged field
+records P0) — use that for criterion 4 instead of deriving by hand.
 
 ## 6. Score this session against the Evaluation criteria
 

@@ -83,6 +83,13 @@ struct ParsedTickRow {
     std::optional<double> cpu_power_window_ms;
     std::optional<double> cpu_pkg_energy_delta_uj;
     std::optional<std::string> cpu_pkg_energy_acquisition;
+    // FEAT-0006 read-only APERF/MPERF cycle evidence (nullable; blank in old
+    // archives, on the baseline read, and on guard-blanked windows).
+    std::optional<std::int64_t> cpu_cycles_sample_id;
+    std::optional<double> cpu_cycles_window_ms;
+    std::optional<double> cpu_aperf_delta;
+    std::optional<double> cpu_mperf_delta;
+    std::optional<std::string> cpu_cycles_acquisition;
     std::vector<ParsedFanSample> fans;
     std::vector<ParsedChannelSample> channels;
 };

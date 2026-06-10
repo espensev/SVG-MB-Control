@@ -462,8 +462,8 @@ GpuResponseSummary SummariseGpuResponse(
 // only windows with a non-null delta (the log-time implausibility guard blanks
 // the rest -> no false zero), and hands the distinct windows plus the
 // acquisition-state provenance to the pure ComputePackagePower. Both queries
-// reference the v9 energy columns, so a schema-8 DB read by a schema-9 binary
-// throws "no such column"; the single try/catch degrades that to an empty
+// reference the v9 energy columns, so a pre-v9 DB read by this binary throws
+// "no such column"; the single try/catch degrades that to an empty
 // (unavailable) summary rather than failing the whole report -- report.cpp
 // verifies the schema version but does not migrate.
 PackagePowerSummary SummarisePackagePower(Database& db, std::int64_t run_id) {
@@ -501,6 +501,57 @@ PackagePowerSummary SummarisePackagePower(Database& db, std::int64_t run_id) {
         return ComputePackagePower({}, {});
     }
     return ComputePackagePower(windows, std::move(acquisition_counts));
+}
+
+// FEAT-0006 (REQ-CPUEFF-01/-03) derived cycle evidence, mirroring
+// SummarisePackagePower: collapses the mirrored per-tick APERF/MPERF rows to
+// one window per cpu_cycles_sample_id (GROUP BY), keeps only windows with
+// non-null deltas (the log-time implausibility guard blanks the rest -> no
+// false zero), and hands the distinct windows plus the acquisition-state
+// provenance to the pure ComputeCpuCycles. Both queries reference the v10
+// cycle columns, so a pre-v10 DB read by this binary throws "no such column";
+// the single try/catch degrades that to an empty (unavailable) summary rather
+// than failing the whole report.
+CpuCyclesSummary SummariseCpuCycles(Database& db, std::int64_t run_id,
+                                    std::optional<double> p0_mhz) {
+    std::map<std::string, int> acquisition_counts;
+    std::vector<CycleEvidenceWindow> windows;
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(cpu_cycles_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+        Statement win = db.Prepare(
+            "SELECT MAX(cpu_cycles_window_ms), MAX(cpu_aperf_delta), "
+            "MAX(cpu_mperf_delta) "
+            "FROM tick_samples WHERE run_id = ?1 "
+            "AND cpu_cycles_sample_id IS NOT NULL AND cpu_cycles_sample_id > 0 "
+            "AND cpu_cycles_window_ms IS NOT NULL "
+            "AND cpu_aperf_delta IS NOT NULL "
+            "AND cpu_mperf_delta IS NOT NULL "
+            "GROUP BY cpu_cycles_sample_id");
+        win.BindInt(1, run_id);
+        while (win.Step()) {
+            if (win.ColumnIsNull(0) || win.ColumnIsNull(1) ||
+                win.ColumnIsNull(2)) {
+                continue;
+            }
+            CycleEvidenceWindow w;
+            w.window_ms = win.ColumnDouble(0);
+            w.d_aperf = win.ColumnDouble(1);
+            w.d_mperf = win.ColumnDouble(2);
+            windows.push_back(w);
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: cpu-cycles query failed: " << ex.what() << '\n';
+        return ComputeCpuCycles({}, {}, p0_mhz);
+    }
+    return ComputeCpuCycles(windows, std::move(acquisition_counts), p0_mhz);
 }
 
 // Loads tick_channel_samples for run_id and aggregates per-channel stats:

@@ -108,6 +108,17 @@ ENERGY_FIELDS = [
 ]
 ENERGY_HEADER = ",".join(ENERGY_FIELDS)
 
+# FEAT-0006 read-only APERF/MPERF cycle columns (schema v10), trailing the
+# energy columns exactly as the runtime CSV emits them.
+CYCLE_FIELDS = [
+    "cpu_cycles_sample_id",
+    "cpu_cycles_window_ms",
+    "cpu_aperf_delta",
+    "cpu_mperf_delta",
+    "cpu_cycles_acquisition",
+]
+CYCLE_HEADER = ",".join(CYCLE_FIELDS)
+
 
 def _csv_row(values: dict[str, str]) -> str:
     missing = [field for field in CSV_FIELDS if field not in values]
@@ -562,7 +573,7 @@ class AnalyzeIngestTests(WindowsExeTestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "9")
+            self.assertEqual(schema[0], "10")
 
             run = _query_one(
                 db_path,
@@ -953,15 +964,34 @@ _ENERGY_WINDOWS = [
     ("4", "1000.000", "", "quarantine"),
 ]
 
+# (sample_id, window_ms, aperf_delta, mperf_delta, acquisition) per tick,
+# mirroring the energy layout: tick 1 is the baseline read, each id repeats
+# across 2 ticks (de-dup on cpu_cycles_sample_id), and tick 8 is a
+# guard-blanked window. Per-window ratios are 1.25, 1.5, 1.0; the
+# cycle-weighted aggregate is 10750000 / 8000000 = 1.34375, deliberately NOT
+# the mean-of-ratios 1.25.
+_CYCLE_WINDOWS = [
+    ("", "", "", "", "quarantine"),
+    ("1", "1000.000", "1250000", "1000000", "quarantine"),
+    ("1", "1000.000", "1250000", "1000000", "quarantine"),
+    ("2", "1000.000", "7500000", "5000000", "quarantine"),
+    ("2", "1000.000", "7500000", "5000000", "quarantine"),
+    ("3", "2000.000", "2000000", "2000000", "quarantine"),
+    ("3", "2000.000", "2000000", "2000000", "quarantine"),
+    ("4", "1000.000", "", "", "quarantine"),
+]
+
 
 def _write_energy_csv(path: Path, session_start: str) -> None:
     lines = [
         "# schema=svg_mb_control.log.v1",
         "# mode=control-loop",
         f"# session_start={session_start}",
-        CSV_HEADER + "," + ENERGY_HEADER,
+        CSV_HEADER + "," + ENERGY_HEADER + "," + CYCLE_HEADER,
     ]
-    for i, (sid, win, delta, acq) in enumerate(_ENERGY_WINDOWS):
+    for i, (energy, cycles) in enumerate(
+        zip(_ENERGY_WINDOWS, _CYCLE_WINDOWS)
+    ):
         base = _control_loop_fixture_row(
             wall=_ts(session_start, i),
             tick=i + 1,
@@ -975,7 +1005,7 @@ def _write_energy_csv(path: Path, session_start: str) -> None:
             channel0_cpu_low_soak_boost_pct="0.000",
             channel0_response_source="primary_curve",
         )
-        lines.append(base + "," + ",".join([sid, win, delta, acq]))
+        lines.append(base + "," + ",".join(energy) + "," + ",".join(cycles))
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1099,6 +1129,14 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertEqual(
                 obj["package_power"]["acquisition_counts"]["unavailable"], 30
             )
+            # Same no-false-zero contract for the cycle block (no cycle
+            # columns in the ramp fixture either).
+            self.assertEqual(obj["cpu_cycles"]["window_count"], 0)
+            self.assertIsNone(obj["cpu_cycles"]["aperf_mperf_ratio"])
+            self.assertIsNone(obj["cpu_cycles"]["effective_mhz"])
+            self.assertEqual(
+                obj["cpu_cycles"]["acquisition_counts"]["unavailable"], 30
+            )
 
     def test_report_derives_time_weighted_package_power(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -1130,6 +1168,138 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertIn(
                 "package_power: windows=3 avg_watts=15.000", text
             )
+
+    def test_report_derives_cycle_ratio_and_effective_frequency(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            cc = json.loads(result.stdout)["cpu_cycles"]
+            # 8 ticks carry 4 sample-ids, but the baseline (tick 1, no id) and
+            # the guard-blanked window (sample_id 4, tick 8) are excluded -> 3
+            # distinct de-duplicated windows, not 8 tick rows and not 4 ids.
+            self.assertEqual(cc["window_count"], 3)
+            self.assertEqual(cc["total_aperf_cycles"], 10750000.0)
+            self.assertEqual(cc["total_mperf_cycles"], 8000000.0)
+            self.assertEqual(cc["total_window_s"], 4.0)
+            # Cycle-weighted 10750000/8000000 = 1.34375, NOT the
+            # mean-of-per-window-ratios (1.25 + 1.5 + 1.0)/3.
+            self.assertEqual(cc["aperf_mperf_ratio"], 1.34375)
+            self.assertEqual(cc["ratio"]["p50"], 1.25)
+            self.assertEqual(cc["ratio"]["max"], 1.5)
+            self.assertEqual(cc["acquisition_counts"]["quarantine"], 8)
+            # Without an operator-supplied P0 there is no effective MHz --
+            # no document fixes a P0 source, so the report must not guess.
+            self.assertIsNone(cc["effective_mhz"])
+            self.assertIsNone(cc["p0_mhz"])
+
+            with_p0 = _run_report(
+                runtime_home, db_path,
+                "--idle-seconds", "1", "--p0-mhz", "4000", "--json",
+            )
+            self.assertEqual(with_p0.returncode, 0, msg=with_p0.stderr)
+            cc = json.loads(with_p0.stdout)["cpu_cycles"]
+            self.assertEqual(cc["p0_mhz"], 4000.0)
+            # effective = aggregate ratio 1.34375 x 4000 MHz.
+            self.assertEqual(cc["effective_mhz"], 5375.0)
+
+            text = _run_report(
+                runtime_home, db_path,
+                "--idle-seconds", "1", "--p0-mhz", "4000",
+            ).stdout
+            self.assertIn(
+                "cpu_cycles: windows=3 aperf_mperf_ratio=1.344 "
+                "effective_mhz=5375.000 p0_mhz=4000.000",
+                text,
+            )
+
+    def test_report_degrades_when_cycle_columns_missing(self) -> None:
+        # A v9 DB read by a v10 binary: the cycle query references columns
+        # that do not exist and throws "no such column". The single try/catch
+        # in SummariseCpuCycles must degrade that to an "unavailable" block
+        # (no false zero) while the v9 package-power block still derives.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                for col in (
+                    "cpu_cycles_sample_id",
+                    "cpu_cycles_window_ms",
+                    "cpu_aperf_delta",
+                    "cpu_mperf_delta",
+                    "cpu_cycles_acquisition",
+                ):
+                    conn.execute(
+                        f"ALTER TABLE tick_samples DROP COLUMN {col}"
+                    )
+                conn.execute(
+                    "UPDATE schema_meta SET value='9' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            self.assertEqual(obj["cpu_cycles"]["window_count"], 0)
+            self.assertIsNone(obj["cpu_cycles"]["aperf_mperf_ratio"])
+            # The energy columns are still present, so package power is
+            # unaffected by the missing cycle columns.
+            self.assertEqual(obj["package_power"]["avg_watts"], 15.0)
+
+    def test_ingest_migrates_v9_db_to_v10(self) -> None:
+        # A pre-existing v9 DB picked up by this binary: ingest bootstraps
+        # (BootstrapSchema -> MigrateSchema) before its strict version check,
+        # so the five cycle columns are added, the version moves to 10, and a
+        # forced re-ingest backfills the cycle data for the run.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                for col in (
+                    "cpu_cycles_sample_id",
+                    "cpu_cycles_window_ms",
+                    "cpu_aperf_delta",
+                    "cpu_mperf_delta",
+                    "cpu_cycles_acquisition",
+                ):
+                    conn.execute(
+                        f"ALTER TABLE tick_samples DROP COLUMN {col}"
+                    )
+                conn.execute(
+                    "UPDATE schema_meta SET value='9' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            self.assertEqual(
+                _run_ingest(runtime_home, db_path, "--force").returncode, 0
+            )
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                version = conn.execute(
+                    "SELECT value FROM schema_meta WHERE key='schema_version'"
+                ).fetchone()[0]
+            self.assertEqual(version, "10")
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            cc = json.loads(result.stdout)["cpu_cycles"]
+            self.assertEqual(cc["window_count"], 3)
+            self.assertEqual(cc["aperf_mperf_ratio"], 1.34375)
 
     def test_report_degrades_when_energy_columns_missing(self) -> None:
         # An old (schema-8) DB read by a schema-9 binary: report.cpp checks only

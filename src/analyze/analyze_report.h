@@ -28,6 +28,12 @@ struct ReportOptions {
     // threshold-crossing metrics. When unset, only the peak + per-channel
     // setpoint-at-peak are reported.
     std::optional<double> gpu_load_threshold_c;
+    // Optional P0 (base) frequency in MHz for the cpu_cycles block. The
+    // APERF/MPERF ratio is derived from logged data alone; effective MHz =
+    // ratio x P0 needs this operator-supplied reference because no logged
+    // field or document fixes a P0 source. When unset, effective_mhz is
+    // reported unavailable (never guessed).
+    std::optional<double> p0_mhz;
     std::filesystem::path out_path;
     std::filesystem::path manifest_out_path;
     std::filesystem::path decision_record_out_path;

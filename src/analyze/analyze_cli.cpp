@@ -6,6 +6,7 @@
 #include "control_config.h"
 #include "read_loop.h"
 
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
@@ -47,6 +48,7 @@ void PrintAnalyzeUsage() {
         << "  svg-mb-control analyze report [--runtime-home <path>] "
            << "[--db <path>] [--run <id>|--session <ts>] [--idle-seconds <s>] "
            << "[--load-threshold-c <c>] [--gpu-load-threshold-c <c>] "
+           << "[--p0-mhz <mhz>] "
            << "[--json] [--out <path>] "
            << "[--manifest-out <path>] "
            << "[--decision-record-out <path|auto>|--no-decision-record] "
@@ -249,6 +251,20 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
                     std::stod(std::wstring(require_value(index)));
             } catch (const std::exception&) {
                 std::cerr << "Error: invalid --gpu-load-threshold-c value.\n";
+                return 1;
+            }
+        } else if (arg == L"--p0-mhz") {
+            if (!report_only("--p0-mhz")) return 1;
+            try {
+                const double parsed =
+                    std::stod(std::wstring(require_value(index)));
+                if (!std::isfinite(parsed) || parsed <= 0.0) {
+                    std::cerr << "Error: invalid --p0-mhz value.\n";
+                    return 1;
+                }
+                report_options.p0_mhz = parsed;
+            } catch (const std::exception&) {
+                std::cerr << "Error: invalid --p0-mhz value.\n";
                 return 1;
             }
         } else if (arg == L"--out") {

@@ -315,21 +315,28 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 
 > **Partial — v1 energy-logger landed 2026-06-07; analyzer average-watts
 > derivation landed 2026-06-09; cycle (APERF/MPERF) logger landed 2026-06-09
-> (default-off).** The status stays **Accepted**
+> (default-off); analyzer cycle derivation landed 2026-06-10 (analyze schema
+> v10).** The status stays **Accepted**
 > (not yet `Implemented`). What is verified: it compiles in the full build, the
 > pure math **and** the baseline/delta/sample-id/guard transition are unit-tested
 > (`rapl_energy.h` / `AdvanceEnergyWindow`), the **default-off** path is inert
-> (CTest 11/11 + hermetic lane via `.\scripts\Test-LocalCI.ps1`), and `analyze
-> report` now derives time-weighted average package power from the
+> (CTest 11/11 + hermetic lane via `.\scripts\Test-LocalCI.ps1`), `analyze
+> report` derives time-weighted average package power from the
 > `cpu_pkg_energy_*` columns — schema v9, sample-id de-duplication, no-false-zero
 > "unavailable" path — covered by `ComputePackagePower` unit tests and the
-> `test_analyze_ingest` end-to-end fixture. What is **not** yet verified: the
-> **enabled** integration path (`SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`) —
-> cadence gating, the real MSR read, and mirror-across-ticks — has run **nowhere**
-> (CI is default-off; the live run that proved RAPL was the separate throwaway
-> probe; the cycle logger's enabled path is likewise unrun in CI). Also pending:
-> the analyzer effective-frequency derivation from the new cycle columns, the
-> live runtime-CSV (M) evidence, the quarantine-exit Evaluation, and
+> `test_analyze_ingest` end-to-end fixture, and (schema v10, 2026-06-10) the
+> same report derives the cycle-weighted `ΔAPERF/ΔMPERF` ratio over distinct
+> `cpu_cycles_sample_id` windows plus effective MHz when `--p0-mhz` supplies the
+> base frequency (no logged field or document fixes a P0 source, so it is never
+> guessed) — covered by `ComputeCpuCycles` unit tests, the e2e cycle fixture,
+> the v9-DB degrade test, and the v9→v10 migration test. The **enabled**
+> integration path ran live once: the 2026-06-10 quarantine capture session 1
+> (energy + cycles enabled, 3164 rows, 5 PASS / 1 MANUAL —
+> [`docs/cpu-energy-quarantine-exit-evidence-2026-06-10-s1.md`](../cpu-energy-quarantine-exit-evidence-2026-06-10-s1.md));
+> CI still exercises only the default-off path. Still pending: the
+> quarantine-exit Evaluation (1 of ≥3 sessions over ≥7 days; sessions 2/3
+> scheduled 2026-06-14/2026-06-18), the cycles-per-Joule energy↔cycle join (the
+> two paths carry separate sample ids and no join rule is specified), and
 > REQ-CPUEFF-08 (deferred). Promotion to `Implemented`
 > additionally requires reconciling the §14 and `docs/TRACEABILITY.md`
 > REQ-CPUEFF result cells to byte-identical text (then enforced by

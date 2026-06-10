@@ -4,8 +4,9 @@
 // REQ-CPUEFF-01 work numerator + REQ-CPUEFF-03 effective-frequency context).
 // Header-only and free of Windows/transport deps so it is unit-testable without
 // hardware (mirrors src/hardware/rapl_energy.h and amd_decode.h). The live
-// per-core MSR read and provenance live in amd_reader.cpp; the analyzer reuses
-// AperfMperfRatio / EffectiveFrequencyMhz for the derived figures.
+// per-core MSR read and provenance live in amd_reader.cpp; the analyzer derives
+// the same ratio / effective-frequency figures from the logged CSV deltas in
+// the double domain (ComputeCpuCycles, src/analyze/analyze_report_data.cpp).
 //
 // Source MSRs (read-only AMD aliases; AMD OSRR 56255): MPERF_RO 0xC00000E7
 // counts at the P0 (base) frequency while the core is in C0; APERF_RO 0xC00000E8

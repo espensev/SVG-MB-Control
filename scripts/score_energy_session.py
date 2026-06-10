@@ -285,7 +285,8 @@ def main(argv=None):
         r_idle, r_load = ratio(idle_m), ratio(load_m)
         c4_detail = (f"dAPERF/dMPERF idle={r_idle and round(r_idle,3)}, "
                      f"load={r_load and round(r_load,3)} "
-                     f"(x base freq = effective; analyzer v10 derivation not built)")
+                     f"(x base freq = effective; analyze report --p0-mhz "
+                     f"<base> derives it; promotion stays manual)")
         results.append((4, "Effective-frequency validity (cycles)", "MANUAL",
                         c4_detail))
 

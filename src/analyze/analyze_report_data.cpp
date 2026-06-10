@@ -93,4 +93,45 @@ PackagePowerSummary ComputePackagePower(
     return out;
 }
 
+CpuCyclesSummary ComputeCpuCycles(
+    const std::vector<CycleEvidenceWindow>& windows,
+    std::map<std::string, int> acquisition_counts,
+    std::optional<double> p0_mhz) {
+    CpuCyclesSummary out;
+    out.acquisition_counts = std::move(acquisition_counts);
+    if (p0_mhz.has_value() && std::isfinite(*p0_mhz) && *p0_mhz > 0.0) {
+        out.p0_mhz = p0_mhz;
+    }
+    std::vector<double> per_window_ratios;
+    per_window_ratios.reserve(windows.size());
+    for (const auto& w : windows) {
+        // The log-time guard (cycles::CycleWindowImplausible) already blanked
+        // implausible windows; skip any non-finite or non-positive straggler
+        // so the totals and the ratio distribution stay clean.
+        if (!std::isfinite(w.window_ms) || w.window_ms <= 0.0 ||
+            !std::isfinite(w.d_aperf) || w.d_aperf < 0.0 ||
+            !std::isfinite(w.d_mperf) || w.d_mperf <= 0.0) {
+            continue;
+        }
+        ++out.window_count;
+        out.total_aperf_cycles += w.d_aperf;
+        out.total_mperf_cycles += w.d_mperf;
+        out.total_window_s += w.window_ms / 1.0e3;
+        // Same architectural ratio as cycles::AperfMperfRatio (actual / P0
+        // multiplier), computed in the double domain the CSV deltas live in.
+        per_window_ratios.push_back(w.d_aperf / w.d_mperf);
+    }
+    if (out.window_count > 0 && out.total_mperf_cycles > 0.0) {
+        out.aperf_mperf_ratio =
+            out.total_aperf_cycles / out.total_mperf_cycles;
+    }
+    out.ratio_p50 = Percentile(per_window_ratios, 50.0);
+    out.ratio_p90 = Percentile(per_window_ratios, 90.0);
+    out.ratio_max = Percentile(per_window_ratios, 100.0);
+    if (out.aperf_mperf_ratio.has_value() && out.p0_mhz.has_value()) {
+        out.effective_mhz = *out.aperf_mperf_ratio * *out.p0_mhz;
+    }
+    return out;
+}
+
 }  // namespace svg_mb_control::analyze::report_detail

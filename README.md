@@ -279,6 +279,7 @@ release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --retain-days 14 --apply
 release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --idle-seconds 300
 release\svg-mb-control.exe analyze report --run 7 --load-threshold-c 70 --json
+release\svg-mb-control.exe analyze report --run 7 --p0-mhz 4300 --json
 release\svg-mb-control.exe analyze report --run 7 --idle-seconds 300 --profile combined-load --notes "ambient and subjective noise notes" --out runtime\analysis\combined-load-summary.txt --manifest-out runtime\analysis\combined-load-manifest.json
 ```
 
@@ -287,7 +288,7 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `9`). The schema
+- The DB schema is bootstrapped on first use (schema version `10`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
@@ -296,11 +297,17 @@ Behavior:
   CPU/GPU/guard attribution for the primary curve input,
   `tick_channel_samples.low_band_stage_boost_pct` /
   `low_band_effective_boost_pct` record the per-channel low-band boost (staged
-  and effective), and the nullable `tick_samples.cpu_power_sample_id` /
+  and effective), the nullable `tick_samples.cpu_power_sample_id` /
   `cpu_power_window_ms` / `cpu_pkg_energy_delta_uj` /
   `cpu_pkg_energy_acquisition` columns carry the read-only RAPL package-energy
   evidence (FEAT-0006) from which `analyze report` derives time-weighted
-  average package power.
+  average package power, and the nullable `tick_samples.cpu_cycles_sample_id` /
+  `cpu_cycles_window_ms` / `cpu_aperf_delta` / `cpu_mperf_delta` /
+  `cpu_cycles_acquisition` columns carry the read-only APERF/MPERF cycle
+  evidence (FEAT-0006) from which `analyze report` derives the cycle-weighted
+  APERF/MPERF ratio over distinct sample-id windows — and effective frequency
+  (ratio × P0) only when `--p0-mhz <mhz>` supplies the base frequency, since
+  no logged field records P0.
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.
