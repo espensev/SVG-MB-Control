@@ -25,6 +25,14 @@ checkable.
 
 ## 2026-06-10
 
+- **Added / Idea** — `docs/cpu-power-feedforward-plan-2026-06-10.md`: planning
+  scaffold for a CPU package-power anticipation boost (a fifth
+  `kBoostStageSpecs` stage keyed on derived watts), explicitly NOT authorized
+  work — the v1 energy decision bans control use, so the path is gated:
+  quarantine exit (Gate 0) → default-on decision (Gate 1) → lead-time
+  characterization with an explicit no-go and a `system_cpu_busy_pct`
+  alternative comparison (Gate 2) → new FEAT intake (Gate 3), then
+  shadow-mode → replay → capped live phases.
 - **Fixed** — stale deployment claims about the 2026-06-09 GPU retune:
   `gpu-response-curve-retune-2026-06-09.md` §5 said the retuned config was
   "not built, published, or restarted on the live worker", and
