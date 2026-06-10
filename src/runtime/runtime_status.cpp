@@ -6,8 +6,9 @@
 
 #include "windows_lean.h"
 
+#include <array>
 #include <cmath>
-#include <utility>
+#include <string>
 
 namespace svg_mb_control {
 
@@ -28,12 +29,21 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
     };
     // Per-stage boost overlays. Keys built from kBoostStageSpecs so the
     // "last_<name>_boost_pct" contract stays driven by the table rather
-    // than by four hand-rolled fields.
+    // than by four hand-rolled fields. The key strings never change, so
+    // they are built once on first use (thread-safe static init) instead
+    // of on every status write.
+    static const std::array<std::string, kBoostStageCount> kBoostKeys =
+        [] {
+            std::array<std::string, kBoostStageCount> keys;
+            for (std::size_t i = 0; i < kBoostStageCount; ++i) {
+                keys[i] = "last_";
+                keys[i].append(kBoostStageSpecs[i].name);
+                keys[i].append("_boost_pct");
+            }
+            return keys;
+        }();
     for (std::size_t i = 0; i < kBoostStageCount; ++i) {
-        std::string key = "last_";
-        key.append(kBoostStageSpecs[i].name);
-        key.append("_boost_pct");
-        status[std::move(key)] = channel.boosts[i].boost_pct;
+        status[kBoostKeys[i]] = channel.boosts[i].boost_pct;
     }
     status["last_low_band_stage_boost_pct"] = channel.low_band_stage_boost_pct;
     status["last_low_band_effective_boost_pct"] =
