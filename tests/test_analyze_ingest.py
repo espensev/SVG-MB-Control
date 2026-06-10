@@ -536,13 +536,7 @@ def _age_archive_bundle(runtime_home: Path, days: int = 3) -> tuple[Path, Path]:
     return csv_path, manifest_path
 
 
-class AnalyzeIngestTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class AnalyzeIngestTests(WindowsExeTestCase):
     def test_ingest_populates_all_tables(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
@@ -1008,13 +1002,7 @@ def _build_energy_fixture(
     return runtime_home
 
 
-class AnalyzeReportTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class AnalyzeReportTests(WindowsExeTestCase):
     def test_report_text_summarises_bands_and_response(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

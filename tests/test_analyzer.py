@@ -4,10 +4,9 @@ import json
 import subprocess
 import sys
 import tempfile
-import unittest
 from pathlib import Path
 
-from tests.helpers import REPO_ROOT, _ensure_release_build
+from tests.helpers import REPO_ROOT, WindowsExeTestCase
 
 ANALYZER = REPO_ROOT / "scripts" / "analyze_control_run.py"
 
@@ -64,13 +63,7 @@ def _run_wrapper(*args: str) -> subprocess.CompletedProcess:
     )
 
 
-class AnalyzerWrapperTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("svg-mb-control.exe is Windows-only")
-        _ensure_release_build()
-
+class AnalyzerWrapperTests(WindowsExeTestCase):
     def _write_csv(self, td: Path) -> Path:
         csv_path = td / "run.csv"
         csv_path.write_text(CSV_TEXT, encoding="utf-8")

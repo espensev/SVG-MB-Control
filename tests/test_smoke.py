@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class SmokeTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class SmokeTests(WindowsExeTestCase):
     def test_direct_one_shot_outputs_json(self) -> None:
         result = _run_control(
             "--mode",

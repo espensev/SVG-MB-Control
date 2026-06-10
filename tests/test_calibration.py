@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class CalibrationTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class CalibrationTests(WindowsExeTestCase):
     def test_calibrate_writes_plant_model_capture(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

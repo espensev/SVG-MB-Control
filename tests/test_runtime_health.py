@@ -3,13 +3,7 @@ from __future__ import annotations
 from tests.helpers import *
 
 
-class RuntimeHealthTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        if sys.platform != "win32":
-            raise unittest.SkipTest("Windows-only repo")
-        _ensure_release_build()
-
+class RuntimeHealthTests(WindowsExeTestCase):
     def _run_health(self, config_path: Path) -> tuple[int, dict, str]:
         result = _run_control("--health", "--json", "--config", str(config_path))
         self.assertEqual(result.stderr, "")
