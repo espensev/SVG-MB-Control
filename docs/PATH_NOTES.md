@@ -25,6 +25,22 @@ checkable.
 
 ## 2026-06-10
 
+- **Done** — applied all four finding groups of
+  `docs/testing-and-hotpath-simplification-review-2026-06-10.md`, one commit
+  per group: TS-1/TS-2 (`tests/cpp/test_helpers.h` shared
+  `g_failures`/`ExpectTrue`/`ExpectFalse`/`ExpectNear`/`ExpectEqual`/
+  `UniqueTempSuffix`; 11 test files migrated; `csv_rows_tests` keeps its
+  field-matcher variants by design), TS-3 (`WindowsExeTestCase` base in
+  `tests/helpers.py`; 11 files / 12 classes — incl. `test_analyzer.py`, which
+  the original grep missed via its variant skip message), HP-1 (3-arg
+  `BuildControlLoopCsvRow` overload deleted; sole test caller builds the
+  index explicitly), HP-2 (status-JSON boost keys precomputed once,
+  byte-identical). Deliberate deviation: shared `ExpectNear` now FAILS
+  NaN-vs-number (historical copies silently passed it); suite-verified
+  unchanged outcomes. Executed as a 24-agent workflow over disjoint files +
+  4 adversarial diff lenses (0 blockers); gated by `Test-LocalCI` (CTest
+  12/12, Python lane 133 tests, counts unchanged). Review doc now carries
+  per-finding Applied notes + an execution record.
 - **Added** — power-anticipation design-support increment (no control wiring;
   the live path stays gated per the feed-forward plan):
   `src/control/power_anticipation.h` (pure watts-derivation + hold/stale

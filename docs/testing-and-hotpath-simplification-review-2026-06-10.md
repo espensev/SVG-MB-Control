@@ -1,11 +1,14 @@
 # Testing/Script Stack and Runtime Hot-Path Simplification Review — 2026-06-10
 
-Status: **review findings, not applied.** Two read-only sweeps (test/script
-stack; runtime hot paths) with every load-bearing claim re-verified against the
-cited code by the session that wrote this doc. Behavior-preserving refactors do
-not require a feature spec (`AGENTS.md` §Feature Intake Gate), but none of the
-changes below are applied; each is small enough to land as its own commit when
-picked up. Prior completed passes were read first and are not re-proposed:
+Status: **applied 2026-06-10** (same day, maintainer-directed; one commit per
+finding group — see the per-finding "Applied" notes and `git log`). Originally
+two read-only sweeps (test/script stack; runtime hot paths) with every
+load-bearing claim re-verified against the cited code. Behavior-preserving
+refactors do not require a feature spec (`AGENTS.md` §Feature Intake Gate).
+The application pass was executed as a 24-agent migration workflow over
+disjoint files plus 4 adversarial verification lenses over the complete diff
+(0 blockers), then gated by `Test-LocalCI.ps1 -KeepBuildDir` (CTest 12/12,
+hermetic Python lane 133 tests). Prior completed passes were read first and are not re-proposed:
 `docs/testing-harness-evaluation-2026-06-06.md` (all 7 recommendations applied),
 `docs/SCRIPT_STACK_REVIEW.md`, `docs/CONTROL_SIMPLIFICATION_TARGETS.md`,
 `docs/archive/build-optimization-results.md`.
@@ -35,6 +38,14 @@ follows the same pattern, so the duplication grows with each new test.
   assertion changes outcome).
 - Estimated saving: ~120 LOC now, plus ~15 LOC per future test.
 - Risk: low. Pure extraction; CTest names/registration unchanged.
+- **Applied 2026-06-10**, with one deliberate deviation beyond this finding's
+  "strictly more lenient" wording: the shared `ExpectNear` makes NaN-vs-number
+  FAIL (every historical per-file copy silently passed it, because
+  `fabs(NaN - x) > tol` is false). Documented in the header; verified
+  non-outcome-changing on the current suite (CTest 12/12). Failure-message
+  text is standardized (boost_stage's ` diff` suffix dropped — stderr text
+  only). `csv_rows_tests.cpp` keeps its own `g_failures` + field matchers by
+  design and does not include the header.
 
 ### TS-2 (verified) — `UniqueTempSuffix` duplicated in 2 C++ test files
 
@@ -42,6 +53,9 @@ follows the same pattern, so the duplication grows with each new test.
 `tests/cpp/channel_write_tests.cpp` both implement the per-process
 random-salted temp suffix introduced by the 2026-06-06 harness pass (3
 occurrences each). Belongs in the same shared header as TS-1.
+
+**Applied 2026-06-10**: both copies removed; the single definition lives in
+`tests/cpp/test_helpers.h`.
 
 ### TS-3 (verified) — Windows-gate `setUpClass` boilerplate in 10 Python test files
 
@@ -56,6 +70,14 @@ occurrences each). Belongs in the same shared header as TS-1.
   discovery.
 - Estimated saving: ~40 LOC.
 - Risk: low; no logic change.
+- **Applied 2026-06-10** to 11 files / 12 classes — one more file than this
+  finding counted: `test_analyzer.py`'s gate escaped the original grep
+  because its skip message read "svg-mb-control.exe is Windows-only"; it now
+  reports the base class's "Windows-only repo" (skip-reason text only). The
+  base class is exported through the module's dynamic `__all__` into
+  star-importing modules; it must never gain `test_*` methods (constraint
+  documented in its docstring — a test there would run once per importing
+  module). Discovery collects the same 133 cases before and after.
 
 ### TS-R1 (rejected) — Build-Release.ps1 "duplicate hashing" is deliberate verification
 
@@ -93,6 +115,11 @@ code.
 - Proposal: delete the 3-arg overload (header + impl, ~12 LOC) and build the
   index explicitly in the one test call site (~3 LOC).
 - Risk: low; compile-checked by the test itself.
+- **Applied 2026-06-10**: overload deleted from `runtime_csv_rows.h`/`.cpp`;
+  `csv_rows_tests.cpp` now builds the index explicitly (its existing
+  `runtime_snapshot.h` include provides the type); repo-wide grep confirms
+  zero remaining 3-arg callers and `tick_runner.cpp:371` (cached index,
+  4-arg) is untouched.
 
 ### HP-2 (verified, negligible) — status-JSON boost keys built per write
 
@@ -103,6 +130,12 @@ constructions per 2.5 s across 6 channels — measurable in lines of code, not
 in runtime. The in-code comment explains the table-driven contract is the
 point. Optional: precompute the four keys once (static table built from
 `kBoostStageSpecs` at first use). Worth doing only as a drive-by.
+
+**Applied 2026-06-10** (the drive-by condition was met — `runtime_status.cpp`
+was open as part of this pass): a function-local static `kBoostKeys` array is
+built once from `kBoostStageSpecs` (magic-static thread-safe init); emitted
+JSON keys are byte-identical in the same order; `<utility>` dropped with the
+removed `std::move`.
 
 ### HP-3 (checked, fine as-is) — recorded so future sweeps skip them
 
@@ -123,13 +156,13 @@ point. Optional: precompute the four keys once (static table built from
   (`runtime_csv_rows.cpp:430`): already allocation-free per tick.
 - Boost-stage and low-band math: no allocations, no string work.
 
-## Suggested order if picked up
+## Execution record (2026-06-10)
 
-1. TS-1 + TS-2 together (one shared header, mechanical).
-2. TS-3 (one base class, mechanical).
-3. HP-1 (small, self-verifying).
-4. HP-2 only as a drive-by when `runtime_status.cpp` is open for other work.
-
-Each is behavior-preserving; validation per `AGENTS.md` §Change Checklist is
-`Test-LocalCI.ps1 -KeepBuildDir` for the C++ items and the hermetic Python
-lane for TS-3.
+All four groups were applied the same day in the suggested order
+(TS-1+TS-2, TS-3, HP-1, HP-2 as the permitted drive-by), one commit per
+group. Validation: `Test-LocalCI.ps1 -KeepBuildDir` green on the final tree —
+build clean, CTest 12/12 (same targets), hermetic Python lane 133 tests (same
+collection count before/after). Adversarial diff verification (4 independent
+lenses: C++ assertion semantics/ODR, Python migration/imports, runtime
+byte-identity, completeness) reported 0 blockers; the minor accepted
+deviations are recorded in the per-finding "Applied" notes above.
