@@ -270,6 +270,26 @@ if(SVG_MB_CONTROL_BUILD_CYCLE_PROBE AND WIN32)
         OUTPUT_NAME "cpu-cycle-counter-probe")
 endif()
 
+# Throwaway synthetic CPU load generator for the FEAT-0006 CPU-energy
+# quarantine-exit capture: drives a controlled all-core load so a session has a
+# clean idle->load->cooldown step. OFF by default: not built by Test-LocalCI /
+# Build-Release / CTest, never shipped in release\, not part of the control
+# loop. Self-contained (no svg_mb_control_core link, no src/hardware, no MSR).
+# Build with
+#   cmake -DSVG_MB_CONTROL_BUILD_SYNTH_LOAD=ON ... && cmake --build ... \
+#         --target cpu_synth_load
+option(SVG_MB_CONTROL_BUILD_SYNTH_LOAD
+    "Build the throwaway synthetic CPU load generator (FEAT-0006 capture)" OFF)
+if(SVG_MB_CONTROL_BUILD_SYNTH_LOAD AND WIN32)
+    add_executable(cpu_synth_load tools/cpu_synth_load.cpp)
+    target_compile_features(cpu_synth_load PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(cpu_synth_load PRIVATE /W4 /permissive- /arch:AVX2)
+    endif()
+    set_target_properties(cpu_synth_load PROPERTIES
+        OUTPUT_NAME "cpu-synth-load")
+endif()
+
 if(BUILD_TESTING)
     # Every core-linked C++ test shares identical wiring: one executable built
     # from a tests/cpp/*.cpp, linked against svg_mb_control_core, configured with
