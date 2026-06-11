@@ -25,6 +25,8 @@ constexpr std::array<std::uint16_t, 7u> kNct6701FanCountRegisters = {
 };
 constexpr unsigned int kSioTransientAttempts = 3u;
 constexpr unsigned int kSioTransientRetryDelayMs = 75u;
+constexpr unsigned int kSioInitAttempts = 5u;
+constexpr unsigned int kSioInitRetryDelayMs = 250u;
 
 std::string StatusString(MbSioStatus status) {
     return std::string(mb_sio_status_string(status));
@@ -92,18 +94,36 @@ class SioFanWriter final : public FanWriter {
         policy.restore_on_exit = false;
         policy.blocked_channels = runtime_policy.blocked_channels;
 
+        // Chip detection can fail transiently when another hardware monitor
+        // probes the Super I/O config space concurrently (observed
+        // 2026-06-11: the boot-time worker lost the NCT6701D probe while a
+        // sibling fan tool was polling, and the supervisor treats a startup
+        // failure as fatal). init() begins with an internal close(), so
+        // re-running the init+discover sequence is safe.
         std::string warning;
-        if (!controller_.init(policy, warning)) {
-            if (warning.empty()) {
-                warning = "unknown init failure";
+        for (unsigned int attempt = 1u;; ++attempt) {
+            warning.clear();
+            const bool init_ok = controller_.init(policy, warning);
+            if (init_ok) {
+                device_ = controller_.discover();
+                if (device_.sio_available) {
+                    return;
+                }
             }
-            throw std::runtime_error("svg_mb_sio init failed: " + warning);
-        }
-
-        device_ = controller_.discover();
-        if (!device_.sio_available) {
-            throw std::runtime_error(
-                "svg_mb_sio did not discover a supported Super I/O device.");
+            if (attempt >= kSioInitAttempts) {
+                if (!init_ok) {
+                    if (warning.empty()) {
+                        warning = "unknown init failure";
+                    }
+                    throw std::runtime_error("svg_mb_sio init failed: " +
+                                             warning);
+                }
+                throw std::runtime_error(
+                    "svg_mb_sio did not discover a supported Super I/O "
+                    "device.");
+            }
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(kSioInitRetryDelayMs));
         }
     }
 

@@ -37,8 +37,19 @@ function Get-Marker {
         Select-Object -First 1) -split ','
     $i = [array]::IndexOf($hdr, 'cpu_pkg_energy_acquisition')
     if ($i -lt 0) { return $null }
-    $last = (Get-Content $live -Tail 1) -split ','
-    if ($i -lt $last.Count) { return $last[$i].Trim() }
+    # The worker appends a fresh header section on every start, so the file
+    # can end on a header row (worker died before its first data row,
+    # observed 2026-06-11). Scan back to the last data row instead of
+    # reading only the final line.
+    $tail = @(Get-Content $live -Tail 50)
+    for ($n = $tail.Count - 1; $n -ge 0; $n--) {
+        $line = $tail[$n]
+        if ([string]::IsNullOrWhiteSpace($line) -or $line -match '^#') { continue }
+        $f = $line -split ','
+        if ($i -lt $f.Count -and $f[$i].Trim() -ne 'cpu_pkg_energy_acquisition') {
+            return $f[$i].Trim()
+        }
+    }
     return $null
 }
 
