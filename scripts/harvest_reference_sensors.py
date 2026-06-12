@@ -15,6 +15,13 @@ docs/cpu-energy-quarantine-exit-capture-runbook-2026-06-10.md; this tool only
 collects. It writes one row per interval so the scorer can align the steady
 load sub-window against the control-loop energy window.
 
+On start it also writes `<out>.provenance.txt` listing EVERY HWiNFO
+"CPU Package Power" [W] reading with its sensor group and marking the one
+selected as the SMU reference. That makes the criterion-3 independence claim
+auditable: a reviewer can confirm the selected sensor is the SMU/"Enhanced"
+source and not a second, RAPL-derived "CPU Package Power" that would make the
++/-15% cross-check tautological.
+
 Usage:
   python harvest_reference_sensors.py --seconds 1200 --interval 1.0 --out ref.csv
   python harvest_reference_sensors.py --until-stop --out ref.csv   # Ctrl-C to end
@@ -55,11 +62,15 @@ def _cstr(buf, off, n):
     return raw.decode("latin-1", "replace").strip()
 
 
-def read_hwinfo_cpu_pkg_w():
-    """The SMU 'CPU Package Power' (W) from HWiNFO shared memory, or None."""
+def hwinfo_pkg_power_candidates():
+    """Every HWiNFO 'CPU Package Power' [W] reading as (group, index, watts).
+
+    Returns ALL matches regardless of sensor group so the SMU-vs-RAPL ambiguity
+    (runbook 3) stays visible instead of being silently resolved by first-match.
+    """
     m = _open_hwinfo(HWINFO_HEADER_SIZE)
     if m is None:
-        return None
+        return []
     try:
         (_sig, _ver, _rev, _pt, off_sens, sz_sens, n_sens,
          off_read, sz_read, n_read) = struct.unpack(
@@ -69,7 +80,8 @@ def read_hwinfo_cpu_pkg_w():
     full = off_read + n_read * sz_read
     m = _open_hwinfo(full)
     if m is None:
-        return None
+        return []
+    out = []
     try:
         sensor_names = [_cstr(m, off_sens + i * sz_sens + 8, 128)
                         for i in range(n_sens)]
@@ -81,12 +93,30 @@ def read_hwinfo_cpu_pkg_w():
                 continue
             sidx = struct.unpack_from("<I", m, base + 4)[0]
             sname = sensor_names[sidx] if sidx < len(sensor_names) else ""
-            # The "Enhanced" CPU sensor is the SMU source we want.
-            if "CPU" in sname or "Ryzen" in sname:
-                return struct.unpack_from("<d", m, base + 284)[0]
-        return None
+            watts = struct.unpack_from("<d", m, base + 284)[0]
+            out.append((sname, i, watts))
     finally:
         m.close()
+    return out
+
+
+def _is_smu_group(group):
+    """The 'Enhanced' CPU sensor (group names the CPU/Ryzen) is the SMU source."""
+    return "CPU" in group or "Ryzen" in group
+
+
+def select_smu_candidate(candidates):
+    """The (group, index, watts) used as the SMU reference, or (None, None, None)."""
+    for group, idx, watts in candidates:
+        if _is_smu_group(group):
+            return group, idx, watts
+    return None, None, None
+
+
+def read_hwinfo_cpu_pkg_w():
+    """The SMU 'CPU Package Power' (W) from HWiNFO shared memory, or None."""
+    _group, _idx, watts = select_smu_candidate(hwinfo_pkg_power_candidates())
+    return watts
 
 
 def read_lhm_cpu_pkg_w(timeout=2.0):
@@ -128,6 +158,25 @@ def main(argv=None):
     if args.seconds <= 0.0 and not args.until_stop:
         print("Specify --seconds N or --until-stop", file=sys.stderr)
         return 2
+
+    # Criterion-3 independence audit: dump every 'CPU Package Power' [W] reading
+    # and mark the one selected as the SMU reference, so a reviewer can confirm
+    # it is the SMU/"Enhanced" source and not a RAPL-derived twin.
+    candidates = hwinfo_pkg_power_candidates()
+    sel_group, sel_idx, _sel_w = select_smu_candidate(candidates)
+    prov_path = args.out.with_name(args.out.stem + ".provenance.txt")
+    with prov_path.open("w", encoding="utf-8") as pf:
+        pf.write("HWiNFO 'CPU Package Power' [W] readings at harvest start "
+                 "(criterion-3 SMU-independence audit).\n"
+                 "The SMU reference must NOT be a RAPL-derived sensor.\n\n")
+        if not candidates:
+            pf.write("  (none found -- HWiNFO not running / sensor disabled?)\n")
+        for group, idx, watts in candidates:
+            mark = " <== SELECTED as SMU reference" if idx == sel_idx else ""
+            pf.write(f"  [{idx}] group='{group}'  {watts:.2f} W{mark}\n")
+    if not args.quiet:
+        print(f"pkg-power provenance -> {prov_path} "
+              f"({len(candidates)} candidate(s), selected group='{sel_group}')")
 
     start = time.monotonic()
     deadline = start + args.seconds if args.seconds > 0 else None

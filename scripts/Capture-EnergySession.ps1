@@ -40,6 +40,7 @@ $ReleaseRoot = Join-Path $RepoRoot 'release'
 $LiveCsv = Join-Path $ReleaseRoot 'runtime\logs\svg_mb_control_output.csv'
 $TaskPath = '\SVG-MB Control\'
 $TaskName = 'SVG-MB Control'
+$WatchdogName = 'SVG-MB Control Watchdog'
 $EnergyVar = 'SVG_MB_CONTROL_RAPL_ENERGY_MODE'
 $CyclesVar = 'SVG_MB_CONTROL_CPU_CYCLES_MODE'
 $MarkerCol = 'cpu_pkg_energy_acquisition'
@@ -97,6 +98,11 @@ function Get-LiveMarker {
 function Restart-WorkerTree {
     param([string]$Reason)
     Write-Host "  restart worker tree ($Reason)" -ForegroundColor Cyan
+    # Stop the watchdog FIRST (runbook 4) so it cannot respawn the worker mid-swap
+    # with the pre-swap env. Best-effort: a missing/idle watchdog is not fatal.
+    try { Stop-ScheduledTask -TaskPath $TaskPath -TaskName $WatchdogName -ErrorAction Stop } catch {
+        Write-Warning "Stop-ScheduledTask watchdog: $($_.Exception.Message)"
+    }
     try { Stop-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName -ErrorAction Stop } catch {
         Write-Warning "Stop-ScheduledTask: $($_.Exception.Message)"
     }
@@ -111,6 +117,11 @@ function Restart-WorkerTree {
         Start-Sleep -Milliseconds 500
     }
     Start-ScheduledTask -TaskPath $TaskPath -TaskName $TaskName
+    # Restore watchdog protection now that the worker is up (it would also re-arm
+    # on its own trigger). The marker check below tolerates a brief health-restart.
+    try { Start-ScheduledTask -TaskPath $TaskPath -TaskName $WatchdogName -ErrorAction Stop } catch {
+        Write-Warning "Start-ScheduledTask watchdog: $($_.Exception.Message)"
+    }
 }
 
 function Wait-ForMarker {
