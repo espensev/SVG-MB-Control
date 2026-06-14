@@ -77,42 +77,74 @@ stays default-off).
 
 ## Runbook (Option B execution)
 
-Manual, operator-run on the test machine. Reverting the frequency lock is
-mandatory.
+Manual, operator-run on the test machine (MAINDESK, Ryzen 9 9950X3D). Reverting
+the frequency lock is mandatory. The scorer support is implemented
+(`scripts/score_energy_session.py` `--p0-mhz` / `--locked-mhz` / `--freq-tol-pct`,
+commit e99505b); only the frequency lock and the capture run remain manual.
+
+Preflight (verified 2026-06-14, read-only): `Win32_Processor.MaxClockSpeed`
+confirms the rated base = **4300 MHz** (`--p0-mhz 4300`); HWiNFO64 is running; the
+worker task `\SVG-MB Control\SVG-MB Control` exists; `cpu-synth-load.exe` is
+cached in `%TEMP%`; energy/cycle env are both `disabled`.
 
 Key relationship: MPERF increments at the rated P0 (base) frequency, APERF at the
 actual core clock, both only in C0, so `effective MHz = (dAPERF/dMPERF) x P0_base`.
-`--p0-mhz` is therefore the part's **rated base** (a constant, e.g. ~4300 for the
-9950X3D), while `--locked-mhz` is the clock you actually lock to. Lock to a clock
-**distinct from the base** so the ratio is non-unity: a lock at the base gives
-ratio ~= 1.0 and the derived MHz equals the setpoint for any base value, so it
-tests affinity and counter health but not the base multiplier. An **underclock**
-(for example a fixed 3000 MHz P-state) is the safest distinct setpoint and needs
-no overclock.
+`--p0-mhz` is the part's **rated base** (4300, constant); `--locked-mhz` is the
+clock you actually lock to. Lock to a clock **distinct from the base** so the
+ratio is non-unity: a lock at the base gives ratio ~= 1.0 and the derived MHz
+equals the setpoint for any base value, so it tests affinity and counter health
+but not the base multiplier. An **underclock** (e.g. a fixed 3000 MHz) is the
+safest distinct setpoint and needs no overclock.
 
-1. Record the rated base frequency `B` for the part (`--p0-mhz B`).
-2. Lock one core to a fixed clock `S` (`S != B`), boost disabled. Ryzen Master
-   "fixed clock" / a fixed BIOS P-state both work. The cycle reader pins to
-   core 0 (`amd_reader.cpp` `SampleCpuCycles`), so lock all-core or lock core 0,
-   and make sure the load keeps core 0 in C0.
-3. Capture a cycles-enabled load session on that core through the existing
-   pipeline (`Capture-EnergySession.ps1` with cycles enabled), or any run that
-   leaves a control CSV + manifest with idle/load phases.
-4. Score criterion 4 against the lock:
-   `python scripts/score_energy_session.py --manifest <out>/manifest.json
-   --session-num N --p0-mhz B --locked-mhz S` (tolerance defaults to +/-5%, set
-   `--freq-tol-pct` to change it). `p0_mhz`/`locked_mhz`/`freq_tol_pct` may
-   instead live in the manifest.
-5. **Revert the lock** (Ryzen Master "Default" / re-enable boost / reboot). Do
-   not leave boost disabled on the machine.
+### 1. Lock the clock to `S` (`S != 4300`; underclock safest)
+Ryzen Master -> Manual -> CPU Clock Speed = 3000 MHz -> Apply & Test. Verify it
+holds: in HWiNFO under a quick load, Core/Effective Clock should sit at ~3000, not
+boost to 5000+. The cycle reader pins to core 0 (`amd_reader.cpp`
+`SampleCpuCycles`), so lock all-core (or core 0) and keep core 0 in C0 under load.
+Record `S`. (Weaker no-OC-tool alternative: disable boost only -> cores cap at
+4300, ratio ~= 1.0; tests affinity + counter health but not the base multiplier.)
 
-Interpretation:
+### 2. Capture a cycles-enabled session (elevated; approve the UAC prompt)
+```
+.\scripts\Capture-EnergySession.ps1 -SessionLabel cycles-optionB
+```
+Cycles are on by default (do not pass `-EnergyOnly`). Default profile idle 300s ->
+load 720s -> cooldown 300s (~22 min); the all-thread synthetic load saturates
+core 0. Faster run (the cycle ratio needs no energy wrap):
+`-IdleSeconds 120 -LoadSeconds 360 -CooldownSeconds 120` (~10 min). The script
+enables energy+cycles, restarts the worker, runs the phases, and ALWAYS reverts
+energy to `disabled`; it prints the OutDir / manifest path at the end.
+
+### 3. Score criterion 4 against the lock
+```
+python scripts\score_energy_session.py --manifest "<OutDir>\manifest.json" --session-num 4 --p0-mhz 4300 --locked-mhz 3000
+```
+Swap `3000` for the actual `S`. Criterion 4 -> PASS if the derived load MHz is
+within +/-5% of `S` (`--freq-tol-pct` to change). `p0_mhz` / `locked_mhz` /
+`freq_tol_pct` may instead live in the manifest.
+
+### 4. Revert the lock -- mandatory
+Ryzen Master -> Default -> Apply (or reboot), re-enable boost, confirm clocks
+boost again under load. Do not leave the machine underclocked.
+
+### Interpretation
 - PASS (derived load MHz within tolerance of `S`): the `ratio x P0` derivation,
-  the base value `B`, and affinity-honoring on the enabled path are confirmed.
-  This is the criterion-4 evidence; cycle-marker promotion is then a separate
-  governance step (the same per-row-stamp consideration as the energy marker).
-- FAIL: either the base `B` is wrong (retry with the correct base) or affinity is
-  not honored, giving a cross-core ratio. Investigate before any promotion.
+  the 4300 base, and affinity-honoring on the enabled path are confirmed -- the
+  criterion-4 evidence. Cycle-marker promotion is then a separate governance step
+  (the same per-row-stamp consideration as the energy marker; likely also "no code
+  stamp" until a consumer exists).
+- FAIL: either the base is wrong (unlikely; 4300 is confirmed from the part) or
+  affinity is not honored, giving a cross-core ratio. Investigate before any
+  promotion.
+
+Notes:
+- HWiNFO running also scores criterion 3 (SMU cross-check); it is not required for
+  criterion 4. Because boost is off, the energy criteria (2/3) reflect the lower
+  locked power -- they should still pass but were already validated at stock in
+  sessions 1-3, so criterion 4 is the point of this run.
+- Cost/return: criterion-4 evidence has no downstream consumer until the
+  cycles-per-Joule join (below) exists, so this run mainly de-risks the cycle path
+  for the eventual efficiency analysis.
 
 Safety: locking the clock on MAINDESK changes CPU power/thermals; the live
 SVG-MB controller reacts to temperature normally and is not at risk, but the lock
