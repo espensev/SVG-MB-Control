@@ -75,6 +75,49 @@ disabled) on the test machine and is a manual, operator-run step. It is not
 performed automatically and does not change the live controller (the cycle path
 stays default-off).
 
+## Runbook (Option B execution)
+
+Manual, operator-run on the test machine. Reverting the frequency lock is
+mandatory.
+
+Key relationship: MPERF increments at the rated P0 (base) frequency, APERF at the
+actual core clock, both only in C0, so `effective MHz = (dAPERF/dMPERF) x P0_base`.
+`--p0-mhz` is therefore the part's **rated base** (a constant, e.g. ~4300 for the
+9950X3D), while `--locked-mhz` is the clock you actually lock to. Lock to a clock
+**distinct from the base** so the ratio is non-unity: a lock at the base gives
+ratio ~= 1.0 and the derived MHz equals the setpoint for any base value, so it
+tests affinity and counter health but not the base multiplier. An **underclock**
+(for example a fixed 3000 MHz P-state) is the safest distinct setpoint and needs
+no overclock.
+
+1. Record the rated base frequency `B` for the part (`--p0-mhz B`).
+2. Lock one core to a fixed clock `S` (`S != B`), boost disabled. Ryzen Master
+   "fixed clock" / a fixed BIOS P-state both work. The cycle reader pins to
+   core 0 (`amd_reader.cpp` `SampleCpuCycles`), so lock all-core or lock core 0,
+   and make sure the load keeps core 0 in C0.
+3. Capture a cycles-enabled load session on that core through the existing
+   pipeline (`Capture-EnergySession.ps1` with cycles enabled), or any run that
+   leaves a control CSV + manifest with idle/load phases.
+4. Score criterion 4 against the lock:
+   `python scripts/score_energy_session.py --manifest <out>/manifest.json
+   --session-num N --p0-mhz B --locked-mhz S` (tolerance defaults to +/-5%, set
+   `--freq-tol-pct` to change it). `p0_mhz`/`locked_mhz`/`freq_tol_pct` may
+   instead live in the manifest.
+5. **Revert the lock** (Ryzen Master "Default" / re-enable boost / reboot). Do
+   not leave boost disabled on the machine.
+
+Interpretation:
+- PASS (derived load MHz within tolerance of `S`): the `ratio x P0` derivation,
+  the base value `B`, and affinity-honoring on the enabled path are confirmed.
+  This is the criterion-4 evidence; cycle-marker promotion is then a separate
+  governance step (the same per-row-stamp consideration as the energy marker).
+- FAIL: either the base `B` is wrong (retry with the correct base) or affinity is
+  not honored, giving a cross-core ratio. Investigate before any promotion.
+
+Safety: locking the clock on MAINDESK changes CPU power/thermals; the live
+SVG-MB controller reacts to temperature normally and is not at risk, but the lock
+must be reverted afterward.
+
 ## Separate open item: cycles-per-Joule join
 
 Effective frequency and package energy are logged under different sample windows
