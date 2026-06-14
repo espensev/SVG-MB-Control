@@ -86,7 +86,8 @@ Both processes run as Windows Scheduled Tasks under task path
   `svg-mb-control.exe --start --config <path>` (`src\platform\task_runner.cpp`),
   which starts the long-running mode named in the config (`read-loop` or
   `control-loop`; the shipped config uses `control-loop`). Installed by
-  `Install-SVG-MB-ControlScheduledTask.ps1`.
+  `Install-SVG-MB-ControlScheduledTask.ps1` with system-startup and
+  current-user logon triggers.
 - `SVG-MB Control Watchdog` — recovery task whose scheduled-task action runs
   `svg-mb-control-task-runner.exe --watchdog-run --config "<path>"`
   (`Install-SVG-MB-ControlWatchdogScheduledTask.ps1`). On `--watchdog-run`, the

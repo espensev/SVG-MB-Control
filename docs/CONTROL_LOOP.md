@@ -244,11 +244,12 @@ Startup/config failures are reported immediately instead of entering a restart
 loop.
 
 The normal Windows install path is
-`Install-SVG-MB-ControlScheduledTask.ps1`. It registers an at-logon scheduled
-task named `SVG-MB Control` for the current user, runs it elevated, and starts
-the controller immediately. The task action invokes `svg-mb-control.exe --start`
-with the packaged `control.json`, so logon startup uses the same supervised
-launch path as a manual operator start.
+`Install-SVG-MB-ControlScheduledTask.ps1`. It registers a scheduled task named
+`SVG-MB Control` for system startup and current-user logon, runs it elevated,
+and starts the controller immediately. The task action invokes
+`svg-mb-control-task-runner.exe --start --config <release\control.json>`, so
+startup and logon launches use the same supervised path as a manual operator
+start.
 
 Operator commands use the same runtime-home resolution as the active config:
 

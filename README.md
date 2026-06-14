@@ -165,9 +165,9 @@ cd .\release
 .\Install-SVG-MB-ControlScheduledTask.ps1
 ```
 
-This registers an at-logon scheduled task named `SVG-MB Control` for the current
-user, runs it elevated, and starts the controller immediately. In the release
-package, the task action uses
+This registers a scheduled task named `SVG-MB Control` for system startup and
+current-user logon, runs it elevated, and starts the controller immediately. In
+the release package, the task action uses
 `svg-mb-control-task-runner.exe --start --config <release\control.json>`, so
 Task Scheduler does not launch the console executable directly. The runner then
 starts `svg-mb-control.exe` through the same supervised launch path as the
