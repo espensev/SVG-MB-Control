@@ -1,9 +1,10 @@
 # CPU Cycles / Effective-Frequency Validation Plan — 2026-06-14
 
-Status: plan only. Defines the evidence that would move `cpu_cycles_acquisition`
-from `quarantine` toward a maintainer promotion (decision doc
-`docs/cpu-work-energy-acquisition-decision-2026-06-07.md` §Evaluation criterion
-4). No code change and no marker change here.
+Status: plan/runbook; scorer support is implemented, but the locked-frequency
+capture has not run. Defines the evidence that would move
+`cpu_cycles_acquisition` from `quarantine` toward a maintainer promotion
+(decision doc `docs/cpu-work-energy-acquisition-decision-2026-06-07.md`
+§Evaluation criterion 4). No runtime marker change here.
 
 This plan is separate from the package-energy marker, which is already covered by
 `docs/cpu-energy-quarantine-exit-validation-2026-06-14.md` and does not depend on

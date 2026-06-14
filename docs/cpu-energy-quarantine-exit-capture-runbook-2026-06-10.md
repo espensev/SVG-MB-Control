@@ -1,11 +1,14 @@
 # CPU Energy Quarantine-Exit Capture Runbook — 2026-06-10
 
-Status: **executed once; reusable for remaining sessions.** Operational runbook
-for capturing one *enabled-path* CPU energy (and optionally cycle) evidence
-session and scoring it against the quarantine-exit Evaluation. Session 1 ran on
-2026-06-10 and is recorded in
-`docs/cpu-energy-quarantine-exit-evidence-2026-06-10-s1.md`; sessions 2/3 remain
-scheduled for 2026-06-14 and 2026-06-18. The criteria are normative in
+Status: **sessions 1-3 executed; reusable for ad hoc or future evidence
+sessions.** Operational runbook for capturing one *enabled-path* CPU energy (and
+optionally cycle) evidence session and scoring it against the quarantine-exit
+Evaluation. Session 1 ran on 2026-06-10 and is recorded in
+`docs/cpu-energy-quarantine-exit-evidence-2026-06-10-s1.md`; sessions 2 and 3
+are recorded in `docs/cpu-energy-quarantine-exit-evidence-2026-06-12-s2.md` and
+`docs/cpu-energy-quarantine-exit-evidence-2026-06-14-s3.md`. The future Session
+3 trigger was disabled after the successful manual 2026-06-14 run to avoid a
+redundant fourth load session. The criteria are normative in
 `docs/cpu-work-energy-acquisition-decision-2026-06-07.md` §Evaluation /
 §Quarantine; this doc only operationalizes how to run a session and read the
 result. It does **not** restate or change those criteria.
@@ -19,15 +22,17 @@ result. It does **not** restate or change those criteria.
 > §Quarantine). One run of this runbook produces **one** session's evidence. It
 > does not by itself flip any `*_acquisition` marker to `validated`.
 
-## 0. Current state (verified 2026-06-11, read-only)
+## 0. Current state (verified 2026-06-14, read-only)
 
-- Session 1 git hash was `c4b6986`; the shipped exe contains the energy + cycle
-  code. The control-loop CSV header already carries the additive
+- Session 1 git hash was `c4b6986`; sessions 2 and 3 used the automated wrapper
+  path. The shipped exe contains the energy + cycle code. The control-loop CSV
+  header already carries the additive
   columns (`cpu_power_sample_id`, `cpu_power_window_ms`, `cpu_pkg_energy_delta_uj`,
   `cpu_pkg_energy_acquisition`, `cpu_cycles_sample_id`, `cpu_cycles_window_ms`,
   `cpu_aperf_delta`, `cpu_mperf_delta`, `cpu_cycles_acquisition`).
 - Current `cpu_pkg_energy_acquisition` = `cpu_cycles_acquisition` = `disabled`
-  (env vars unset). **No rebuild is required** — enabling is an env-var + restart.
+  after the 2026-06-14 closeout. **No rebuild is required** — enabling is an
+  env-var + restart.
 - Worker is launched by scheduled task `\SVG-MB Control\SVG-MB Control`
   (`svg-mb-control-task-runner.exe --start`). Current capture/revert scripts
   restart this task and terminate the release worker process tree so the new
