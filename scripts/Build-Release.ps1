@@ -57,8 +57,8 @@ Set-StrictMode -Version Latest
 # ── Project Configuration ────────────────────────────────────────────
 $ProjectName         = 'svg-mb-control'
 $MainExeName         = "$ProjectName.exe"
-$SupportExeNames     = @()
-$ProcessNames        = @('svg-mb-control')
+$SupportExeNames     = @('svg-mb-control-watchdog.exe')
+$ProcessNames        = @('svg-mb-control', 'svg-mb-control-watchdog')
 $ReleaseDir          = 'release'
 $DistExtras          = @(
     'README.md'

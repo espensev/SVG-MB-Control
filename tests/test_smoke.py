@@ -350,3 +350,69 @@ class SmokeTests(unittest.TestCase):
                 "pending writes reconciliation failed",
                 result.stderr,
             )
+
+    def test_native_watchdog_helper_runs_health_without_console_output(self) -> None:
+        if not WATCHDOG_EXE.is_file():
+            raise unittest.SkipTest(f"watchdog helper not built: {WATCHDOG_EXE}")
+
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            staged_exe = td / "svg-mb-control.exe"
+            staged_watchdog = td / "svg-mb-control-watchdog.exe"
+            runtime_home = td / "runtime"
+            log_dir = runtime_home / "logs"
+            shutil.copy2(CONTROL_EXE, staged_exe)
+            shutil.copy2(WATCHDOG_EXE, staged_watchdog)
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                default_mode="read-loop",
+                poll_ms=100,
+                staleness_threshold_ms=60000,
+            )
+            runtime_home.mkdir(parents=True, exist_ok=True)
+            _write_json(
+                runtime_home / "control_runtime.json",
+                {
+                    "schema_version": 1,
+                    "mode": "read-loop",
+                    "status": "running",
+                    "process_id": os.getpid(),
+                    "last_refresh": time.strftime(
+                        "%Y-%m-%dT%H:%M:%S", time.localtime()
+                    ),
+                    "controlled_channels": [],
+                },
+            )
+
+            result = subprocess.run(
+                [
+                    str(staged_watchdog),
+                    "--exe",
+                    str(staged_exe),
+                    "--config",
+                    str(config_path),
+                    "--log-dir",
+                    str(log_dir),
+                ],
+                cwd=td,
+                capture_output=True,
+                text=True,
+                env=_merged_env(),
+            )
+
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"{result.stdout}\n{result.stderr}",
+            )
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "")
+            log_text = (log_dir / "svg-mb-control-watchdog.log").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("health exit code=0", log_text)
+            self.assertIn("watchdog run completed without restart", log_text)
+            health = _read_json(runtime_home / "control_health.json")
+            self.assertIsNotNone(health)
+            self.assertEqual(health["last_health_state"], "healthy")

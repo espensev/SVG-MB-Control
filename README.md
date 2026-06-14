@@ -88,6 +88,7 @@ cmake --build --preset x64-release
 Release-script outputs:
 
 - `release\svg-mb-control.exe`
+- `release\svg-mb-control-watchdog.exe`
 - `release\control.json`
 - `release\runtime_policy_write_live.json`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
@@ -148,9 +149,11 @@ cd .\release
 .\Install-SVG-MB-ControlWatchdogScheduledTask.ps1
 ```
 
-The watchdog runs `svg-mb-control.exe --health --json` at logon and every minute.
-It does nothing for `healthy` or `degraded`, restarts the controller for
-`stale` or `stopped`, and leaves `failed` untouched for operator review.
+The watchdog scheduled task runs the no-console `svg-mb-control-watchdog.exe`
+helper at logon and every minute. The helper runs
+`svg-mb-control.exe --health --json` hidden, does nothing for `healthy` or
+`degraded`, restarts the controller for `stale` or `stopped`, and leaves
+`failed` untouched for operator review.
 
 Task manager commands:
 

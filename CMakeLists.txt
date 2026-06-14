@@ -171,3 +171,23 @@ if(MSVC)
 else()
     target_compile_options(svg_mb_control PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+if(WIN32)
+    add_executable(svg_mb_control_watchdog WIN32
+        src/watchdog_main.cpp
+    )
+    set_target_properties(svg_mb_control_watchdog PROPERTIES
+        OUTPUT_NAME "svg-mb-control-watchdog"
+    )
+    target_compile_features(svg_mb_control_watchdog PRIVATE cxx_std_20)
+    target_compile_definitions(svg_mb_control_watchdog PRIVATE
+        SVG_MB_CONTROL_VERSION="${PROJECT_VERSION}"
+        SVG_MB_CONTROL_GIT_HASH="${SVG_MB_CONTROL_GIT_HASH}"
+    )
+    target_link_libraries(svg_mb_control_watchdog PRIVATE shell32)
+    if(MSVC)
+        target_compile_options(svg_mb_control_watchdog PRIVATE /W4 /permissive- /MP)
+    else()
+        target_compile_options(svg_mb_control_watchdog PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endif()

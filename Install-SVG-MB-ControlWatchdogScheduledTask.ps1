@@ -45,6 +45,26 @@ function Resolve-ControlConfig {
     return (Resolve-Path -LiteralPath $configPath).ProviderPath
 }
 
+function Resolve-WatchdogExe {
+    param([Parameter(Mandatory = $true)][string]$ControlExePath)
+
+    $exeDir = Split-Path -Parent $ControlExePath
+    $scriptRoot = Split-Path -Parent $PSCommandPath
+    $candidates = @(
+        (Join-Path $exeDir 'svg-mb-control-watchdog.exe'),
+        (Join-Path $scriptRoot 'svg-mb-control-watchdog.exe'),
+        (Join-Path $scriptRoot 'release\svg-mb-control-watchdog.exe')
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).ProviderPath
+        }
+    }
+
+    throw 'Could not find svg-mb-control-watchdog.exe next to svg-mb-control.exe, this script, or under release\.'
+}
+
 function Get-CurrentUserId {
     if (-not [string]::IsNullOrWhiteSpace($UserId)) {
         return $UserId
@@ -223,15 +243,12 @@ if ($Remove) {
 
 if ($Install) {
     $effectiveUser = Get-CurrentUserId
-    $scriptPath = (Resolve-Path -LiteralPath $PSCommandPath).ProviderPath
-    $powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $powerShellExe -PathType Leaf)) {
-        $powerShellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
-    }
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -Run"
+    $watchdogExePath = Resolve-WatchdogExe -ControlExePath $exePath
+    $logDir = Join-Path (Split-Path -Parent $exePath) 'runtime\logs'
+    $arguments = "--exe `"$exePath`" --config `"$configPath`" --log-dir `"$logDir`""
 
     $action = New-ScheduledTaskAction `
-        -Execute $powerShellExe `
+        -Execute $watchdogExePath `
         -Argument $arguments `
         -WorkingDirectory (Split-Path -Parent $exePath)
     $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $effectiveUser
@@ -264,7 +281,7 @@ if ($Install) {
     Write-Host "Registered scheduled task: $taskPathValue$TaskName"
     Write-Host "  user: $effectiveUser"
     Write-Host "  interval_minutes: $IntervalMinutes"
-    Write-Host "  action: $powerShellExe $arguments"
+    Write-Host "  action: $watchdogExePath $arguments"
 
     if (-not $NoStart) {
         Start-ScheduledTask -TaskName $TaskName -TaskPath $taskPathValue

@@ -267,3 +267,13 @@ class ConfigContractTests(unittest.TestCase):
         payload = _read_json(REPO_ROOT / "config" / "runtime_policy_write_live.json")
         self.assertIsNotNone(payload)
         self.assertEqual(payload["control"]["blocked_channels"], [6])
+
+    def test_watchdog_task_installer_uses_native_no_console_helper(self) -> None:
+        script = (
+            REPO_ROOT / "Install-SVG-MB-ControlWatchdogScheduledTask.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("svg-mb-control-watchdog.exe", script)
+        self.assertIn("-Execute $watchdogExePath", script)
+        self.assertIn("--exe `\"$exePath`\"", script)
+        self.assertIn("--config `\"$configPath`\"", script)
+        self.assertNotIn("-Execute $powerShellExe", script)

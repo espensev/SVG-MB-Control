@@ -17,6 +17,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = REPO_ROOT / "build" / "x64-release"
 _TEST_EXE_ENV = os.environ.get("SVG_MB_CONTROL_TEST_EXE")
 CONTROL_EXE = Path(_TEST_EXE_ENV) if _TEST_EXE_ENV else BUILD_DIR / "svg-mb-control.exe"
+_TEST_WATCHDOG_EXE_ENV = os.environ.get("SVG_MB_CONTROL_TEST_WATCHDOG_EXE")
+WATCHDOG_EXE = (
+    Path(_TEST_WATCHDOG_EXE_ENV)
+    if _TEST_WATCHDOG_EXE_ENV
+    else CONTROL_EXE.parent / "svg-mb-control-watchdog.exe"
+)
 BUILD_SCRIPT = REPO_ROOT / "build-release.ps1"
 
 
