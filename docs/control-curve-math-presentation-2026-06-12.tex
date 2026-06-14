@@ -1,0 +1,511 @@
+\documentclass[aspectratio=169]{beamer}
+
+\usetheme{Boadilla}
+\usecolortheme{seahorse}
+
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcommand{\cfg}{\texttt}
+\newcommand{\clip}{\operatorname{clip}}
+\newcommand{\RL}{\operatorname{RL}}
+
+\title{SVG-MB-Control Fan Curve Math}
+\subtitle{Validated release-control pathways for SND-DESK}
+\author{Codex validation note}
+\date{Created 2026-06-12; updated 2026-06-14}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Scope}
+  \begin{itemize}
+    \item Target: shipped SND-DESK release profile packaged as
+      \cfg{release/control.json} from \cfg{config/control.release.json}.
+    \item Controlled airflow lanes: channels $0,1,2,3,4,5$.
+    \item Excluded lane: channel $6$ is blocked in
+      \cfg{config/runtime\_policy\_write\_live.json}.
+    \item Static math validation is separated from live runtime evidence: this
+      deck checks curve/control identities from source and config, and records
+      only a post-repair liveness check for the packaged runtime.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Validation Inputs: Code}
+  \begin{itemize}
+    \item \cfg{src/policy/control\_policy.cpp}: curve lookup, smootherstep
+      interpolation, min-duty floor, clamp.
+    \item \cfg{src/control/channel\_evaluator.cpp}: primary input selection,
+      CPU override, smoothing, boost sum, rate limit.
+    \item \cfg{src/control/boost\_stage.cpp}: shared thermal, midband,
+      GPU-airflow, and CPU-low-soak integrators.
+    \item \cfg{src/control/low\_band\_integrator.cpp}: low-band signal, debt,
+      staged activation, and residual contribution.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Validation Inputs: Contracts}
+  \begin{itemize}
+    \item \cfg{docs/CONTROL\_PIPELINE\_MATH.md}: maintained equation reference
+      for the current curve-overlay law.
+    \item \cfg{docs/COOLING\_STRATEGY.md} plus machine policy JSON: fan roles,
+      pressure strategy, soft-floor expectations, channel grouping.
+    \item \cfg{release/build-info.json}: current release gate and packaged
+      artifact identity.
+    \item \cfg{--status --json}: packaged runtime liveness after the 2026-06-14
+      repair.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Validation Results}
+  \begin{itemize}
+    \item Current release gate: \cfg{release/build-info.json} records
+      \cfg{testsRun=true}, \cfg{testsPassed=true}, source commit
+      \cfg{57279e80973a939ec6c395b64865c6f3712cb062}.
+    \item Current packaged executable SHA256:\\
+      {\scriptsize\cfg{511BD4563BAECFE425B5934CBC13C37CA5B00D124EB2A9147D9ABBAAD1954F5D}}.
+    \item Targeted contracts covered by the release gate:
+      machine-cooling policy $6/6$ and config contracts $16/16$.
+    \item \cfg{release/svg-mb-control.exe --show-config --json --config
+      config/control.release.json}: release config parsed and reported.
+    \item Explicit release-curve audit: PASS.
+      Channels $0$-$5$, source-aware guard $75^\circ$C, smootherstep shape,
+      low-band residual cap $1.0\%$.
+    \item Policy flow-index reference ratio:
+      $\mathrm{intake}/\mathrm{exhaust}=2.221$ versus target $1.1$.
+    \item 2026-06-14 runtime check: \cfg{--status --json} reported
+      \cfg{health\_state=healthy}, \cfg{process\_active=true}, and
+      \cfg{supervisor\_active=true}; controller and watchdog task results
+      were both \cfg{0}.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Validation Boundary}
+  \begin{block}{What this proves}
+    The release configuration is internally consistent with the current source
+    math and the policy contracts: curve knots are monotone, floors match the
+    machine policy, source-aware guards are present, staged low-band settings
+    are bounded, and channel-group spacing rules pass. The packaged controller
+    and watchdog paths also resolve after the 2026-06-14 release repair.
+  \end{block}
+  \begin{block}{What this does not prove}
+    It does not claim fresh live thermal-response quality. The 2026-06-14
+    health check proves runtime liveness, not low-load airflow or acoustic
+    quality. The dynamic low-end profile still needs the runtime CSV/status
+    re-validation described in \cfg{docs/NORMAL\_RUNTIME\_AIRFLOW\_PROFILE.md}
+    before making a new trace-backed RPM or noise claim.
+  \end{block}
+\end{frame}
+
+\section{Control Path}
+
+\begin{frame}{Per-tick Pathway}
+  \[
+  \begin{array}{c}
+  \text{CPU Tctl/Tdie},\ \text{GPU core/memjn/hotspot},\ \text{fan state} \\
+  \downarrow \\
+  T^{gpu}=\max(T^{core},T^{memjn},
+    T^{hotspot}\cdot\mathbf{1}[T^{hotspot}>0]) \\
+  \downarrow \\
+  T^{(c)}\ \text{from source-aware blend} \\
+  \downarrow \\
+  r^{(c)}=\max(\text{primary curve},\ \text{CPU override curve}) \\
+  \downarrow \\
+  s^{(c)}=\text{EMA rise/fall smoothing plus bounded decay latch} \\
+  \downarrow \\
+  u^{des}=\clip(s+\Sigma \text{boosts},0,100) \\
+  \downarrow \\
+  u=\text{rate-limited setpoint, then write gates}
+  \end{array}
+  \]
+\end{frame}
+
+\begin{frame}{Shared Curve Shape}
+  Every controlled release channel uses \cfg{smootherstep}.
+  \[
+    S_5(x)=x^3(6x^2-15x+10), \qquad x \in [0,1]
+  \]
+  Segment interpolation for neighboring curve points
+  $(\tau_i,d_i)$ and $(\tau_{i+1},d_{i+1})$:
+  \[
+    g(T)=d_i + S_5\left(\frac{T-\tau_i}{\tau_{i+1}-\tau_i}\right)
+      (d_{i+1}-d_i)
+  \]
+  Final curve lookup:
+  \[
+    g_c(T)=\clip(g(T),\max(0,m_c),100)
+  \]
+  where $m_c$ is the channel's configured \cfg{min\_duty\_pct}.
+\end{frame}
+
+\begin{frame}{Source-aware Temperature Selection}
+  All six release channels use
+  \cfg{max\_cpu\_gpu\_source\_aware} with a $75^\circ$C CPU guard:
+  \[
+  T^{(c)} =
+  \begin{cases}
+    \max(T^{cpu},T^{gpu}) & T^{cpu}\ \text{available and}\ T^{cpu}\ge 75 \\
+    T^{gpu} & T^{cpu}<75\ \text{or unavailable, and GPU available} \\
+    T^{cpu} & GPU unavailable, CPU available \\
+    \mathrm{undefined} & \text{otherwise}
+  \end{cases}
+  \]
+  Below the CPU guard, GPU envelope is the preferred airflow driver. At or
+  above the guard, the legacy max blend is restored so CPU heat can dominate.
+\end{frame}
+
+\begin{frame}{Primary Curve Plus CPU Override}
+  Primary feed-forward:
+  \[
+    r^{(c)}_{primary}=g^{(c)}_{primary}\left(T^{(c)}\right)
+  \]
+  CPU overlay:
+  \[
+    r^{(c)}_{cpu}=g^{(c)}_{cpu}\left(T^{cpu}\right)
+  \]
+  Effective raw demand:
+  \[
+    r^{(c)} =
+    \begin{cases}
+      \max(r^{(c)}_{primary},r^{(c)}_{cpu}) & T^{cpu}\ \text{available} \\
+      r^{(c)}_{primary} & \text{otherwise}
+    \end{cases}
+  \]
+  When the CPU override wins, the observed temperature passed to the
+  observed-temperature boost stages becomes $T^{cpu}$.
+\end{frame}
+
+\begin{frame}{Demand Smoothing}
+  With prior smoothed demand $s_{k-1}$ and raw demand $r_k$:
+  \[
+    \Delta=r_k-s_{k-1}
+  \]
+  Rising demand uses an EMA:
+  \[
+    s_k=\clip(s_{k-1}+\alpha_{\uparrow}\Delta,0,100)
+  \]
+  Falling demand uses fall EMA, then the decay latch can cap the drop:
+  \[
+    s_k=\clip\left(\max(\tilde{s},\ s_{k-1}-
+      \rho^{down}\Delta t_{min}),0,100\right)
+  \]
+  The release config uses small rise/fall alphas and per-channel latch
+  thresholds to avoid chasing short dips at high duty.
+\end{frame}
+
+\begin{frame}{Boost Integrators}
+  Thermal pressure, midband pressure, and GPU airflow share one
+  seconds-scale integrator:
+  \[
+    B_k=\clip\left(B_{k-1}+\rho_{\uparrow}
+      S_5\left(\frac{T-a}{b-a}\right)\Delta t_s,\ 0,\ B_{max}\right)
+  \]
+  while $T\ge a$; below $a$:
+  \[
+    B_k=\clip(B_{k-1}-\rho_{\downarrow}\Delta t_s,\ 0,\ B_{max})
+  \]
+  CPU low-soak uses the same shape with per-minute rates and an explicit
+  release threshold, so it rises slowly and holds through the hysteresis band.
+\end{frame}
+
+\begin{frame}{Low-band Path}
+  Global low-band signal:
+  \[
+    S_k=\clip(\max(w_{cpu}\sigma_{cpu},w_{gpu}\sigma_{gpu}),0,1)
+  \]
+  Debt rises only when the signal is nonzero and no primary boost is active:
+  \[
+    D_k=\clip(D_{k-1}+0.12 S_k \Delta t_{min},0,1)
+  \]
+  Debt falls when CPU and GPU are released:
+  \[
+    D_k=\clip(D_{k-1}-0.06 \Delta t_{min},0,1)
+  \]
+  Per-channel stages activate after threshold and hold time. Final low-band
+  contribution is capped by the release residual cap:
+  \[
+    B^{lb,eff}_c=\min(B^{lb}_c,1.0\%)
+  \]
+\end{frame}
+
+\begin{frame}{Global Loop Constants}
+  \scriptsize
+  \begin{tabularx}{\linewidth}{@{}lY@{}}
+    \toprule
+    Constant & Release value \\
+    \midrule
+    Tick and write cadence & Poll tick $250$ ms; write cooldown $250$ ms. \\
+    Deadband & $0.25\%$ global default. \\
+    Curve shape & \cfg{smootherstep} on every controlled channel. \\
+    Source-aware guard & $75^\circ$C CPU guard on every controlled channel. \\
+    Low-band CPU scale & start $62^\circ$C, full $71^\circ$C, release $60.5^\circ$C. \\
+    Low-band GPU scale & start $68^\circ$C, full $76^\circ$C, release $64^\circ$C. \\
+    Low-band debt & rise $0.12$/min, fall $0.06$/min, CPU/GPU weights $1.0/1.0$. \\
+    Low-band stage slew & rise $0.6\%$/min, fall $0.4\%$/min, spacing $90$ s. \\
+    Low-band residual cap & $1.0\%$ before the final setpoint sum. \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Final Setpoint And Write Gates}
+  \[
+    u^{des}_c=\clip(s_c+B^{thermal}_c+B^{mid}_c+B^{gpu}_c+
+      B^{soak}_c+B^{lb,eff}_c,0,100)
+  \]
+  \[
+    u_c=\RL(u^{des}_c,u^{last}_c,\Delta t_{write};
+      \rho_{\uparrow,c},\rho_{\downarrow,c},\delta_{max,c})
+  \]
+  A write still must pass the operational gates:
+  \begin{itemize}
+    \item deadband $0.25\%$ unless authority reassert applies,
+    \item write cooldown $250$ ms except first write or bounded reassert,
+    \item baseline captured, runtime policy allowed, breaker not blocking,
+    \item sensor-safe command can bypass an open write-failure breaker.
+  \end{itemize}
+\end{frame}
+
+\section{Fan Pathways}
+
+\begin{frame}{Fan Roles}
+  \scriptsize
+  \begin{tabularx}{\linewidth}{@{}cllclY@{}}
+    \toprule
+    Ch & Header & Role & Dir. & Min & Path intent \\
+    \midrule
+    0 & CHA0 & rear case exhaust & Exh. & 15.5\% &
+      Lowest exhaust floor; small CPU assist; GPU/case-air exhaust ramp. \\
+    1 & CHA1 & radiator exhaust A & Exh. & 22.0\% &
+      Radiator exhaust with strong CPU override and staggered GPU assist. \\
+    2 & CHA2 & front 200 mm intake & Int. & 42.0\% &
+      Intake leader; strong GPU airflow; moderate CPU assist. \\
+    3 & CHA3 & front 200 mm intake & Int. & 38.0\% &
+      Intake leader; 4 point spacing below channel 2 to avoid resonance. \\
+    4 & CHA4 & front radiator intake & Int. & 24.0\% &
+      Filtered radiator intake; secondary radiator authority. \\
+    5 & CHA5 & radiator exhaust B & Exh. & 20.0\% &
+      Radiator exhaust with strong CPU override; staggered below channel 1. \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Rate Limits And Smoothing}
+  \scriptsize
+  \begin{tabularx}{\linewidth}{@{}ccccccY@{}}
+    \toprule
+    Ch & Rise & Fall & Step & $\alpha_\uparrow$ & $\alpha_\downarrow$ & Decay latch \\
+    \midrule
+    0 & 75 & 45 & 0.6 & 0.012 & 0.004 & above 36\%, max drop 90\%/min \\
+    1 & 75 & 25 & 0.8 & 0.012 & 0.003 & above 38\%, max drop 90\%/min \\
+    2 & 90 & 45 & 0.7 & 0.018 & 0.006 & above 60\%, max drop 120\%/min \\
+    3 & 90 & 45 & 0.7 & 0.018 & 0.006 & above 60\%, max drop 120\%/min \\
+    4 & 60 & 25 & 0.6 & 0.008 & 0.003 & above 34\%, max drop 90\%/min \\
+    5 & 75 & 25 & 0.8 & 0.012 & 0.003 & above 32\%, max drop 90\%/min \\
+    \bottomrule
+  \end{tabularx}
+  \vspace{0.5em}
+  Rise/fall are percent duty per minute; step is max setpoint step per write.
+\end{frame}
+
+\begin{frame}{Primary Curves: Channels 0 And 1}
+  \scriptsize
+  Points are $(^\circ\mathrm{C}:\%)$.
+  \begin{tabularx}{\linewidth}{@{}cY@{}}
+    \toprule
+    Ch & Primary curve \\
+    \midrule
+    0 & 50:15.5, 64:15.5, 68:22, 72:36, 76:48, 80:58,
+        84:66, 88:72, 92:78, 98:86 \\
+    1 & 50:22, 60:24, 64:27, 68:34, 72:42, 76:49,
+        80:55, 84:59, 88:61, 94:63, 98:65 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Primary Curves: Channels 2 And 3}
+  \scriptsize
+  Points are $(^\circ\mathrm{C}:\%)$.
+  \begin{tabularx}{\linewidth}{@{}cY@{}}
+    \toprule
+    Ch & Primary curve \\
+    \midrule
+    2 & 35:42, 50:46, 62:54, 72:64, 84:84, 94:94, 98:100 \\
+    3 & 35:38, 50:42, 62:50, 72:60, 84:80, 94:90, 98:95 \\
+    \bottomrule
+  \end{tabularx}
+  \vspace{0.6em}
+  The front 200 mm intake pair keeps a 4 point low/medium offset at the
+  matched soft-floor knots.
+\end{frame}
+
+\begin{frame}{Primary Curves: Channels 4 And 5}
+  \scriptsize
+  Points are $(^\circ\mathrm{C}:\%)$.
+  \begin{tabularx}{\linewidth}{@{}cY@{}}
+    \toprule
+    Ch & Primary curve \\
+    \midrule
+    4 & 35:24, 50:27, 62:31, 72:38, 78:50, 84:60, 90:70, 96:78 \\
+    5 & 50:20, 60:21, 64:24, 68:31, 72:39, 76:46,
+        80:52, 84:56, 88:58, 94:60, 98:62 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{CPU Override Curves: Channels 0 And 1}
+  \scriptsize
+  Points are $(^\circ\mathrm{C}:\%)$.
+  \begin{tabularx}{\linewidth}{@{}cY@{}}
+    \toprule
+    Ch & CPU override curve \\
+    \midrule
+    0 & 75:15.5, 84:18, 88:28, 92:42, 96:58 \\
+    1 & 50:22, 64:22, 72:24, 82:42, 84:46, 88:60,
+        90:74, 92:88, 96:100 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{CPU Override Curves: Channels 2 And 3}
+  \scriptsize
+  Points are $(^\circ\mathrm{C}:\%)$.
+  \begin{tabularx}{\linewidth}{@{}cY@{}}
+    \toprule
+    Ch & CPU override curve \\
+    \midrule
+    2 & 35:42, 50:46, 62:54, 72:64, 82:64, 86:66, 90:74, 95:86 \\
+    3 & 35:38, 50:42, 62:50, 72:60, 82:60, 86:62, 90:70, 95:82 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{CPU Override Curves: Channels 4 And 5}
+  \scriptsize
+  Points are $(^\circ\mathrm{C}:\%)$.
+  \begin{tabularx}{\linewidth}{@{}cY@{}}
+    \toprule
+    Ch & CPU override curve \\
+    \midrule
+    4 & 35:24, 50:27, 62:31, 72:38, 82:42, 86:46, 90:54, 95:70 \\
+    5 & 50:20, 64:20, 72:24, 82:42, 84:46, 88:61,
+        90:74, 92:88, 96:100 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Boost Overlay Bands}
+  \scriptsize
+  Entries are start/full/max boost.
+  \begin{tabularx}{\linewidth}{@{}cYYY@{}}
+    \toprule
+    Ch & Thermal pressure & Midband pressure & GPU airflow \\
+    \midrule
+    0 & 86/93/6 & 64/84/8 & 64/74/4 \\
+    1 & 85.5/92/20 & 64/84/10 & 64/74/5 \\
+    2 & 86/94/4 & 66/84/6 & 62/72/8 \\
+    3 & 86/94/4 & 66/84/6 & 62/72/8 \\
+    4 & 84/92/14 & 64/84/10 & 64/74/5 \\
+    5 & 85.5/92/20 & 64/84/10 & 64/74/5 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Boost Overlay Rates}
+  \scriptsize
+  Entries are rise/fall rates. Thermal, midband, and GPU airflow are
+  percent duty per second; CPU low-soak is percent duty per minute.
+  \begin{tabularx}{\linewidth}{@{}cYYYY@{}}
+    \toprule
+    Ch & Thermal & Midband & GPU airflow & CPU low-soak \\
+    \midrule
+    0 & 0.12/0.08 & 0.25/0.12 & 0.20/0.10 & disabled \\
+    1 & 0.22/0.08 & 0.25/0.12 & 0.20/0.10 & 0.04/0.05 \\
+    2 & 0.15/0.08 & 0.25/0.12 & 0.20/0.10 & disabled \\
+    3 & 0.15/0.08 & 0.25/0.12 & 0.20/0.10 & disabled \\
+    4 & 0.16/0.08 & 0.25/0.12 & 0.20/0.10 & 0.04/0.05 \\
+    5 & 0.22/0.08 & 0.25/0.12 & 0.20/0.10 & 0.04/0.05 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{CPU Low-soak And Low-band Stages}
+  \scriptsize
+  \begin{tabularx}{\linewidth}{@{}cYY@{}}
+    \toprule
+    Ch & CPU low-soak & Low-band stage \\
+    \midrule
+    0 & disabled & disabled \\
+    1 & start 72, full 82, release 68, max 0.3 & stage 2, debt 0.45, hold 180 s, max 1.8 \\
+    2 & disabled & stage 1, debt 0.25, hold 120 s, max 2.0 \\
+    3 & disabled & stage 1, debt 0.25, hold 120 s, max 2.0 \\
+    4 & start 72, full 82, release 68, max 0.3 & stage 3, debt 0.65, hold 240 s, max 1.2 \\
+    5 & start 72, full 82, release 68, max 0.3 & stage 3, debt 0.65, hold 240 s, max 1.2 \\
+    \bottomrule
+  \end{tabularx}
+  \vspace{0.5em}
+  Low-band output is additionally capped to $1.0\%$ before the final sum.
+\end{frame}
+
+\section{Interpretation}
+
+\begin{frame}{Channel Pathway Summary}
+  \begin{itemize}
+    \item Channels 2 and 3 are the low/medium intake leaders. Their curves
+      preserve the 4 point spacing required by the machine policy.
+    \item Channel 4 is both filtered intake and radiator lane. It carries
+      lower static floor than the earlier reference profile but retains
+      secondary radiator authority.
+    \item Channels 1 and 5 are radiator exhausts. They share temperature knots
+      on the GPU-assist curve but channel 1 stays at least 2 points above
+      channel 5 at every knot.
+    \item Channel 0 is rear exhaust assist with the lowest exhaust floor.
+    \item Channel 6 is not part of the control law or case-pressure math.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Key Invariants}
+  \begin{itemize}
+    \item Every commanded setpoint is clipped into $[0,100]$.
+    \item Curve floors match the machine policy release minima.
+    \item CPU guard preserves high-CPU response even when GPU is cooler.
+    \item Boost integrators are bounded by per-channel maxima and decay below
+      threshold or release bands.
+    \item Low-band is residual and second-priority: it freezes while primary
+      boost response is active and is capped to $1.0\%$ in the final sum.
+    \item The write policy controls lanes 0--5 and blocks lane 6.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Recommended Next Validation}
+  \begin{enumerate}
+    \item Keep the packaged controller running; choose a quiet live-validation
+      window when thermal-response evidence is needed.
+    \item Capture native runtime manifest, active CSV, current state,
+      control runtime, and event log.
+    \item Run native analyzer ingest/report against the runtime home.
+    \item Re-check the identities in \cfg{docs/CONTROL\_PIPELINE\_MATH.md}:
+      feed-forward/correction, setpoint bounds, low-band cap, cadence bounds,
+      and response-source attribution.
+    \item Record the before/after result as a compact decision record rather
+      than committing raw CSV captures.
+  \end{enumerate}
+\end{frame}
+
+\begin{frame}{Source Of Truth}
+  \begin{itemize}
+    \item Equations: \cfg{docs/CONTROL\_PIPELINE\_MATH.md}.
+    \item Fan strategy: \cfg{docs/COOLING\_STRATEGY.md}.
+    \item Release curves: \cfg{config/control.release.json}.
+    \item Machine policy: \cfg{config/machines/snd-desk.cooling.policy.json}.
+    \item Runtime write policy: \cfg{config/runtime\_policy\_write\_live.json}.
+    \item Runtime evidence workflow:
+      \cfg{docs/RUNTIME\_LOGGING\_AND\_EVALUATION.md}.
+  \end{itemize}
+\end{frame}
+
+\end{document}
