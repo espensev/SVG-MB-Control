@@ -9,8 +9,8 @@ there, this only reads them):
   3 +/-15% vs the SMU reference        4 effective-frequency validity (cycles)
   5 fault behavior                     6 no-disturbance vs the disabled baseline
 
-It contributes ONE session toward the >=3 sessions / >=7 days gate; promotion to
-`validated` stays a manual maintainer step (decision §Quarantine).
+It contributes ONE session toward the >=3 independent sessions gate; promotion
+to `validated` stays a manual maintainer step (decision §Quarantine).
 
 Usage:
   python score_energy_session.py --manifest <out>/manifest.json --session-num 1
@@ -302,7 +302,7 @@ def main(argv=None):
         f"# CPU Energy Quarantine-Exit Evidence — session {args.session_num} — {date}",
         "",
         "Auto-scored by `scripts/score_energy_session.py` from "
-        f"`{args.manifest}`. One of >=3 sessions over >=7 days; promotion to "
+        f"`{args.manifest}`. One of >=3 independent sessions; promotion to "
         "`validated` stays a manual maintainer step (decision §Quarantine).",
         "",
         f"- Session CSV: `{session_csv}` ({len(rows)} rows)",

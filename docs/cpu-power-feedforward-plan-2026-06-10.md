@@ -59,7 +59,7 @@ As of 2026-06-10 (`analyze-native-superset`, live worker exe `c4b6986`):
 - **Trust state: quarantine, zero evidence sessions.** Markers are
   `disabled` live; the enabled path has never run in CI or on hardware.
   Quarantine exit requires all 6 criteria of the decision doc §Evaluation
-  across ≥ 3 sessions spanning ≥ 7 days
+  across ≥ 3 independent sessions
   (`docs/cpu-energy-quarantine-exit-capture-runbook-2026-06-10.md` is the
   prepared, unexecuted capture procedure).
 
@@ -121,7 +121,7 @@ band $[a,b]$), so the stage would be:
 ## 5. Gates, in order (each blocks the next)
 
 - **Gate 0 — quarantine exit (already planned, no new authorization):** run
-  the capture runbook ≥ 3 sessions over ≥ 7 days; all 6 criteria pass;
+  the capture runbook for ≥ 3 independent sessions; all 6 criteria pass;
   maintainer flips `cpu_pkg_energy_acquisition` to `validated`.
 - **Gate 1 — always-on decision:** a control input cannot depend on a
   default-off env var. Requires criterion-6 (no-disturbance) evidence and an

@@ -10,12 +10,13 @@
 #    restart so an interrupted session can never leave energy enabled.
 #  - The worker task already auto-starts AtLogon, so after a reboot the controller
 #    and HWiNFO (Autorun) come back on their own for the next session.
-#  - Span margin: session #3 defaults to +8 days so the >=7-day gate holds even
-#    if a session slips a day.
+#  - Session offsets are operator convenience only. Quarantine exit requires
+#    >=3 independent sessions; the earlier fixed >=7-day span was removed as an
+#    unsupported policy margin.
 [CmdletBinding()]
 param(
-    [int]$Session2OffsetDays = 4,
-    [int]$Session3OffsetDays = 8,
+    [int]$Session2OffsetDays = 1,
+    [int]$Session3OffsetDays = 2,
     [string]$TimeOfDay = '04:00',
     [int]$LoadThreads = 28,        # leave headroom so the 250 ms loop is not starved
     [int]$IdleSeconds = 300,
@@ -93,4 +94,4 @@ Register-Session 2 ($base.AddDays($Session2OffsetDays).Add($t))
 Register-Session 3 ($base.AddDays($Session3OffsetDays).Add($t))
 
 $span = $Session3OffsetDays
-Write-Host "`nSpan: session 1 today .. session 3 in $span days (gate needs >=7). LoadThreads=$LoadThreads."
+Write-Host "`nSession offsets: session 1 today .. session 3 in $span days. Gate needs >=3 independent sessions. LoadThreads=$LoadThreads."

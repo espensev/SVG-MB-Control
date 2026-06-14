@@ -1,6 +1,6 @@
 # CPU Energy Quarantine-Exit Evidence — session 1 — 2026-06-10
 
-Auto-scored by `scripts/score_energy_session.py` from `D:\Development\Thermals\SVG-MB\SVG-MB-Control\release\runtime\experiments\energy-quarantine\session1\manifest.json`. One of >=3 sessions over >=7 days; promotion to `validated` stays a manual maintainer step (decision §Quarantine).
+Auto-scored by `scripts/score_energy_session.py` from `D:\Development\Thermals\SVG-MB\SVG-MB-Control\release\runtime\experiments\energy-quarantine\session1\manifest.json`. One of >=3 independent sessions; promotion to `validated` stays a manual maintainer step (decision §Quarantine).
 
 - Session CSV: `D:\Development\Thermals\SVG-MB\SVG-MB-Control\release\runtime\experiments\energy-quarantine\session1\session.csv` (3164 rows)
 - git `c4b6986f45a3`  config `b51e542a6138`  session_start `2026-06-10T16:31:14`

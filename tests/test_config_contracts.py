@@ -4,6 +4,18 @@ from tests.helpers import *
 
 
 class ConfigContractTests(unittest.TestCase):
+    def test_energy_session_wrapper_forwards_load_threads(self) -> None:
+        scheduler = (
+            REPO_ROOT / "scripts" / "Schedule-EnergySessions.ps1"
+        ).read_text(encoding="utf-8")
+        wrapper = (
+            REPO_ROOT / "scripts" / "Invoke-EnergySessionCapture.ps1"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("-LoadThreads $LoadThreads", scheduler)
+        self.assertIn("[int]$LoadThreads", wrapper)
+        self.assertIn("LoadThreads     = $LoadThreads", wrapper)
+
     def test_native_watchdog_recovery_uses_restart(self) -> None:
         source = (REPO_ROOT / "src" / "platform" / "task_runner.cpp").read_text(
             encoding="utf-8"

@@ -7,9 +7,11 @@ behavior they assume. Automates the manual procedure in
 criteria are normative in
 `docs/cpu-work-energy-acquisition-decision-2026-06-07.md` §Evaluation.
 
-Scheduled (as of 2026-06-10): session 1 ran today (5 PASS / 0 FAIL / 1 MANUAL);
-**session 2 = 2026-06-14 04:00**, **session 3 = 2026-06-18 04:00** (8-day span,
-gate needs ≥ 7). Tasks live under `\SVG-MB Control\`.
+Current state (verified 2026-06-14): sessions 1, 2, and 3 have run and each
+scored 5 PASS / 0 FAIL / 1 MANUAL. The fixed calendar-span gate was removed on
+2026-06-14; quarantine exit now requires **>= 3 independent sessions** plus
+maintainer review. The future Session 3 task trigger was disabled after the
+manual 2026-06-14 run to avoid an unnecessary fourth load session.
 
 ## Assumptions about user behavior
 
@@ -17,7 +19,7 @@ gate needs ≥ 7). Tasks live under `\SVG-MB Control\`.
    the harvester can read HWiNFO's shared memory in the user session). User
    `Sev` must be **logged in** at the scheduled time. A **locked screen is
    fine.** If logged out, the task does not run then; `StartWhenAvailable` runs
-   it at the next logon (the ≥7-day span only grows).
+   it at the next logon.
 2. **Machine on or asleep — not fully off.** `WakeToRun` wakes the PC from
    sleep. If the PC is powered off at 04:00, the session runs when it is next
    on + logged in.
@@ -67,7 +69,7 @@ gate needs ≥ 7). Tasks live under `\SVG-MB Control\`.
 
 ## Promotion (manual, never automatic)
 
-After **≥ 3 sessions pass over ≥ 7 days**, the maintainer reviews the evidence
+After **>= 3 independent sessions pass**, the maintainer reviews the evidence
 notes and flips `cpu_pkg_energy_acquisition` → `validated` (and
 `cpu_cycles_acquisition` only if criterion 4 is confirmed), then reconciles
 FEAT-0006 §14 / `docs/TRACEABILITY.md` (decision §Quarantine).

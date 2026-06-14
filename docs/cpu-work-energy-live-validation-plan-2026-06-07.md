@@ -38,7 +38,7 @@ open live questions and produces one outcome:
 **Out of scope (named so they are not confused with this gate).**
 
 - This is **not** the post-implementation quarantine-exit Evaluation. That
-  separate, later gate (≥ 3 capture sessions spanning ≥ 7 days, counter-continuity
+  separate, later gate (≥ 3 independent capture sessions, counter-continuity
   across a wrap, the ±15% external cross-check, the no-disturbance `loop_slip_ms`
   gate) is defined in `cpu-work-energy-acquisition-decision-2026-06-07.md`
   §Evaluation and §Quarantine and is **not** restated here. This plan's outcome

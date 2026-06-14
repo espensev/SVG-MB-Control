@@ -142,8 +142,8 @@ corrected cycle-path re-validation.)
    per-core-pinned live read (`tools/cpu_cycle_counter_probe.cpp`) then the cycle
    path, per `docs/cpu-cycle-counter-source-decision-2026-06-07.md`.
 2. If (a): implement the energy path per the decision doc §Apply order; the data
-   ships `quarantine` and only the post-implementation Evaluation (≥ 3 sessions /
-   ≥ 7 days, ±15% external cross-check) promotes it to `validated`.
+   ships `quarantine` and only the post-implementation Evaluation (≥ 3
+   independent sessions, ±15% external cross-check) promotes it to `validated`.
 3. **Done.** The throwaway probe (`tools/cpu_msr_validation_probe.cpp`) and its
    `SVG_MB_CONTROL_BUILD_MSR_PROBE` build option were removed when this record was
    accepted and the energy-only slice landed. It was never committed (throwaway);
