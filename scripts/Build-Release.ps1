@@ -141,6 +141,18 @@ Write-Host "Dist dir    : $DistDir"
 Write-Host "Release dir : $ReleaseRoot"
 Write-Host "Archive dir : $ArchiveDir"
 
+# Self-heal: a previous build that was interrupted (terminal closed, reboot)
+# after disabling the watchdog leaves the suspend sentinel behind. Because
+# Suspend-ScheduledTaskIfEnabled returns $false when the watchdog is already
+# disabled, a later build would otherwise never re-enable it, leaving
+# boot-resilience off indefinitely. Re-enable it here before this build manages
+# it. A watchdog disabled by the operator (no sentinel) is left untouched.
+if (Test-Path -LiteralPath (Get-WatchdogSuspendSentinelPath -RepoRoot $RepoRoot)) {
+    Write-Host "`nFound watchdog-suspend sentinel from an interrupted build; re-enabling watchdog." -ForegroundColor Yellow
+    Resume-ScheduledTaskIfNeeded -TaskName $watchdogTaskName -ShouldEnable $true
+    Clear-WatchdogSuspendSentinel -RepoRoot $RepoRoot
+}
+
 try {
     if ($NoStopProcesses) {
         Write-Host "`n[0/11] Skipping process stop (-NoStopProcesses)." -ForegroundColor Yellow
@@ -148,6 +160,7 @@ try {
         Write-Host "`n[0/11] Stopping running processes..." -ForegroundColor Yellow
         $resumeWatchdogAfterBuild = Suspend-ScheduledTaskIfEnabled -TaskName $watchdogTaskName
         if ($resumeWatchdogAfterBuild) {
+            Set-WatchdogSuspendSentinel -RepoRoot $RepoRoot
             Write-Host "Temporarily disabled watchdog task: $watchdogTaskName" -ForegroundColor Green
         }
         foreach ($processName in $ProcessNames) {
@@ -395,16 +408,8 @@ try {
         Write-Host "`n[10/11] Release archive skipped (-NoPublish)." -ForegroundColor DarkGray
     } else {
         Write-Host "`n[9/11] Publishing to release/..." -ForegroundColor Yellow
-        if (Test-Path -LiteralPath $ReleaseRoot) {
-            Get-ChildItem -LiteralPath $ReleaseRoot -Force | Where-Object {
-                -not ($_.PSIsContainer -and ($_.Name -eq 'archive' -or $_.Name -eq 'runtime'))
-            } | Remove-Item -Recurse -Force
-        } else {
-            New-Item -ItemType Directory -Path $ReleaseRoot -Force | Out-Null
-        }
-
-        Copy-Item -Path (Join-Path $DistDir '*') -Destination $ReleaseRoot -Recurse -Force
-        Write-Host "Copied dist/ contents to release/" -ForegroundColor Green
+        Publish-DistToRelease -DistDir $DistDir -ReleaseRoot $ReleaseRoot -PreserveNames @('archive', 'runtime')
+        Write-Host "Published dist/ to release/ (atomic per-file replace)." -ForegroundColor Green
         Write-Host "Preserved release/archive and release/runtime." -ForegroundColor DarkGray
 
         $buildInfoPath = New-BuildInfo `
@@ -468,6 +473,9 @@ finally {
         Start-PackagedController -ReleaseRoot $ReleaseRoot -MainExeName $MainExeName | Out-Null
     }
     Resume-ScheduledTaskIfNeeded -TaskName $watchdogTaskName -ShouldEnable $resumeWatchdogAfterBuild
+    if ($resumeWatchdogAfterBuild) {
+        Clear-WatchdogSuspendSentinel -RepoRoot $RepoRoot
+    }
 }
 
 $timer.Stop()
