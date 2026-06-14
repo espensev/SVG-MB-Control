@@ -86,7 +86,8 @@ Both processes run as Windows Scheduled Tasks under task path
   `svg-mb-control.exe --start --config <path>` (`src\platform\task_runner.cpp`),
   which starts the long-running mode named in the config (`read-loop` or
   `control-loop`; the shipped config uses `control-loop`). Installed by
-  `Install-SVG-MB-ControlScheduledTask.ps1`.
+  `Install-SVG-MB-ControlScheduledTask.ps1` with system-startup and
+  current-user logon triggers.
 - `SVG-MB Control Watchdog` — recovery task whose scheduled-task action runs
   `svg-mb-control-task-runner.exe --watchdog-run --config "<path>"`
   (`Install-SVG-MB-ControlWatchdogScheduledTask.ps1`). On `--watchdog-run`, the
@@ -154,13 +155,15 @@ PawnIO loads bytecode modules and executes named functions in them (load IOCTL
 `0xA084`, execute IOCTL `0xA104`) rather than the app issuing register or port
 access directly. The app loads two modules:
 
-- `AMDFamily17.bin` — AMD CPU registers. The app calls `ioctl_read_smn` only.
-  CPU temperature is read from the **System Management Network (SMN)**, not from
-  MSR: Tctl/Tdie at SMN `0x00059800` and per-CCD Tdie at Zen2 `0x00059954` /
-  Zen4 `0x00059B08`, serialized by the `Global\Access_PCI` mutex
-  (`src\hardware\amd_reader.cpp`). The module also exposes `ioctl_read_msr` /
-  `ioctl_write_msr`, but the app does not call them — there are no MSR reads or
-  writes in the codebase.
+- `AMDFamily17.bin` — AMD CPU registers. CPU temperature is read from the
+  **System Management Network (SMN)**, not from MSR: Tctl/Tdie at SMN
+  `0x00059800` and per-CCD Tdie at Zen2 `0x00059954` / Zen4 `0x00059B08`,
+  serialized by the `Global\Access_PCI` mutex (`src\hardware\amd_reader.cpp`).
+  FEAT-0006 also uses the module's `ioctl_read_msr` path when the default-off
+  environment gates are explicitly enabled: RAPL package energy reads only
+  `0xC0010299` / `0xC001029B`, and APERF/MPERF cycle evidence reads only the AMD
+  read-only aliases `0xC00000E7` / `0xC00000E8` under a transient affinity pin.
+  The app does not call `ioctl_write_msr`.
 - `LpcIO.bin` — NCT6701D Super I/O over LPC. Fan reads, PWM duty writes, restore,
   voltage reads, temperature reads, and raw register access run as kernel-side
   port I/O through PawnIO (`ioctl_pio_inb` / `ioctl_pio_outb`,

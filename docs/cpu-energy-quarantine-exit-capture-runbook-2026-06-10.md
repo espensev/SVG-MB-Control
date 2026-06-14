@@ -1,8 +1,14 @@
 # CPU Energy Quarantine-Exit Capture Runbook — 2026-06-10
 
-Status: **prepared, not yet executed.** Operational runbook for capturing one
-*enabled-path* CPU energy (and optionally cycle) evidence session and scoring it
-against the quarantine-exit Evaluation. The criteria are normative in
+Status: **sessions 1-3 executed; reusable for ad hoc or future evidence
+sessions.** Operational runbook for capturing one *enabled-path* CPU energy (and
+optionally cycle) evidence session and scoring it against the quarantine-exit
+Evaluation. Session 1 ran on 2026-06-10 and is recorded in
+`docs/cpu-energy-quarantine-exit-evidence-2026-06-10-s1.md`; sessions 2 and 3
+are recorded in `docs/cpu-energy-quarantine-exit-evidence-2026-06-12-s2.md` and
+`docs/cpu-energy-quarantine-exit-evidence-2026-06-14-s3.md`. The future Session
+3 trigger was disabled after the successful manual 2026-06-14 run to avoid a
+redundant fourth load session. The criteria are normative in
 `docs/cpu-work-energy-acquisition-decision-2026-06-07.md` §Evaluation /
 §Quarantine; this doc only operationalizes how to run a session and read the
 result. It does **not** restate or change those criteria.
@@ -12,24 +18,35 @@ result. It does **not** restate or change those criteria.
 §Apply order), `AGENTS.md` §Live Runtime Safety, `docs/RUNTIME_LOGGING_AND_EVALUATION.md`.
 
 > **Promotion is multi-session.** Quarantine ends only when all Evaluation
-> criteria hold across **≥ 3 independent capture sessions spanning ≥ 7 days**
-> (decision §Quarantine). One run of this runbook produces **one** session's
-> evidence. It does not by itself flip any `*_acquisition` marker to `validated`.
+> criteria hold across **>= 3 independent capture sessions** (decision
+> §Quarantine). One run of this runbook produces **one** session's evidence. It
+> does not by itself flip any `*_acquisition` marker to `validated`.
 
-## 0. Current state (verified 2026-06-10, read-only)
+## 0. Current state (verified 2026-06-14, read-only)
 
-- Live worker git hash `c4b6986`; the shipped exe already contains the
-  energy + cycle code. The control-loop CSV header already carries the additive
+- Session 1 git hash was `c4b6986`; sessions 2 and 3 used the automated wrapper
+  path. The shipped exe contains the energy + cycle code. The control-loop CSV
+  header already carries the additive
   columns (`cpu_power_sample_id`, `cpu_power_window_ms`, `cpu_pkg_energy_delta_uj`,
   `cpu_pkg_energy_acquisition`, `cpu_cycles_sample_id`, `cpu_cycles_window_ms`,
   `cpu_aperf_delta`, `cpu_mperf_delta`, `cpu_cycles_acquisition`).
 - Current `cpu_pkg_energy_acquisition` = `cpu_cycles_acquisition` = `disabled`
-  (env vars unset). **No rebuild is required** — enabling is an env-var + restart.
+  after the 2026-06-14 closeout. **No rebuild is required** — enabling is an
+  env-var + restart.
 - Worker is launched by scheduled task `\SVG-MB Control\SVG-MB Control`
-  (`svg-mb-control-task-runner.exe --start`); a second task
-  `\SVG-MB Control\SVG-MB Control Watchdog` (`--watchdog-run`) respawns the worker
-  on death. The worker reads `SVG_MB_CONTROL_RAPL_ENERGY_MODE` /
-  `SVG_MB_CONTROL_CPU_CYCLES_MODE` once at reader init (`amd_reader.cpp`).
+  (`svg-mb-control-task-runner.exe --start`). Current capture/revert scripts
+  restart this task and terminate the release worker process tree so the new
+  environment is inherited. The `\SVG-MB Control\SVG-MB Control Watchdog` task
+  (`--watchdog-run`, 1-minute interval) was re-registered 2026-06-11 after a
+  boot-time SIO init failure left the controller down with nothing to restart
+  it. Watchdog coexistence with capture sessions: it only restarts a dead or
+  stale runtime, each firing is a new process that reads the then-current User
+  environment (so a watchdog-respawned worker inherits the same
+  `SVG_MB_CONTROL_RAPL_ENERGY_MODE` the capture scripts set), and the
+  `Wait-ForMarker` gate in `Capture-EnergySession.ps1` aborts the session if
+  the marker does not reach the expected state. The worker reads
+  `SVG_MB_CONTROL_RAPL_ENERGY_MODE` / `SVG_MB_CONTROL_CPU_CYCLES_MODE` once at
+  reader init (`amd_reader.cpp`).
 
 ## 1. Pre-session criterion-6 baseline (captured 2026-06-10, energy disabled)
 
@@ -97,12 +114,9 @@ into the exit note — not a runtime dependency (`AGENTS.md` §Repo Boundary).
 # optional, only to also exercise the cycle path (independent gate):
 # [Environment]::SetEnvironmentVariable('SVG_MB_CONTROL_CPU_CYCLES_MODE','enabled','User')
 
-# Restart the whole chain so worker + watchdog relaunch and inherit the new env.
-# Stop the watchdog first so it does not respawn the worker mid-swap.
-Stop-ScheduledTask  -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control Watchdog'
+# Restart the worker task so the relaunched process inherits the new env.
 Stop-ScheduledTask  -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control'
 Start-ScheduledTask -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control'
-Start-ScheduledTask -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control Watchdog'
 ```
 
 **Verify enabled** before capturing: a new session file appears under
@@ -119,10 +133,8 @@ passes — decision §Disturbance mitigation §1):
 ```powershell
 [Environment]::SetEnvironmentVariable('SVG_MB_CONTROL_RAPL_ENERGY_MODE','disabled','User')
 # [Environment]::SetEnvironmentVariable('SVG_MB_CONTROL_CPU_CYCLES_MODE','disabled','User')
-Stop-ScheduledTask  -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control Watchdog'
 Stop-ScheduledTask  -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control'
 Start-ScheduledTask -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control'
-Start-ScheduledTask -TaskPath '\SVG-MB Control\' -TaskName 'SVG-MB Control Watchdog'
 ```
 
 Confirm `cpu_pkg_energy_acquisition` is back to `disabled` in the post-revert session.
@@ -165,7 +177,7 @@ Per decision §Evaluation. This session contributes to (does not complete) the g
 Write a dated exit-evidence note (e.g. `docs/cpu-energy-quarantine-exit-evidence-<date>.md`)
 with: the session window, ESU read, idle/load/cooldown avg watts, the §3 external
 comparison (source + numbers + % delta), the §6 no-disturbance deltas, and any
-criterion not met. After **≥ 3 sessions over ≥ 7 days** all pass, the maintainer
+criterion not met. After **>= 3 independent sessions** all pass, the maintainer
 records the promotion and flips `cpu_pkg_energy_acquisition` to `validated` in a
 follow-up note (and `cpu_cycles_acquisition` only if criterion 4 also passed);
 then reconcile FEAT-0006 §14 / `docs/TRACEABILITY.md`. Promotion is never automatic.

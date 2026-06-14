@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.1   **Updated:** 2026-06-07
+**Status:** Accepted   **Version:** 0.3   **Updated:** 2026-06-14
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -56,7 +56,7 @@ Result values:
 | `FEAT-0003` Selectable control-law profile with hot-swap | Draft | Not buildable; design capture only. |
 | `FEAT-0004` Hardware-access dependency health signal | Draft | Not buildable; decision record gate open. |
 | `FEAT-0005` Write actuation confirmation | Reserved (body parked) | Not buildable; body parked in `docs/features/_parked/`, sequenced behind FEAT-0004. |
-| `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; APERF/MPERF `#GP` through the shipped bin, so the work numerator / effective frequency are deferred. Energy-only v1 build authorized; the enabled integration path is not yet hardware/CI-validated. The analyzer time-weighted average-power derivation (schema v9, `analyze report`) landed 2026-06-09 with unit + end-to-end tests green; live runtime-CSV (M) evidence still pending. FEAT-0004 recommended, not blocking. |
+| `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed behind default-off gates. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
 
 ## 3. Requirement map
@@ -116,12 +116,12 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | partial — cycle logger landed default-off (cpu_cycles.h math + cpu_cycles_tests, CTest 11/11; amd_reader per-core APERF/MPERF read logging cpu_aperf_delta/cpu_mperf_delta; reachability+affinity live-confirmed 2026-06-09). Analyzer effective-freq derivation + enabled-path/live CSV pending |
-| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | partial — energy logger landed 2026-06-07; analyzer time-weighted avg-power derivation landed 2026-06-09 (schema v9, sample-id de-duplication, no-false-zero; `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end). Enabled integration path + live-CSV (M) evidence pending |
-| `REQ-CPUEFF-03` | T, R | Context/provenance propagation test, explicit deferred-signal unavailable handling, and review vs `RUNTIME_HOME.md`. | pass (v1 scope) — temperature stays aligned with the window; the first cut reports effective-frequency inputs unavailable (not guessed), but they are reachable with the shipped bin (AMD RO aliases; the 2026-06-07 #GP was a probe-index error) |
+| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | partial — cycle logger landed default-off (`cpu_cycles.h` math + `cpu_cycles_tests`; `amd_reader` per-core APERF/MPERF reads logging `cpu_aperf_delta` / `cpu_mperf_delta`); analyzer effective-frequency derivation landed 2026-06-10 (schema v10). Enabled live CSV sessions 1-3 captured `cpu_cycles_acquisition=quarantine`; criterion 4 remains MANUAL in the evidence notes, so cycle promotion and cycles-per-Joule join remain pending; `INST_RETIRED` stays out of read-only scope. |
+| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | pass (marker promotion pending) — energy logger landed 2026-06-07; analyzer time-weighted avg-power derivation landed 2026-06-09 (schema v9, sample-id de-duplication, no-false-zero; `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end). Enabled live CSV sessions 1-3 captured `cpu_pkg_energy_acquisition=quarantine`; each scored 5 PASS / 0 FAIL / 1 MANUAL, with the MANUAL item limited to cycle effective-frequency validity. Energy quarantine-exit evidence is complete across 3 independent sessions; flipping to `validated` remains a manual maintainer decision. |
+| `REQ-CPUEFF-03` | T, R | Context/provenance propagation test, explicit deferred-signal unavailable handling, and review vs `RUNTIME_HOME.md`. | pass (v1 scope) — temperature stays aligned with the window; energy and cycle acquisition markers remain independent; effective-frequency inputs are emitted only when the default-off cycle path is enabled and are derived by analyzer schema v10 rather than guessed. |
 | `REQ-CPUEFF-04` | T, R | Analyzer-ingest tests with old archives missing the new fields; no-false-zero test. | pass — additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility guard |
-| `REQ-CPUEFF-05` | R | Review confirms read paths only; no CPU-control write. | pass — `ReadAllowlistedMsr` issues `ioctl_read_msr` only; no write in the energy path |
-| `REQ-CPUEFF-06` | R | Review of the enumerated register/counter read set vs `AGENTS.md`. | pass — enumerated read set `{0xC0010299, 0xC001029B}` via `rapl::IsAllowlistedEnergyMsr` + allow-list guard test |
+| `REQ-CPUEFF-05` | R | Review confirms read paths only; no CPU-control write. | pass — the energy and cycle helpers issue `ioctl_read_msr` only; no write in the FEAT-0006 paths |
+| `REQ-CPUEFF-06` | R | Review of the enumerated register/counter read set vs `AGENTS.md`. | pass — enumerated read sets `{0xC0010299, 0xC001029B}` via `rapl::IsAllowlistedEnergyMsr` and `{0xC00000E7, 0xC00000E8}` via `cycles::IsAllowlistedCycleMsr`, with allow-list guard tests |
 | `REQ-CPUEFF-07` | R | Review logger code/docs: no baked-in efficiency scoring. | pass — logger records raw delta+window only; no efficiency scoring (review) |
 | `REQ-CPUEFF-08` | T, R | CPU-settings label-propagation test/config review. | deferred — workload/CPU-setting label is the shared open question with FEAT-0002 §8; not in v1 |
 

@@ -9,11 +9,16 @@ there, this only reads them):
   3 +/-15% vs the SMU reference        4 effective-frequency validity (cycles)
   5 fault behavior                     6 no-disturbance vs the disabled baseline
 
-It contributes ONE session toward the >=3 sessions / >=7 days gate; promotion to
-`validated` stays a manual maintainer step (decision §Quarantine).
+It contributes ONE session toward the >=3 independent sessions gate; promotion
+to `validated` stays a manual maintainer step (decision §Quarantine).
 
 Usage:
   python score_energy_session.py --manifest <out>/manifest.json --session-num 1
+
+  # Criterion-4 Option B (cycle validation plan): lock a core to a known clock,
+  # run cycles-enabled load on it, then score the derived load MHz vs the lock:
+  python score_energy_session.py --manifest <out>/manifest.json --session-num N \
+      --p0-mhz 4300 --locked-mhz 4300
 """
 from __future__ import annotations
 
@@ -26,48 +31,19 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-WALL_FMT = "%Y-%m-%dT%H:%M:%S"
+# scripts/ is not a package; make the shared helpers importable under the
+# by-file-path loaders too (tests, scheduled tasks).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from control_csv import (  # noqa: E402
+    WALL_CLOCK_FMT as WALL_FMT,
+    column as col,
+    parse_control_csv,
+    to_float as to_f,
+)
+
 CEILING_W = 400.0          # socket sanity ceiling (decision criterion 2)
 WRAP_JOULES = 2 ** 32 * 15.26e-6   # ESU=16 -> 15.26 uJ/unit -> ~65.5 kJ per wrap
 TOL_PCT = 15.0             # criterion 3 tolerance
-
-
-def parse_control_csv(path):
-    meta, header, rows = {}, [], []
-    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            line = raw.rstrip("\r\n")
-            if not line:
-                continue
-            if line.startswith("#"):
-                body = line.lstrip("#").strip()
-                if "=" in body:
-                    k, _, v = body.partition("=")
-                    meta[k.strip()] = v.strip()
-                continue
-            if not header:
-                header = next(csv.reader([line]))
-                continue
-            rows.append(next(csv.reader([line])))
-    return meta, header, rows
-
-
-def col(header, rows, name):
-    try:
-        i = header.index(name)
-    except ValueError:
-        return [""] * len(rows)
-    return [r[i] if i < len(r) else "" for r in rows]
-
-
-def to_f(x):
-    if x is None or x == "":
-        return None
-    try:
-        v = float(x)
-    except ValueError:
-        return None
-    return v if math.isfinite(v) else None
 
 
 def parse_wall(x):
@@ -156,14 +132,72 @@ def verdict(ok, manual=False, incomplete=False):
     return "PASS" if ok else "FAIL"
 
 
+def effective_freq_verdict(r_idle, r_load, p0_mhz=None, locked_mhz=None,
+                           tol_pct=5.0):
+    """Score criterion 4 from the idle/load APERF/MPERF ratios. Pure.
+
+    `ratio x P0 base = effective MHz` (MPERF counts at the P0 reference, APERF at
+    the actual core clock). Three modes, lowest evidence first:
+
+    - No `p0_mhz`: report the raw ratios; stays MANUAL (no MHz, no reference).
+    - `p0_mhz` only: also report derived MHz, but stays MANUAL -- a derived MHz
+      with no reference is not validated (cycle validation plan, Option A would
+      add an external effective-clock comparison here).
+    - `p0_mhz` + `locked_mhz` (Option B): the load window is at the locked clock
+      under full C0 residency, so derived load MHz must equal the operator-locked
+      setpoint within `tol_pct`. This also tests that `p0_mhz` is the correct
+      base, because a wrong base scales the derived value off the setpoint.
+
+    Returns `(verdict, detail)`.
+    """
+    def mhz(x):
+        return f"{x:.0f}" if x is not None else "n/a"
+
+    base = (f"dAPERF/dMPERF idle={r_idle and round(r_idle, 3)}, "
+            f"load={r_load and round(r_load, 3)}")
+    if p0_mhz is None:
+        return "MANUAL", (base + " (x base freq = effective; analyze report "
+                          "--p0-mhz <base> derives it; promotion stays manual)")
+    d_idle = r_idle * p0_mhz if r_idle is not None else None
+    d_load = r_load * p0_mhz if r_load is not None else None
+    derived = (f"{base}; derived idle={mhz(d_idle)} MHz, load={mhz(d_load)} MHz "
+               f"@ P0 {p0_mhz:.0f}")
+    if locked_mhz is None:
+        return "MANUAL", (derived + " (no locked setpoint; supply --locked-mhz "
+                          "for the Option B cross-check)")
+    if d_load is None or not (locked_mhz > 0):
+        return "INCOMPLETE", (derived + f"; locked={locked_mhz} but no load-window "
+                              "ratio -> rerun with cycles enabled under load")
+    dpct = (d_load - locked_mhz) / locked_mhz * 100.0
+    return verdict(abs(dpct) <= tol_pct), (
+        derived + f"; locked={locked_mhz:.0f} MHz -> load derived {d_load:.0f} MHz "
+        f"({dpct:+.1f}%, tol +/-{tol_pct:.0f}%)")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--manifest", required=True, type=Path)
     ap.add_argument("--session-num", type=int, default=1)
     ap.add_argument("--out", type=Path)
+    # Criterion-4 Option B (cycle validation plan): the analyzer's P0 base and the
+    # operator-locked clock. CLI overrides the manifest; both default off (MANUAL).
+    ap.add_argument("--p0-mhz", type=float, default=None,
+                    help="P0/base frequency MHz for the APERF/MPERF ratio.")
+    ap.add_argument("--locked-mhz", type=float, default=None,
+                    help="Operator-locked clock MHz to validate the load window "
+                         "against (Option B).")
+    ap.add_argument("--freq-tol-pct", type=float, default=None,
+                    help="Criterion-4 tolerance percent (default 5).")
     args = ap.parse_args(argv)
 
     man = json.loads(args.manifest.read_text(encoding="utf-8"))
+    p0_mhz = args.p0_mhz if args.p0_mhz is not None else man.get("p0_mhz")
+    locked_mhz = (args.locked_mhz if args.locked_mhz is not None
+                  else man.get("locked_mhz"))
+    freq_tol = (args.freq_tol_pct if args.freq_tol_pct is not None
+                else man.get("freq_tol_pct"))
+    if freq_tol is None:
+        freq_tol = 5.0
     ph = man.get("phases", {})
     session_csv = man.get("session_csv")
     if not session_csv or not Path(session_csv).is_file():
@@ -283,11 +317,9 @@ def main(argv=None):
                      if m and to_f(x) is not None)
             return (a / mm) if mm else None
         r_idle, r_load = ratio(idle_m), ratio(load_m)
-        c4_detail = (f"dAPERF/dMPERF idle={r_idle and round(r_idle,3)}, "
-                     f"load={r_load and round(r_load,3)} "
-                     f"(x base freq = effective; analyze report --p0-mhz "
-                     f"<base> derives it; promotion stays manual)")
-        results.append((4, "Effective-frequency validity (cycles)", "MANUAL",
+        c4, c4_detail = effective_freq_verdict(
+            r_idle, r_load, p0_mhz, locked_mhz, freq_tol)
+        results.append((4, "Effective-frequency validity (cycles)", c4,
                         c4_detail))
 
     # --- Criterion 5: fault behavior ---
@@ -331,7 +363,7 @@ def main(argv=None):
         f"# CPU Energy Quarantine-Exit Evidence — session {args.session_num} — {date}",
         "",
         "Auto-scored by `scripts/score_energy_session.py` from "
-        f"`{args.manifest}`. One of >=3 sessions over >=7 days; promotion to "
+        f"`{args.manifest}`. One of >=3 independent sessions; promotion to "
         "`validated` stays a manual maintainer step (decision §Quarantine).",
         "",
         f"- Session CSV: `{session_csv}` ({len(rows)} rows)",

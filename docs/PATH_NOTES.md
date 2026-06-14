@@ -23,6 +23,39 @@ checkable.
 
 ---
 
+## 2026-06-14
+
+- **Added** — two-pass discovery fan-out over the codebase for reliability/
+  performance/maintainability targets (static read+grep, adversarially verified;
+  no code changed, nothing committed or promoted). Method: finder → per-finding
+  verify → synthesis → completeness critic. Pass 1 (`wf_45e89d06-a60`, 48 agents):
+  10 seams, 36 findings → 26 verified survivors. Pass 2 (`wf_32fc8e34-cee`, 54
+  agents): the 12 pass-1-critic-flagged unscanned seams, 40 findings → 25
+  survivors. New docs:
+  `docs/discovery-loop-targets-value-ranked-2026-06-14.md` (master value-ranked
+  list, 40 clustered candidates), `docs/discovery-loop-plan-tighter-pass-2026-06-14.md`
+  (full evidence per item + Now/Next/Later), `docs/loop-checkpoint-tighter-pass-targets.md`
+  (resume checkpoint), `docs/loop-rotation-state.md` (seam coverage).
+- **Added** — two corrections the verify layer caught vs a solo read, recorded in
+  the docs: the `duty_pct→duty_raw` conversion is CORRECT
+  (`fan_sio.cpp:830`, only a test gap remains, W3-3); and the
+  `LookupCurve` floor-on-bad-temp concern is reachable via the 0.0 GPU-envelope
+  sentinel (AM-1), not via NaN (unreachable, CPU path is `isnan`-gated at
+  `tick_runner.cpp:183`).
+- **Idea** — top candidates for a tighter pass (NOT authorized work; promote via
+  `docs/features/` first): HR-2 (wedged worker has no force-recovery,
+  `task_runner.cpp:201-203`); W2-2 (duplicate channel number silently accepted,
+  `control_loop_config.cpp:557-562`); GPU-INIT-1 (NVML init ctor-only, no
+  re-init, `gpu_reader.cpp:394-404`); EH-2/3/4/5 (discarded write/append returns,
+  `tick_runner.cpp:368-377` et al.). Full ranking + evidence in the value-ranked
+  doc. Several need a maintainer decision before code (curve-shape contract,
+  reconcile-fail boot policy, FEAT-0005 un-park, scheduled-task principal).
+- **Idea (verify)** — pass-2 critic flagged seams still unscanned after two passes:
+  `runtime_health.cpp` AssessHealthState DST/backward-clock age-clamp masking;
+  supervisor restart-policy asymmetry (`control_supervisor.cpp:618-668`); CSV
+  cross-layer column-contract drift (use the schema-validator skill); the
+  01452dc trailing-header-skip parser has no cited regression test.
+
 ## 2026-06-10
 
 - **Done** — applied all four finding groups of

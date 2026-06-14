@@ -69,7 +69,15 @@ if ($Install) {
     $effectiveUser = Get-SvgMbCurrentUserId -UserId $UserId
     $taskRunnerPath = Resolve-SvgMbControlTaskRunner -ExePath $exePath -Required
     $arguments = "--start --config `"$configPath`""
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $effectiveUser
+    # Start at system boot as well as at user logon so an unattended reboot
+    # relaunches the controller even before interactive logon. The runtime
+    # singleton guard makes a duplicate boot+logon launch a safe no-op. Mirrors
+    # the Interactive/Highest principal already used here (and by the Energy
+    # Safety Revert task, which runs reliably from its boot trigger).
+    $triggers = @(
+        New-ScheduledTaskTrigger -AtLogOn -User $effectiveUser
+        New-ScheduledTaskTrigger -AtStartup
+    )
 
     Register-SvgMbControlTask `
         -EffectiveUser $effectiveUser `
@@ -78,9 +86,9 @@ if ($Install) {
         -ExecuteExe $taskRunnerPath `
         -Arguments $arguments `
         -WorkingDirectory $exeDir `
-        -Triggers $trigger `
+        -Triggers $triggers `
         -ExecutionTimeLimit (New-TimeSpan -Minutes 5) `
-        -Description 'Starts SVG-MB Control fan controller at user logon.'
+        -Description 'Starts SVG-MB Control fan controller at system startup and user logon.'
 
     if (-not $NoStart) {
         $Start = $true

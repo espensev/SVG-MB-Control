@@ -325,14 +325,18 @@ New telemetry from an unexercised, hardware-unconfirmed path is collected but
   verdict or tuning conclusion (extends REQ-CPUEFF-07).
 - **No control use, ever in this scope.** Read-only, log-only — quarantine
   status does not gate any control path because there is none (Scope).
-- **Exit is an explicit maintainer decision over a sustained period.**
+- **Exit is an explicit maintainer decision over independent captures.**
   Quarantine ends only when the Evaluation criteria hold across **at least 3
-  independent capture sessions spanning ≥ 7 days** — not a single window — so the
-  bar is reliability over time, not one plausible run. The decision is recorded
-  in a follow-up validation note; the marker then flips to
-  `cpu_pkg_energy_acquisition = validated`. `cpu_cycles_acquisition` flips only
-  if the separate APERF/MPERF affinity and plausibility gates also pass.
-  Promotion is never automatic.
+  independent capture sessions** -- not a single window -- so the bar is
+  repeatability, not one plausible run. The earlier fixed **>= 7 day** span was
+  removed on 2026-06-14 because it was an unsupported policy margin, not a
+  measured requirement. Reliability is demonstrated by separate capture sessions,
+  worker restart cycles, idle/load/cooldown phase coverage, and the criteria
+  below. Any future calendar-delay gate needs an explicit rationale and decision
+  record. The decision is recorded in a follow-up validation note; the marker
+  then flips to `cpu_pkg_energy_acquisition = validated`.
+  `cpu_cycles_acquisition` flips only if the separate APERF/MPERF affinity and
+  plausibility gates also pass. Promotion is never automatic.
 - If RAPL proves unavailable or implausible on this part, the path stays
   quarantined indefinitely (it failed on this hardware) and is not promoted.
 

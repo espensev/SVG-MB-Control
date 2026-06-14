@@ -45,6 +45,7 @@ $captureArgs = @{
     IdleSeconds     = $IdleSeconds
     LoadSeconds     = $LoadSeconds
     CooldownSeconds = $CooldownSeconds
+    LoadThreads     = $LoadThreads
 }
 if ($SynthLoadExe) { $captureArgs.SynthLoadExe = $SynthLoadExe }
 

@@ -24,7 +24,6 @@ This script reports numbers; it does not decide the plan's go/no-go.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import statistics
@@ -32,52 +31,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-WALL_CLOCK_FMT = "%Y-%m-%dT%H:%M:%S"
+# scripts/ is not a package; make the shared helpers importable under the
+# by-file-path loaders too (tests, scheduled tasks).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from control_csv import (  # noqa: E402
+    WALL_CLOCK_FMT, column, parse_control_csv, to_float)
+
 DEFAULT_TICK_S = 0.25  # shipped poll_tick_ms when the span cannot be derived
 
 REQUIRED_COLUMNS = ("wall_clock", "cpu_tctl_c")
-
-
-def parse_control_csv(path: Path) -> tuple[dict[str, str], list[str], list[list[str]]]:
-    """Split a control-loop CSV into (#-comment meta, header, data rows)."""
-    meta: dict[str, str] = {}
-    header: list[str] = []
-    rows: list[list[str]] = []
-    with path.open(newline="", encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
-            line = raw.rstrip("\r\n")
-            if not line:
-                continue
-            if line.startswith("#"):
-                body = line.lstrip("#").strip()
-                if "=" in body:
-                    key, _, value = body.partition("=")
-                    meta[key.strip()] = value.strip()
-                continue
-            if not header:
-                header = next(csv.reader([line]))
-                continue
-            rows.append(next(csv.reader([line])))
-    return meta, header, rows
-
-
-def column(header: list[str], rows: list[list[str]], name: str) -> list[str]:
-    """One column as raw strings ('' where the row is short)."""
-    try:
-        idx = header.index(name)
-    except ValueError:
-        return ["" for _ in rows]
-    return [row[idx] if idx < len(row) else "" for row in rows]
-
-
-def to_float(value: str) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        out = float(value)
-    except ValueError:
-        return None
-    return out if math.isfinite(out) else None
 
 
 def derive_watts(sample_ids: list[str], deltas_uj: list[str],
