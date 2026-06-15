@@ -8,6 +8,41 @@ logged energy data "must not feed any control path: no curve, blend, boost,
 cadence, write-gate, or feedforward input. A CPU power feedforward is a
 separate future feature and is explicitly out of scope here." This document
 scaffolds that separate future feature up to (not through) its FEAT intake.
+**Update 2026-06-15: Gate 2 ran → no-go for the control variant; the feature is
+parked. See Outcome below.**
+
+## Outcome — 2026-06-15: no-go for the control variant (maintainer decision)
+
+Gate 2 ran for the first time on the three energy-enabled quarantine sessions.
+The method and per-session numbers are recorded neutrally in
+`docs/cpu-power-anticipation-gate2-characterization-2026-06-15.md` (datasets under
+`release/runtime/experiments/energy-quarantine/gate2-characterization-2026-06-15/`).
+
+Result against §5 Gate 2 and §6:
+
+- The event-onset offset between derived package watts and `system_cpu_busy_pct`
+  is 0 s (±1 tick) in all three sessions: package watts gives no onset lead over
+  the already-validated, always-on `system_cpu_busy_pct` (FEAT-0002). Per §6 this
+  is the documented no-go for the power variant as a control input — the
+  busy-keyed signal captures the same lead at no acquisition cost.
+- The absolute power→Tctl lead is not resolvable at the present ~1 s mirrored
+  energy cadence (characterization doc Appendix C); the supported statement is
+  "lead 0 ± 1 tick, unresolvable," not "no physical lead exists."
+
+Decision: do not build the §4 power-anticipation boost as a control input, and do
+not pursue Gate 1 (always-on) or Gate 3 (FEAT intake) for the control variant.
+RAPL package energy remains read/log-only evidence telemetry (FEAT-0006 scope;
+`cpu_pkg_energy_acquisition` validated 2026-06-14). This parks the feature and
+keeps the §4 design-support artifacts (`src/control/power_anticipation.h` and its
+tests, `scripts/analyze_power_lead.py`, `scripts/analyze_power_onset.py`) in place;
+it does not delete the scaffold.
+
+Reopen criterion: a divergent-load capture — un-mirrored / sub-second energy
+sampling, a ramped or staircase load, and full-occupancy variable-intensity steps
+(characterization doc Appendix C.4) — could separate watts from `system_cpu_busy_pct`
+where the latter saturates. That regime is a steady/high-load amplitude property,
+which §1 places outside this anticipation term, so it would seed a separate
+power-keyed proportional feature rather than reviving this §4 boost.
 
 ## 1. Intent
 
@@ -56,12 +91,14 @@ As of 2026-06-10 (`analyze-native-superset`, live worker exe `c4b6986`):
   not yet built.
 - **Consumer (landed):** analyzer schema v9 derives time-weighted average
   package watts over distinct `cpu_power_sample_id` windows.
-- **Trust state: quarantine, zero evidence sessions.** Markers are
-  `disabled` live; the enabled path has never run in CI or on hardware.
-  Quarantine exit requires all 6 criteria of the decision doc §Evaluation
-  across ≥ 3 independent sessions
-  (`docs/cpu-energy-quarantine-exit-capture-runbook-2026-06-10.md` is the
-  prepared, unexecuted capture procedure).
+- **Trust state (updated 2026-06-14): quarantine exited;
+  `cpu_pkg_energy_acquisition` validated.** Three energy-enabled sessions ran the
+  capture runbook; criteria 1/2/3/5/6 passed (criterion 4 is the separate cycle
+  path), and promotion was authorized as a governance decision
+  (`docs/cpu-energy-quarantine-exit-validation-2026-06-14.md`). The live
+  controller is still default-off, so live markers read `disabled`. The cycle
+  marker `cpu_cycles_acquisition` is not yet promotable
+  (`docs/cpu-cycles-effective-freq-validation-plan-2026-06-14.md`).
 
 The plumbing means a control-path consumer is a governance and validation
 problem, not a data-path problem.
@@ -123,6 +160,9 @@ band $[a,b]$), so the stage would be:
 - **Gate 0 — quarantine exit (already planned, no new authorization):** run
   the capture runbook for ≥ 3 independent sessions; all 6 criteria pass;
   maintainer flips `cpu_pkg_energy_acquisition` to `validated`.
+  **Status: done 2026-06-14** — 3 sessions; criteria 1/2/3/5/6 pass; promotion
+  authorized as governance-only (no runtime stamp, by decision)
+  (`docs/cpu-energy-quarantine-exit-validation-2026-06-14.md`).
 - **Gate 1 — always-on decision:** a control input cannot depend on a
   default-off env var. Requires criterion-6 (no-disturbance) evidence and an
   explicit maintainer decision to make the energy read default-on (a decision
@@ -141,6 +181,12 @@ band $[a,b]$), so the stage would be:
   **Go/no-go: if the measured lead time does not exceed the fan-side response
   latency (rate limiter + spin-up) by a useful margin, stop here — the
   feature has no benefit to deliver.**
+  **Status: ran 2026-06-15 → no-go for the control variant** (Outcome at the top
+  of this document; `system_cpu_busy_pct` − watts onset offset 0 s across 3
+  sessions). The onset measurement uses the event-onset method in
+  `docs/cpu-power-anticipation-gate2-characterization-2026-06-15.md`; that record
+  also notes the lag-correlation in `analyze_power_lead.py` does not resolve onset
+  lead on a single step (its Appendix A).
 - **Gate 3 — FEAT intake:** new feature spec (next free FEAT number;
   FEAT-0006 cannot be expanded — its decision record excludes control use),
   with REQ IDs, acceptance criteria, a decision record fixing the band/cap

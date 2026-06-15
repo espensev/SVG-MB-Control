@@ -10,6 +10,22 @@ This plan is separate from the package-energy marker, which is already covered b
 `docs/cpu-energy-quarantine-exit-validation-2026-06-14.md` and does not depend on
 the cycle path.
 
+## Queued action (single remaining step)
+
+To close criterion 4: run **one** manual operator session — Option B
+(locked-frequency cross-check), steps 1–4 in the Runbook below. Machine time
+~10–22 min. Everything else is done and green: the per-core APERF/MPERF read
+path, the default-off cycle logger, the schema-v10 analyzer derivation, and the
+scorer (`scripts/score_energy_session.py`, commit e99505b) are implemented; the
+rated base (4300 MHz) and preflight are verified (2026-06-14). The only
+un-automatable parts are step 1 (lock a core to a fixed P-state, boost disabled —
+an underclock such as 3000 MHz is safest) and step 4 (revert the lock); neither
+runs autonomously on the live machine, which is why this is queued for an
+operator rather than executed. On PASS, `cpu_cycles_acquisition` promotion is a
+separate governance step (same "no runtime stamp until a consumer exists" pattern
+as the energy marker). This blocks nothing else; the cycles-per-Joule join (end
+of this doc) is a separate prerequisite for the efficiency conclusion.
+
 ## What is already established
 
 - The per-core APERF/MPERF read path is reachable on Family 1Ah through the
