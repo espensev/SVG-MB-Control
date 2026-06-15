@@ -37,21 +37,28 @@ Scope:
 |---|---|---|---|---|---|---|
 | Baseline | 32 threads, **normal**, no pin, 60 s | **1.12** (of 4) | 314 | 6 s | alive (pid stable) | **survives (degraded ~3.6×)** |
 | Affinity | 32 threads, **normal**, **+pin**, 60 s | **0.85** (of 4) | 252 | 3 s | alive (pid stable) | **survives (degraded)** |
-| A1 | 32 threads, **above**, no pin, 60 s | collapse → **stall** | — | **~25 s** | **watchdog restart** (pid 40956 → 53332) | **STALL** |
+| A1 (×3) | 32 threads, **above**, no pin, 60 s | ~1.3 (survivors) | 302–370 | 3 s (survivors) | **1 of 3 restarted** | **probabilistic STALL (1/3)** |
 
 Idle/ambient cadence before each cell measured at ~4.0–4.1 ticks/s; the controller
 recovered to ~4 ticks/s and ~44 °C within ~60 s after each cell.
 
-**Discriminator: the load's priority class relative to the `BelowNormal`
-controller — not core occupancy.** A `normal` load (one class above) survives at
-~1 tick/s whether unpinned (1.12/s) or pinned one-per-core (0.85/s): pinning adds
-only marginal degradation and **no** stall (no restart, 0 errors, ≤3 s write gap).
-Elevating the same load one further class to `above` stalls it (watchdog restart,
-~25 s dead-time). So affinity pinning alone is **not** sufficient — the stall is
-driven by the load out-prioritising the controller. This isolates the *reproduction
-trigger* to load priority. But the **restart mechanism** is staleness-mediated and
-the **actuation failure** is sidecar-gated (§2.1), so the controller's priority is
-**one of two** Layer-0 levers — not the only one.
+**Reproduction rate:** `above` was run three times → **1 stall** (watchdog restart,
+~25 s dead-time) **+ 2 degraded-survive** (~1.3 ticks/s, ≤3 s write gap, 0–1 sidecar
+errors, no restart). `normal` and `normal`+pin (×1 each) survived. The stall is
+therefore **stochastic**, not a deterministic function of priority (§2.1).
+
+**What the priority axis shows — a probability shift, not a deterministic
+threshold.** Every cell degrades the `BelowNormal` loop to ~1 tick/s: `normal`
+unpinned (1.12/s), `normal` + pin (0.85/s), `above` (~1.3/s) — and degradation
+alone never restarts the loop (writes continue, status stays < 10 s fresh). The
+**stall** (watchdog restart) appeared in only **1 of 3** `above` runs and **0 of 1**
+`normal` / `normal`+pin runs. So a higher-priority load does **not** deterministically
+stall the controller; it raises the **probability** of the stall by increasing
+contention (more `pending_writes.json` upsert races, §2.1). Affinity pinning at
+`normal` added no stall. The reproduction is therefore **stochastic** — which is
+itself the finding — and it points the Layer-0 lever at the underlying write race as
+much as at the priority gap. The restart is staleness-mediated and the actuation
+failure is sidecar-gated (§2.1); the controller's priority is **one of two** levers.
 
 ## 2.1 Mechanism (code-confirmed) and what it implies for the lever
 
@@ -84,11 +91,14 @@ elevation** — keeps the status fresh under CPU contention; the lever this swee
 isolated, with affinity / CPU-Sets as the secondary "harder guarantee". (2)
 **sidecar / status write resilience** — retry the pending-writes upsert on transient
 error 5, and/or decouple actuation and status-freshness from a single sidecar
-write, which also covers the I/O-stall path priority cannot.
+write, which also covers the I/O-stall path priority cannot. Because the stall is
+gated by the **probabilistic** sidecar race (1 of 3 at `above`) rather than a
+priority cliff, lever (2) targets the proximate stochastic cause directly; lever (1)
+reduces how often contention provokes the race.
 
 ## 3. A1 stall timeline (reconstructed from `events.jsonl`)
 
-Load started 00:08:45 (`above`, 32 threads).
+Load started 00:08:45 (`above`, 32 threads — the one run of three that stalled).
 
 | Time | Observation |
 |---|---|
@@ -118,10 +128,11 @@ Load started 00:08:45 (`above`, 32 threads).
 
 - **Oversubscription:** `--oversubscribe 2|4` — not run; would test stall
   *severity* (dead-time, repeated restarts), not the trigger.
-- **Reproducibility:** A1 is n=1. Because the proximate actuation failure is a
-  `pending_writes.json` file-replace race (error 5), the stall may be probabilistic
-  near the threshold; a confirm-repeat — and especially a repeat that does **not**
-  stall — would itself be informative.
+- **Reproducibility (resolved):** `above` ×3 → **1 stall, 2 degraded-survive**;
+  `normal` and `normal`+pin ×1 each → survive. The stall is **probabilistic**
+  (consistent with the `pending_writes.json` file-replace race), not a deterministic
+  priority threshold. The rate is not well-estimated at this n; a dedicated multi-run
+  campaign would quantify stall-probability vs load priority.
 - **Detector signals:** cadence < 1 tick/s alone is *degraded*, not a stall — a
   `BelowNormal` loop sharing cores with a `normal` load runs at ~1/s yet keeps
   actuating and refreshing status. The authoritative **restart** predictor is
