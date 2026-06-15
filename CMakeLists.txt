@@ -279,7 +279,7 @@ endif()
 #   cmake -DSVG_MB_CONTROL_BUILD_SYNTH_LOAD=ON ... && cmake --build ... \
 #         --target cpu_synth_load
 option(SVG_MB_CONTROL_BUILD_SYNTH_LOAD
-    "Build the throwaway synthetic CPU load generator (FEAT-0006 capture)" OFF)
+    "Build the throwaway synthetic CPU load generator (FEAT-0006 energy capture + Layer-0 stall reproduction)" OFF)
 if(SVG_MB_CONTROL_BUILD_SYNTH_LOAD AND WIN32)
     add_executable(cpu_synth_load tools/cpu_synth_load.cpp)
     target_compile_features(cpu_synth_load PRIVATE cxx_std_20)

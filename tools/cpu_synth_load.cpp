@@ -1,22 +1,44 @@
-// Throwaway synthetic CPU load generator for the FEAT-0006 CPU-energy
-// quarantine-exit capture (docs/cpu-energy-quarantine-exit-capture-runbook).
+// Throwaway synthetic CPU load generator.
 //
-// Drives a controlled, reproducible all-core load so a capture session has a
-// clean idle -> load -> cooldown step and a steady sub-window for the external
-// (SMU) power cross-check. NOT shipped, NOT part of the control loop, NOT a
-// dependency of any runtime path: read-only on the machine (pure FP register
-// math, no I/O, no MSR, no fan writes). OFF by default at the CMake level.
+// Two read-only uses, one binary:
+//   1. FEAT-0006 CPU-energy quarantine-exit capture
+//      (docs/cpu-energy-quarantine-exit-capture-runbook): a clean, reproducible
+//      idle -> load -> cooldown step with a steady sub-window for the external
+//      (SMU) power cross-check. This is the original use; the default invocation
+//      (no scheduling flags) is byte-identical to that behavior.
+//   2. Layer-0 loop-stall reproduction instrument
+//      (docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md): a controllable
+//      antagonist for the 06-09 control-loop starvation, which does NOT reproduce
+//      under a plain Normal-priority all-core load. The scheduling knobs below
+//      (--priority, --pin, --oversubscribe) let an operator sweep the suspected
+//      causes one at a time -- the load's priority class, its per-core affinity,
+//      and thread oversubscription -- while the shipped BelowNormal controller is
+//      held fixed, to find the minimal condition that stalls the loop.
 //
-// Each worker runs eight independent 256-bit FMA accumulator chains (re-seeded
-// per outer iteration so values stay bounded and the compiler cannot fold the
-// loop), saturating both FMA ports to pull near-package-max power. Stops after
-// --seconds (self-terminating; the orchestrator launches it with a duration)
-// or runs until killed when --seconds is 0.
+// NOT shipped, NOT part of the control loop, NOT a dependency of any runtime path.
+// Read-only on the machine: pure FP register math, no I/O, no MSR, no PCI, no fan
+// writes. The scheduling knobs touch only THIS process's own priority/affinity
+// (SetPriorityClass / SetThreadAffinityMask) -- they change nothing on the
+// hardware or in the controller. REALTIME_PRIORITY_CLASS is intentionally NOT
+// offered (it can preempt driver IOCTL / critical system threads and hard-lock the
+// box). OFF by default at the CMake level.
+//
+// Each worker runs eight independent 256-bit FMA accumulator chains (re-seeded per
+// outer iteration so values stay bounded and the compiler cannot fold the loop),
+// saturating both FMA ports to pull near-package-max power (AVX2 -- a safer, lower-
+// power proxy than a y-cruncher VT3 / AVX-512 power-virus). Stops after --seconds
+// (self-terminating) or runs until killed when --seconds is 0.
 //
 // Usage:
-//   cpu-synth-load.exe [--threads N] [--seconds S]
-//     --threads  worker count (default: hardware_concurrency)
-//     --seconds  run duration; 0 = until killed (default: 0)
+//   cpu-synth-load.exe [--threads N] [--seconds S] [--oversubscribe K]
+//                      [--priority below|normal|above|high] [--pin]
+//     --threads        worker count (default: logical CPU count)
+//     --seconds        run duration; 0 = until killed (default: 0)
+//     --oversubscribe  set threads = K * logical CPUs (ignored if --threads given)
+//     --priority       process priority class (default: inherit from launcher).
+//                      below|normal|above|high -- realtime is not accepted.
+//     --pin            pin worker t to logical CPU (t mod CPU count), so every core
+//                      carries a busy thread (deterministic full occupancy)
 //
 // Build (OFF by default):
 //   cmake -DSVG_MB_CONTROL_BUILD_SYNTH_LOAD=ON ... \
@@ -33,6 +55,7 @@
 #include <vector>
 
 #include <immintrin.h>
+#include <windows.h>  // SetPriorityClass / SetThreadAffinityMask (scheduling knobs)
 
 namespace {
 
@@ -48,7 +71,20 @@ std::string NowIso() {
     return std::string(buf);
 }
 
-void Worker(double seed) {
+// Pin the calling thread to a single logical CPU. Single processor group only
+// (this box is 32 logical CPUs, well under the 64-per-group affinity-mask limit);
+// no-op for core >= 64 rather than silently wrapping into the wrong group.
+void PinThisThread(unsigned core) {
+    if (core < 64u) {
+        const DWORD_PTR mask = static_cast<DWORD_PTR>(1ull) << core;
+        SetThreadAffinityMask(GetCurrentThread(), mask);
+    }
+}
+
+void Worker(double seed, int pin_core) {
+    if (pin_core >= 0) {
+        PinThisThread(static_cast<unsigned>(pin_core));
+    }
     const __m256d b = _mm256_set1_pd(1.0 + seed * 1e-12);
     const __m256d c = _mm256_set1_pd(seed * 1e-12);
     std::uint64_t local = 0;
@@ -85,34 +121,106 @@ void Worker(double seed) {
                      std::memory_order_relaxed);
 }
 
+// Apply a process priority class by name. REALTIME is intentionally rejected.
+// Returns false on an unknown name or a failed SetPriorityClass call.
+bool ApplyPriority(const std::string& name) {
+    DWORD cls = 0;
+    if (name == "below") {
+        cls = BELOW_NORMAL_PRIORITY_CLASS;
+    } else if (name == "normal") {
+        cls = NORMAL_PRIORITY_CLASS;
+    } else if (name == "above") {
+        cls = ABOVE_NORMAL_PRIORITY_CLASS;
+    } else if (name == "high") {
+        cls = HIGH_PRIORITY_CLASS;
+    } else {
+        return false;
+    }
+    return SetPriorityClass(GetCurrentProcess(), cls) != 0;
+}
+
+const char* CurrentPriorityName() {
+    switch (GetPriorityClass(GetCurrentProcess())) {
+        case IDLE_PRIORITY_CLASS:
+            return "idle";
+        case BELOW_NORMAL_PRIORITY_CLASS:
+            return "below";
+        case NORMAL_PRIORITY_CLASS:
+            return "normal";
+        case ABOVE_NORMAL_PRIORITY_CLASS:
+            return "above";
+        case HIGH_PRIORITY_CLASS:
+            return "high";
+        case REALTIME_PRIORITY_CLASS:
+            return "realtime";
+        default:
+            return "unknown";
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-    unsigned threads = std::thread::hardware_concurrency();
+    unsigned hw = std::thread::hardware_concurrency();
+    if (hw == 0u) {
+        hw = 1u;
+    }
+    unsigned threads = hw;
     int seconds = 0;
+    int oversub = 0;
+    bool threads_explicit = false;
+    bool pin = false;
+    std::string priority;  // empty = inherit launcher priority (do not change it)
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--threads" && i + 1 < argc) {
             threads = static_cast<unsigned>(std::atoi(argv[++i]));
+            threads_explicit = true;
         } else if (a == "--seconds" && i + 1 < argc) {
             seconds = std::atoi(argv[++i]);
+        } else if (a == "--oversubscribe" && i + 1 < argc) {
+            oversub = std::atoi(argv[++i]);
+        } else if (a == "--priority" && i + 1 < argc) {
+            priority = argv[++i];
+        } else if (a == "--pin") {
+            pin = true;
         } else {
             std::fprintf(stderr, "unknown/incomplete arg: %s\n", a.c_str());
             return 2;
+        }
+    }
+
+    if (oversub > 0) {
+        if (threads_explicit) {
+            std::fprintf(stderr, "note: --threads overrides --oversubscribe\n");
+        } else {
+            threads = hw * static_cast<unsigned>(oversub);
         }
     }
     if (threads == 0u) {
         threads = 1u;
     }
 
-    std::printf("cpu_synth_load start threads=%u seconds=%d ts=%s\n", threads,
-                seconds, NowIso().c_str());
+    if (!priority.empty() && !ApplyPriority(priority)) {
+        std::fprintf(stderr,
+                     "bad/failed --priority '%s' (use below|normal|above|high)\n",
+                     priority.c_str());
+        return 2;
+    }
+
+    std::printf(
+        "cpu_synth_load start threads=%u cores=%u (%.2fx) priority=%s pin=%s "
+        "seconds=%d ts=%s\n",
+        threads, hw, static_cast<double>(threads) / static_cast<double>(hw),
+        CurrentPriorityName(), pin ? "on" : "off", seconds, NowIso().c_str());
     std::fflush(stdout);
 
     std::vector<std::thread> pool;
     pool.reserve(threads);
     for (unsigned t = 0; t < threads; ++t) {
-        pool.emplace_back(Worker, 1.0 + static_cast<double>(t));
+        const int pin_core = pin ? static_cast<int>(t % hw) : -1;
+        pool.emplace_back(Worker, 1.0 + static_cast<double>(t), pin_core);
     }
 
     if (seconds > 0) {
