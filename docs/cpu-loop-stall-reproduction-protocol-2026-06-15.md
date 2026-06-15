@@ -56,6 +56,15 @@ Metrics (read over the window the load runs):
    (stale/torn reads, blanked windows, `*_upsert_failed`). Prefer Tctl/Tdie over
    per-CCD per-core reads; reject impossible dT/dt or stuck registers.
 
+**Authoritative signals (established by the 2026-06-16 run —
+`docs/cpu-loop-stall-reproduction-findings-2026-06-16.md` §2.1):** cadence (1) is an
+*early/secondary* indicator only. The **restart** is triggered by
+`control_runtime.json` staleness past the 10 s default `stale_after_ms` (watchdog
+`--health` → `--restart`), so the primary restart predictor is the status-refresh
+gap, not cadence. The **actuation** failure is `control_loop.sidecar_upsert_failed`
+(a `pending_writes.json` upsert that, on failure, skips the fan write). Treat those
+two events as the verdict signals; use cadence to see degradation building.
+
 **Calibration reference (real, logged):** the 2026-06-15 23:27 NDIS-hang stall
 (see memory `cpu-controller-restart-ndis-hang-2026-06-15`) shows the signature in
 this same log — `tick_count` advanced **22452 → 22455 in ~25 s** (≈0.12 ticks/s vs

@@ -48,10 +48,43 @@ controller — not core occupancy.** A `normal` load (one class above) survives 
 only marginal degradation and **no** stall (no restart, 0 errors, ≤3 s write gap).
 Elevating the same load one further class to `above` stalls it (watchdog restart,
 ~25 s dead-time). So affinity pinning alone is **not** sufficient — the stall is
-driven by the load out-prioritising the controller. This isolates the Layer-0
-lever to **the controller's own priority** (raise it from `BelowNormal` toward
-Normal/High), with affinity / CPU-Sets as a secondary "harder-guarantee" measure,
-consistent with the brief's 06-09 "operator-induced starvation" reading.
+driven by the load out-prioritising the controller. This isolates the *reproduction
+trigger* to load priority. But the **restart mechanism** is staleness-mediated and
+the **actuation failure** is sidecar-gated (§2.1), so the controller's priority is
+**one of two** Layer-0 levers — not the only one.
+
+## 2.1 Mechanism (code-confirmed) and what it implies for the lever
+
+Two independent failure paths, both verified in source, explain the A1 stall and
+why priority alone is an incomplete fix:
+
+- **Restart = status staleness, not cadence or the sidecar error directly.** The
+  worker refreshes `control_runtime.json` each tick. The external watchdog
+  (`svg-mb-control-task-runner.exe --watchdog-run`) runs `--health`; on the restart
+  code (`health == 2`, i.e. status stale past the **10 s default** `stale_after_ms`
+  — `staleness_threshold_ms` is not set in `control.json`) it issues `--restart`.
+  Under A1 the loop was starved enough to miss the 10 s status refresh → recycle.
+  The ~25 s dead-time ≈ 10 s staleness + watchdog poll + relaunch-under-load. This
+  is why baseline/affinity (cadence ~1/s but status still refreshed < 10 s) did
+  **not** restart despite low cadence — cadence is a *secondary* indicator here.
+- **Actuation is gated by the sidecar upsert.** In `channel_write.cpp`
+  (`TryApplyChannelSetpoint`, ~ln 311–337) each fan write first `Upsert`s the
+  `pending_writes.json` sidecar (FEAT-0001 write-once ordering); if that throws
+  (the observed Windows **error 5** / file-replace lock race) the function
+  `return`s **before** `fan_writer.ApplyDuty(...)`, emitting `sidecar_upsert_failed`
+  and skipping that channel's PWM write for the tick.
+- **Shared fragility.** The *same* `sidecar_upsert_failed` (error 5) appears under
+  CPU contention (A1) **and** the 2026-06-15 I/O stall (NDIS live-dump,
+  memory `cpu-controller-restart-ndis-hang-2026-06-15`). Priority elevation keeps
+  the loop scheduled (addresses the CPU-starvation → staleness path) but does **not**
+  prevent a file-replace lock-race under I/O pressure.
+
+**Two Layer-0 levers (for Phase 2; not decided here):** (1) **controller priority
+elevation** — keeps the status fresh under CPU contention; the lever this sweep
+isolated, with affinity / CPU-Sets as the secondary "harder guarantee". (2)
+**sidecar / status write resilience** — retry the pending-writes upsert on transient
+error 5, and/or decouple actuation and status-freshness from a single sidecar
+write, which also covers the I/O-stall path priority cannot.
 
 ## 3. A1 stall timeline (reconstructed from `events.jsonl`)
 
@@ -84,14 +117,18 @@ Load started 00:08:45 (`above`, 32 threads).
 ## 4. Not yet run / caveats
 
 - **Oversubscription:** `--oversubscribe 2|4` — not run; would test stall
-  *severity* (dead-time, repeated restarts), not the threshold, which is already
-  isolated to priority.
-- **Reproducibility:** A1 is n=1 (mechanism is fully logged, not a fluke, but a
-  confirm-repeat would harden the "deterministic at `above`" claim).
-- **Detector threshold:** cadence < 1 tick/s alone is *degraded*, not a stall — a
+  *severity* (dead-time, repeated restarts), not the trigger.
+- **Reproducibility:** A1 is n=1. Because the proximate actuation failure is a
+  `pending_writes.json` file-replace race (error 5), the stall may be probabilistic
+  near the threshold; a confirm-repeat — and especially a repeat that does **not**
+  stall — would itself be informative.
+- **Detector signals:** cadence < 1 tick/s alone is *degraded*, not a stall — a
   `BelowNormal` loop sharing cores with a `normal` load runs at ~1/s yet keeps
-  actuating. The reliable stall signals are a watchdog restart, writes stopping,
-  or a long (≥ ~10 s) write gap; the harness verdict was corrected to require one.
+  actuating and refreshing status. The authoritative **restart** predictor is
+  `control_runtime.json` staleness > 10 s (→ watchdog `--restart`); the
+  **actuation** predictor is `sidecar_upsert_failed`. The harness verdict was
+  corrected to require a hard signal (restart / writes-stopped / long write gap),
+  not low cadence.
 - AVX2 reproduced a *scheduling* stall; it does not reach the 06-09 ~107 °C
   thermal regime. The protocol's §5 AVX-512 escalation was **not** triggered (a
   repro was obtained), and is reserved should a thermal-coupled question arise.
