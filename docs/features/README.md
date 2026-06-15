@@ -1,7 +1,7 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.3   **Updated:** 2026-06-14
+**Status:** Accepted   **Version:** 0.4   **Updated:** 2026-06-16
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/MEASUREMENT_GATE.md`
@@ -114,3 +114,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | FEAT-0005 | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Reserved (body parked in `_parked/`) |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |
 | FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |
+| [FEAT-0008](FEAT-0008-watchdog-hung-worker-recovery.md) | Watchdog hung-worker recovery (force-kill escalation) | `REQ-WATCHDOG-*` | Draft |

@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.3   **Updated:** 2026-06-14
+**Status:** Accepted   **Version:** 0.4   **Updated:** 2026-06-16
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -58,6 +58,7 @@ Result values:
 | `FEAT-0005` Write actuation confirmation | Reserved (body parked) | Not buildable; body parked in `docs/features/_parked/`, sequenced behind FEAT-0004. |
 | `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed behind default-off gates. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
+| `FEAT-0008` Watchdog hung-worker recovery | Draft | Not buildable; decision-record gate (§9) open. Code-verified gap: the watchdog detects a hung worker (`kStale`) but cannot recover it — no `TerminateProcess`/force-kill in `src/`. |
 
 ## 3. Requirement map
 
@@ -124,6 +125,15 @@ Result values:
 | `REQ-CPUEFF-06` | R | Review of the enumerated register/counter read set vs `AGENTS.md`. | pass — enumerated read sets `{0xC0010299, 0xC001029B}` via `rapl::IsAllowlistedEnergyMsr` and `{0xC00000E7, 0xC00000E8}` via `cycles::IsAllowlistedCycleMsr`, with allow-list guard tests |
 | `REQ-CPUEFF-07` | R | Review logger code/docs: no baked-in efficiency scoring. | pass — logger records raw delta+window only; no efficiency scoring (review) |
 | `REQ-CPUEFF-08` | T, R | CPU-settings label-propagation test/config review. | deferred — workload/CPU-setting label is the shared open question with FEAT-0002 §8; not in v1 |
+
+### FEAT-0008 - Watchdog hung-worker recovery
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-WATCHDOG-01` | T, M | Integration test: a worker that ignores the stop sentinel past the deadline is force-terminated and relaunched; live A4 hung-worker repro shows recovery. | not buildable |
+| `REQ-WATCHDOG-02` | T, R | Assert `supervisor.worker_force_terminated` event (PID/reason); review vs `RUNTIME_HOME.md` event schema. | not buildable |
+| `REQ-WATCHDOG-03` | T, R | Reconcile-after-force-kill restores the orphaned baseline on relaunch; review vs `WRITE_ORCHESTRATION.md`. | not buildable |
+| `REQ-WATCHDOG-04` | T, R | A worker honoring the graceful stop is not force-terminated; the escalation is attempt-bounded. | not buildable |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 
