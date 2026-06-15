@@ -10,7 +10,9 @@ and by the maintainer; nothing here authorizes or rejects work.
 Scope:
 
 - In scope: data provenance, the two measurement methods and their parameters,
-  and the per-session numeric results, with machine-readable dataset files.
+  the per-session numeric results with machine-readable dataset files, and the
+  measurement-resolution limits plus the capture campaign that would lift them
+  (Appendix C).
 - Out of scope: any judgment of whether the measured values meet or fail a gate,
   any comparison verdict between signals, and any recommendation.
 
@@ -197,3 +199,80 @@ Sessions 2–3.
 `tctl_steady`, `tctl_threshold`, `onset_watts_s`, `onset_busy_s`, `onset_tctl_s`,
 `watts_minus_busy_s`, `tctl_minus_watts_s`, `tctl_minus_busy_s`, `tctl_max_c`,
 `tctl_cross_64c_s`, `tctl_cross_84c_s`.
+
+## Appendix C — measurement-resolution limits and the campaign that would resolve the deferred onset-lead question
+
+This appendix records what the two methods can and cannot resolve from the
+present captures, the measured context around that, and the capture campaign
+that would lift those limits. It states limits and measured values only; the
+go/no-go remains owned by the plan §5/§6. All values are recomputed from the
+`datasets/trace_session*.csv` extracts.
+
+### C.1 Onset-lead resolution
+
+- Energy windows are ~1 s and are mirrored across the 250 ms ticks of each
+  window (§2), so derived watts changes at about one quarter of the row rate.
+  The onset estimator's resolution is one row (Session 1 ≈ 0.43 s,
+  Sessions 2–3 ≈ 0.25 s).
+- The load stimulus is a single maximal step (§1), giving one onset event per
+  session; both watts and `system_cpu_busy_pct` cross their thresholds within
+  one window of `load_start`.
+- Consequence: the watts-vs-busy onset offset is resolvable to ±1 row at this
+  cadence (measured 0 s, §4). A power→Tctl lead shorter than the energy-window
+  period is not resolvable from these captures. The supported statement is
+  "watts-vs-busy onset offset is 0 ± 1 tick; a sub-window power lead is
+  unresolvable at this cadence," not "no lead exists."
+
+### C.2 The pre-load ("idle") phase is not quiescent
+
+Per-session pre-load (`t_rel_load_start_s` < 0) distributions:
+
+| Session | busy p50/p95 (%) | Tctl p50 (°C) / rows >64 °C | watts p95/max (W) | `busy<5%` floor p50/p95 (W) |
+|---|---|---|---|---|
+| 1 | 10.7 / 20.6 | 62.9 / 39 % | 95.9 / 107.9 | 53.9 / 59.7 (§5) |
+| 2 | 9.7 / 15.3 | 59.8 / 4 % | 83.2 / 94.0 | 45.3 / 49.7 (§5) |
+| 3 | 9.3 / 15.8 | 63.4 / 22 % | 77.6 / 121.1 | none (0 rows) |
+
+- The operative idle watts ceiling for any `start_w` siting is the pre-load
+  excursion p95/max (94–121 W), not the `busy<5%` quiet floor (45–60 W): the
+  quiet-floor filter excludes the background activity that a `start_w` would need to
+  clear. The load plateau is ~184–190 W (§4).
+- The `midband_pressure` term (start 64 °C) sees a session-dependent pre-load
+  active fraction (Session 1 39 %, Session 3 22 %, Session 2 4 %).
+
+### C.3 Session heterogeneity, coverage, and what the methods do not measure
+
+- Session 1 differs from Sessions 2–3 in binary (`c4b6986f45a3` vs
+  `01452dc42d69`), load (all-core vs 28-thread), tick (0.43 vs 0.25 s/row), and
+  blank rate (2.4 % vs 0.1 % undefined-watts rows). Sessions 2–3 are the
+  matched-binary, matched-load pair; the watts-vs-busy onset offset is 0 s in
+  all three (§4), i.e. invariant across those differences.
+- Load-phase `system_cpu_busy_pct` is occupancy-dependent: all-core (Session 1)
+  p50 100 %; 28-thread (Sessions 2–3) p50 92–97 %, not pinned at 100 %.
+- Session 3 has no `busy<5%` rows, so the `busy<5%` idle-floor distribution
+  rests on Sessions 1–2.
+- Relative-amplitude fidelity between watts and `system_cpu_busy_pct` under
+  busy saturation (full occupancy with variable per-core intensity, e.g. AVX
+  vs integer) is a steady/high-load property and is not measured by either
+  method here, which compare onset crossing-time order on a single step. Plan
+  §1 bounds the anticipation term to transients, so that amplitude property
+  pertains to a separate mechanism rather than to the §4 boost.
+
+### C.4 Capture campaign that would resolve the deferred onset-lead question
+
+Resolving a sub-window power-vs-busy lead would require:
+
+- **(a) Un-mirrored / sub-second energy sampling**, so watts is not ~4× coarser
+  than the tick. This is a producer-side change: the present ~1 s window read
+  outside the `Global\Access_PCI` mutex is a disturbance-mitigation design
+  (`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`), so faster
+  sampling re-opens criterion 6 (no-disturbance) and the Gate 1 always-on
+  decision.
+- **(b) A ramped or staircase load** rather than a single step, so the signals
+  separate in time.
+- **(c) Load at full core occupancy with variable per-core intensity** (e.g.
+  AVX vs integer) — the regime where `system_cpu_busy_pct` saturates near
+  100 % while watts continues to track frequency and residency.
+- **(d) ≥ 3 independent sessions on one binary with a finer onset estimator**
+  (sub-tick interpolation, multiple load events per session); resolution is
+  bounded by (a).
