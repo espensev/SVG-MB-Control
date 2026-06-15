@@ -346,11 +346,16 @@ DRAM-resident pointer-chase — busy pinned, watts low) and an **AVX2 FMA burst*
 the earliness metric (§8 Replay) needs. `--bursts 0` is the §8 case-2
 sustained-steady control session; `--bursts K` is case 1. It is first-party (no
 `AGENTS.md` repo-boundary issue) and read-only (FP math + private-buffer loads; no
-MSR, no fan writes). Two items remain before Phase B can run: **(i)** wiring it
-into `Capture-EnergySession.ps1` (which currently invokes the saturator), and
-**(ii)** the burst is AVX2 (a reproducible proxy); a real **y-cruncher VT3**
-(AVX-512) cross-check gives a larger, more representative surge and remains a
-complementary capture.
+MSR, no fan writes). **The capture orchestrator now drives it (2026-06-15):**
+`Capture-EnergySession.ps1 -SpikeLoad` swaps the saturator for the spike generator,
+writes `spike_markers.csv` into the session dir, and records the spike schedule +
+`load_mode = spike` in the manifest (the initial floor is the steady /
+no-disturbance window). It is an opt-in switch — the default saturator path
+(energy-quarantine captures) is unchanged — and is run directly (elevated), not via
+the scheduled-task wrapper. Remaining before Phase B: **(i)** the replay analyzer
+`scripts/analyze_power_spike.py` (§8 Tooling) is not yet written; **(ii)** the burst
+is AVX2 (a reproducible proxy) — a real **y-cruncher VT3** (AVX-512) cross-check
+gives a larger, more representative surge and remains a complementary capture.
 
 **Capture set:**
 
@@ -441,10 +446,11 @@ authorization; this plan matches that ordering.
 
 ## 10. Open questions for the maintainer
 
-1. **Load tooling (§8):** the first-party constant-occupancy generator now exists
-   (`tools/cpu_synth_spike_load.cpp`, emits the spike marker). Remaining: wire it
-   into `Capture-EnergySession.ps1`, and decide whether to also cross-check against
-   a real y-cruncher VT3 (AVX-512) run for a larger, representative surge.
+1. **Load tooling (§8):** the first-party constant-occupancy generator exists
+   (`tools/cpu_synth_spike_load.cpp`) and is wired into `Capture-EnergySession.ps1`
+   (`-SpikeLoad`, emits `spike_markers.csv`). Remaining: write the replay analyzer
+   `scripts/analyze_power_spike.py`, and decide whether to also cross-check against a
+   real y-cruncher VT3 (AVX-512) run for a larger, representative surge.
 2. **Composition (§5.7):** C1 winner-take-all or C2 attenuated-additive, and over
    which stack? (Must include `midband_pressure`, the active term — not only
    `thermal_pressure`.)

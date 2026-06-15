@@ -19,10 +19,13 @@
 #   .\scripts\Capture-EnergySession.ps1                      # full real session
 #   .\scripts\Capture-EnergySession.ps1 -Rehearse            # no-touch rehearsal
 #   .\scripts\Capture-EnergySession.ps1 -IdleSeconds 60 -LoadSeconds 420 -CooldownSeconds 120
+#   # transient spike-catcher capture (docs/cpu-transient-power-anticipation-plan §8):
+#   .\scripts\Capture-EnergySession.ps1 -SpikeLoad -SessionLabel spike-case1   # mid->spike, default 3 bursts
+#   .\scripts\Capture-EnergySession.ps1 -SpikeLoad -Bursts 0 -SessionLabel spike-steady  # §8 case-2 no-disturbance control
 [CmdletBinding()]
 param(
     [int]$IdleSeconds = 300,
-    [int]$LoadSeconds = 720,       # >= 6 min crosses a 32-bit energy wrap
+    [int]$LoadSeconds = 720,       # >= 6 min crosses a 32-bit energy wrap (saturate mode)
     [int]$CooldownSeconds = 300,
     [int]$LoadThreads = 0,         # 0 = all logical processors
     [switch]$EnergyOnly,           # cycles are captured too unless this is set
@@ -30,6 +33,17 @@ param(
     [string]$OutDir,
     [string]$SynthLoadExe,
     [string]$SessionLabel = 'energy-quarantine',
+    # --- opt-in: constant-occupancy spike capture (transient power plan §8). Off
+    # by default; when set, swaps the saturator for tools/cpu_synth_spike_load.cpp
+    # (floor -> AVX2 bursts at pinned busy) and ignores -LoadSeconds. Run directly,
+    # NOT via the scheduled-task wrapper. ---
+    [switch]$SpikeLoad,
+    [int]$FloorSeconds = 120,      # low-power plateau before the first burst
+    [int]$BurstSeconds = 20,
+    [int]$GapSeconds = 40,
+    [int]$Bursts = 3,              # 0 = pure floor = §8 case-2 steady control
+    [int]$BufferMb = 32,
+    [string]$SpikeLoadExe,
     [switch]$NoElevate             # internal: set on the self-elevated relaunch
 )
 
@@ -61,6 +75,11 @@ if (-not $Rehearse -and -not $NoElevate -and -not (Test-Admin)) {
     if ($EnergyOnly) { $argList += '-EnergyOnly' }
     if ($OutDir) { $argList += @('-OutDir', $OutDir) }
     if ($SynthLoadExe) { $argList += @('-SynthLoadExe', $SynthLoadExe) }
+    if ($SpikeLoad) {
+        $argList += @('-SpikeLoad', '-FloorSeconds', $FloorSeconds, '-BurstSeconds', $BurstSeconds,
+            '-GapSeconds', $GapSeconds, '-Bursts', $Bursts, '-BufferMb', $BufferMb)
+        if ($SpikeLoadExe) { $argList += @('-SpikeLoadExe', $SpikeLoadExe) }
+    }
     Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList $argList -Verb RunAs
     return
 }
@@ -154,6 +173,25 @@ function Resolve-SynthLoad {
     return $out
 }
 
+function Resolve-SpikeLoad {
+    if ($SpikeLoadExe -and (Test-Path $SpikeLoadExe)) { return $SpikeLoadExe }
+    $candidates = @(
+        (Join-Path $RepoRoot 'build\x64-release\cpu-synth-spike-load.exe'),
+        (Join-Path $env:TEMP 'cpu-synth-spike-load.exe')
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    Write-Host '  spike-load exe not found; building it...' -ForegroundColor Yellow
+    . (Join-Path $PSScriptRoot 'Build.VsEnv.ps1')
+    Import-VsDevShellEnvironment -VsInstallPath (Get-VsInstallPath) -VsInstanceId (Get-VsInstanceId) -Arch amd64 -HostArch amd64
+    $out = Join-Path $env:TEMP 'cpu-synth-spike-load.exe'
+    $src = Join-Path $RepoRoot 'tools\cpu_synth_spike_load.cpp'
+    Push-Location $env:TEMP
+    try { & cl /nologo /O2 /arch:AVX2 /EHsc /std:c++20 /W4 $src "/Fe:$out" | Out-Null }
+    finally { Pop-Location }
+    if (-not (Test-Path $out)) { throw 'failed to build cpu-synth-spike-load.exe' }
+    return $out
+}
+
 function Now-Iso { (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss') }
 
 # ---- pre-flight ------------------------------------------------------------
@@ -175,16 +213,18 @@ $refCsv = Join-Path $OutDir 'reference_sensors.csv'
 $baselineCsv = Join-Path $OutDir 'baseline_disabled.csv'
 $sessionCsv = Join-Path $OutDir 'session.csv'
 $manifestPath = Join-Path $OutDir 'manifest.json'
+$spikeMarkerCsv = Join-Path $OutDir 'spike_markers.csv'
 $includeCycles = -not $EnergyOnly
-$totalSeconds = $IdleSeconds + $LoadSeconds + $CooldownSeconds + 30
+$loadDuration = if ($SpikeLoad) { $FloorSeconds + $Bursts * ($BurstSeconds + $GapSeconds) } else { $LoadSeconds }
+$totalSeconds = $IdleSeconds + $loadDuration + $CooldownSeconds + 30
 
 Write-Host "=== Capture-EnergySession ($SessionLabel) ===" -ForegroundColor Green
 Write-Host "OutDir         : $OutDir"
 Write-Host "Profile        : idle ${IdleSeconds}s -> load ${LoadSeconds}s -> cooldown ${CooldownSeconds}s"
 Write-Host "Cycles         : $includeCycles    Rehearse: $Rehearse"
 
-$synth = Resolve-SynthLoad
-Write-Host "Synth load exe : $synth"
+$synth = if ($SpikeLoad) { Resolve-SpikeLoad } else { Resolve-SynthLoad }
+Write-Host "Load exe       : $synth  (mode: $(if ($SpikeLoad) {'spike'} else {'saturate'}))"
 
 # Fresh disabled baseline (criterion-6 reference): snapshot the current live CSV
 # BEFORE any enable. The scorer computes loop_slip/overrun from it.
@@ -207,11 +247,22 @@ $manifest = [ordered]@{
     out_dir         = $OutDir
     synth_load_exe  = $synth
     load_threads    = $LoadThreads
+    load_mode       = ($SpikeLoad ? 'spike' : 'saturate')
     baseline_csv    = (Test-Path $baselineCsv) ? $baselineCsv : $null
     reference_csv   = $refCsv
     session_csv     = $sessionCsv
     phases          = [ordered]@{}
     markers         = [ordered]@{}
+}
+if ($SpikeLoad) {
+    $manifest.spike = [ordered]@{
+        floor_seconds = $FloorSeconds
+        burst_seconds = $BurstSeconds
+        gap_seconds   = $GapSeconds
+        bursts        = $Bursts
+        buffer_mb     = $BufferMb
+        marker_csv    = $spikeMarkerCsv
+    }
 }
 
 $enabled = $false
@@ -247,13 +298,28 @@ try {
 
     # ---- load (steady window excludes 1st/last for spin-up/down) ----
     $manifest.phases.load_start = Now-Iso
-    Write-Host "[load] synthetic ${LoadSeconds}s ($([math]::Max(1,$LoadThreads)) or all threads)..." -ForegroundColor Yellow
-    $loadArgs = @('--seconds', $LoadSeconds)
-    if ($LoadThreads -gt 0) { $loadArgs += @('--threads', $LoadThreads) }
-    & $synth @loadArgs
-    $manifest.phases.load_end = Now-Iso
-    $manifest.phases.steady_start = ([datetime]$manifest.phases.load_start).AddSeconds(120).ToString('yyyy-MM-ddTHH:mm:ss')
-    $manifest.phases.steady_end = ([datetime]$manifest.phases.load_end).AddSeconds(-60).ToString('yyyy-MM-ddTHH:mm:ss')
+    if ($SpikeLoad) {
+        Write-Host "[load:spike] floor ${FloorSeconds}s + ${Bursts}x(burst ${BurstSeconds}s + gap ${GapSeconds}s); markers -> $spikeMarkerCsv" -ForegroundColor Yellow
+        $loadArgs = @('--floor-seconds', $FloorSeconds, '--burst-seconds', $BurstSeconds,
+            '--gap-seconds', $GapSeconds, '--bursts', $Bursts, '--buffer-mb', $BufferMb,
+            '--marker-file', $spikeMarkerCsv)
+        if ($LoadThreads -gt 0) { $loadArgs += @('--threads', $LoadThreads) }
+        & $synth @loadArgs
+        $manifest.phases.load_end = Now-Iso
+        # Steady window = the clean INITIAL floor plateau, before the first burst:
+        # the §8 case-2 no-disturbance / criterion-3 reference window. Burst onsets
+        # come from spike_markers.csv, not from steady_*.
+        $manifest.phases.steady_start = ([datetime]$manifest.phases.load_start).AddSeconds(30).ToString('yyyy-MM-ddTHH:mm:ss')
+        $manifest.phases.steady_end = ([datetime]$manifest.phases.load_start).AddSeconds([math]::Max(40, $FloorSeconds - 10)).ToString('yyyy-MM-ddTHH:mm:ss')
+    } else {
+        Write-Host "[load] synthetic ${LoadSeconds}s ($([math]::Max(1,$LoadThreads)) or all threads)..." -ForegroundColor Yellow
+        $loadArgs = @('--seconds', $LoadSeconds)
+        if ($LoadThreads -gt 0) { $loadArgs += @('--threads', $LoadThreads) }
+        & $synth @loadArgs
+        $manifest.phases.load_end = Now-Iso
+        $manifest.phases.steady_start = ([datetime]$manifest.phases.load_start).AddSeconds(120).ToString('yyyy-MM-ddTHH:mm:ss')
+        $manifest.phases.steady_end = ([datetime]$manifest.phases.load_end).AddSeconds(-60).ToString('yyyy-MM-ddTHH:mm:ss')
+    }
 
     # ---- cooldown ----
     $manifest.phases.cooldown_start = Now-Iso
