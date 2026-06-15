@@ -1,7 +1,7 @@
 # FEAT-0008: Watchdog hung-worker recovery (force-kill escalation)
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-16
+**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-16
 **Namespace:** `REQ-WATCHDOG-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -123,8 +123,7 @@ behavior changes (`AGENTS.md` §Change Checklist).
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` (§3.2 L0-A4) | That force-kill escalation is the chosen recovery for a hung worker (vs. leaving detection-only). | Proposed |
-| `docs/watchdog-hung-worker-recovery-decision-YYYY-MM-DD.md` (to write) | Worker-only vs. worker+supervisor termination; grace period source (reuse 15 s vs. config); force-kill attempt bound. | Pending (gate 3) |
+| `docs/watchdog-hung-worker-recovery-decision-2026-06-16.md` | Force-kill escalation is the chosen recovery: D1 worker-first (supervisor self-exits), D2 reuse the 15 s graceful deadline, D3 bounded single-shot with a PID-reuse image-path guard. Basis: `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 and `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`. | Current |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -143,11 +142,13 @@ Verify legend:
 
 ## 11. Open decisions
 
+D1–D3 are resolved in `docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`.
+Remaining items are non-blocking and post-v1:
+
 | Decision | Needed before | Current default |
 |---|---|---|
-| Force-terminate worker only, or worker + supervisor when both are wedged? | implementation | Worker first; supervisor only if it also fails to exit. |
-| Grace period before force-kill: reuse the 15 s `RequestStopAndWait` deadline or a separate config key? | implementation | Reuse the existing deadline for v1. |
-| Bound on force-kill escalations (avoid a force-kill/relaunch loop on a persistently wedged machine)? | implementation | Cap attempts, then fall back to the supervisor backoff and log. |
+| Configurable force-kill grace period vs. the fixed 15 s deadline | post-v1 tuning | Fixed 15 s (reuse the existing `WaitForRuntimeStop` deadline). |
+| Apply the same force-stop escalation to a plain `--stop` after timeout | post-v1 | Graceful-only for `--stop`; escalation scoped to `--restart` recovery. |
 
 ## 12. Measurement gate & dependencies
 
@@ -162,7 +163,7 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9).
+- [x] 3. Required design decision record(s) written and marked current (§9).
 - [x] 4. Concrete `REQ-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI`, build-release, contract review, or runtime evidence (§10), and mirrored in `docs/TRACEABILITY.md`.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline.
