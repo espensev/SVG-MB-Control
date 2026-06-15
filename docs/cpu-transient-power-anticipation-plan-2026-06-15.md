@@ -333,16 +333,24 @@ The point of this campaign is to capture the **load cases Gate 2 missed.** Each
 case uses ≥ 3 independent sessions (repeatability bar) on the **same binary**
 (Gate 2's session 1 differed in git hash and load config — avoid repeating that).
 
-**[rev] Load tooling required — it does not exist yet.** The only in-repo loader,
-`tools/cpu_synth_load.cpp` (wrapped by `Capture-EnergySession.ps1`), is a fixed
-AVX2 all-core *saturator* (`--threads`/`--seconds`, idle→full only). It produces
-**neither** a sustained low-power plateau **nor** an intensity step at constant
-occupancy. Case 1 below therefore needs a **new** load generator (a low-power
-all-core floor + an injectable AVX-512 burst at pinned busy) **or** a documented
-external tool (e.g. y-cruncher VT3), plus a **logged spike-injection timestamp
-marker** so earliness has a ground-truth zero. If an external binary is used, the
-`AGENTS.md` repo-boundary question must be resolved. **Phase B (§9) is blocked
-until this load tool exists.**
+**[rev] Load tooling — first-party generator drafted 2026-06-15
+(`tools/cpu_synth_spike_load.cpp`, OFF-by-default `SVG_MB_CONTROL_BUILD_SYNTH_LOAD`,
+`/W4 /permissive- /arch:AVX2`, compiles clean).** The shipped
+`tools/cpu_synth_load.cpp` is a fixed all-core *saturator* (idle→full only) and
+cannot produce this stimulus. The new sibling holds **constant occupancy** with a
+persistent worker pool that never sleeps (so `busy%` stays pinned), flipping every
+worker via an atomic phase flag between a **memory-latency floor** (per-thread
+DRAM-resident pointer-chase — busy pinned, watts low) and an **AVX2 FMA burst**
+(watts surge), and timestamps every transition to stdout and an optional
+`--marker-file` CSV (`event,iso,unix_ms`) — the **ground-truth spike-onset zero**
+the earliness metric (§8 Replay) needs. `--bursts 0` is the §8 case-2
+sustained-steady control session; `--bursts K` is case 1. It is first-party (no
+`AGENTS.md` repo-boundary issue) and read-only (FP math + private-buffer loads; no
+MSR, no fan writes). Two items remain before Phase B can run: **(i)** wiring it
+into `Capture-EnergySession.ps1` (which currently invokes the saturator), and
+**(ii)** the burst is AVX2 (a reproducible proxy); a real **y-cruncher VT3**
+(AVX-512) cross-check gives a larger, more representative surge and remains a
+complementary capture.
 
 **Capture set:**
 
@@ -433,9 +441,10 @@ authorization; this plan matches that ordering.
 
 ## 10. Open questions for the maintainer
 
-1. **Load tooling (§8):** build a new constant-occupancy intensity-step generator,
-   or use external y-cruncher? If external, resolve the `AGENTS.md` repo boundary.
-   Either way, who emits the spike-injection marker?
+1. **Load tooling (§8):** the first-party constant-occupancy generator now exists
+   (`tools/cpu_synth_spike_load.cpp`, emits the spike marker). Remaining: wire it
+   into `Capture-EnergySession.ps1`, and decide whether to also cross-check against
+   a real y-cruncher VT3 (AVX-512) run for a larger, representative surge.
 2. **Composition (§5.7):** C1 winner-take-all or C2 attenuated-additive, and over
    which stack? (Must include `midband_pressure`, the active term — not only
    `thermal_pressure`.)

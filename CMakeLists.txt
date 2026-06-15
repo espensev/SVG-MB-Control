@@ -288,6 +288,16 @@ if(SVG_MB_CONTROL_BUILD_SYNTH_LOAD AND WIN32)
     endif()
     set_target_properties(cpu_synth_load PROPERTIES
         OUTPUT_NAME "cpu-synth-load")
+    # Sibling: constant-occupancy spike load generator for the transient
+    # power-anticipation capture (docs/cpu-transient-power-anticipation-plan-2026-06-15.md
+    # §8). Same OFF-by-default flag; same self-contained, read-only posture.
+    add_executable(cpu_synth_spike_load tools/cpu_synth_spike_load.cpp)
+    target_compile_features(cpu_synth_spike_load PRIVATE cxx_std_20)
+    if(MSVC)
+        target_compile_options(cpu_synth_spike_load PRIVATE /W4 /permissive- /arch:AVX2)
+    endif()
+    set_target_properties(cpu_synth_spike_load PROPERTIES
+        OUTPUT_NAME "cpu-synth-spike-load")
 endif()
 
 if(BUILD_TESTING)
