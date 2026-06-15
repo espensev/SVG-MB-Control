@@ -352,10 +352,12 @@ writes `spike_markers.csv` into the session dir, and records the spike schedule 
 `load_mode = spike` in the manifest (the initial floor is the steady /
 no-disturbance window). It is an opt-in switch — the default saturator path
 (energy-quarantine captures) is unchanged — and is run directly (elevated), not via
-the scheduled-task wrapper. Remaining before Phase B: **(i)** the replay analyzer
-`scripts/analyze_power_spike.py` (§8 Tooling) is not yet written; **(ii)** the burst
-is AVX2 (a reproducible proxy) — a real **y-cruncher VT3** (AVX-512) cross-check
-gives a larger, more representative surge and remains a complementary capture.
+the scheduled-task wrapper. The replay analyzer `scripts/analyze_power_spike.py`
+(§8 Tooling) is also landed (+ `tests/test_power_spike.py`). So every **code**
+artifact exists; what remains is the **physical capture run** (operator, elevated)
+and one signal caveat: **the burst is AVX2** (a reproducible proxy) — a real
+**y-cruncher VT3** (AVX-512) cross-check gives a larger, more representative surge
+and remains a complementary capture.
 
 **Capture set:**
 
@@ -402,12 +404,17 @@ justification for estimating a median lead. The headline metric is a distributio
 so the spec fixes a per-session **burst count** (N injected bursts) and a target
 confidence interval on the median, independently of the 3-session bar.
 
-**Tooling.** New `scripts/analyze_power_spike.py` (or an `analyze_power_onset.py`
-extension): from `session.csv` + the raw accumulator + the injection marker,
-compute un-mirrored W, $\tilde s$, and `dTctl/dt`; replay the shadow
-$B^{\mathrm{spk}}$; report differential-lead distributions, steady-plateau
-magnitude, and the budget-skip rate. Read-only, stdlib only, like the existing
-analyzers.
+**Tooling — landed 2026-06-15.** `scripts/analyze_power_spike.py`
+(+ `tests/test_power_spike.py`): from `session.csv` + `spike_markers.csv`, it
+computes watts (auto-detecting the un-mirrored shadow column, else the mirrored
+window with an explicit resolution caveat), the EMA-smoothed slope $\tilde s$, and
+`dTctl/dt`, and replays the §5 $B^{\mathrm{spk}}$ via the pinned pure functions
+(`ema`/`slope`/`smootherstep`/`slope_drive`/`integrate_target`). Its headline is the
+**parameter-free differential onset lead** of the power slope over the free
+`dTctl/dt` (per burst, anchored to the marker), plus $B^{\mathrm{spk}}$'s floor p95
+(the no-disturbance check) and a busy-pinned confirmation. Read-only, stdlib only.
+The band/cap params are CLI inputs flagged as un-tuned (§8 fixes them from the
+captured data).
 
 ## 9. Gates / phases — **[rev] producer + schema work is behind Gate 3**
 
@@ -446,11 +453,12 @@ authorization; this plan matches that ordering.
 
 ## 10. Open questions for the maintainer
 
-1. **Load tooling (§8):** the first-party constant-occupancy generator exists
-   (`tools/cpu_synth_spike_load.cpp`) and is wired into `Capture-EnergySession.ps1`
-   (`-SpikeLoad`, emits `spike_markers.csv`). Remaining: write the replay analyzer
-   `scripts/analyze_power_spike.py`, and decide whether to also cross-check against a
-   real y-cruncher VT3 (AVX-512) run for a larger, representative surge.
+1. **Tooling (§8):** the full pre-FEAT chain is landed — the constant-occupancy
+   generator (`tools/cpu_synth_spike_load.cpp`), the capture wiring
+   (`Capture-EnergySession.ps1 -SpikeLoad`, emits `spike_markers.csv`), and the
+   replay analyzer (`scripts/analyze_power_spike.py` + test). Remaining is the
+   **physical capture run** (operator, elevated) and the decision whether to also
+   cross-check against a real y-cruncher VT3 (AVX-512) run for a larger surge.
 2. **Composition (§5.7):** C1 winner-take-all or C2 attenuated-additive, and over
    which stack? (Must include `midband_pressure`, the active term — not only
    `thermal_pressure`.)
