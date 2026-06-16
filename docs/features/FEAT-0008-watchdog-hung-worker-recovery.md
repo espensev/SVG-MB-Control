@@ -132,7 +132,7 @@ the new event-log entries on a forced recovery.
 
 | Requirement | Verify (T/B/M/R) | Where |
 |---|---|---|
-| REQ-WATCHDOG-01 | T, M | Integration test drives a worker that ignores the stop sentinel past the deadline and asserts force-terminate + relaunch; live hung-worker repro (`docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md` A4) shows recovery. |
+| REQ-WATCHDOG-01 | T, M | Integration test suspends the real worker (`NtSuspendProcess`) so it misses the 15 s stop deadline and asserts force-terminate + relaunch; (M) the live deploy verified the same recovery mechanism on the production watchdog via the suspend proxy. The natural-load hard-freeze premise is a separate Layer-0 characterization, closed on evidence as not reproducible by load (see §14). |
 | REQ-WATCHDOG-02 | T, R | Test asserts the `supervisor.worker_force_terminated` event is emitted with PID/reason; review against the event schema in `docs/RUNTIME_HOME.md`. |
 | REQ-WATCHDOG-03 | T, R | Reconcile-after-force-kill test (orphaned sidecar restored on relaunch); review vs `docs/WRITE_ORCHESTRATION.md` that ordering/recovery is unchanged. |
 | REQ-WATCHDOG-04 | T, R | Test that a worker honoring the graceful stop is not force-terminated and that the escalation is attempt-bounded; review of the trigger gate. |
