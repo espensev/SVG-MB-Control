@@ -71,6 +71,8 @@ A core library gives three stability benefits:
 - low-band evidence serialization (`low_band_evidence.cpp`),
 - control status publication shape (`control_status_writer.cpp`),
 - supervisor and run-mode dispatch (`control_supervisor.cpp`),
+- bounded hung-worker force-terminate escalation
+  (`worker_force_terminate.cpp`),
 - config loading, validation, and CLI formatting (`control_loop_config.cpp`, `control_config.cpp`, `control_config_print.cpp`),
 - mutable runtime state and shared context (`control_runtime_context.cpp`),
 - calibration sequence parsing and execution (`calibration.cpp`).
@@ -183,13 +185,13 @@ Completed:
     builders. `svg_mb_control_csv_rows_tests` now checks read-loop,
     evidence-log, and control-loop header/row alignment plus representative
     present/absent indexed values.
-16. Collapsed the nine duplicated core-linked CTest registration blocks in
+16. Collapsed the duplicated core-linked CTest registration blocks in
     `CMakeLists.txt` into one `svg_mb_control_add_core_test(name source)`
-    helper plus nine one-line calls. The two header-only tests
+    helper plus one-line calls. The two header-only tests
     (`svg_mb_control_rapl_energy_tests`, `svg_mb_control_cpu_cycles_tests`)
     stay hand-rolled because they must not link `svg_mb_control_core`. The
-    build graph is unchanged: the same eleven CTest targets, names, and
-    registration order, verified by `Test-LocalCI` (CTest 11/11).
+    current build graph has thirteen CTest targets, verified by
+    `Test-LocalCI` (CTest 13/13).
 
 Remaining polish:
 
