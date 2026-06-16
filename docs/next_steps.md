@@ -2,7 +2,8 @@
 
 ## Status
 
-Reviewed and rewritten 2026-06-09. These are review notes and a backlog, not work
+Reviewed and rewritten 2026-06-09; FEAT-0008 status refreshed 2026-06-16.
+These are review notes and a backlog, not work
 authorization: per `AGENTS.md` (Feature Intake Gate), product-code work for a new
 capability, schema/status/log field, CLI surface, or shipped-config behavior must
 go through an implementation-authorized `docs\features\FEAT-*` spec first. Each
@@ -50,6 +51,27 @@ Governed by FEAT-0006 and the `REQ-CPUEFF-*` rows in `docs\TRACEABILITY.md`.
   current bin (corrected 2026-06-09). Remaining: a corrected per-core-pinned live
   read (`tools\cpu_cycle_counter_probe.cpp`) then the cycle path
   (`docs\cpu-work-energy-live-validation-results-2026-06-07.md`).
+
+### FEAT-0008 (watchdog hung-worker recovery) post-v1 only
+
+FEAT-0008 v1 is implemented and verified: the `--restart` stop-timeout path now
+escalates to a bounded force-terminate, automated C++/Python tests pass, and the
+live deterministic suspend measurement verified the production watchdog recovery
+mechanism. There is no remaining v1 recovery-path evidence to collect. The
+natural load hard-freeze premise is closed on evidence as not reproducible by
+load on this system; the AVX-512 escalation was rejected as the wrong instrument
+for FEAT-0008's worker-specific stop-timeout trigger.
+
+Remaining items are post-v1 options or hardening only, governed by
+`docs\features\FEAT-0008-watchdog-hung-worker-recovery.md` §11:
+
+- Make the force-kill grace period configurable if the fixed 15 s deadline proves
+  wrong in practice.
+- Consider applying the same escalation to plain `--stop` after timeout.
+- Consider a fail-closed recovery fallback for the pre-first-write PID
+  corroboration race.
+- Consider canonicalizing image paths if a future install uses `subst`, mapped
+  drives, junctions, or symlinked `release\` paths.
 
 ### Include ownership — decision-gated, no action yet
 `docs\STRUCTURE_AND_STABILITY.md` already records converting `#include` directives

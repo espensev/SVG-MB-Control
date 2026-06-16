@@ -6,10 +6,15 @@ force-terminate escalation (D1–D3) landed in
 `stop_result == 2` branch, with C++ unit + Python suspend-based integration
 tests. See FEAT-0008 §14 for the verification log and spec-vs-implementation
 deltas (testable `ProcessTerminator` seam; PID-corroboration guard;
-`NtSuspendProcess` test fixture instead of a controller ignore-stop mode).
+`NtSuspendProcess` test fixture instead of a controller ignore-stop mode). The
+live deterministic suspend evidence has passed; no live A4 / AVX-512 load
+reproduction remains for v1.
 **Owns:** `docs/features/FEAT-0008-watchdog-hung-worker-recovery.md` (`REQ-WATCHDOG-*`).
 **Basis:** `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 (L0-A4) and the
-verified gap in `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`.
+verified gap in `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`; the
+natural-load hard-freeze premise is closed by the live-sweep evidence in
+`docs/cpu-loop-survival-live-sweep-findings-2026-06-16.md` and the mechanism
+classification in `docs/cpu-0609-freeze-classification-2026-06-16.md`.
 **Scope guard:** this record captures the decision and the implemented v1 slice.
 Future behavior expansion still requires the `AGENTS.md` Feature Intake Gate.
 
@@ -100,9 +105,12 @@ is left graceful-only in v1):
 
 - **REQ-WATCHDOG-01 (T, M):** an integration test suspends the real worker process
   with `NtSuspendProcess`, drives `--restart`, and asserts the worker PID is
-  terminated and a fresh worker is launched. Manual (M): the live
-  A4 repro from `docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md` (hold a
-  worker blocked > 15 s) shows recovery.
+  terminated and a fresh worker is launched. Manual (M): the live deployed
+  controller was measured through the same deterministic suspend proxy; the
+  production watchdog `--restart` force-terminated the hung worker and relaunched
+  a fresh PID. Natural load testing is not remaining v1 evidence: it only
+  produced graceful recovery, and the AVX-512 escalation was rejected as the
+  wrong instrument for FEAT-0008's worker-specific stop-timeout trigger.
 - **REQ-WATCHDOG-02 (T, R):** assert the `supervisor.worker_force_terminated` event
   is emitted with PID + reason; review the event against `docs/RUNTIME_HOME.md`.
 - **REQ-WATCHDOG-03 (T, R):** seed an orphaned `pending_writes.json` entry, force-kill
@@ -117,6 +125,10 @@ coverage lives in `tests/test_watchdog_force_terminate.py`. The test fixture use
 the real worker process rather than adding an ignore-stop test mode.
 
 ## 5. Open / future (not v1)
+
+Nothing below is required for FEAT-0008 v1 completion. The v1 implementation,
+automated tests, and live deterministic recovery evidence are complete; these
+items are post-v1 options or hardening candidates.
 
 - Configurable force-kill grace period (vs the fixed 15 s) — add a `control.json` key
   only if 15 s proves wrong in practice.
