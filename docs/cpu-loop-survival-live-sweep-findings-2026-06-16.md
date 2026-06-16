@@ -155,3 +155,107 @@ read from `events.jsonl` (`supervisor.worker_exited` / `supervisor.shutdown` /
 Detector limitation: a normal-priority sampler under a `high`-priority pinned load
 can be starved, inflating apparent zero-deltas — hence `events.jsonl` is treated as
 the authoritative signal and "stall" labels as degraded-cadence indicators.
+
+## Appendix B — Restart attribution re-verified against `events.jsonl` ground truth (2026-06-16)
+
+A later independent eval flagged the §3.1/§3.2 restart attributions for direct
+verification against the authoritative log rather than the prose summary. Re-pulled
+from `release/runtime/logs/svg_mb_control_events.jsonl` (the supervisor lifecycle
+events from the M-evidence onward). The **`exit_code` field is the decisive
+force-vs-graceful discriminator** the original tables did not surface:
+`TerminateProcess(process, 1u)` makes a force-killed worker exit with `exit_code=1`,
+while a worker that honors the stop sentinel exits `exit_code=0`.
+
+| `worker_exited` (time) | pid → relaunch | `exit_code` | `worker_force_terminated`? | verdict |
+|---|---|---|---|---|
+| 06:13:06 | 44984 → 36348 | **1** | **yes** — `… stop_result=2` | force-terminated (the deterministic suspend, REQ-WATCHDOG-01 M) |
+| 06:24:22 | 36348 → 37536 | **0** | none | graceful watchdog `--restart` (cell A2) |
+| 06:26:51 | 37536 → 44676 | **0** | none | graceful watchdog `--restart` (cell C2) |
+
+Whole-log tallies (text-mode scan, treating the 686 k-line jsonl as text):
+
+- Exactly **one** `supervisor.worker_force_terminated` in the entire log — the
+  06:13:06 suspend (pid 44984, `stop_result=2`, `exit_code=1`). No other.
+- **Zero** `supervisor.supervisor_force_terminated`; **zero**
+  `supervisor.force_terminate_failed`.
+- Each restart shows the full graceful shape (`worker_exited stop_requested=true`
+  → `supervisor.shutdown` → `supervisor.start` → `worker_started restart_count=0`),
+  and the two sweep restarts carry `exit_code=0` — confirming §3.2's "graceful,
+  watchdog-initiated, not a crash-loop" claim from primary data, not inference.
+- Cell ordering corroborates load-attribution: only two restarts followed the
+  M-evidence relaunch, at 06:24:22 and 06:26:51 — bracketing cell B (`high+pin`),
+  which did **not** restart (same pid), exactly as §3.2 reports for Baseline/B.
+- Current live worker pid **44676** has run with **no further restart** since
+  06:26:52 (loop stable since the sweep).
+
+Conclusion: §3.1 (force-terminate M-evidence) and §3.2 (graceful watchdog restarts
+under load) are **verified against the authoritative log**. The eval's
+attribution flag is closed.
+
+## Appendix C — Aggressive-cell n>1 repeat (protocol §5 precondition close) (2026-06-16)
+
+§3.2 ran each cell at n=1, so §4 item 3 / §5 could not estimate the stall rate or
+close the protocol §5 escalation precondition ("the most aggressive cell must fail
+*across repeats*"). This addendum runs the single most aggressive cell —
+`--oversubscribe 4 --priority high --pin --seconds 45` (128 threads, 4× oversubscribed,
+HIGH priority, pinned) — **5 times** against the same live `BelowNormal`
+FEAT-0008 controller, operator-present.
+
+Orchestrator: `release/runtime/experiments/loop-stall/Run-AggressiveRepeat.ps1`
+(untracked); 85 °C software abort, 25 s pre-cell cooldown gate (start each cell
+≤ 70 °C), 55 s post-cell watch for a late watchdog restart, `events.jsonl`
+byte-offset delta as the authoritative verdict. Raw:
+`aggressive-repeat-results-20260616.json`.
+
+| Cell | preTemp °C | maxTemp °C | verdict | force-term | restart | `sidecar_upsert_failed` |
+|---|---|---|---|---|---|---|
+| 1 | 59.1 | 75.8 | SURVIVE | 0 | 0 | 0 |
+| 2 | 44.0 | 75.9 | SURVIVE | 0 | 0 | 0 |
+| 3 | 44.0 | 75.9 | SURVIVE | 0 | 0 | 0 |
+| 4 | 54.3 | 76.1 | SURVIVE | 0 | 0 | 0 |
+| 5 | 66.0 | 75.8 | SURVIVE | 0 | 0 | 0 |
+
+**Result: 5/5 SURVIVE; 0 force-terminations; 0 graceful restarts; 0 sidecar errors;
+peak 76.1 °C.** Worker pid 44676 was unchanged across the entire ~11 min sweep.
+Independently cross-checked against `events.jsonl` for the window
+12:20:30-12:31:30: the only events were **1,940 `control_loop.write_applied`**
+(tick 83646→85454, ~2.7/s avg including cooldown periods) — no `supervisor.*`
+lifecycle event, no `force_terminate`, no `sidecar_upsert_failed`. The controller
+actuated fans continuously throughout.
+
+Findings:
+
+1. **Protocol §5 precondition met; the close rests on mechanism, corroborated by
+   n=6 (not proven by it).** The aggressive cell ran n=5 (this) + n=1 (§3.2 cell C2)
+   = **n=6 total** with zero force-terminations and zero natural hard freezes
+   (`stop_result==2`). The *reason* the scheduling axis cannot produce the FEAT-0008
+   trigger is mechanistic (`docs/cpu-0609-freeze-classification-2026-06-16.md` §2):
+   the stop-sentinel poll is timer-bound (`steady_clock`, throttle-immune) and
+   Windows balance-set-manager boost caps a *runnable* `BelowNormal` thread's
+   starvation at a few seconds, well inside the 15 s deadline. The n=6 is
+   **consistent with** that, not a rate bound — 0/6 bounds the per-cell hard-freeze
+   rate only loosely (rule of three, ~50 % upper 95 % CI). So this is "the mechanism
+   predicts no hard freeze and six live cells agree," not "six runs prove it cannot
+   occur."
+2. **Stronger than §3.2 — with a measurement caveat.** Here the worker did not even
+   go stale enough for a *graceful* watchdog restart (0/5; directly evidenced by zero
+   staleness restarts) — at peak ~76 °C the `BelowNormal` worker stayed scheduled and
+   status-fresh, consistent with the balance-set boost above. The §3.2 graceful
+   restarts are the stochastic tail of the staleness-recycle, not the hard-freeze
+   class. **Caveat:** this orchestrator recorded lifecycle + temp, not per-cell
+   cadence, so `SURVIVE` means "no restart / force-terminate / sidecar-error," not a
+   measured degradation depth; cell C2 restarting under *identical* args in §3.2 is
+   the evidence the load *can* bite — this n=5 was the quieter tail.
+3. **AVX-512 escalation superseded, not pending.** The mechanism/asymmetry analysis
+   in `docs/cpu-0609-freeze-classification-2026-06-16.md` §2 establishes that a
+   thermal power-virus cannot produce the worker-specific 15 s stop-miss and that
+   the 06-09 whole-system class is outside FEAT-0008's recovery envelope; so §5's
+   AVX-512 escalation is the wrong instrument, and this n=5 scheduling repeat is the
+   correct close. The natural-hard-freeze premise is reframed **on evidence**: not
+   reproducible by load on this system; FEAT-0008 is validated defense-in-depth for
+   the deterministic-deschedule / kernel-block class (the `NtSuspendProcess` proxy
+   M-evidence, §3.1).
+
+Thermal: peak 76.1 °C (~18.9 °C below the 95 °C SMU throttle); no abort across 5
+cells. AVX2 on this liquid loop with a degraded `BelowNormal` controller stays well
+inside the envelope for bounded 45 s cells at n=5.
