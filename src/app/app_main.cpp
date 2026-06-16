@@ -17,6 +17,7 @@
 #include "runtime_write_policy.h"
 #include "service_probe.h"
 #include "startup_banner.h"
+#include "worker_force_terminate.h"
 #include "write_orchestrator.h"
 
 #include "windows_lean.h"
@@ -191,7 +192,19 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             const int stop_result =
                 RequestStopAndWait(command_runtime_home, true);
             if (stop_result != 0) {
-                return stop_result;
+                // stop_result == 2 is the hung-worker case (the graceful stop
+                // timed out). Escalate to a bounded force-terminate
+                // (FEAT-0008 / REQ-WATCHDOG-01): if the worker -- and the
+                // supervisor, if it does not self-exit -- are confirmed gone,
+                // relaunch proceeds; otherwise return the original error and let
+                // the watchdog retry on its next poll. stop_result == 1 (could
+                // not even write the stop request) is not a hung worker, so it
+                // stays on the unchanged return-without-relaunch path.
+                if (stop_result != 2 ||
+                    !svg_mb_control::EscalateForceTerminate(
+                        command_runtime_home, stop_result)) {
+                    return stop_result;
+                }
             }
             options.start_requested = true;
         }

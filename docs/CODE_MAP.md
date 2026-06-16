@@ -77,6 +77,11 @@ the same responsibility; otherwise they are listed separately.
 - `src/control/tick_runner.{h,cpp}` — `ControlLoopRunState` and
   `RunControlTick`: per-tick sampling, channel evaluation, write
   attempts, artifact publication, and wait — the steady-state body.
+- `src/control/worker_force_terminate.{h,cpp}` — FEAT-0008 bounded
+  force-terminate escalation for a hung worker the `--restart` graceful
+  stop cannot clear: a pure `EscalateForceTerminate` orchestration behind
+  an injectable `ProcessTerminator` seam, plus the single-handle
+  `Win32ProcessTerminator` adapter.
 
 ## Policy (`src/policy/`)
 
@@ -249,6 +254,10 @@ the same responsibility; otherwise they are listed separately.
   math in `cpu_cycles.h`.
 - `tests/cpp/rapl_energy_tests.cpp` — CTest coverage for the AMD RAPL
   package-energy math in `rapl_energy.h`.
+- `tests/cpp/worker_force_terminate_tests.cpp` — CTest coverage for the
+  FEAT-0008 force-terminate escalation orchestration (worker-first
+  ordering, image guard, PID corroboration, single-shot bound) via a fake
+  `ProcessTerminator`.
 - `tests/test_analyze_ingest.py` — End-to-end `analyze ingest`,
   `analyze prune`, and native `analyze report` coverage.
 - `tests/test_analyzer.py` — Integration tests for the Python
@@ -278,6 +287,10 @@ the same responsibility; otherwise they are listed separately.
   smoke helper.
 - `tests/test_write_once.py` — `write-once` mode coverage including
   sidecar upsert and restore.
+- `tests/test_watchdog_force_terminate.py` — FEAT-0008 integration
+  coverage: a suspended (hung) worker is force-terminated by `--restart`
+  and relaunched with a new PID, the orphaned baseline is reconciled, and
+  a graceful worker is never force-terminated.
 
 ## Scripts
 

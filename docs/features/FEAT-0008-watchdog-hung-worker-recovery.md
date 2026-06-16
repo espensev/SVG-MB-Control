@@ -1,7 +1,7 @@
 # FEAT-0008: Watchdog hung-worker recovery (force-kill escalation)
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-16
+**Status:** Implemented   **Version:** 0.3   **Updated:** 2026-06-16
 **Namespace:** `REQ-WATCHDOG-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -12,25 +12,27 @@ control loop is actually recovered, not merely detected.
 
 ## 1. Summary
 
-Today the watchdog *detects* a hung worker (health exit code 2, `kStale`) and
-issues `--restart`, but if the worker is frozen hard enough not to honor the
-graceful stop within `RequestStopAndWait`'s deadline, the controller returns
-**without relaunching** and no force-kill exists, so the loop stays down until the
-next event (reboot, manual restart). This feature adds a bounded force-terminate
-escalation on the restart path: after the graceful stop times out, force-terminate
-the worker (and supervisor if still present), then relaunch — recovering the
-`{worker alive but frozen}` case that the current path detects but cannot clear.
+Before this feature, the watchdog *detected* a hung worker (health exit code 2,
+`kStale`) and issued `--restart`, but if the worker was frozen hard enough not to
+honor the graceful stop within `RequestStopAndWait`'s deadline, the controller
+returned **without relaunching** and no force-kill existed, so the loop stayed
+down until the next event (reboot, manual restart). This feature adds a bounded
+force-terminate escalation on the restart path: after the graceful stop times
+out, force-terminate the worker (and supervisor if still present), then relaunch
+— recovering the `{worker alive but frozen}` case the old path detected but could
+not clear.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
 
-Verified on 2026-06-16 from source: on `--restart` the handler calls
-`RequestStopAndWait` (`src/control/control_supervisor.cpp:399-423`, 15 s deadline)
-and then `app_main.cpp:190-197` does `if (stop_result != 0) return stop_result;`
+The pre-implementation source review on 2026-06-16 found: on `--restart` the
+handler called `RequestStopAndWait`
+(`src/control/control_supervisor.cpp:399-423`, 15 s deadline) and then
+`app_main.cpp:190-197` did `if (stop_result != 0) return stop_result;`
 **before** `options.start_requested = true`. So a stop that times out aborts the
-relaunch. A grep of `src/` finds **no** `TerminateProcess` / force-kill in the
-watchdog or supervisor paths. The watchdog scheduled task therefore detects a
-hung worker (`kStale` → exit 2 → `--restart`) but cannot recover one that will not
-honor the stop sentinel.
+relaunch. A grep of `src/` at that point found **no** `TerminateProcess` /
+force-kill in the watchdog or supervisor paths. The watchdog scheduled task
+therefore detected a hung worker (`kStale` -> exit 2 -> `--restart`) but could
+not recover one that would not honor the stop sentinel.
 
 This is the "everything stopped updating" freeze class from the 06-09 incident
 (`docs/cpu-peak-temp-excursion-2026-06-09.md`). The 2026-06-16 reproduction
@@ -64,7 +66,7 @@ matters so the loop resumes tracking rather than holding a stale duty indefinite
 | No fan write / start / stop / breaker reset outside an explicit live task | `AGENTS.md` §Live Runtime Safety | Force-kill is a process-lifecycle action on the already-authorized watchdog/`--restart` path; it issues no fan write. Fans hold last PWM during the gap; the relaunched worker reasserts authority through the normal startup path. |
 | Write-once crash recovery: never `{durable hardware override + no durable baseline record}` | `docs/WRITE_ORCHESTRATION.md`, `pending_writes.cpp`, `app_main.cpp` | A force-kill is equivalent to a crash; the existing `ReconcilePendingWrites` startup gate restores the captured baseline from `pending_writes.json`. No new actuation and no change to the Upsert-before-ApplyDuty ordering. |
 | Single supervisor per runtime-home | `src/control/control_supervisor.cpp` (singleton mutex) | The escalation must terminate the existing worker/supervisor and confirm exit before relaunch, so the supervisor-singleton guarantee holds across the forced restart. |
-| Runtime sidecar / status / event schema stays backward-compatible | `docs/RUNTIME_HOME.md` | Adds one new event type (additive); no existing field, file, or schema version changes. |
+| Runtime sidecar / status / event schema stays backward-compatible | `docs/RUNTIME_HOME.md` | Adds supervisor process-lifecycle event types (additive); no existing field, file, or schema version changes. |
 | Repo stays standalone; no sibling-repo / bridge dependency | `AGENTS.md` §Repo Boundary | Uses the Win32 process API already used by the supervisor; no new external dependency. |
 
 ## 5. Behavior specification
@@ -75,7 +77,7 @@ path (`src/app/app_main.cpp:190-197`, `src/control/control_supervisor.cpp` —
 
 - On `--restart`, request the graceful stop as today. If it confirms worker (and
   supervisor) exit within the deadline, relaunch as today — unchanged path.
-- If the graceful stop **times out** (returns non-zero), escalate: resolve the
+- If the graceful stop **times out** (returns `2`), escalate: resolve the
   worker PID (and supervisor PID) from the supervisor state / `control_runtime.json`
   and force-terminate them, confirm exit, then proceed to relaunch
   (`start_requested = true`) — instead of the current return-without-relaunch.
@@ -102,9 +104,12 @@ IDs come from this feature's `REQ-WATCHDOG-*` namespace, reserved in the registr
 
 ## 7. Data / schema deltas
 
-- New/changed fields: one new event type `supervisor.worker_force_terminated`
-  (additive event-log entry: PID(s), prior graceful-stop result, reason). No
-  status, sidecar, manifest, CSV, or config field changes.
+- New/changed fields: additive event types
+  `supervisor.worker_force_terminated`,
+  `supervisor.supervisor_force_terminated`, and
+  `supervisor.force_terminate_failed` (PID when available and reason; worker
+  force-terminate success records the prior graceful-stop result). No status,
+  sidecar, manifest, CSV, or config field changes.
 - Config impact (`config/control.*.json`, `config/machines/*.json`): none for v1
   (the grace period reuses the existing `RequestStopAndWait` deadline). A
   configurable force-kill grace period is an open decision (§11).
@@ -115,15 +120,13 @@ IDs come from this feature's `REQ-WATCHDOG-*` namespace, reserved in the registr
 
 No new CLI subcommand or flag. The escalation is internal to the existing
 `--restart` path the watchdog already invokes. The only operator-visible change is
-the new event-log entry on a forced recovery. Update `docs/STRUCTURE_AND_STABILITY.md`
-and the watchdog/runtime docs at implementation if the restart path's documented
-behavior changes (`AGENTS.md` §Change Checklist).
+the new event-log entries on a forced recovery.
 
 ## 9. Design decision record(s)  *(promotion gate 3 — write before implementation)*
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| `docs/watchdog-hung-worker-recovery-decision-2026-06-16.md` | Force-kill escalation is the chosen recovery: D1 worker-first (supervisor self-exits), D2 reuse the 15 s graceful deadline, D3 bounded single-shot with a PID-reuse image-path guard. Basis: `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 and `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`. | Current |
+| `docs/watchdog-hung-worker-recovery-decision-2026-06-16.md` | Force-kill escalation is the chosen recovery: D1 worker-first (supervisor self-exits), D2 reuse the 15 s graceful deadline, D3 bounded single-shot with a PID-reuse image-path guard. Basis: `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 and `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`. | Current (implemented) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -150,13 +153,34 @@ Remaining items are non-blocking and post-v1:
 | Configurable force-kill grace period vs. the fixed 15 s deadline | post-v1 tuning | Fixed 15 s (reuse the existing `WaitForRuntimeStop` deadline). |
 | Apply the same force-stop escalation to a plain `--stop` after timeout | post-v1 | Graceful-only for `--stop`; escalation scoped to `--restart` recovery. |
 
+**Known limitations (v1):**
+- *PID-corroboration refusal on a pre-first-write freeze.* The worker-PID guard refuses
+  to force-terminate when `control_supervisor.json` `last_worker_pid` disagrees with
+  `control_runtime.json` `process_id`. If a worker freezes *before* its first status
+  write while a prior incarnation's `process_id` still sits in `control_runtime.json`,
+  the PIDs disagree and the escalation refuses; because the frozen worker can never
+  republish its PID, every subsequent watchdog poll refuses too, so this narrow startup
+  race is not auto-recovered until external intervention. This is the fail-closed
+  direction by design (an uncorroborated PID is never terminated) and is not a
+  regression from the pre-FEAT-0008 detect-but-don't-recover behavior, but it is a case
+  this recovery path does not clear. A future option is to fall back to the supervisor
+  sidecar PID (or re-resolve the worker by parent/handle) when corroboration is absent.
+- *Image-path guard assumes a non-reparse-point install.* The guard compares
+  `GetModuleFileNameW` (the `--restart` invoker) against `QueryFullProcessImageNameW`
+  (the live target) with `_wcsicmp` and no canonicalization. Verified to match on the
+  current deployment (installer resolves to `.ProviderPath` at task registration;
+  `release\` is not a junction/symlink). A `subst`/mapped-drive/junctioned `release\`
+  could make the same file render as two strings, in which case the guard refuses
+  (fail-closed, deferred recovery) rather than killing the wrong process.
+
 ## 12. Measurement gate & dependencies
 
 - **Measurement gate:** does not cross `docs/MEASUREMENT_GATE.md` — no cadence,
   channel-count, or mixed-input-strategy change; this is a process-recovery path.
 - **Depends on:** the existing watchdog task and supervisor/`RequestStopAndWait`
   path; the write-once recovery (`ReconcilePendingWrites`).
-- **Build/test impact:** one new integration test for the hung-worker path; no
+- **Build/test impact:** one new C++ orchestration unit test target and one
+  Python integration test module for the hung-worker path; no
   `CONTROL_PIPELINE_MATH` change.
 
 ## 13. Promotion-gate checklist  *(all must pass before this is buildable work)*
@@ -173,11 +197,35 @@ Remaining items are non-blocking and post-v1:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-WATCHDOG-01 | | | |
-| REQ-WATCHDOG-02 | | | |
-| REQ-WATCHDOG-03 | | | |
-| REQ-WATCHDOG-04 | | | |
+| REQ-WATCHDOG-01 | pass (T); M pending | `tests/test_watchdog_force_terminate.py::test_hung_worker_is_force_terminated_and_relaunched`: the worker is suspended (`NtSuspendProcess`) so it cannot honor the stop sentinel, `--restart` force-terminates it, and the relaunched worker PID **differs** from the killed one. Live A4 hardware repro not yet run. | 2026-06-16 |
+| REQ-WATCHDOG-02 | pass | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; `docs/RUNTIME_HOME.md` documents the three additive `supervisor.*force_terminate*` event types (R). | 2026-06-16 |
+| REQ-WATCHDOG-03 | pass | Same integration test seeds an orphaned `pending_writes.json` entry that the force-killed relaunch reconciles to `[]`; the escalation does not touch the reconcile path (`app_main.cpp` startup `ReconcilePendingWrites` unchanged; a force-kill is a crash) (R). | 2026-06-16 |
+| REQ-WATCHDOG-04 | pass | `tests/test_watchdog_force_terminate.py::test_graceful_worker_is_not_force_terminated` (a graceful stop never escalates) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard refusal, PID-corroboration refusal, single-shot no-retry bound); trigger gated on `stop_result == 2` in `app_main.cpp` (R). | 2026-06-16 |
 
-**Spec vs. implementation deltas:** <record anything built differently from this
-spec, and why. If behavior changed, update §5/§6, refresh the cited contract docs
-per `AGENTS.md` §Change Checklist, and bump **Updated**.>
+**Spec vs. implementation deltas:**
+- **Testable seam (additive, no behavior change).** The escalation logic lives
+  in `src/control/worker_force_terminate.{h,cpp}` rather than inside
+  `control_supervisor.cpp` as §9's plan suggested, behind an injectable
+  `ProcessTerminator` interface (the same DI idiom as `FanWriter` /
+  `RecordingFanWriter`). The pure orchestration — worker-first ordering, the
+  PID-reuse image guard, the worker-PID corroboration guard, the single-shot
+  bound, and the `runtime_gone` relaunch gate — is unit-tested with a fake
+  (`tests/cpp/worker_force_terminate_tests.cpp`); the real `Win32ProcessTerminator`
+  opens **one** handle per PID and uses it for the image-path guard,
+  `TerminateProcess`, and the post-kill exit confirm, so a confirmed-gone result
+  means death verified on the held handle (not a racy re-`OpenProcess` that PID
+  reuse could defeat).
+- **PID-corroboration guard.** D3's image-path guard is implemented as a full
+  case-insensitive image-path match against the `--restart` invoker's own
+  executable, plus a corroboration check: the supervisor sidecar's
+  `last_worker_pid` is cross-checked against `control_runtime.json`'s
+  `process_id`, and a disagreement refuses the kill (an uncorroborated PID is
+  never terminated).
+- **Integration-test fixture.** REQ-WATCHDOG-01's (T) creates a genuinely frozen
+  worker by suspending the real process (`NtSuspendProcess` via `ctypes`),
+  rather than adding a test-only "ignore-stop" mode to the controller as §4
+  contemplated — no production worker code path was added.
+- **No change** to `RequestStopAndWait`, the worker, the tick loop, the sidecar
+  gate, or the supervisor crash-restart loop; the `--restart` handler gains a
+  single `stop_result == 2` branch that calls the escalation and relaunches only
+  when the runtime is confirmed gone.

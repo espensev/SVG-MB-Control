@@ -147,6 +147,7 @@ add_library(svg_mb_control_core STATIC
     src/control/low_band_evidence.cpp
     src/control/low_band_integrator.cpp
     src/control/tick_runner.cpp
+    src/control/worker_force_terminate.cpp
     src/hardware/amd_reader.cpp
     src/hardware/fan_writer.cpp
     src/hardware/gpu_reader.cpp
@@ -331,6 +332,8 @@ if(BUILD_TESTING)
         tests/cpp/csv_rows_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_channel_write_tests
         tests/cpp/channel_write_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_force_terminate_tests
+        tests/cpp/worker_force_terminate_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests
         tests/cpp/amd_decode_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_power_anticipation_tests

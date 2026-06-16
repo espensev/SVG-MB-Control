@@ -399,6 +399,16 @@ circuit-breaker transitions. Normal rows use `severity=info` and
 `error_code=none`; warning/error/critical rows use stable uppercase event codes
 such as `CONTROL_LOOP_WRITE_FAILED`.
 
+Supervisor process-lifecycle events include `supervisor.worker_started`,
+`supervisor.worker_exited`, and `supervisor.worker_restart_scheduled`. When a
+`--restart` graceful stop times out on a hung worker, the bounded
+force-terminate escalation (FEAT-0008 / `REQ-WATCHDOG-*`) appends one of
+`supervisor.worker_force_terminated`, `supervisor.supervisor_force_terminated`,
+or `supervisor.force_terminate_failed`, each recording the affected PID and the
+reason in its `detail` string; `supervisor.worker_force_terminated` additionally
+records the timed-out graceful-stop result. These are additive event types on
+the same schema; no field or schema-version change.
+
 ## Ownership Rules
 
 - Control is the only writer of these files.

@@ -1,12 +1,17 @@
 # Watchdog Hung-Worker Recovery — Decision & Implementation Plan — 2026-06-16
 
-**Status:** Current (settles FEAT-0008 promotion gate 3).
+**Status:** Implemented (2026-06-16). Settled FEAT-0008 promotion gate 3; the
+force-terminate escalation (D1–D3) landed in
+`src/control/worker_force_terminate.{h,cpp}` + the `app_main.cpp` `--restart`
+`stop_result == 2` branch, with C++ unit + Python suspend-based integration
+tests. See FEAT-0008 §14 for the verification log and spec-vs-implementation
+deltas (testable `ProcessTerminator` seam; PID-corroboration guard;
+`NtSuspendProcess` test fixture instead of a controller ignore-stop mode).
 **Owns:** `docs/features/FEAT-0008-watchdog-hung-worker-recovery.md` (`REQ-WATCHDOG-*`).
 **Basis:** `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 (L0-A4) and the
 verified gap in `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`.
-**Scope guard:** this is a design + build plan. Implementing it is control-path /
-process-lifecycle work and still requires explicit build authorization through the
-`AGENTS.md` Feature Intake Gate; nothing here authorizes code.
+**Scope guard:** this record captures the decision and the implemented v1 slice.
+Future behavior expansion still requires the `AGENTS.md` Feature Intake Gate.
 
 ## 1. Context (the gap this settles)
 
@@ -65,18 +70,20 @@ no-loop bound keep the escalation safe and watchdog-time-bounded.
 
 ## 3. Implementation plan (files, functions, sequence)
 
-Smallest-diff path, scoped to the `--restart` recovery route only (a plain `--stop`
+Implemented path, scoped to the `--restart` recovery route only (a plain `--stop`
 is left graceful-only in v1):
 
-1. **New helper** in `src/control/control_supervisor.cpp` (e.g.
-   `EscalateForceTerminate(runtime_home) -> bool`): read `SupervisorState`
-   (`ReadSupervisorState`) for `last_worker_pid` / `supervisor_pid`; for each, open
-   the process, verify the image path is the release `svg-mb-control.exe`
-   (`QueryFullProcessImageNameW`), `TerminateProcess`, and confirm exit with a bounded
-   `WaitForSingleObject`. Emit `supervisor.worker_force_terminated` (PID, prior
-   graceful-stop result, reason) via `AppendRuntimeEvent`; emit
-   `supervisor.force_terminate_failed` on a confirm timeout. Return whether the
-   runtime is confirmed gone.
+1. **New helper** in `src/control/worker_force_terminate.{h,cpp}`:
+   `EscalateForceTerminate(runtime_home, graceful_stop_result) -> bool` reads
+   `SupervisorState` (`ReadSupervisorState`) for `last_worker_pid` /
+   `supervisor_pid`, cross-checks the worker PID against `control_runtime.json`
+   when available, verifies the live process image path matches the current
+   `svg-mb-control.exe` image (`QueryFullProcessImageNameW`), calls
+   `TerminateProcess`, and confirms exit with a bounded `WaitForSingleObject`.
+   It emits `supervisor.worker_force_terminated`,
+   `supervisor.supervisor_force_terminated`, or
+   `supervisor.force_terminate_failed` via `AppendRuntimeEvent`. Return value is
+   whether the runtime is confirmed gone.
 2. **Wire it into the restart path:** in `app_main.cpp:190-197`, when
    `RequestStopAndWait` returns `2` (the hung-stop code, distinct from `1` =
    could-not-write-stop), call `EscalateForceTerminate`; on success set
@@ -91,9 +98,9 @@ is left graceful-only in v1):
 
 ## 4. Test plan (REQ coverage)
 
-- **REQ-WATCHDOG-01 (T, M):** an integration test that launches a stub worker which
-  ignores the stop sentinel (busy-sleeps past 15 s), drives `--restart`, and asserts
-  the worker PID is terminated and a fresh worker is launched. Manual (M): the live
+- **REQ-WATCHDOG-01 (T, M):** an integration test suspends the real worker process
+  with `NtSuspendProcess`, drives `--restart`, and asserts the worker PID is
+  terminated and a fresh worker is launched. Manual (M): the live
   A4 repro from `docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md` (hold a
   worker blocked > 15 s) shows recovery.
 - **REQ-WATCHDOG-02 (T, R):** assert the `supervisor.worker_force_terminated` event
@@ -105,9 +112,9 @@ is left graceful-only in v1):
   force-killed (`stop_result == 0` fast path); and the PID-reuse guard refuses a PID
   whose image is not `svg-mb-control.exe`. Review the trigger gate and the bound.
 
-Existing seam: process-lifecycle tests live near `tests/test_service_probe.py` and the
-supervisor; a stub-worker fixture (a tiny exe or the controller in a "ignore-stop"
-test mode) is the missing piece to add.
+Unit coverage lives in `tests/cpp/worker_force_terminate_tests.cpp`; integration
+coverage lives in `tests/test_watchdog_force_terminate.py`. The test fixture uses
+the real worker process rather than adding an ignore-stop test mode.
 
 ## 5. Open / future (not v1)
 

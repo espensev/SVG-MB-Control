@@ -58,7 +58,7 @@ Result values:
 | `FEAT-0005` Write actuation confirmation | Reserved (body parked) | Not buildable; body parked in `docs/features/_parked/`, sequenced behind FEAT-0004. |
 | `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed behind default-off gates. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
-| `FEAT-0008` Watchdog hung-worker recovery | Accepted | Buildable when implementation is explicitly authorized; verification pending. Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). Code-verified gap: the watchdog detects a hung worker (`kStale`) but cannot recover it — no `TerminateProcess`/force-kill in `src/`. |
+| `FEAT-0008` Watchdog hung-worker recovery | Implemented | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). Remaining: live A4 hardware repro (M) pending. |
 
 ## 3. Requirement map
 
@@ -130,10 +130,10 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-WATCHDOG-01` | T, M | Integration test: a worker that ignores the stop sentinel past the deadline is force-terminated and relaunched; live A4 hung-worker repro shows recovery. | pending |
-| `REQ-WATCHDOG-02` | T, R | Assert `supervisor.worker_force_terminated` event (PID/reason); review vs `RUNTIME_HOME.md` event schema. | pending |
-| `REQ-WATCHDOG-03` | T, R | Reconcile-after-force-kill restores the orphaned baseline on relaunch; review vs `WRITE_ORCHESTRATION.md`. | pending |
-| `REQ-WATCHDOG-04` | T, R | A worker honoring the graceful stop is not force-terminated; the escalation is attempt-bounded. | pending |
+| `REQ-WATCHDOG-01` | T, M | `tests/test_watchdog_force_terminate.py::test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched worker PID differs); live A4 hardware repro pending. | pass (T); M pending |
+| `REQ-WATCHDOG-02` | T, R | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; review vs the additive `supervisor.*force_terminate*` event types in `RUNTIME_HOME.md`. | pass |
+| `REQ-WATCHDOG-03` | T, R | Same integration test seeds an orphaned `pending_writes.json` entry the force-killed relaunch reconciles to `[]`; review that the escalation leaves the `app_main.cpp` startup `ReconcilePendingWrites` path unchanged. | pass |
+| `REQ-WATCHDOG-04` | T, R | `test_graceful_worker_is_not_force_terminated` (no escalation on a graceful stop) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard / PID-corroboration refusal, single-shot bound); trigger gated on `stop_result == 2`. | pass |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 
