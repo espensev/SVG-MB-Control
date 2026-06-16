@@ -98,6 +98,26 @@ So both observed natural axes yield graceful recovery; the only producers of a 1
 stop-miss are a deterministic deschedule (suspend) or a hard kernel-wait block —
 neither thermal.
 
+**Direct I/O write-path probe (confirmatory, 2026-06-16).** To close the I/O axis
+directly rather than only by mechanism + the NDIS precedent, an external read-share
+handle (`FileShare.Read`, blocking the atomic rename-replace, allowing the
+controller's reads) was held on `release/runtime/pending_writes.json` on the live
+loop under a brief 6-thread nudge (`Probe-SidecarLock.ps1`;
+`sidecar-lock-probe-20260616.json`). Result: **23 `control_loop.sidecar_upsert_failed`
+events (fan-write skip), `tick_count` advanced throughout (~0.83/s vs 4/s nominal —
+degraded but responsive), 0 force-terminations, 0 restarts, worker pid unchanged**;
+on release, `write_applied` resumed immediately with 0 residual sidecar errors. This
+**confirms** (does not discover — the mechanism is what proves it) that a write-path
+I/O stall is the documented *safe-degraded* state (hold-last-PWM) with the worker
+*responsive*, not frozen. The probe was deliberately bounded by an active
+tick/status-freshness release (fired at status-age 6.3 s, well under the 10 s floor):
+status-age reaching 6.3 s in 7.6 s of lock empirically shows a *sustained* lock would
+trip the 10 s staleness → a **graceful** watchdog recycle (the worker honors the stop
+because it is responsive), **not** a `stop_result==2` — and the release intentionally
+avoids exercising the un-characterized restart-reconcile-during-lock path. A
+zero-live-risk assertion of the same skip-not-block invariant is available as the
+`RecordingFanWriter` unit test specced in the Layer-0 plan §6 (not added here).
+
 ## 4. Recommended next step — close the scheduling axis per protocol §5 (not the virus, not yet a reframe)
 
 > **Update 2026-06-16 (post-run): the recommended step ran; the reframe is now
