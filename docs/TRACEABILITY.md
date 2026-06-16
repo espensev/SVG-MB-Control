@@ -130,7 +130,7 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-WATCHDOG-01` | T, M | `tests/test_watchdog_force_terminate.py::test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched worker PID differs); live A4 hardware repro pending. | pass (T); M pending |
+| `REQ-WATCHDOG-01` | T, M | (T) `test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched PID differs); (M) live deploy 2026-06-16 commit `e5bafdb`: suspended live worker pid 44984 force-terminated by the production watchdog `--restart` (`supervisor.worker_force_terminated`, stop_result=2), fresh worker pid 36348, loop resumed ticking. | pass (T, M) |
 | `REQ-WATCHDOG-02` | T, R | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; review vs the additive `supervisor.*force_terminate*` event types in `RUNTIME_HOME.md`. | pass |
 | `REQ-WATCHDOG-03` | T, R | Same integration test seeds an orphaned `pending_writes.json` entry the force-killed relaunch reconciles to `[]`; review that the escalation leaves the `app_main.cpp` startup `ReconcilePendingWrites` path unchanged. | pass |
 | `REQ-WATCHDOG-04` | T, R | `test_graceful_worker_is_not_force_terminated` (no escalation on a graceful stop) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard / PID-corroboration refusal, single-shot bound); trigger gated on `stop_result == 2`. | pass |
