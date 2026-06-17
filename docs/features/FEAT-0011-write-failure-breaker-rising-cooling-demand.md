@@ -1,7 +1,7 @@
 # FEAT-0011: Write-failure breaker must not block rising cooling demand
 
 **Project:** svg-mb-control
-**Status:** Draft (held — pending maintainer direction on a recovered-actuator self-heal)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
 **Namespace:** `REQ-COOLWRITE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -131,33 +131,37 @@ The proposal is therefore framed as a **direction to decide**, not a settled fix
 
 ## 5. Behavior specification
 
-Behavior is **proposed (not yet implemented)** and is one direction for the
-maintainer to accept, refine, or reject. It lives at the breaker gate in
-`src/control/channel_write.cpp` (`TryApplyChannelSetpoint`, line 307) and the
-per-channel state in `src/control/control_runtime_context.h`.
+Implemented behavior (per the decision record; Direction = bounded half-open
+probe). It lives at the breaker gate in `src/control/channel_write.cpp`
+(`TryApplyChannelSetpoint`, line 307) and the per-channel state in
+`src/control/control_runtime_context.h`.
 
-- **Down-or-equal command, breaker open — unchanged.** When the breaker is open
-  and the computed setpoint is not above `channel.last_issued_pct` by the proposed
-  margin, the gate keeps suppressing the write (futile-write suppression is
-  preserved). The sensor-safe (`safety_override`) bypass is unchanged.
-- **Rising command, breaker open — proposed bypass.** When the breaker is open and
-  the computed setpoint is a rising (more-cooling) command that meets the proposed
-  bound (a setpoint above `channel.last_issued_pct` by a margin, and/or an observed
-  temperature above a high-temperature threshold), the controller lets that one
-  write proceed to `ApplyDuty`.
-- **Self-heal on success.** A bypassed rising write that succeeds runs the existing
-  `NoteSuccessfulChannelWrite` (`channel_write.cpp:356`), which closes the breaker
-  and emits `control_loop.circuit_breaker_closed`. The channel resumes normal
-  control. This is the self-heal the open breaker currently prevents.
-- **Stay loud on failure.** A bypassed rising write that fails runs the existing
-  `HandleChannelWriteFailure` (`channel_write.cpp:350`): the actuator is confirmed
-  still-failing, the breaker stays open, and `consecutive_write_failures` continues
-  as today. The bound (§11) limits how often this trial occurs so the bypass does
-  not degenerate into an every-tick retry against a truly-dead actuator.
-- **Observable, if a probe-rate bound is chosen.** If the maintainer selects a
-  rate-limited trial (rather than a pure threshold), the proposal adds an additive
-  per-channel field recording the last trial tick and reuses the existing
-  breaker-open/closed event vocabulary; no new event type is required.
+- **Down-or-equal command, breaker open — unchanged.** When the breaker is open and
+  the computed setpoint is not above `channel.last_issued_pct` (no more cooling
+  wanted), the gate keeps suppressing the write (futile-write suppression
+  preserved). The sensor-safe (`safety_override`) bypass is unchanged — it reaches
+  the actuator immediately, above the probe logic.
+- **Rising command, breaker open — bounded half-open probe.** When the breaker is
+  open and the computed setpoint exceeds `channel.last_issued_pct` (more cooling
+  wanted) **and** at least `kBreakerProbeBackoff` (5 s) has elapsed since the last
+  probe, the controller lets that one write proceed to `ApplyDuty` and records the
+  probe tick (`channel.last_probe_time`).
+- **Self-heal on success.** A successful probe runs the existing
+  `NoteSuccessfulChannelWrite`, which closes the breaker, resets
+  `consecutive_write_failures`, and emits `control_loop.circuit_breaker_closed`. The
+  channel resumes normal control — the self-heal the open breaker previously
+  prevented.
+- **Stay loud on failure.** A failed probe runs the existing
+  `HandleChannelWriteFailure`: the actuator is confirmed still-failing and the
+  breaker stays open. Because `last_probe_time` is set before the write attempt, the
+  next probe waits the full 5 s backoff, so a persistently-failing actuator is
+  retried at most once per backoff — not every tick.
+- **Observable.** The probe attempt emits an additive
+  `control_loop.circuit_breaker_probe` event (best-effort — wrapped so a logging
+  throw cannot veto the probe write, consistent with REQ-WRITESAFE-06); the outcome
+  is the existing `circuit_breaker_closed` / `write_failed` event. The only new
+  per-channel state is the internal `last_probe_time` (not published to
+  `control_runtime.json`).
 
 ## 6. Requirements  *(promotion gate 4)*
 
@@ -200,7 +204,7 @@ per-channel state in `src/control/control_runtime_context.h`.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — held-Draft; no decision file created) | Whether to accept the rising-demand-bypass direction at all; if accepted, the bound (high-temperature threshold vs. margin-above-`last_issued_pct` vs. probe-rate limit, or a combination), whether the bound is operator-tunable, and how the futile-write-suppression trade is set. Nothing here authorizes code. | Proposed (pending maintainer direction) |
+| [`docs/breaker-probe-decision-2026-06-17.md`](../breaker-probe-decision-2026-06-17.md) | Accept the bounded half-open probe (D-COOLWRITE-1); fixed 5 s hardcoded `kBreakerProbeBackoff` (D-COOLWRITE-2); "cooling wanted" = setpoint above the last applied duty (D-COOLWRITE-3); reuse the existing success/failure paths, `safety_override` unchanged, additive `control_loop.circuit_breaker_probe` event (D-COOLWRITE-4). | Current (settled 2026-06-17) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -219,6 +223,10 @@ Verify legend:
 - **R** = code review against the cited contract doc.
 
 ## 11. Open decisions
+
+**Resolved 2026-06-17** by `docs/breaker-probe-decision-2026-06-17.md`
+(D-COOLWRITE-1..4 adopted: bounded half-open probe, 5 s backoff, cooling-wanted =
+setpoint above last applied duty, fixed in code).
 
 | Decision | Needed before | Current default |
 |---|---|---|
@@ -252,28 +260,31 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — static-verified code gap at `channel_write.cpp:307`, corroborated by team-review finding 5 and the recovery-gap audit; not runtime-reproduced).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — held: no decision doc; direction is `Proposed (pending maintainer direction)`. This is the held gate.).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/breaker-probe-decision-2026-06-17.md`, Current; bounded half-open probe).
 - [x] 4. Concrete `REQ-COOLWRITE-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI`, contract review (§10), to be mirrored in `docs/TRACEABILITY.md` on acceptance.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (breaker-gate decision only; computed duty unchanged; additive schema).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held at Draft 2026-06-17: the maintainer has not authorized this feature. The
-> direction in §5 is proposed, not decided; gate 3 stays open until a maintainer
-> accepts the direction and the bound (§11) and a decision record is written.
+> Implemented 2026-06-17: the maintainer authorized the bounded half-open probe
+> (decision `docs/breaker-probe-decision-2026-06-17.md`). The breaker gate now
+> probes once per 5 s backoff on rising cooling demand; the former "all normal
+> writes suppressed" leg of the breaker test was narrowed to a down-demand case.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after
-implementation, which is not authorized until the maintainer accepts the §5
-direction and the §11 bound.
-
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-COOLWRITE-01 | | | |
-| REQ-COOLWRITE-02 | | | |
-| REQ-COOLWRITE-03 | | | |
-| REQ-COOLWRITE-04 | | | |
-| REQ-COOLWRITE-05 | | | |
+| REQ-COOLWRITE-01 | pass | `channel_write_tests.cpp::TestRisingDemandProbesOpenBreaker` (a rising cooling demand probes through the open breaker to `ApplyDuty`) — CTest green | 2026-06-17 |
+| REQ-COOLWRITE-02 | pass | `channel_write_tests.cpp::TestNonCoolingWriteSuppressedByOpenBreaker` (a lower setpoint stays suppressed) + `TestSensorSafeBypassesOpenBreaker` (`safety_override` bypass unchanged) — CTest green | 2026-06-17 |
+| REQ-COOLWRITE-03 | pass | `TestProbeSuccessClosesBreaker` (success → breaker closed + `consecutive_write_failures` reset) + `TestProbeFailureKeepsBreakerOpen` (failure → breaker stays open) — CTest green | 2026-06-17 |
+| REQ-COOLWRITE-04 | pass | `TestProbeRateLimitedWithinBackoff` (a second rising write within the 5 s `kBreakerProbeBackoff` does not probe again) — CTest green | 2026-06-17 |
+| REQ-COOLWRITE-05 | pass | Review (R): change confined to the breaker gate in `channel_write.cpp`; computed duty/cadence/channels/control identity unchanged; the only new per-channel state (`last_probe_time`) is internal and the `circuit_breaker_probe` event is additive — no new published status field | 2026-06-17 |
 
-**Spec vs. implementation deltas:** none yet (not implemented).
+**Spec vs. implementation deltas:** Implemented as a bounded half-open probe. The
+bound is a fixed 5 s `kBreakerProbeBackoff` rate-limit (D-COOLWRITE-2) rather than a
+high-temperature threshold; "cooling wanted" is `setpoint > last_issued_pct`
+(D-COOLWRITE-3), generalizing the spec's "rising" framing to also cover a
+hot-but-steady channel above its last applied duty. No new published status field
+(REQ-COOLWRITE-05) — `last_probe_time` is internal; the additive
+`control_loop.circuit_breaker_probe` event marks the probe.

@@ -76,6 +76,13 @@ struct ChannelState {
     std::uint32_t consecutive_write_failures = 0u;
     bool circuit_breaker_open = false;
     static constexpr std::uint32_t kMaxConsecutiveFailures = 5u;
+    // FEAT-0011: time of the last half-open probe write while the write-failure
+    // breaker is open. Bounds probe frequency to kBreakerProbeBackoff so a
+    // recovered actuator can self-heal on rising cooling demand without spamming
+    // a still-failing one every tick.
+    std::chrono::steady_clock::time_point last_probe_time =
+        std::chrono::steady_clock::time_point{};
+    static constexpr std::chrono::milliseconds kBreakerProbeBackoff{5000};
 
     // FEAT-0010 (REQ-WRITESAFE-03): consecutive failures to persist the
     // pending-write sidecar (PendingWritesStore::Upsert throwing). A sidecar

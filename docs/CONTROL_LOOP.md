@@ -332,8 +332,13 @@ current terminal and does not add supervisor restart behavior.
   channel. A sensor-safe (safe-mode) command still bypasses the open breaker so
   a thermal-safety write reaches the hardware
   (`docs/discovery-recovery-gap-audit-2026-06-04.md`, remediation 3); a
-  successful bypassed write closes the breaker. The
-  reset path is `--reset-breakers` or
+  successful bypassed write closes the breaker. While the breaker is open, a
+  rising cooling demand (computed setpoint above the last applied duty) also
+  triggers a bounded **half-open probe** — at most one write per 5 s
+  (`kBreakerProbeBackoff`), logged as `control_loop.circuit_breaker_probe` — so a
+  recovered actuator self-heals in the cooling direction instead of staying locked
+  out (FEAT-0011); a successful probe closes the breaker, a failed one keeps it
+  open. The reset path is `--reset-breakers` or
   `--reset-breakers --reset-breaker-channel <n>`. The reset clears
   `circuit_breaker_open` and `consecutive_write_failures`, logs
   `control_loop.circuit_breaker_reset`, and leaves policy/fan-write gates in

@@ -219,23 +219,26 @@ void TestSensorSafeBypassesOpenBreaker() {
     std::filesystem::remove_all(home, ec);
 }
 
-// Leg 2 (same open-breaker state): a normal command is still suppressed, and
-// the breaker stays open. This proves the fix did not let normal writes bypass.
-void TestNormalWriteSuppressedByOpenBreaker() {
-    const std::filesystem::path home = MakeTempHome("normal_suppressed");
+// Leg 2 (same open-breaker state): a non-cooling (lower) command is still
+// suppressed and the breaker stays open. After FEAT-0011 an open breaker allows a
+// bounded rising-cooling-demand probe, so this leg uses a *lower* setpoint to
+// prove the breaker still blocks writes that do not ask for more cooling.
+void TestNonCoolingWriteSuppressedByOpenBreaker() {
+    const std::filesystem::path home = MakeTempHome("noncooling_suppressed");
     svg_mb_control::ControlRuntimeContext context = MakeContext(home);
     svg_mb_control::ChannelState channel = MakeReadyChannel(/*breaker_open=*/true);
+    channel.last_issued_pct = 80.0;  // a lower setpoint is not a cooling increase
     svg_mb_control::PendingWritesStore store(home);
     RecordingFanWriter writer;
 
     const svg_mb_control::ChannelEvaluation eval =
-        MakeEvaluation(60.0, /*safety_override=*/false);
+        MakeEvaluation(50.0, /*safety_override=*/false);
     RunWrite(context, channel, eval, writer, store);
 
     ExpectTrue(writer.apply_calls.empty(),
-               "normal command is suppressed by an open breaker");
+               "a non-cooling (lower) command stays suppressed by an open breaker");
     ExpectTrue(channel.circuit_breaker_open,
-               "suppressed normal write leaves the breaker open");
+               "the suppressed write leaves the breaker open");
 
     std::error_code ec;
     std::filesystem::remove_all(home, ec);
@@ -791,11 +794,95 @@ void TestReconcileQuarantinesCorruptSidecarAndProceeds() {
     std::filesystem::remove_all(home, ec);
 }
 
+// --- FEAT-0011: half-open breaker probe on rising cooling demand (REQ-COOLWRITE-*) ---
+
+// REQ-COOLWRITE-01: while the breaker is open, a rising cooling demand probes
+// through (one write reaches the actuator) so a recovered actuator can self-heal.
+void TestRisingDemandProbesOpenBreaker() {
+    const std::filesystem::path home = MakeTempHome("breaker_probe");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel = MakeReadyChannel(/*breaker_open=*/true);
+    channel.last_issued_pct = 50.0;  // a higher setpoint wants more cooling
+    svg_mb_control::PendingWritesStore store(home);
+    RecordingFanWriter writer;
+
+    RunWrite(context, channel, MakeEvaluation(80.0, /*safety_override=*/false),
+             writer, store);
+
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "a rising cooling demand probes through an open breaker");
+}
+
+// REQ-COOLWRITE-03 (success): a successful probe closes the breaker and clears the
+// write-failure counter.
+void TestProbeSuccessClosesBreaker() {
+    const std::filesystem::path home = MakeTempHome("probe_success");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel = MakeReadyChannel(/*breaker_open=*/true);
+    channel.last_issued_pct = 50.0;
+    svg_mb_control::PendingWritesStore store(home);
+    RecordingFanWriter writer;  // apply_result ok by default
+
+    RunWrite(context, channel, MakeEvaluation(80.0, /*safety_override=*/false),
+             writer, store);
+
+    ExpectTrue(writer.apply_calls.size() == 1u, "the probe write reaches the actuator");
+    ExpectTrue(!channel.circuit_breaker_open,
+               "a successful probe closes the breaker");
+    ExpectTrue(channel.consecutive_write_failures == 0u,
+               "a successful probe clears the write-failure counter");
+}
+
+// REQ-COOLWRITE-03 (failure): a failed probe reaches the actuator but leaves the
+// breaker open.
+void TestProbeFailureKeepsBreakerOpen() {
+    const std::filesystem::path home = MakeTempHome("probe_failure");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel = MakeReadyChannel(/*breaker_open=*/true);
+    channel.last_issued_pct = 50.0;
+    svg_mb_control::PendingWritesStore store(home);
+    RecordingFanWriter writer;
+    writer.apply_result.error = svg_mb_control::FanWriteError::kWriteFailed;
+    writer.apply_result.detail = "simulated still-failing actuator";
+
+    RunWrite(context, channel, MakeEvaluation(80.0, /*safety_override=*/false),
+             writer, store);
+
+    ExpectTrue(writer.apply_calls.size() == 1u, "the probe attempt reaches the actuator");
+    ExpectTrue(channel.circuit_breaker_open, "a failed probe leaves the breaker open");
+}
+
+// REQ-COOLWRITE-04: the open breaker is probed at most once per backoff window, so
+// a persistently-failing actuator is not retried every tick.
+void TestProbeRateLimitedWithinBackoff() {
+    const std::filesystem::path home = MakeTempHome("probe_ratelimit");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel = MakeReadyChannel(/*breaker_open=*/true);
+    channel.last_issued_pct = 50.0;
+    svg_mb_control::PendingWritesStore store(home);
+    RecordingFanWriter writer;
+    writer.apply_result.error = svg_mb_control::FanWriteError::kWriteFailed;
+    writer.apply_result.detail = "still failing";
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(80.0, /*safety_override=*/false);
+    RunWrite(context, channel, eval, writer, store);  // first probe (fails, stays open)
+    RunWrite(context, channel, eval, writer, store);  // within backoff -> no second probe
+
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "the open breaker is probed at most once per backoff window");
+    ExpectTrue(channel.circuit_breaker_open, "a failed probe leaves the breaker open");
+}
+
 }  // namespace
 
 int main() {
     TestSensorSafeBypassesOpenBreaker();
-    TestNormalWriteSuppressedByOpenBreaker();
+    TestNonCoolingWriteSuppressedByOpenBreaker();
+    TestRisingDemandProbesOpenBreaker();
+    TestProbeSuccessClosesBreaker();
+    TestProbeFailureKeepsBreakerOpen();
+    TestProbeRateLimitedWithinBackoff();
     TestNormalWriteAppliesWhenBreakerClosed();
     TestSafetyWriteFailureKeepsBreakerOpen();
     TestEvaluatorSetsSafetyOverrideOnSensorFailure();
