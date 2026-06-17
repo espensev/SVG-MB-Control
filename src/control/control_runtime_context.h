@@ -86,6 +86,10 @@ struct ChannelState {
 
     std::uint32_t consecutive_sensor_failures = 0u;
     bool sensor_failed = false;
+    // FEAT-0013: true once this channel has seen a CPU input available. Used to
+    // distinguish a CPU *dropout* (CPU was available, now gone while GPU remains)
+    // from a never-present GPU-led configuration on source-aware channels.
+    bool cpu_input_was_available = false;
     static constexpr std::uint32_t kMaxConsecutiveSensorFailures = 3u;
     static constexpr double kSafeModeFanDuty = 100.0;
 };

@@ -1,7 +1,7 @@
 # FEAT-0013: Source-aware channels enter safe mode on primary-source dropout
 
 **Project:** svg-mb-control
-**Status:** Draft (held — pending maintainer direction on the primary-dropout safe-mode proposal)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
 **Namespace:** `REQ-SRCSAFE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -118,7 +118,7 @@ own response, not whether the silicon protects itself.
 
 ## 5. Behavior specification
 
-Behavior is **proposed** (not yet implemented). It lives in `EvaluateChannel`'s
+Implemented behavior. It lives in `EvaluateChannel`'s
 primary-selection step (`src/control/channel_evaluator.cpp`,
 `SelectPrimaryCurveInput` / `EvaluatePrimarySetpoint`) and the per-channel state in
 `src/control/control_runtime_context.h` (`ChannelState`).
@@ -155,7 +155,7 @@ primary-selection step (`src/control/channel_evaluator.cpp`,
 
 | ID | Requirement |
 |---|---|
-| REQ-SRCSAFE-01 | On a `TempBlend::MaxCpuGpuSourceAware` (or `MaxCpuGpu`) channel whose CPU input was available on a prior evaluation and is now unavailable while the GPU input remains available, the evaluation must count the tick toward `consecutive_sensor_failures` and must not reset that counter on the GPU fallback alone. |
+| REQ-SRCSAFE-01 | On a `TempBlend::MaxCpuGpuSourceAware` channel whose CPU input was available on a prior evaluation and is now unavailable while the GPU input remains available, the evaluation must count the tick toward `consecutive_sensor_failures` and must not reset that counter on the GPU fallback alone. |
 | REQ-SRCSAFE-02 | After `ChannelState::kMaxConsecutiveSensorFailures` (3) consecutive CPU-dropout ticks, the channel must enter the sensor-safe response (the chosen response from §11; default: set `safety_override` and command `kSafeModeFanDuty`), reusing the existing sensor-failure mechanism rather than a parallel one. |
 | REQ-SRCSAFE-03 | A CPU-dropout-driven safe-mode entry must emit a sensor-failure event (`ChannelSensorEvent::FailureDetected`), and a subsequent CPU-input return must emit `ChannelSensorEvent::Recovered` and restore normal source-aware selection. |
 | REQ-SRCSAFE-04 | The trip must distinguish a CPU *dropout* (CPU previously available, now unavailable) from a CPU *never-present* configuration (GPU-led channel that never had CPU): a never-present CPU input on a GPU-available channel must not trip the CPU-dropout safe mode. |
@@ -197,11 +197,10 @@ IDs come from this feature's `REQ-SRCSAFE-*` namespace, reserved in the registry
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none written yet — held-Draft) | The failure response on a confirmed CPU dropout (force `kSafeModeFanDuty` + `safety_override`, vs hold a CPU-derived floor, vs event-only); whether the GPU-dropout symmetric case is in scope; whether the threshold is per-channel-configurable; and the dropout-vs-never-present detection rule. | Proposed (pending maintainer direction) |
+| [`docs/source-aware-cpu-dropout-decision-2026-06-17.md`](../source-aware-cpu-dropout-decision-2026-06-17.md) | The failure response (force `kSafeModeFanDuty` + `safety_override`, D-SRCSAFE-1), scope (`MaxCpuGpuSourceAware` + CPU-primary only, D-SRCSAFE-2), counter/threshold reuse (D-SRCSAFE-3), and the dropout-vs-never-present rule (D-SRCSAFE-4). | Current (settled 2026-06-17) |
 
-No separate decision file is created while this spec is held at Draft. Nothing here
-authorizes code; the decision record is written before implementation if the maintainer
-promotes the direction.
+The decision record was settled and the maintainer authorized implementation
+2026-06-17; the §11 defaults were adopted as the v1 design.
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -220,6 +219,9 @@ Verify legend:
 - **R** = code review against the cited contract doc.
 
 ## 11. Open decisions
+
+**Resolved 2026-06-17** by `docs/source-aware-cpu-dropout-decision-2026-06-17.md`;
+the defaults below were adopted as the v1 design.
 
 | Decision | Needed before | Current default |
 |---|---|---|
@@ -249,7 +251,7 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — static-verified `channel_evaluator.cpp:219-234,268-276,287-301`; team-review §High source-aware CPU-dropout).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — decision record pending maintainer direction on the failure response; this is the held gate).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/source-aware-cpu-dropout-decision-2026-06-17.md`, Current).
 - [x] 4. Concrete `REQ-SRCSAFE-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI` C++ tests and contract review (§10), and mirrored in `docs/TRACEABILITY.md`.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (dropout-path only; normal-operation computed duty unchanged; fail-safe direction; additive schema).
@@ -257,15 +259,19 @@ Verify legend:
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after implementation,
-which is not authorized until the maintainer chooses a direction (§9, §13 gate 3).
-
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-SRCSAFE-01 | | | |
-| REQ-SRCSAFE-02 | | | |
-| REQ-SRCSAFE-03 | | | |
-| REQ-SRCSAFE-04 | | | |
-| REQ-SRCSAFE-05 | | | |
+| REQ-SRCSAFE-01 | pass | `tests/cpp/channel_write_tests.cpp::TestSourceAwareCpuDropoutCountsTowardTrip` (a CPU dropout increments `consecutive_sensor_failures` instead of resetting on the GPU fallback) — CTest green | 2026-06-17 |
+| REQ-SRCSAFE-02 | pass | `channel_write_tests.cpp::TestSourceAwareCpuDropoutTripsSafeMode` (3 dropout ticks set `safety_override` + response source `source_aware_cpu_dropout_safe_mode`) — CTest green | 2026-06-17 |
+| REQ-SRCSAFE-03 | pass | `...TripsSafeMode` asserts `ChannelSensorEvent::FailureDetected` on the trip; `...CpuRecoveryClearsDropout` asserts `Recovered` on CPU return — CTest green | 2026-06-17 |
+| REQ-SRCSAFE-04 | pass | `channel_write_tests.cpp::TestSourceAwareNeverPresentCpuDoesNotTrip` (GPU-led, CPU never seen → no trip) — CTest green | 2026-06-17 |
+| REQ-SRCSAFE-05 | pass | `channel_write_tests.cpp::TestSourceAwareBothPresentNoTrip` (both-inputs-present unchanged); change confined to the dropout branch in `EvaluatePrimarySetpoint`; total-loss path unchanged | 2026-06-17 |
 
-**Spec vs. implementation deltas:** none yet (not implemented).
+**Spec vs. implementation deltas:** Implemented per the decision record. Reuses the
+existing `consecutive_sensor_failures` counter, `kMaxConsecutiveSensorFailures`
+threshold, `sensor_failed` health degradation, and `FailureDetected`/`Recovered`
+events (D-SRCSAFE-3); the only new state is the additive `cpu_input_was_available`
+flag. The dropout trip carries response source `source_aware_cpu_dropout_safe_mode`;
+below the threshold the channel keeps cooling on the GPU curve. Scope is
+`MaxCpuGpuSourceAware` + CPU-primary only (D-SRCSAFE-2); REQ-SRCSAFE-01 dropped the
+"(or MaxCpuGpu)" qualifier accordingly.

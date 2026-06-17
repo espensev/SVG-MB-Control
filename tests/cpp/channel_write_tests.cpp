@@ -533,6 +533,147 @@ void TestEventLogThrowDoesNotVetoActuation() {
     std::filesystem::remove_all(home, ec);
 }
 
+// --- FEAT-0013: source-aware CPU-dropout safe mode (REQ-SRCSAFE-*) ---
+
+svg_mb_control::ChannelState MakeSourceAwareChannel() {
+    svg_mb_control::ChannelState channel;
+    channel.config.channel = 2u;
+    channel.config.temp_blend = svg_mb_control::TempBlend::MaxCpuGpuSourceAware;
+    channel.config.source_aware_cpu_hot_guard_c = 75.0;
+    channel.config.curve = {{30.0, 20.0}, {70.0, 100.0}};
+    return channel;
+}
+
+svg_mb_control::TempInputs MakeTempInputs(bool cpu_avail, double cpu_c,
+                                         bool gpu_avail, double gpu_c) {
+    svg_mb_control::TempInputs t;
+    t.cpu_available = cpu_avail;
+    t.cpu_c = cpu_c;
+    t.gpu_available = gpu_avail;
+    t.gpu_c = gpu_c;
+    return t;
+}
+
+// REQ-SRCSAFE-01: a CPU dropout (CPU seen, now gone, GPU still present) on a
+// source-aware channel counts toward consecutive_sensor_failures instead of being
+// reset by the GPU fallback.
+void TestSourceAwareCpuDropoutCountsTowardTrip() {
+    using namespace svg_mb_control;
+    ControlLoopConfig loop;
+    ChannelState channel = MakeSourceAwareChannel();
+    RuntimeSnapshot empty_snapshot;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(empty_snapshot);
+    const auto now = std::chrono::steady_clock::now();
+
+    EvaluateChannel(channel, loop, MakeTempInputs(true, 55.0, true, 50.0), index,
+                    now);  // CPU seen, both present
+    ExpectTrue(channel.consecutive_sensor_failures == 0u,
+               "no sensor-failure count while both inputs are present");
+
+    EvaluateChannel(channel, loop, MakeTempInputs(false, 0.0, true, 50.0), index,
+                    now);  // CPU drops, GPU remains
+    ExpectTrue(channel.consecutive_sensor_failures == 1u,
+               "a CPU dropout on a source-aware channel increments the sensor-failure count");
+}
+
+// REQ-SRCSAFE-02/03: three consecutive CPU-dropout ticks trip safe mode
+// (safety_override + a distinct response source) and emit FailureDetected.
+void TestSourceAwareCpuDropoutTripsSafeMode() {
+    using namespace svg_mb_control;
+    ControlLoopConfig loop;
+    ChannelState channel = MakeSourceAwareChannel();
+    RuntimeSnapshot empty_snapshot;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(empty_snapshot);
+    const auto now = std::chrono::steady_clock::now();
+
+    EvaluateChannel(channel, loop, MakeTempInputs(true, 55.0, true, 50.0), index,
+                    now);  // seed CPU-seen
+    const TempInputs dropout = MakeTempInputs(false, 0.0, true, 50.0);
+    const ChannelEvaluation d1 = EvaluateChannel(channel, loop, dropout, index, now);
+    ExpectTrue(!d1.safety_override, "no safe mode before the dropout threshold (1)");
+    const ChannelEvaluation d2 = EvaluateChannel(channel, loop, dropout, index, now);
+    ExpectTrue(!d2.safety_override, "no safe mode before the dropout threshold (2)");
+    const ChannelEvaluation d3 = EvaluateChannel(channel, loop, dropout, index, now);
+    ExpectTrue(d3.safety_override,
+               "three CPU-dropout ticks trip source-aware safe mode");
+    ExpectTrue(d3.response_source == "source_aware_cpu_dropout_safe_mode",
+               "the dropout trip carries a distinct response source");
+    ExpectTrue(d3.sensor_event == ChannelSensorEvent::FailureDetected,
+               "the dropout trip emits FailureDetected");
+    ExpectTrue(d3.has_setpoint, "the dropout safe-mode command produces a setpoint");
+}
+
+// REQ-SRCSAFE-03: when CPU returns after a dropout trip, the channel recovers
+// (Recovered event, safety_override cleared, counter reset).
+void TestSourceAwareCpuRecoveryClearsDropout() {
+    using namespace svg_mb_control;
+    ControlLoopConfig loop;
+    ChannelState channel = MakeSourceAwareChannel();
+    RuntimeSnapshot empty_snapshot;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(empty_snapshot);
+    const auto now = std::chrono::steady_clock::now();
+
+    EvaluateChannel(channel, loop, MakeTempInputs(true, 55.0, true, 50.0), index,
+                    now);  // seed
+    const TempInputs dropout = MakeTempInputs(false, 0.0, true, 50.0);
+    EvaluateChannel(channel, loop, dropout, index, now);
+    EvaluateChannel(channel, loop, dropout, index, now);
+    EvaluateChannel(channel, loop, dropout, index, now);  // trip
+
+    const ChannelEvaluation rec = EvaluateChannel(
+        channel, loop, MakeTempInputs(true, 55.0, true, 50.0), index, now);
+    ExpectTrue(rec.sensor_event == ChannelSensorEvent::Recovered,
+               "CPU return after a dropout trip emits Recovered");
+    ExpectTrue(!rec.safety_override, "CPU recovery clears safe mode");
+    ExpectTrue(channel.consecutive_sensor_failures == 0u,
+               "CPU recovery resets the sensor-failure counter");
+}
+
+// REQ-SRCSAFE-04: a source-aware channel that never saw CPU (GPU-led from the
+// start) does not trip the CPU-dropout safe mode.
+void TestSourceAwareNeverPresentCpuDoesNotTrip() {
+    using namespace svg_mb_control;
+    ControlLoopConfig loop;
+    ChannelState channel = MakeSourceAwareChannel();
+    RuntimeSnapshot empty_snapshot;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(empty_snapshot);
+    const auto now = std::chrono::steady_clock::now();
+
+    const TempInputs gpu_only = MakeTempInputs(false, 0.0, true, 50.0);
+    for (int i = 0; i < 5; ++i) {
+        const ChannelEvaluation e =
+            EvaluateChannel(channel, loop, gpu_only, index, now);
+        ExpectTrue(!e.safety_override,
+                   "a never-CPU-present source-aware channel does not trip dropout safe mode");
+    }
+    ExpectTrue(channel.consecutive_sensor_failures == 0u,
+               "never-present CPU does not accumulate sensor failures");
+}
+
+// REQ-SRCSAFE-05 (regression): with both inputs present, the source-aware channel
+// rides the curve normally and never enters safe mode.
+void TestSourceAwareBothPresentNoTrip() {
+    using namespace svg_mb_control;
+    ControlLoopConfig loop;
+    ChannelState channel = MakeSourceAwareChannel();
+    RuntimeSnapshot empty_snapshot;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(empty_snapshot);
+    const auto now = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < 5; ++i) {
+        const ChannelEvaluation e = EvaluateChannel(
+            channel, loop, MakeTempInputs(true, 55.0, true, 50.0), index, now);
+        ExpectTrue(!e.safety_override, "both inputs present: no safe mode");
+        ExpectTrue(channel.consecutive_sensor_failures == 0u,
+                   "both inputs present: no sensor-failure accumulation");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -549,6 +690,11 @@ int main() {
     TestSidecarBaselineSurvivesStaleAndAbsentEntry();
     TestSidecarPersistFailureEmitsEvent();
     TestEventLogThrowDoesNotVetoActuation();
+    TestSourceAwareCpuDropoutCountsTowardTrip();
+    TestSourceAwareCpuDropoutTripsSafeMode();
+    TestSourceAwareCpuRecoveryClearsDropout();
+    TestSourceAwareNeverPresentCpuDoesNotTrip();
+    TestSourceAwareBothPresentNoTrip();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " channel write test failure(s)\n";

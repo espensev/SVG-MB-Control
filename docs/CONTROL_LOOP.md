@@ -219,7 +219,8 @@ GPU telemetry was unavailable below the CPU guard.
 
 Response attribution is emitted as `last_response_source` in
 `control_runtime.json` and `channelN_response_source` in the CSV. Current
-sources are `primary_curve`, `cpu_override`, `sensor_safe_mode`, and optional
+sources are `primary_curve`, `cpu_override`, `sensor_safe_mode`,
+`source_aware_cpu_dropout_safe_mode`, and optional
 modifiers such as `+thermal_pressure`, `+midband_pressure`, and
 `+gpu_airflow`, `+cpu_low_soak`, and `+low_band_stage`. CSV rows also include
 `channelN_write_reason`, which is `first_write`, `setpoint_delta`,
@@ -320,6 +321,12 @@ current terminal and does not add supervisor restart behavior.
   `control_loop.sensor_failure_detected` and commands a safe full-speed setpoint
   for that channel. It logs `control_loop.sensor_recovered` when valid input
   returns.
+- On a `max_cpu_gpu_source_aware` channel, a CPU-input dropout (CPU previously
+  available, now unavailable while GPU remains) counts toward the same
+  three-miss sensor-failure trip rather than being masked by the GPU fallback;
+  the trip uses the response source `source_aware_cpu_dropout_safe_mode` and the
+  existing `sensor_failure_detected` / `sensor_recovered` events (FEAT-0013).
+  Below the threshold the channel keeps cooling on the GPU curve.
 - After repeated write failures for a channel, the loop logs
   `control_loop.circuit_breaker_opened` and stops normal writes for that
   channel. A sensor-safe (safe-mode) command still bypasses the open breaker so

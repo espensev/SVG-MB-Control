@@ -63,7 +63,7 @@ Result values:
 | `FEAT-0010` Write actuation survives a sidecar-persistence fault | Implemented | Implemented 2026-06-17 (decision record `docs/write-actuation-sidecar-fault-decision-2026-06-17.md` current). Fixes runtime-reproduced finding H1: a `pending_writes.json` persist fault no longer vetoes the fan write (incl. the sensor-safe command); it records `control_loop.sidecar_upsert_failed`, increments `consecutive_sidecar_persist_failures` (degrades health), and still actuates. §14 verification log filled; CTest 13/13 green. |
 | `FEAT-0011` Write-failure breaker must not block rising cooling demand | Draft (held) | Not buildable; intake spec for a static-verified code gap at `src/control/channel_write.cpp:307` (open breaker suppresses a rising/more-cooling write so a recovered actuator cannot self-heal). Held at promotion gate 3 pending maintainer direction on the rising-demand-bypass and its bound (§11). |
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Draft (held) | Not buildable; intake only — a corrupt `pending_writes.json` aborts startup reconcile into a watchdog relaunch-thrash loop (steady loop tolerates the same failure). Maintainer has not chosen a direction (A quarantine-whole-file vs. B per-entry skip) or authorized code. |
-| `FEAT-0013` Source-aware primary-dropout safe mode | Draft (held) | Not buildable; design capture only, held at promotion gate 3 (decision record) pending maintainer direction on the dropout failure response. Static-verified finding: on a `max_cpu_gpu_source_aware` channel a CPU-input dropout while GPU remains available resets `consecutive_sensor_failures` (`channel_evaluator.cpp:268-276`) so the 3-miss safe-mode trip never fires and no sensor-failure event is logged. |
+| `FEAT-0013` Source-aware primary-dropout safe mode | Implemented | Implemented 2026-06-17 (decision `docs/source-aware-cpu-dropout-decision-2026-06-17.md` Current). A CPU dropout on a `max_cpu_gpu_source_aware` channel (CPU seen, now gone, GPU present) now counts toward the existing 3-miss sensor-failure trip and enters safe mode (`safety_override` + response source `source_aware_cpu_dropout_safe_mode`), reusing the `CpuOnly` mechanism; recovers on CPU return. Only new state is the additive `cpu_input_was_available` flag. §14 filled; CTest green. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
 
 ## 3. Requirement map
@@ -193,11 +193,11 @@ the maintainer authorizes promotion (gate 3).
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-SRCSAFE-01` | T | C++ test (source-aware sibling of `channel_write_tests.cpp:251`): CPU-available then dropped while GPU remains asserts `consecutive_sensor_failures` increments rather than resetting. | pending (held-Draft) |
-| `REQ-SRCSAFE-02` | T | C++ test: three consecutive CPU-dropout ticks set `safety_override` and command `kSafeModeFanDuty` on a `max_cpu_gpu_source_aware` channel. | pending (held-Draft) |
-| `REQ-SRCSAFE-03` | T, R | C++ test asserts `ChannelSensorEvent::FailureDetected` on trip and `Recovered` on CPU return; review vs `RUNTIME_HOME.md` event list. | pending (held-Draft) |
-| `REQ-SRCSAFE-04` | T | C++ test: a GPU-led channel that never had CPU does not trip the dropout safe mode; a channel that had CPU and lost it does. | pending (held-Draft) |
-| `REQ-SRCSAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: both-inputs-present duty/cadence/channels/identity and total-loss behavior unchanged; new status field additive. | pending (held-Draft) |
+| `REQ-SRCSAFE-01` | T | `channel_write_tests.cpp::TestSourceAwareCpuDropoutCountsTowardTrip`: CPU-available then dropped while GPU remains asserts `consecutive_sensor_failures` increments rather than resetting. | pass |
+| `REQ-SRCSAFE-02` | T | `channel_write_tests.cpp::TestSourceAwareCpuDropoutTripsSafeMode`: three CPU-dropout ticks set `safety_override` + response source `source_aware_cpu_dropout_safe_mode`. | pass |
+| `REQ-SRCSAFE-03` | T, R | `...TripsSafeMode` asserts `ChannelSensorEvent::FailureDetected`; `...CpuRecoveryClearsDropout` asserts `Recovered` on CPU return; reuses the existing `RUNTIME_HOME.md` event list. | pass |
+| `REQ-SRCSAFE-04` | T | `channel_write_tests.cpp::TestSourceAwareNeverPresentCpuDoesNotTrip`: a GPU-led channel that never had CPU does not trip; a channel that had CPU and lost it does. | pass |
+| `REQ-SRCSAFE-05` | R | `TestSourceAwareBothPresentNoTrip` + review: both-inputs-present duty/cadence/channels/identity and total-loss behavior unchanged; only the additive `cpu_input_was_available` flag is new. | pass |
 
 ### FEAT-0014 - Reconcile and restore honor the blocked-channel guard
 
