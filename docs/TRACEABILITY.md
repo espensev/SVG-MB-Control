@@ -60,6 +60,7 @@ Result values:
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
 | `FEAT-0008` Watchdog hung-worker recovery | Implemented | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
 | `FEAT-0009` Controller scheduling-priority elevation | Draft (held) | Not buildable; design capture only, held at promotion gate 1 pending the FEAT-0009 §12 A/B contention experiment (whether the cadence degradation under `above`-load is scheduling-bound rather than file-lock bound). |
+| `FEAT-0010` Write actuation survives a sidecar-persistence fault | Accepted | Build-authorized 2026-06-17 (all gates met; decision record `docs/write-actuation-sidecar-fault-decision-2026-06-17.md` current). Fixes runtime-reproduced finding H1: a `pending_writes.json` persist fault must not veto the fan write (incl. the sensor-safe command). Verification pending implementation. |
 
 ## 3. Requirement map
 
@@ -149,6 +150,16 @@ until the FEAT-0009 §12 A/B contention experiment authorizes promotion.
 | `REQ-PRIORITY-04` | T, M, R | Recovery-against-elevated-worker test (FEAT-0008 force-terminate at priority 15); (M) live force-terminate of an elevated suspended worker; (R) review that the `--restart` killer process and supervisor are elevated (a raised task `<Priority>` does not propagate to the killer). | pending (held-Draft) |
 | `REQ-PRIORITY-05` | M, R | (M) §12 experiment shows no system-wide responsiveness regression / no `Global\Access_PCI` stall increase; review that no spin is held across the mutex/file-I/O wait. | pending (held-Draft) |
 | `REQ-PRIORITY-06` | M | (M) §12 A/B experiment result; promotion blocked until it shows a scheduling-attributable degradation reduction. | pending (held-Draft) |
+
+### FEAT-0010 - Write actuation survives a sidecar-persistence fault
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-WRITESAFE-01` | T | C++ test: a throwing pending-store with `simulated_fan_writer` asserts `ApplyDuty` still fires for the computed setpoint after a persist failure. | pending |
+| `REQ-WRITESAFE-02` | T | C++ test: `safety_override` set + throwing pending-store asserts the 100% command reaches the actuator. | pending |
+| `REQ-WRITESAFE-03` | T, R | C++ test asserts the additive per-channel counter increments, health degrades, the breaker stays closed and `consecutive_write_failures` stays 0; review vs `RUNTIME_HOME.md`. | pending |
+| `REQ-WRITESAFE-04` | T, R | C++ test: reconcile/restore with a stale and an absent entry restores the captured baseline; review vs `WRITE_ORCHESTRATION.md` Reconciliation. | pending |
+| `REQ-WRITESAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; status field additive. | pending |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 
