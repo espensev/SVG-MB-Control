@@ -151,7 +151,13 @@ Each controlled-channel entry includes:
 - `consecutive_sensor_failures`
 - `circuit_breaker_open`
 - `consecutive_write_failures`
+- `consecutive_sidecar_persist_failures`
 - `baseline_captured`
+
+A nonzero `consecutive_sidecar_persist_failures` degrades the runtime health
+state (it counts toward `DegradedChannelCount`). It records consecutive failures
+to persist the `pending_writes.json` sidecar entry; the fan write still actuates
+(FEAT-0010) and the counter resets on the next successful persist.
 
 `control_runtime.json` is a status publication. In the current implementation,
 it is rate-limited and should not be treated as a per-tick log. Use the active

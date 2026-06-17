@@ -47,7 +47,20 @@ std::filesystem::path PendingWritesSidecarPath(
 // queued; callers must invoke Flush() at a safe point (e.g. end of tick).
 //
 // Not thread-safe: intended for single-threaded use inside the control loop.
-class PendingWritesStore {
+
+// Abstract seam over the pending-writes store so the control write path
+// (TryApplyChannelSetpoint) can be exercised with an injected store that throws
+// on persist (FEAT-0010). PendingWritesStore is the production implementation;
+// only the methods the write path calls through the injected reference (Upsert,
+// QueueRemove) are virtual.
+class PendingWritesStoreInterface {
+ public:
+    virtual ~PendingWritesStoreInterface() = default;
+    virtual void Upsert(const PendingWriteEntry& entry) = 0;
+    virtual void QueueRemove(std::uint32_t channel) = 0;
+};
+
+class PendingWritesStore : public PendingWritesStoreInterface {
  public:
     explicit PendingWritesStore(std::filesystem::path runtime_home);
 
@@ -57,11 +70,11 @@ class PendingWritesStore {
 
     // Inserts or replaces the entry for entry.channel and persists the
     // sidecar to disk synchronously. Throws on filesystem failure.
-    void Upsert(const PendingWriteEntry& entry);
+    void Upsert(const PendingWriteEntry& entry) override;
 
     // Marks the entry for the given channel as removed. Does not touch
     // disk until Flush() is called.
-    void QueueRemove(std::uint32_t channel);
+    void QueueRemove(std::uint32_t channel) override;
 
     // Persists any queued removals to disk if the in-memory state has
     // changed since the last write. No-op if there is nothing to flush.

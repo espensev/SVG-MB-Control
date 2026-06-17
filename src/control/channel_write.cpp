@@ -34,7 +34,7 @@ bool RuntimeFanAllowsWrite(const RuntimeSnapshotIndex& runtime_index,
 // after; no further setpoint-related state is touched.
 void HandleChannelWriteFailure(ControlRuntimeContext& context,
                                ChannelState& channel,
-                               PendingWritesStore& pending_store,
+                               PendingWritesStoreInterface& pending_store,
                                const FanWriteResult& write_result,
                                double observed_temp_c,
                                double setpoint,
@@ -262,7 +262,7 @@ void TryApplyChannelSetpoint(
     const RuntimeSnapshotIndex& runtime_index,
     const ChannelEvaluation& evaluation,
     FanWriter& fan_writer,
-    PendingWritesStore& pending_store,
+    PendingWritesStoreInterface& pending_store,
     std::string_view eval_iso,
     std::chrono::steady_clock::time_point now_steady,
     std::uint64_t tick_count) {
@@ -318,7 +318,17 @@ void TryApplyChannelSetpoint(
     entry.child_pid = 0u;
     try {
         pending_store.Upsert(entry);
+        // Persist succeeded: the crash-recovery record is current and the store
+        // has self-healed, so clear any prior persist-failure degradation.
+        channel.consecutive_sidecar_persist_failures = 0u;
     } catch (const std::exception& e) {
+        // FEAT-0010 (REQ-WRITESAFE-01/02): a sidecar persist failure must NOT
+        // veto the fan write. PendingWritesStore::Upsert already updated its
+        // in-memory entry before the throw, so the next successful tick
+        // re-persists; here we record the fault (event + an additive per-channel
+        // counter that degrades runtime health) and fall through to ApplyDuty
+        // instead of returning. The write-failure breaker / consecutive_write_
+        // failures are untouched because the actuation has not failed.
         AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
@@ -331,7 +341,7 @@ void TryApplyChannelSetpoint(
                 .tick_count = tick_count,
                 .success = false,
             });
-        return;
+        ++channel.consecutive_sidecar_persist_failures;
     }
 
     const FanWriteResult write_result =

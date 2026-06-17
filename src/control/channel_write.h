@@ -58,7 +58,7 @@ void TryApplyChannelSetpoint(
     const RuntimeSnapshotIndex& runtime_index,
     const ChannelEvaluation& evaluation,
     FanWriter& fan_writer,
-    PendingWritesStore& pending_store,
+    PendingWritesStoreInterface& pending_store,
     std::string_view eval_iso,
     std::chrono::steady_clock::time_point now_steady,
     std::uint64_t tick_count);

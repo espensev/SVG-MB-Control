@@ -1,7 +1,7 @@
 # FEAT-0010: Write actuation survives a sidecar-persistence fault
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
 **Namespace:** `REQ-WRITESAFE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -230,12 +230,16 @@ Verify legend:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-WRITESAFE-01 | | | |
-| REQ-WRITESAFE-02 | | | |
-| REQ-WRITESAFE-03 | | | |
-| REQ-WRITESAFE-04 | | | |
-| REQ-WRITESAFE-05 | | | |
+| REQ-WRITESAFE-01 | pass | `tests/cpp/channel_write_tests.cpp::TestSidecarPersistFailureStillActuates` — CTest green (`Test-LocalCI` 13/13) | 2026-06-17 |
+| REQ-WRITESAFE-02 | pass | `channel_write_tests.cpp::TestSafetyOverrideActuatesDespiteSidecarPersistFailure` (100% safe-mode command actuates past an open breaker) — CTest green | 2026-06-17 |
+| REQ-WRITESAFE-03 | pass | `channel_write_tests.cpp::TestSidecarPersistFailureIncrementsCounterNotBreaker` + `...CounterResetsOnSuccess` + `...DegradesHealth` (`DegradedChannelCount`) — CTest green | 2026-06-17 |
+| REQ-WRITESAFE-04 | pass | `channel_write_tests.cpp::TestSidecarBaselineSurvivesStaleAndAbsentEntry` (stale/absent sidecar baseline round-trip); reconcile→restore integration-covered (`tests/test_write_once.py`) — CTest green | 2026-06-17 |
+| REQ-WRITESAFE-05 | pass | Review (R): change confined to the `channel_write.cpp` failure path; computed duty/cadence/channels/control identity unchanged; `consecutive_sidecar_persist_failures` is an additive status field | 2026-06-17 |
 
-**Spec vs. implementation deltas:** <record anything built differently from this
-spec, and why. If behavior changed, update §5/§6, refresh the cited contract docs
-per `AGENTS.md` §Change Checklist, and bump **Updated**.>
+**Spec vs. implementation deltas:** Implemented per spec. Added a
+`PendingWritesStoreInterface` seam (behavior-preserving testability refactor) so a
+throwing pending-store can be injected; `PendingWritesStore` implements it and the
+control write path (`TryApplyChannelSetpoint`) takes the interface. The counter is
+named `consecutive_sidecar_persist_failures` (the §11 "consecutive, resets on a
+successful persist" default); health degrades via `DegradedChannelCount` and the
+counter is additive in `control_runtime.json`.

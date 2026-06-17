@@ -21,6 +21,8 @@ struct RuntimeStatusChannelSnapshot {
     bool circuit_breaker_open = false;
     bool sensor_failed = false;
     std::uint32_t consecutive_write_failures = 0u;
+    // FEAT-0010 (REQ-WRITESAFE-03): sidecar-persist failures degrade health.
+    std::uint32_t consecutive_sidecar_persist_failures = 0u;
 };
 
 // Typed view of <runtime_home>/control_runtime.json that both schemas
