@@ -65,6 +65,8 @@ Result values:
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Draft (held) | Not buildable; intake only — a corrupt `pending_writes.json` aborts startup reconcile into a watchdog relaunch-thrash loop (steady loop tolerates the same failure). Maintainer has not chosen a direction (A quarantine-whole-file vs. B per-entry skip) or authorized code. |
 | `FEAT-0013` Source-aware primary-dropout safe mode | Draft (held) | Not buildable; design capture only, held at promotion gate 3 (decision record) pending maintainer direction on the dropout failure response. Static-verified finding: on a `max_cpu_gpu_source_aware` channel a CPU-input dropout while GPU remains available resets `consecutive_sensor_failures` (`channel_evaluator.cpp:268-276`) so the 3-miss safe-mode trip never fires and no sensor-failure event is logged. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
+| `FEAT-0015` Event JSONL has a retention bound | Draft (held) | Not buildable; intake spec for issue #4 Finding 1. `logs/svg_mb_control_events.jsonl` is append-only with no rotation/retention (`src/runtime/runtime_event_log.cpp:210`); the `log_rotate_hours`/`log_retain_days` keys bound the CSV archive only. Held at promotion gate 3 pending maintainer direction on the retention model (size/age rotation vs. severity-based persistence) and bound (§11). |
+| `FEAT-0016` Analyze SQLite DB has a retention bound | Draft (held) | Not buildable; intake spec for issue #4 Finding 2 (resolved: real telemetry, not bloat). `analyze prune` deletes ingested CSV bundles only; no age/size run-purge and no `VACUUM` exist in `src/`. Held at promotion gate 3 pending maintainer direction on the run-purge bound, where the purge lives, and the reclaim trigger (§11). |
 
 ## 3. Requirement map
 
@@ -207,6 +209,32 @@ the maintainer authorizes promotion (gate 3).
 | `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending (held-Draft) |
 | `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
 | `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
+
+### FEAT-0015 - Event JSONL has a retention bound
+
+Held at Draft; verification homes are planned, results `pending (held-Draft)` until
+the maintainer authorizes promotion (gate 3).
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-EVENTRET-01` | T, R | `Test-LocalCI` test writing past the accepted bound asserts the event JSONL is rotated/capped (or routine `info` reduced); review vs the design decision recording the model and bound. | pending (held-Draft) |
+| `REQ-EVENTRET-02` | T, R | Test asserts whole NDJSON lines across a rotation boundary (no split/interleave); review of atomic-append + rotation vs `runtime_event_log.cpp:28-40,299-321` and the torn-write finding. | pending (held-Draft) |
+| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced/rotated out within the window. | pending (held-Draft) |
+| `REQ-EVENTRET-04` | T, R | Test asserts an absent config key preserves current append behavior and existing event JSONL + `CachedEventCount` still parse; review vs `RUNTIME_HOME.md` schema stability. | pending (held-Draft) |
+| `REQ-EVENTRET-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; control-thread append non-blocking; docs updated. | pending (held-Draft) |
+
+### FEAT-0016 - Analyze SQLite DB has a retention bound
+
+Held at Draft; verification homes are planned, results `pending (held-Draft)` until
+the maintainer authorizes promotion (gate 3).
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-DBRETAIN-01` | T, R | `Test-LocalCI` (`tests/test_analyze_ingest.py` sibling): ingest runs spanning the bound, purge, assert out-of-bound runs deleted and in-bound retained; review vs the design decision recording the bound. | pending (held-Draft) |
+| `REQ-DBRETAIN-02` | T | Test asserts no `tick_samples`/`tick_fan_samples`/`tick_channel_samples`/`events` row references a deleted `run_id` (cascade fired under `foreign_keys = ON`). | pending (held-Draft) |
+| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs (`page_count` drops), and no VACUUM when nothing was deleted. | pending (held-Draft) |
+| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest (`IsManifestPathInDb`/`IsSessionInDb`) and dry-run vs `--apply` behavior; review vs the `analyze prune` dry-run convention. | pending (held-Draft) |
+| `REQ-DBRETAIN-05` | R | Review vs `RUNTIME_HOME.md` / `MEASUREMENT_GATE.md`: analyze schema/`schema_version`, per-tick fidelity, and existing CSV-bundle prune unchanged; offline-only; docs updated. | pending (held-Draft) |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 
