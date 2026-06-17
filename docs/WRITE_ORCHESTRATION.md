@@ -43,6 +43,23 @@ Startup reconciliation reads `runtime\pending_writes.json` and attempts to
 restore each stored baseline directly through Control's own writer. Successful
 entries are removed. Failed entries remain on disk and block further startup.
 
+## Control-loop sidecar persist failure (FEAT-0010)
+
+In the control loop (`TryApplyChannelSetpoint`) the sidecar upsert (Runtime Flow
+step 6) precedes the fan write so a crash mid-write leaves a recovery record. A
+*failure* to persist that sidecar entry does **not** veto the fan write: the
+controller logs `control_loop.sidecar_upsert_failed`, increments the additive
+per-channel `consecutive_sidecar_persist_failures` counter (which degrades
+health), and still applies the computed duty — including the sensor-safe 100%
+command. `PendingWritesStore::Upsert` updates its in-memory entry before the
+throw, so the next successful tick re-persists; the captured baseline
+(`baseline_duty_raw`/`baseline_mode_raw`) is stable across ticks, so a
+stale-but-present entry still restores correctly on reconcile. The write-failure
+breaker and `consecutive_write_failures` are untouched because the actuation
+itself did not fail. (A first-write-with-failed-persist crash leaves no entry for
+that channel; the in-window command is a cooling command and the next worker
+re-establishes control — an accepted residual.)
+
 ## Logging
 
 `write-once` and startup reconciliation append durable events to

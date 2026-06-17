@@ -64,6 +64,8 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
     status["consecutive_sensor_failures"] = channel.consecutive_sensor_failures;
     status["circuit_breaker_open"] = channel.circuit_breaker_open;
     status["consecutive_write_failures"] = channel.consecutive_write_failures;
+    status["consecutive_sidecar_persist_failures"] =
+        channel.consecutive_sidecar_persist_failures;
     status["baseline_captured"] = channel.baseline_captured;
     return status;
 }
@@ -82,7 +84,8 @@ std::uint32_t RuntimeStatusSnapshot::DegradedChannelCount() const {
     std::uint32_t count = 0u;
     for (const auto& channel : controlled_channels) {
         if (channel.circuit_breaker_open || channel.sensor_failed ||
-            channel.consecutive_write_failures > 0u) {
+            channel.consecutive_write_failures > 0u ||
+            channel.consecutive_sidecar_persist_failures > 0u) {
             ++count;
         }
     }
@@ -127,6 +130,8 @@ std::optional<RuntimeStatusSnapshot> ReadRuntimeStatus(
             entry.sensor_failed = JsonBoolOr(channel, "sensor_failed");
             entry.consecutive_write_failures =
                 JsonUInt32Or(channel, "consecutive_write_failures");
+            entry.consecutive_sidecar_persist_failures =
+                JsonUInt32Or(channel, "consecutive_sidecar_persist_failures");
             snapshot.controlled_channels.push_back(entry);
         }
     }

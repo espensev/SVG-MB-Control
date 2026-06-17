@@ -21,11 +21,13 @@
 #include "fan_writer.h"
 #include "pending_writes.h"
 #include "runtime_snapshot.h"
+#include "runtime_status.h"
 
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -72,6 +74,20 @@ class RecordingFanWriter : public svg_mb_control::FanWriter {
     std::string BackendLabel() const override { return "recording"; }
 };
 
+// A pending-writes store whose Upsert always throws, simulating a persistent
+// pending_writes.json fault (lock, ACL, disk error) for FEAT-0010. QueueRemove
+// is inert; only Upsert/QueueRemove are reached through the injected reference.
+class ThrowingPendingWritesStore
+    : public svg_mb_control::PendingWritesStoreInterface {
+ public:
+    int upsert_calls = 0;
+    void Upsert(const svg_mb_control::PendingWriteEntry&) override {
+        ++upsert_calls;
+        throw std::runtime_error("simulated sidecar persist failure");
+    }
+    void QueueRemove(std::uint32_t) override {}
+};
+
 // A fresh, empty runtime-home directory for the pending-writes sidecar and the
 // control-loop event log. The name carries a per-process salt (UniqueTempSuffix)
 // so concurrent test processes do not collide; removed and recreated so each
@@ -115,7 +131,7 @@ void RunWrite(svg_mb_control::ControlRuntimeContext& context,
               svg_mb_control::ChannelState& channel,
               const svg_mb_control::ChannelEvaluation& eval,
               RecordingFanWriter& writer,
-              svg_mb_control::PendingWritesStore& store) {
+              svg_mb_control::PendingWritesStoreInterface& store) {
     svg_mb_control::RuntimeSnapshot empty_snapshot;
     svg_mb_control::RuntimeSnapshotIndex index;
     index.Rebuild(empty_snapshot);  // FindFanChannel -> nullptr -> writes allowed
@@ -276,6 +292,156 @@ void TestEvaluatorSetsSafetyOverrideOnSensorFailure() {
                "safety_override clears when a primary temperature returns");
 }
 
+// FEAT-0010 REQ-WRITESAFE-01: a failure to persist the pending-write sidecar
+// must not stop the computed fan duty from being applied.
+void TestSidecarPersistFailureStillActuates() {
+    const std::filesystem::path home = MakeTempHome("persist_fail_actuates");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel =
+        MakeReadyChannel(/*breaker_open=*/false);
+    ThrowingPendingWritesStore store;
+    RecordingFanWriter writer;
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(60.0, /*safety_override=*/false);
+    RunWrite(context, channel, eval, writer, store);
+
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "a sidecar persist failure does not veto the fan write");
+    if (writer.apply_calls.size() == 1u) {
+        ExpectTrue(writer.apply_calls.front().duty_pct == 60.0,
+                   "the computed setpoint is applied despite the persist fault");
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// FEAT-0010 REQ-WRITESAFE-02: the sensor-safe (safety_override) command must
+// reach the actuator regardless of sidecar persist success — even with the
+// write-failure breaker open.
+void TestSafetyOverrideActuatesDespiteSidecarPersistFailure() {
+    const std::filesystem::path home = MakeTempHome("persist_fail_safe");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel = MakeReadyChannel(/*breaker_open=*/true);
+    ThrowingPendingWritesStore store;
+    RecordingFanWriter writer;
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(100.0, /*safety_override=*/true);
+    RunWrite(context, channel, eval, writer, store);
+
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "sensor-safe command actuates despite a sidecar persist failure");
+    if (writer.apply_calls.size() == 1u) {
+        ExpectTrue(writer.apply_calls.front().duty_pct == 100.0,
+                   "the 100% safe-mode command reaches the actuator");
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// FEAT-0010 REQ-WRITESAFE-03: a persist failure followed by a successful
+// actuation increments the additive per-channel persist-failure counter and
+// must NOT increment consecutive_write_failures or open the write-failure
+// breaker (the actuation succeeded).
+void TestSidecarPersistFailureIncrementsCounterNotBreaker() {
+    const std::filesystem::path home = MakeTempHome("persist_fail_counter");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel =
+        MakeReadyChannel(/*breaker_open=*/false);
+    ThrowingPendingWritesStore store;
+    RecordingFanWriter writer;
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(60.0, /*safety_override=*/false);
+    RunWrite(context, channel, eval, writer, store);
+
+    ExpectTrue(channel.consecutive_sidecar_persist_failures == 1u,
+               "a persist failure increments the sidecar-persist-failure counter");
+    ExpectTrue(channel.consecutive_write_failures == 0u,
+               "a sidecar persist failure does not increment write failures");
+    ExpectTrue(!channel.circuit_breaker_open,
+               "a sidecar persist failure does not open the write-failure breaker");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// FEAT-0010 REQ-WRITESAFE-03: the persist-failure counter resets once a persist
+// succeeds (the store self-heals).
+void TestSidecarPersistFailureCounterResetsOnSuccess() {
+    const std::filesystem::path home = MakeTempHome("persist_fail_reset");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel =
+        MakeReadyChannel(/*breaker_open=*/false);
+    channel.consecutive_sidecar_persist_failures = 3u;  // simulate prior faults
+    svg_mb_control::PendingWritesStore working_store(home);
+    RecordingFanWriter writer;
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(60.0, /*safety_override=*/false);
+    RunWrite(context, channel, eval, writer, working_store);
+
+    ExpectTrue(channel.consecutive_sidecar_persist_failures == 0u,
+               "a successful persist resets the sidecar-persist-failure counter");
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "the successful write still actuates");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// FEAT-0010 REQ-WRITESAFE-03: a sidecar persist failure degrades runtime
+// health — a channel carrying a nonzero persist-failure counter (and nothing
+// else) counts toward the degraded-channel total that drives the health state.
+void TestSidecarPersistFailureDegradesHealth() {
+    svg_mb_control::RuntimeStatusSnapshot snapshot;
+    svg_mb_control::RuntimeStatusChannelSnapshot ch;
+    ch.channel = 2u;
+    ch.consecutive_sidecar_persist_failures = 1u;  // only this set
+    snapshot.controlled_channels.push_back(ch);
+
+    ExpectTrue(snapshot.DegradedChannelCount() == 1u,
+               "a sidecar persist failure degrades the channel health count");
+}
+
+// FEAT-0010 REQ-WRITESAFE-04: crash recovery stays correct when the sidecar
+// entry is stale or absent because a persist failed. The captured baseline
+// (baseline_duty_raw/mode_raw) is stable across ticks, so a stale-but-present
+// entry still round-trips the baseline that reconcile/restore replays; an
+// absent sidecar yields no entries (the accepted first-write residual) without
+// error.
+void TestSidecarBaselineSurvivesStaleAndAbsentEntry() {
+    const std::filesystem::path home = MakeTempHome("recovery_baseline");
+
+    const std::vector<svg_mb_control::PendingWriteEntry> absent =
+        svg_mb_control::ReadPendingWrites(home);
+    ExpectTrue(absent.empty(),
+               "an absent sidecar yields no pending entries (first-write residual)");
+
+    svg_mb_control::PendingWriteEntry entry;
+    entry.channel = 2u;
+    entry.baseline_duty_raw = 42u;
+    entry.baseline_mode_raw = 1u;
+    entry.target_pct = 80.0;
+    svg_mb_control::WritePendingWrites(home, {entry});
+
+    const std::vector<svg_mb_control::PendingWriteEntry> reread =
+        svg_mb_control::ReadPendingWrites(home);
+    ExpectTrue(reread.size() == 1u,
+               "a stale sidecar entry stays readable for reconcile");
+    if (reread.size() == 1u) {
+        ExpectTrue(reread.front().baseline_duty_raw == 42u &&
+                       reread.front().baseline_mode_raw == 1u,
+                   "the captured baseline survives in a stale sidecar entry");
+    }
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
 }  // namespace
 
 int main() {
@@ -284,6 +450,12 @@ int main() {
     TestNormalWriteAppliesWhenBreakerClosed();
     TestSafetyWriteFailureKeepsBreakerOpen();
     TestEvaluatorSetsSafetyOverrideOnSensorFailure();
+    TestSidecarPersistFailureStillActuates();
+    TestSafetyOverrideActuatesDespiteSidecarPersistFailure();
+    TestSidecarPersistFailureIncrementsCounterNotBreaker();
+    TestSidecarPersistFailureCounterResetsOnSuccess();
+    TestSidecarPersistFailureDegradesHealth();
+    TestSidecarBaselineSurvivesStaleAndAbsentEntry();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " channel write test failure(s)\n";

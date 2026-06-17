@@ -77,6 +77,13 @@ struct ChannelState {
     bool circuit_breaker_open = false;
     static constexpr std::uint32_t kMaxConsecutiveFailures = 5u;
 
+    // FEAT-0010 (REQ-WRITESAFE-03): consecutive failures to persist the
+    // pending-write sidecar (PendingWritesStore::Upsert throwing). A sidecar
+    // persist failure does NOT veto the fan write and does NOT touch the
+    // write-failure breaker; this counter degrades runtime health and resets to
+    // 0 on the next successful persist.
+    std::uint32_t consecutive_sidecar_persist_failures = 0u;
+
     std::uint32_t consecutive_sensor_failures = 0u;
     bool sensor_failed = false;
     static constexpr std::uint32_t kMaxConsecutiveSensorFailures = 3u;
