@@ -245,6 +245,16 @@ void EvaluatePrimarySetpoint(EvaluationScratch& s) {
         SelectPrimaryCurveInput(s.temp_inputs, s.channel.config);
     s.primary_temp_source = primary.source;
 
+    // FEAT-0013: remember that CPU has been seen, and detect a CPU dropout on a
+    // source-aware channel (CPU was available, is now unavailable, GPU remains).
+    if (s.temp_inputs.cpu_available) {
+        s.channel.cpu_input_was_available = true;
+    }
+    const bool source_aware_cpu_dropout =
+        s.channel.config.temp_blend == TempBlend::MaxCpuGpuSourceAware &&
+        s.channel.cpu_input_was_available && !s.temp_inputs.cpu_available &&
+        s.temp_inputs.gpu_available;
+
     if (!primary.available) {
         ++s.channel.consecutive_sensor_failures;
         if (s.channel.consecutive_sensor_failures >=
@@ -262,6 +272,33 @@ void EvaluatePrimarySetpoint(EvaluationScratch& s) {
             // boost overlays only add, so the flag stays valid to the end.
             s.evaluation.safety_override = true;
         }
+        return;
+    }
+
+    // FEAT-0013 (REQ-SRCSAFE-01/02/03): a CPU dropout while GPU remains counts
+    // toward the existing sensor-failure trip instead of being reset by the GPU
+    // fallback. Below the threshold the channel keeps cooling on the available
+    // (GPU) curve; at the threshold it enters the same safe-mode response the
+    // CpuOnly path uses, with a distinct response source.
+    if (source_aware_cpu_dropout) {
+        ++s.channel.consecutive_sensor_failures;
+        if (s.channel.consecutive_sensor_failures >=
+            ChannelState::kMaxConsecutiveSensorFailures) {
+            if (!s.channel.sensor_failed) {
+                s.channel.sensor_failed = true;
+                s.evaluation.sensor_event =
+                    ChannelSensorEvent::FailureDetected;
+            }
+            s.raw_desired_setpoint = ChannelState::kSafeModeFanDuty;
+            s.response_source = "source_aware_cpu_dropout_safe_mode";
+            s.evaluation.safety_override = true;
+            return;
+        }
+        s.raw_desired_setpoint = LookupCurve(
+            s.channel.config.curve, primary.temp_c,
+            s.channel.config.min_duty_pct, s.channel.config.curve_shape);
+        s.observed_temp_c = primary.temp_c;
+        s.response_source = "primary_curve";
         return;
     }
 
