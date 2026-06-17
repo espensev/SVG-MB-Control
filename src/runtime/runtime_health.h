@@ -35,6 +35,9 @@ struct RuntimeHealthResult {
     bool stop_request_present = false;
     std::uint32_t pending_write_count = 0u;
     bool pending_writes_unreadable = false;
+    // FEAT-0012: a corrupt pending-writes sidecar was quarantined aside
+    // (pending_writes.json.corrupt present); recovery records were lost.
+    bool sidecar_quarantined_present = false;
     std::uint32_t degraded_channel_count = 0u;
     std::string last_successful_restore_time;
 

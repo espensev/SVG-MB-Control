@@ -46,6 +46,10 @@ void FillSidecarHealth(RuntimeHealthResult* result) {
         result->pending_writes_unreadable = true;
     }
 
+    std::error_code quarantine_ec;
+    result->sidecar_quarantined_present = std::filesystem::exists(
+        QuarantinedSidecarPath(result->runtime_home), quarantine_ec);
+
     const auto supervisor = ReadSupervisorState(result->runtime_home);
     if (supervisor.has_value()) {
         result->supervisor_state_present = true;
@@ -166,6 +170,13 @@ void AssessHealthState(RuntimeHealthResult& result,
         return;
     }
 
+    if (result.sidecar_quarantined_present) {
+        SetState(&result, RuntimeHealthState::kDegraded,
+                 "a corrupt pending-writes sidecar was quarantined; recovery "
+                 "records were lost (inspect pending_writes.json.corrupt)");
+        return;
+    }
+
     if (result.status != "running") {
         SetState(&result, RuntimeHealthState::kDegraded,
                  "runtime status is not running");
@@ -265,6 +276,7 @@ nlohmann::json RuntimeHealthToJson(const RuntimeHealthResult& result) {
     payload["stop_request_present"] = result.stop_request_present;
     payload["pending_write_count"] = result.pending_write_count;
     payload["pending_writes_unreadable"] = result.pending_writes_unreadable;
+    payload["sidecar_quarantined_present"] = result.sidecar_quarantined_present;
     payload["degraded_channel_count"] = result.degraded_channel_count;
     payload["last_successful_restore_time"] =
         result.last_successful_restore_time;

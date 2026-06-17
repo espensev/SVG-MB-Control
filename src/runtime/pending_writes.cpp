@@ -69,6 +69,45 @@ std::vector<PendingWriteEntry> ReadPendingWrites(
     return result;
 }
 
+std::filesystem::path QuarantinedSidecarPath(
+    const std::filesystem::path& runtime_home) {
+    return runtime_home / "pending_writes.json.corrupt";
+}
+
+TolerantPendingWritesRead ReadPendingWritesTolerant(
+    const std::filesystem::path& runtime_home) {
+    TolerantPendingWritesRead out;
+    try {
+        out.entries = ReadPendingWrites(runtime_home);
+        return out;
+    } catch (const std::exception& error) {
+        // FEAT-0012 (REQ-SIDECARRESIL-01/02): a corrupt sidecar is quarantined
+        // (renamed aside, preserving the bytes for forensics) and treated as
+        // empty so startup is not fatal. This never throws on a corrupt file.
+        const std::filesystem::path original =
+            PendingWritesSidecarPath(runtime_home);
+        const std::filesystem::path quarantine =
+            QuarantinedSidecarPath(runtime_home);
+        std::error_code ec;
+        // std::filesystem::rename replaces an existing target on both POSIX and
+        // Windows (MoveFileEx with REPLACE_EXISTING), keeping one most-recent
+        // corrupt sample.
+        std::filesystem::rename(original, quarantine, ec);
+        out.entries.clear();
+        out.quarantined = true;
+        out.detail =
+            std::string("corrupt pending-writes sidecar: ") + error.what();
+        if (ec) {
+            out.detail += std::string("; quarantine rename failed: ") +
+                          ec.message();
+        } else {
+            out.detail += std::string("; quarantined to ") +
+                          quarantine.filename().string();
+        }
+        return out;
+    }
+}
+
 void WritePendingWrites(const std::filesystem::path& runtime_home,
                         const std::vector<PendingWriteEntry>& entries) {
     nlohmann::json payload = MakeSchemaObject(1u);
@@ -114,6 +153,12 @@ PendingWritesStore::PendingWritesStore(std::filesystem::path runtime_home)
 
 void PendingWritesStore::Load() {
     entries_ = ReadPendingWrites(runtime_home_);
+    loaded_ = true;
+    dirty_ = false;
+}
+
+void PendingWritesStore::Adopt(std::vector<PendingWriteEntry> entries) {
+    entries_ = std::move(entries);
     loaded_ = true;
     dirty_ = false;
 }

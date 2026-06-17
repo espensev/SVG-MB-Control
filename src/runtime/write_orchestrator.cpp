@@ -293,18 +293,20 @@ int ReconcilePendingWrites(const std::filesystem::path& runtime_home,
                            std::uint32_t restore_timeout_ms) {
     (void)restore_timeout_ms;
 
-    std::vector<PendingWriteEntry> entries;
-    try {
-        entries = ReadPendingWrites(runtime_home);
-    } catch (const std::exception& error) {
+    // FEAT-0012 (REQ-SIDECARRESIL-01/02/03): a corrupt sidecar is quarantined and
+    // treated as empty so startup proceeds, instead of aborting the worker into a
+    // watchdog relaunch-thrash loop. This matches the steady loop's existing
+    // tolerance (control_loop.cpp).
+    const TolerantPendingWritesRead read = ReadPendingWritesTolerant(runtime_home);
+    if (read.quarantined) {
         LogOrchestratorEvent(runtime_home, "reconcile",
-                             "reconcile.sidecar_read_failed",
-                             error.what(),
+                             "reconcile.sidecar_quarantined",
+                             read.detail,
                              std::nullopt, std::nullopt, false);
-        std::cerr << "Error: could not read pending-writes sidecar: "
-                  << error.what() << '\n';
-        return 1;
+        std::cerr << "Warning: corrupt pending-writes sidecar quarantined; "
+                  << "proceeding as empty: " << read.detail << '\n';
     }
+    const std::vector<PendingWriteEntry>& entries = read.entries;
     if (entries.empty()) {
         return 0;
     }
@@ -323,20 +325,11 @@ int ReconcilePendingWrites(const std::filesystem::path& runtime_home,
     }
 
     bool any_failure = false;
-    // Use a single store so the sidecar is read/parsed once and rewritten
-    // once at the end instead of on every successfully-restored channel.
+    // Single parse: adopt the entries already read above so the sidecar is not
+    // re-parsed here (FEAT-0012 collapses the former duplicate read). The store
+    // is the write-cache for the removals below.
     PendingWritesStore store(runtime_home);
-    try {
-        store.Load();
-    } catch (const std::exception& error) {
-        LogOrchestratorEvent(runtime_home, "reconcile",
-                             "reconcile.sidecar_read_failed",
-                             error.what(),
-                             std::nullopt, std::nullopt, false);
-        std::cerr << "Error: could not read pending-writes sidecar: "
-                  << error.what() << '\n';
-        return 1;
-    }
+    store.Adopt(entries);
 
     for (const auto& entry : entries) {
         const FanWriteResult restore_result = writer->RestoreSavedState(

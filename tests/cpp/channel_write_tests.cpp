@@ -22,6 +22,8 @@
 #include "pending_writes.h"
 #include "runtime_snapshot.h"
 #include "runtime_status.h"
+#include "runtime_write_policy.h"
+#include "write_orchestrator.h"
 
 #include <chrono>
 #include <cstdint>
@@ -674,6 +676,121 @@ void TestSourceAwareBothPresentNoTrip() {
     }
 }
 
+// --- FEAT-0012: startup tolerates a corrupt pending-writes sidecar (REQ-SIDECARRESIL-*) ---
+
+void WriteRawFile(const std::filesystem::path& path, const std::string& content) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << content;
+}
+
+// REQ-SIDECARRESIL-01/02: a corrupt sidecar is quarantined (renamed aside,
+// original bytes preserved) and read tolerantly so startup is not fatal.
+void TestCorruptSidecarIsQuarantinedAndReadProceeds() {
+    const std::filesystem::path home = MakeTempHome("corrupt_sidecar");
+    const std::filesystem::path sidecar =
+        svg_mb_control::PendingWritesSidecarPath(home);
+    const std::filesystem::path quarantine =
+        svg_mb_control::QuarantinedSidecarPath(home);
+    const std::string garbage = "{ this is not valid json ]]]";
+    WriteRawFile(sidecar, garbage);
+
+    bool threw = false;
+    svg_mb_control::TolerantPendingWritesRead read;
+    try {
+        read = svg_mb_control::ReadPendingWritesTolerant(home);
+    } catch (...) {
+        threw = true;
+    }
+    ExpectTrue(!threw, "a corrupt sidecar does not throw (it is quarantined)");
+    ExpectTrue(read.quarantined, "a corrupt sidecar is quarantined");
+    ExpectTrue(read.entries.empty(), "a quarantined sidecar yields no entries");
+    ExpectTrue(!std::filesystem::exists(sidecar),
+               "the corrupt sidecar is renamed away from the live path");
+    ExpectTrue(std::filesystem::exists(quarantine),
+               "the corrupt bytes are preserved at the quarantine path");
+    if (std::filesystem::exists(quarantine)) {
+        std::ifstream q(quarantine, std::ios::binary);
+        const std::string content((std::istreambuf_iterator<char>(q)),
+                                  std::istreambuf_iterator<char>());
+        ExpectTrue(content == garbage,
+                   "the quarantine file preserves the original corrupt bytes");
+    }
+    ExpectTrue(svg_mb_control::ReadPendingWrites(home).empty(),
+               "after quarantine the live sidecar no longer blocks a clean start");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// REQ-SIDECARRESIL-01 (variant): a structurally-invalid sidecar (valid JSON but
+// non-array `entries`) is also quarantined.
+void TestNonArrayEntriesSidecarIsQuarantined() {
+    const std::filesystem::path home = MakeTempHome("nonarray_sidecar");
+    WriteRawFile(svg_mb_control::PendingWritesSidecarPath(home),
+                 "{\"entries\": \"not-an-array\"}");
+
+    bool threw = false;
+    svg_mb_control::TolerantPendingWritesRead read;
+    try {
+        read = svg_mb_control::ReadPendingWritesTolerant(home);
+    } catch (...) {
+        threw = true;
+    }
+    ExpectTrue(!threw && read.quarantined,
+               "a non-array `entries` sidecar is quarantined, not fatal");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// REQ-SIDECARRESIL-04: a valid sidecar is read normally and not quarantined.
+void TestValidSidecarIsNotQuarantined() {
+    const std::filesystem::path home = MakeTempHome("valid_sidecar");
+    svg_mb_control::PendingWriteEntry entry;
+    entry.channel = 2u;
+    entry.baseline_duty_raw = 42u;
+    entry.baseline_mode_raw = 1u;
+    svg_mb_control::WritePendingWrites(home, {entry});
+
+    const svg_mb_control::TolerantPendingWritesRead read =
+        svg_mb_control::ReadPendingWritesTolerant(home);
+    ExpectTrue(!read.quarantined, "a valid sidecar is not quarantined");
+    ExpectTrue(read.entries.size() == 1u, "a valid sidecar yields its entries");
+    ExpectTrue(
+        !std::filesystem::exists(svg_mb_control::QuarantinedSidecarPath(home)),
+        "a valid sidecar produces no quarantine artifact");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// REQ-SIDECARRESIL-01/03: the startup reconcile proceeds (returns 0) on a corrupt
+// sidecar and emits reconcile.sidecar_quarantined, instead of aborting the worker.
+void TestReconcileQuarantinesCorruptSidecarAndProceeds() {
+    const std::filesystem::path home = MakeTempHome("reconcile_corrupt");
+    WriteRawFile(svg_mb_control::PendingWritesSidecarPath(home),
+                 "garbage not json {{{");
+
+    const svg_mb_control::RuntimeWritePolicy policy;
+    bool threw = false;
+    int rc = -1;
+    try {
+        rc = svg_mb_control::ReconcilePendingWrites(home, policy, 100u);
+    } catch (...) {
+        threw = true;
+    }
+    ExpectTrue(!threw && rc == 0,
+               "reconcile proceeds (returns 0) on a corrupt sidecar instead of aborting");
+    ExpectTrue(EventLogContains(home, "reconcile.sidecar_quarantined"),
+               "reconcile emits reconcile.sidecar_quarantined on a corrupt sidecar");
+    ExpectTrue(
+        std::filesystem::exists(svg_mb_control::QuarantinedSidecarPath(home)),
+        "reconcile quarantines the corrupt sidecar");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
 }  // namespace
 
 int main() {
@@ -695,6 +812,10 @@ int main() {
     TestSourceAwareCpuRecoveryClearsDropout();
     TestSourceAwareNeverPresentCpuDoesNotTrip();
     TestSourceAwareBothPresentNoTrip();
+    TestCorruptSidecarIsQuarantinedAndReadProceeds();
+    TestNonArrayEntriesSidecarIsQuarantined();
+    TestValidSidecarIsNotQuarantined();
+    TestReconcileQuarantinesCorruptSidecarAndProceeds();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " channel write test failure(s)\n";

@@ -41,7 +41,15 @@ CLI can override the write fields with:
 
 Startup reconciliation reads `runtime\pending_writes.json` and attempts to
 restore each stored baseline directly through Control's own writer. Successful
-entries are removed. Failed entries remain on disk and block further startup.
+entries are removed. Failed restores remain on disk and block further startup.
+
+A **corrupt or unparseable** `pending_writes.json` is not fatal (FEAT-0012): the
+startup read quarantines the bad file to `pending_writes.json.corrupt` (preserving
+the original bytes), emits `reconcile.sidecar_quarantined`, degrades runtime health
+(`sidecar_quarantined_present`, surfaced in the `--health` JSON), and proceeds as if
+the sidecar were empty — so a corrupt recovery file cannot trap the worker in a
+relaunch loop. The control loop then reasserts authority through its normal startup
+path. The parsed-but-failed-restore case above is unchanged.
 
 ## Control-loop sidecar persist failure (FEAT-0010)
 
