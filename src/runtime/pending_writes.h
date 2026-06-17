@@ -40,6 +40,26 @@ void RemovePendingWrite(const std::filesystem::path& runtime_home,
 std::filesystem::path PendingWritesSidecarPath(
     const std::filesystem::path& runtime_home);
 
+// The path a corrupt sidecar is quarantined to (FEAT-0012):
+// `<runtime_home>/pending_writes.json.corrupt`.
+std::filesystem::path QuarantinedSidecarPath(
+    const std::filesystem::path& runtime_home);
+
+// Result of a fault-tolerant sidecar read (FEAT-0012).
+struct TolerantPendingWritesRead {
+    std::vector<PendingWriteEntry> entries;
+    bool quarantined = false;  // true if a corrupt file was renamed aside
+    std::string detail;        // diagnostic for the quarantine event
+};
+
+// Reads the pending-writes sidecar; on a parse/shape failure it quarantines the
+// corrupt file (renames it to QuarantinedSidecarPath) and returns no entries
+// with quarantined=true, so a corrupt sidecar at startup is not fatal
+// (FEAT-0012 REQ-SIDECARRESIL-01/02). A missing file returns no entries with
+// quarantined=false. Does not throw on a corrupt file.
+TolerantPendingWritesRead ReadPendingWritesTolerant(
+    const std::filesystem::path& runtime_home);
+
 // In-memory cache for the pending-writes sidecar. Avoids re-reading and
 // re-parsing the JSON file on every Upsert/Remove call. Upsert still
 // persists synchronously so the crash-recovery contract (sidecar reflects
@@ -67,6 +87,10 @@ class PendingWritesStore : public PendingWritesStoreInterface {
     // Loads existing sidecar contents from disk into the in-memory cache.
     // Throws on parse failure; missing file is treated as empty.
     void Load();
+
+    // Replaces the in-memory cache with already-read entries without re-reading
+    // the file (lets reconcile parse the sidecar once; FEAT-0012).
+    void Adopt(std::vector<PendingWriteEntry> entries);
 
     // Inserts or replaces the entry for entry.channel and persists the
     // sidecar to disk synchronously. Throws on filesystem failure.

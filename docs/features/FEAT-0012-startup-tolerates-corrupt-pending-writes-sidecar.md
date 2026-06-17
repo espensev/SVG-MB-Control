@@ -1,7 +1,7 @@
 # FEAT-0012: Startup tolerates a corrupt pending-writes sidecar
 
 **Project:** svg-mb-control
-**Status:** Draft (held — intake only; maintainer has not chosen a direction or authorized code)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
 **Namespace:** `REQ-SIDECARRESIL-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -13,14 +13,10 @@ recoverable transient into a permanent worker-relaunch loop that never runs the
 control loop, so a single bad recovery file cannot leave the fans frozen at the
 last latched PWM while temperature rises.
 
-> **Intake posture (2026-06-17).** This spec structures a known hazard (team
-> review finding H2, `review/svg-mb-control-review-20260617-team-review.md`) and
-> proposes a direction for the maintainer to decide. It does **not** authorize
-> code and does not assert that the fix is decided. The two candidate directions
-> (quarantine-whole-file vs. per-entry skip) are recorded in §11 Open decisions;
-> §9 carries the directional choice as `Proposed (pending maintainer direction)`.
-> No decision record is written, so promotion gate 3 is open and the spec stays
-> held-Draft.
+> **Implemented (2026-06-17).** Promoted from intake to Implemented: the maintainer
+> authorized **Direction A** (quarantine the whole file, treat as empty) via the
+> decision record `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md`. The
+> hazard is team review finding H2.
 
 ## 1. Summary
 
@@ -152,8 +148,7 @@ fail direction (a permanent dead loop) is the concern rather than the probabilit
 
 ## 5. Behavior specification
 
-Behavior is **proposed** (not yet implemented, and a direction is not yet
-chosen — see §11). It would live in or near the startup reconcile read
+Implemented behavior (Direction A, per the decision record). It lives in or near the startup reconcile read
 (`src/runtime/write_orchestrator.cpp` `ReconcilePendingWrites` and/or
 `src/runtime/pending_writes.cpp` `ReadPendingWrites`), with health degradation in
 the startup/runtime-health path (`src/runtime/runtime_health.cpp`).
@@ -232,11 +227,10 @@ the startup/runtime-health path (`src/runtime/runtime_health.cpp`).
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — held-Draft intake) | Direction A (quarantine whole file, treat as empty) vs. Direction B (per-entry skip, reconcile the rest); the quarantine naming/retention; whether to reuse `reconcile.sidecar_read_failed` or add a quarantine event; whether the degraded-health condition clears on the next clean session or holds for a window. | Proposed (pending maintainer direction) |
+| [`docs/corrupt-sidecar-quarantine-decision-2026-06-17.md`](../corrupt-sidecar-quarantine-decision-2026-06-17.md) | Direction A (quarantine whole file, treat as empty; D-SIDECAR-1); fixed `pending_writes.json.corrupt` sibling overwrite (D-SIDECAR-2); additive `reconcile.sidecar_quarantined` event + collapse the duplicate read (D-SIDECAR-3); health degraded while the artifact exists (D-SIDECAR-4). | Current (settled 2026-06-17) |
 
-No decision record is written for this held-Draft intake; the held posture means
-nothing here authorizes code. The decision record is written, and a direction
-chosen, only if the maintainer promotes this beyond intake.
+The decision record was settled and the maintainer authorized implementation
+2026-06-17 (Direction A adopted).
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -255,6 +249,9 @@ Verify legend:
 - **R** = code review against the cited contract doc.
 
 ## 11. Open decisions
+
+**Resolved 2026-06-17** by `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md`
+(Direction A adopted; D-SIDECAR-1..4).
 
 | Decision | Needed before | Current default (proposed, not decided) |
 |---|---|---|
@@ -289,28 +286,32 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from a named code/contract gap (§2 — H2, static-verified against `write_orchestrator.cpp:297-307`, `pending_writes.cpp:14-26,47-70`, `json_io.cpp:162-168`, `app_main.cpp:298-307`, `control_supervisor.cpp:618-668`; the asymmetry vs `control_loop.cpp:150-161`).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current — OPEN: no decision record is written for this held-Draft intake; the direction (A vs. B) is unchosen and stated as `Proposed (pending maintainer direction)` in §9.
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md`, Current; Direction A).
 - [x] 4. Concrete `REQ-SIDECARRESIL-*` IDs assigned from the namespace (§6).
-- [ ] 5. Verification mapped to real checks and mirrored in `docs/TRACEABILITY.md` — OPEN: §10 maps to `Test-LocalCI` / review, but no tests exist yet and the TRACEABILITY rows are proposed, not mirrored into the file in this intake.
+- [x] 5. Verification mapped to real checks and mirrored in `docs/TRACEABILITY.md` (§10; C++ tests in `channel_write_tests.cpp` + the `test_smoke.py` integration test; rows mirrored).
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (startup-read-path only; no fan write added; additive schema).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held-Draft (intake) 2026-06-17: the maintainer has **not** authorized
-> implementation. This spec structures finding H2 and proposes a direction; it is
-> not buildable work. Promotion gates 3 and 5 stay open until a decision record is
-> written, a direction (A vs. B) is chosen, and the verification is mirrored into
-> `docs/TRACEABILITY.md`. The hazard is static-verified, not runtime-reproduced; a
-> reproduction (seed a corrupt sidecar, observe the relaunch loop) would
-> strengthen §2 before promotion.
+> Implemented 2026-06-17: Direction A authorized and built (decision record
+> `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md`). The startup reconcile
+> now quarantines a corrupt sidecar and proceeds; the former fatal smoke test in
+> `tests/test_smoke.py` was updated to assert the quarantine-and-proceed contract.
 
 ## 14. Verification log  *(fill in after the feature is built — not implemented; held-Draft)*
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-SIDECARRESIL-01 | | | |
-| REQ-SIDECARRESIL-02 | | | |
-| REQ-SIDECARRESIL-03 | | | |
-| REQ-SIDECARRESIL-04 | | | |
-| REQ-SIDECARRESIL-05 | | | |
+| REQ-SIDECARRESIL-01 | pass | `channel_write_tests.cpp::TestReconcileQuarantinesCorruptSidecarAndProceeds` (reconcile returns 0, does not abort) + `TestCorruptSidecarIsQuarantinedAndReadProceeds` + `TestNonArrayEntriesSidecarIsQuarantined`; `test_smoke.py::test_corrupt_pending_writes_is_quarantined_and_startup_proceeds` — CTest + pytest green | 2026-06-17 |
+| REQ-SIDECARRESIL-02 | pass | `TestCorruptSidecarIsQuarantinedAndReadProceeds` asserts the corrupt bytes are preserved at `pending_writes.json.corrupt`; `test_smoke.py` asserts the quarantine artifact preserves the original bytes — CTest + pytest green | 2026-06-17 |
+| REQ-SIDECARRESIL-03 | pass | `TestReconcileQuarantinesCorruptSidecarAndProceeds` + `test_smoke.py` assert the `reconcile.sidecar_quarantined` event; the `sidecar_quarantined_present` health flag degrades runtime health and is surfaced in the `--health` JSON (mirrors `pending_writes_unreadable`, `runtime_health.cpp`) | 2026-06-17 |
+| REQ-SIDECARRESIL-04 | pass | `TestValidSidecarIsNotQuarantined` (a valid sidecar is read normally, not quarantined); the happy-path reconcile/restore is unchanged (existing `test_write_once.py` reconcile tests stay green) | 2026-06-17 |
+| REQ-SIDECARRESIL-05 | pass | Review (R): change confined to the startup read/reconcile path (`pending_writes.cpp` `ReadPendingWritesTolerant`, `write_orchestrator.cpp` `ReconcilePendingWrites`); write path/durability/relaunch policy/cadence/channels/control identity unchanged; the event, `.corrupt` artifact, and health field are additive | 2026-06-17 |
 
-**Spec vs. implementation deltas:** none yet (not implemented).
+**Spec vs. implementation deltas:** Implemented per the decision record (Direction A).
+Added `ReadPendingWritesTolerant` + `QuarantinedSidecarPath` (quarantine to a fixed
+`pending_writes.json.corrupt` sibling), collapsed the former duplicate sidecar read
+in `ReconcilePendingWrites` via a new `PendingWritesStore::Adopt`, and added the
+`sidecar_quarantined_present` health flag (D-SIDECAR-4; degrades health while the
+artifact exists, mirroring `pending_writes_unreadable`). The former fatal smoke test
+`test_zero_arg_staged_launch_reports_startup_failure` was rewritten to
+`test_corrupt_pending_writes_is_quarantined_and_startup_proceeds`.

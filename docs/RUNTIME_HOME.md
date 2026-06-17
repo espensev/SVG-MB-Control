@@ -17,6 +17,8 @@ Control owns these files:
 - `control_supervisor.json`
 - `control_health.json`
 - `pending_writes.json`
+- `pending_writes.json.corrupt` (a quarantined corrupt pending-writes sidecar;
+  FEAT-0012 — additive, absence reads as "no corruption seen")
 - `stop.request.json`
 - `circuit_breaker_reset.request.json`
 - `logs\svg_mb_control_output.csv`

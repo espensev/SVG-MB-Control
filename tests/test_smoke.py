@@ -360,24 +360,50 @@ class SmokeTests(WindowsExeTestCase):
             self.assertIsNotNone(state, msg="watchdog-started worker did not refresh")
             self.assertEqual(state["amd_sensors"][0]["temperature_c"], 73.0)
 
-    def test_zero_arg_staged_launch_reports_startup_failure(self) -> None:
+    def test_corrupt_pending_writes_is_quarantined_and_startup_proceeds(self) -> None:
+        # FEAT-0012: a corrupt pending_writes.json must NOT abort startup into a
+        # watchdog relaunch-thrash loop. The startup reconcile quarantines the bad
+        # file aside (preserving the bytes) and proceeds, emitting
+        # reconcile.sidecar_quarantined. (Before FEAT-0012 this aborted startup.)
         with StagedControlApp() as app:
             app.runtime_home.mkdir(parents=True, exist_ok=True)
+            corrupt = '{"schema_version":1,"entries":[]} trailing'
             (app.runtime_home / "pending_writes.json").write_text(
-                '{"schema_version":1,"entries":[]} trailing',
-                encoding="utf-8",
+                corrupt, encoding="utf-8"
             )
 
             result = app.start(
                 env=_sim_direct_env(channel=1, amd_temp_c=74.0),
             )
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(
-                "background supervisor exited during startup",
-                result.stderr,
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=f"a corrupt sidecar must not abort startup; stderr={result.stderr}",
             )
-            self.assertIn(
-                "pending writes reconciliation failed",
-                result.stderr,
+            quarantine = app.runtime_home / "pending_writes.json.corrupt"
+            quarantined = _wait_for(
+                lambda: quarantine.exists() or None,
+                timeout_s=5.0,
+            )
+            self.assertIsNotNone(
+                quarantined, msg="corrupt pending_writes.json was not quarantined"
+            )
+            self.assertEqual(
+                quarantine.read_text(encoding="utf-8"),
+                corrupt,
+                msg="quarantine must preserve the original corrupt bytes",
+            )
+            def _quarantine_event_seen():
+                evs = _read_runtime_events(app.runtime_home)
+                seen = any(
+                    e.get("event_type") == "reconcile.sidecar_quarantined"
+                    for e in evs
+                )
+                return evs if seen else None
+
+            events = _wait_for(_quarantine_event_seen, timeout_s=5.0)
+            self.assertIsNotNone(
+                events,
+                msg="a reconcile.sidecar_quarantined event must be emitted",
             )
