@@ -61,6 +61,10 @@ Result values:
 | `FEAT-0008` Watchdog hung-worker recovery | Implemented | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
 | `FEAT-0009` Controller scheduling-priority elevation | Draft (held) | Not buildable; design capture only, held at promotion gate 1 pending the FEAT-0009 §12 A/B contention experiment (whether the cadence degradation under `above`-load is scheduling-bound rather than file-lock bound). |
 | `FEAT-0010` Write actuation survives a sidecar-persistence fault | Implemented | Implemented 2026-06-17 (decision record `docs/write-actuation-sidecar-fault-decision-2026-06-17.md` current). Fixes runtime-reproduced finding H1: a `pending_writes.json` persist fault no longer vetoes the fan write (incl. the sensor-safe command); it records `control_loop.sidecar_upsert_failed`, increments `consecutive_sidecar_persist_failures` (degrades health), and still actuates. §14 verification log filled; CTest 13/13 green. |
+| `FEAT-0011` Write-failure breaker must not block rising cooling demand | Draft (held) | Not buildable; intake spec for a static-verified code gap at `src/control/channel_write.cpp:307` (open breaker suppresses a rising/more-cooling write so a recovered actuator cannot self-heal). Held at promotion gate 3 pending maintainer direction on the rising-demand-bypass and its bound (§11). |
+| `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Draft (held) | Not buildable; intake only — a corrupt `pending_writes.json` aborts startup reconcile into a watchdog relaunch-thrash loop (steady loop tolerates the same failure). Maintainer has not chosen a direction (A quarantine-whole-file vs. B per-entry skip) or authorized code. |
+| `FEAT-0013` Source-aware primary-dropout safe mode | Draft (held) | Not buildable; design capture only, held at promotion gate 3 (decision record) pending maintainer direction on the dropout failure response. Static-verified finding: on a `max_cpu_gpu_source_aware` channel a CPU-input dropout while GPU remains available resets `consecutive_sensor_failures` (`channel_evaluator.cpp:268-276`) so the 3-miss safe-mode trip never fires and no sensor-failure event is logged. |
+| `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
 
 ## 3. Requirement map
 
@@ -160,6 +164,49 @@ until the FEAT-0009 §12 A/B contention experiment authorizes promotion.
 | `REQ-WRITESAFE-03` | T, R | C++ test asserts the additive per-channel counter increments/resets, health degrades (`DegradedChannelCount`), the breaker stays closed and `consecutive_write_failures` stays 0; review vs `RUNTIME_HOME.md`. | pass |
 | `REQ-WRITESAFE-04` | T, R | C++ test: a stale and an absent sidecar entry preserve the captured-baseline round-trip (`channel_write_tests.cpp`); reconcile→restore integration-covered (`test_write_once.py`); review vs `WRITE_ORCHESTRATION.md`. | pass |
 | `REQ-WRITESAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; status field additive. | pass |
+
+### FEAT-0011 - Write-failure breaker must not block rising cooling demand
+
+Held at Draft; verification homes are planned, results `pending (held-Draft)` until
+the maintainer authorizes promotion (gate 3).
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-COOLWRITE-01` | T | C++ open-breaker rising-setpoint test via `src/hardware/simulated_fan_writer.cpp` (`Test-LocalCI`); asserts `ApplyDuty` fires for a rising command on a healthy-sensor channel. | pending (held-Draft) |
+| `REQ-COOLWRITE-02` | T | C++ test: down-or-equal setpoint stays suppressed while the breaker is open; `safety_override` bypass unchanged. | pending (held-Draft) |
+| `REQ-COOLWRITE-03` | T, R | C++ test: bypassed rising write closes the breaker on success (`circuit_breaker_closed`) / leaves it open on failure with `consecutive_write_failures` correct; review vs `docs/WRITE_ORCHESTRATION.md` breaker self-heal. | pending (held-Draft) |
+| `REQ-COOLWRITE-04` | T, R | C++ test: accepted bound prevents an every-tick retry against a persistently-failing actuator; review vs the design decision recording the bound. | pending (held-Draft) |
+| `REQ-COOLWRITE-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; any new status field additive to `docs/RUNTIME_HOME.md`. | pending (held-Draft) |
+
+### FEAT-0012 - Startup tolerates a corrupt pending-writes sidecar
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-SIDECARRESIL-01` | T | `tests/` startup-reconcile corrupt-sidecar test (`Test-LocalCI`). | pending (held-Draft) |
+| `REQ-SIDECARRESIL-02` | T | `tests/` quarantine-not-delete test (`Test-LocalCI`). | pending (held-Draft) |
+| `REQ-SIDECARRESIL-03` | T, R | `tests/` event+degraded-health test; review vs `docs/RUNTIME_HOME.md`. | pending (held-Draft) |
+| `REQ-SIDECARRESIL-04` | T, R | `tests/` happy-path reconcile/restore regression test; review vs `docs/WRITE_ORCHESTRATION.md`. | pending (held-Draft) |
+| `REQ-SIDECARRESIL-05` | R | Review vs `docs/MEASUREMENT_GATE.md`, `docs/CONTROL_PIPELINE_MATH.md`, and FEAT-0008 (confinement). | pending (held-Draft) |
+
+### FEAT-0013 - Source-aware channels enter safe mode on primary-source dropout
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-SRCSAFE-01` | T | C++ test (source-aware sibling of `channel_write_tests.cpp:251`): CPU-available then dropped while GPU remains asserts `consecutive_sensor_failures` increments rather than resetting. | pending (held-Draft) |
+| `REQ-SRCSAFE-02` | T | C++ test: three consecutive CPU-dropout ticks set `safety_override` and command `kSafeModeFanDuty` on a `max_cpu_gpu_source_aware` channel. | pending (held-Draft) |
+| `REQ-SRCSAFE-03` | T, R | C++ test asserts `ChannelSensorEvent::FailureDetected` on trip and `Recovered` on CPU return; review vs `RUNTIME_HOME.md` event list. | pending (held-Draft) |
+| `REQ-SRCSAFE-04` | T | C++ test: a GPU-led channel that never had CPU does not trip the dropout safe mode; a channel that had CPU and lost it does. | pending (held-Draft) |
+| `REQ-SRCSAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: both-inputs-present duty/cadence/channels/identity and total-loss behavior unchanged; new status field additive. | pending (held-Draft) |
+
+### FEAT-0014 - Reconcile and restore honor the blocked-channel guard
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-RESTOREGUARD-01` | T, R | `ReconcilePendingWrites` skips `RestoreSavedState` for a policy-blocked channel; test with a call-recording/simulated writer + `blocked_channels` policy; review vs `svg_mb_sio.cpp:218-223` guard parity. | pending (held-Draft) |
+| `REQ-RESTOREGUARD-02` | T, R | Blocked-channel skip emits `reconcile.restore_skipped_blocked` and does not fail the reconcile exit code; review vs `docs/WRITE_ORCHESTRATION.md` Reconciliation. | pending (held-Draft) |
+| `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending (held-Draft) |
+| `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
+| `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 
