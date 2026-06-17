@@ -51,8 +51,8 @@ struct RuntimeStatusSnapshot {
     // and stop-wait paths.
     bool LooksActive() const;
 
-    // Sum of channels that report a circuit breaker open, sensor failure,
-    // or any consecutive write failures.
+    // Sum of channels that report a circuit breaker open, sensor failure, any
+    // consecutive write failures, or any sidecar-persistence failures.
     std::uint32_t DegradedChannelCount() const;
 };
 

@@ -325,23 +325,33 @@ void TryApplyChannelSetpoint(
         // FEAT-0010 (REQ-WRITESAFE-01/02): a sidecar persist failure must NOT
         // veto the fan write. PendingWritesStore::Upsert already updated its
         // in-memory entry before the throw, so the next successful tick
-        // re-persists; here we record the fault (event + an additive per-channel
-        // counter that degrades runtime health) and fall through to ApplyDuty
-        // instead of returning. The write-failure breaker / consecutive_write_
-        // failures are untouched because the actuation has not failed.
-        AppendControlLoopEvent(
-            context.runtime_home,
-            RuntimeLogEvent{
-                    .event_type = "control_loop.sidecar_upsert_failed",
-                .detail = std::string(
-                              "failed to write sidecar entry before "
-                              "fan write: ") +
-                          e.what(),
-                .channel = channel.config.channel,
-                .tick_count = tick_count,
-                .success = false,
-            });
+        // re-persists; here we record the fault (an additive per-channel counter
+        // that degrades runtime health, plus a best-effort event) and fall
+        // through to ApplyDuty instead of returning. The write-failure breaker /
+        // consecutive_write_failures are untouched because the actuation has not
+        // failed.
         ++channel.consecutive_sidecar_persist_failures;
+        // REQ-WRITESAFE-06: event logging on this safety path is best-effort and
+        // must never veto actuation. Event serialization/append can still throw
+        // (e.g. a non-UTF-8 exception message making the JSON dump throw, or an
+        // allocation failure), so any throw is swallowed and control proceeds to
+        // the fan write below.
+        try {
+            AppendControlLoopEvent(
+                context.runtime_home,
+                RuntimeLogEvent{
+                        .event_type = "control_loop.sidecar_upsert_failed",
+                    .detail = std::string(
+                                  "failed to write sidecar entry before "
+                                  "fan write: ") +
+                              e.what(),
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .success = false,
+                });
+        } catch (...) {
+            // Best-effort logging only; actuation must proceed.
+        }
     }
 
     const FanWriteResult write_result =

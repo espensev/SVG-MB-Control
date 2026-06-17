@@ -161,9 +161,10 @@ until the FEAT-0009 §12 A/B contention experiment authorizes promotion.
 |---|---|---|---|
 | `REQ-WRITESAFE-01` | T | C++ test: a throwing pending-store (`ThrowingPendingWritesStore`) asserts `ApplyDuty` still fires for the computed setpoint after a persist failure (`channel_write_tests.cpp`). | pass |
 | `REQ-WRITESAFE-02` | T | C++ test: `safety_override` set + throwing pending-store + open breaker asserts the 100% command reaches the actuator. | pass |
-| `REQ-WRITESAFE-03` | T, R | C++ test asserts the additive per-channel counter increments/resets, health degrades (`DegradedChannelCount`), the breaker stays closed and `consecutive_write_failures` stays 0; review vs `RUNTIME_HOME.md`. | pass |
+| `REQ-WRITESAFE-03` | T, R | C++ test asserts the additive per-channel counter increments/resets, health degrades (`DegradedChannelCount`), the `control_loop.sidecar_upsert_failed` event is emitted, the breaker stays closed and `consecutive_write_failures` stays 0; review vs `RUNTIME_HOME.md`. | pass |
 | `REQ-WRITESAFE-04` | T, R | C++ test: a stale and an absent sidecar entry preserve the captured-baseline round-trip (`channel_write_tests.cpp`); reconcile→restore integration-covered (`test_write_once.py`); review vs `WRITE_ORCHESTRATION.md`. | pass |
 | `REQ-WRITESAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; status field additive. | pass |
+| `REQ-WRITESAFE-06` | T, R | C++ test: a persist failure whose event serialization throws (non-UTF-8 message) still reaches `ApplyDuty` (`TestEventLogThrowDoesNotVetoActuation`); review the pre-actuation append is wrapped best-effort. | pass |
 
 ### FEAT-0011 - Write-failure breaker must not block rising cooling demand
 

@@ -1,7 +1,7 @@
 # FEAT-0010: Write actuation survives a sidecar-persistence fault
 
 **Project:** svg-mb-control
-**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
+**Status:** Implemented   **Version:** 0.3   **Updated:** 2026-06-17
 **Namespace:** `REQ-WRITESAFE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -13,9 +13,9 @@ thermal actuation (including the sensor-safe command).
 ## 1. Summary
 
 On the control hot path the controller persists a pending-write sidecar entry
-before it commands a fan duty. Today a failure to persist that entry returns
-early and skips the fan write
-(`src/control/channel_write.cpp:319-335`), so a persistent fault on
+before it commands a fan duty. Before this fix a failure to persist that entry
+returned early and skipped the fan write
+(`src/control/channel_write.cpp` `TryApplyChannelSetpoint`), so a persistent fault on
 `pending_writes.json` (an antivirus scan, backup snapshot, file indexer, a stuck
 concurrent writer, or a disk/ACL error) freezes the fan at its last duty while
 temperature rises — and suppresses the 100% sensor-safe command on the same
@@ -98,7 +98,7 @@ over actuation.
 
 ## 5. Behavior specification
 
-Behavior is proposed (not yet implemented). It lives in or near
+Implemented behavior (v1 plus the v0.3 REQ-WRITESAFE-06 hardening pass). It lives in or near
 `src/control/channel_write.cpp` (`TryApplyChannelSetpoint`),
 `src/runtime/pending_writes.cpp` (`PendingWritesStore`),
 `src/control/control_runtime_context.h` (per-channel state), and the health
@@ -121,6 +121,11 @@ assessment in `src/runtime/runtime_health.cpp`.
   so `--health` reflects the degraded condition. It must **not** increment
   `consecutive_write_failures` or open the write-failure breaker (the actuation
   succeeded), and must not, by this condition alone, drive a watchdog recycle.
+- **Event logging is best-effort (REQ-WRITESAFE-06).** The additive counter is
+  incremented before the `control_loop.sidecar_upsert_failed` emit, and the emit
+  is wrapped so a throw from event serialization/append (e.g. a non-UTF-8
+  exception message making the JSON dump throw, or an allocation failure) cannot
+  veto the fan write.
 - **Crash recovery preserved.** Because the reconcile/restore paths replay the
   captured baseline (`baseline_duty_raw`/`baseline_mode_raw`), which is stable
   across ticks, a stale-but-present sidecar entry still restores correctly; the
@@ -139,6 +144,7 @@ assessment in `src/runtime/runtime_health.cpp`.
 | REQ-WRITESAFE-03 | A sidecar persist failure followed by a successful actuation must be observable — emit `control_loop.sidecar_upsert_failed`, increment an additive per-channel counter, and degrade the runtime health state — and must not increment `consecutive_write_failures`, open the write-failure breaker, or by itself cause a watchdog recycle. |
 | REQ-WRITESAFE-04 | Crash recovery must remain correct when a sidecar entry is stale or absent because a persist failed: reconcile/restore must restore the captured baseline. The first-write-with-failed-persist case (no entry for that channel) is an accepted residual recorded in §5. |
 | REQ-WRITESAFE-05 | The change must be confined to the failure path: the computed duty, cadence, channel set, and control-computation identity are unchanged, and any new status/health field is additive to `docs/RUNTIME_HOME.md`. |
+| REQ-WRITESAFE-06 | Event logging on the sidecar-persist-failure path is best-effort and must not veto the fan write: a throw from event serialization or append is swallowed, and `ApplyDuty` still runs for the computed setpoint. |
 
 ## 7. Data / schema deltas
 
@@ -175,9 +181,10 @@ assessment in `src/runtime/runtime_health.cpp`.
 |---|---|---|
 | REQ-WRITESAFE-01 | T | `.\scripts\Test-LocalCI.ps1` C++ test: a throwing pending-store with `src/hardware/simulated_fan_writer.cpp` asserts `ApplyDuty` still fires for the computed setpoint after a persist failure. |
 | REQ-WRITESAFE-02 | T | C++ test: `safety_override` set + throwing pending-store asserts the actuator receives the 100% command. |
-| REQ-WRITESAFE-03 | T, R | C++ test asserts the per-channel counter increments, health degrades, and the breaker does not open / `consecutive_write_failures` stays `0`; review vs `docs/RUNTIME_HOME.md` (additive field + health trigger). |
+| REQ-WRITESAFE-03 | T, R | C++ test asserts the per-channel counter increments, health degrades, the `control_loop.sidecar_upsert_failed` event is emitted, and the breaker does not open / `consecutive_write_failures` stays `0`; review vs `docs/RUNTIME_HOME.md` (additive field + health trigger). |
 | REQ-WRITESAFE-04 | T, R | C++ test: reconcile/restore with a stale and an absent entry restores the captured baseline; review vs `docs/WRITE_ORCHESTRATION.md` Reconciliation. |
 | REQ-WRITESAFE-05 | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` and `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; status field additive. |
+| REQ-WRITESAFE-06 | T, R | C++ test: a persist failure whose event serialization throws (non-UTF-8 exception message) still reaches `ApplyDuty`; review that the pre-actuation event append in `channel_write.cpp` is wrapped best-effort. |
 
 Verify legend:
 - **T** = automated test (`.\scripts\Test-LocalCI.ps1`, C++ smoke / pytest under `tests/`).
@@ -232,9 +239,10 @@ Verify legend:
 |---|---|---|---|
 | REQ-WRITESAFE-01 | pass | `tests/cpp/channel_write_tests.cpp::TestSidecarPersistFailureStillActuates` — CTest green (`Test-LocalCI` 13/13) | 2026-06-17 |
 | REQ-WRITESAFE-02 | pass | `channel_write_tests.cpp::TestSafetyOverrideActuatesDespiteSidecarPersistFailure` (100% safe-mode command actuates past an open breaker) — CTest green | 2026-06-17 |
-| REQ-WRITESAFE-03 | pass | `channel_write_tests.cpp::TestSidecarPersistFailureIncrementsCounterNotBreaker` + `...CounterResetsOnSuccess` + `...DegradesHealth` (`DegradedChannelCount`) — CTest green | 2026-06-17 |
+| REQ-WRITESAFE-03 | pass | `channel_write_tests.cpp::TestSidecarPersistFailureIncrementsCounterNotBreaker` + `...CounterResetsOnSuccess` + `...DegradesHealth` (`DegradedChannelCount`) + `...EmitsEvent` (event logged) — CTest green | 2026-06-17 |
 | REQ-WRITESAFE-04 | pass | `channel_write_tests.cpp::TestSidecarBaselineSurvivesStaleAndAbsentEntry` (stale/absent sidecar baseline round-trip); reconcile→restore integration-covered (`tests/test_write_once.py`) — CTest green | 2026-06-17 |
 | REQ-WRITESAFE-05 | pass | Review (R): change confined to the `channel_write.cpp` failure path; computed duty/cadence/channels/control identity unchanged; `consecutive_sidecar_persist_failures` is an additive status field | 2026-06-17 |
+| REQ-WRITESAFE-06 | pass | `channel_write_tests.cpp::TestEventLogThrowDoesNotVetoActuation` — a non-UTF-8 exception message makes the failure-path event JSON dump throw; the wrapped best-effort emit swallows it and actuation still fires — CTest green | 2026-06-17 |
 
 **Spec vs. implementation deltas:** Implemented per spec. Added a
 `PendingWritesStoreInterface` seam (behavior-preserving testability refactor) so a
@@ -242,4 +250,8 @@ throwing pending-store can be injected; `PendingWritesStore` implements it and t
 control write path (`TryApplyChannelSetpoint`) takes the interface. The counter is
 named `consecutive_sidecar_persist_failures` (the §11 "consecutive, resets on a
 successful persist" default); health degrades via `DegradedChannelCount` and the
-counter is additive in `control_runtime.json`.
+counter is additive in `control_runtime.json`. **v0.3 hardening
+(REQ-WRITESAFE-06):** the pre-actuation `control_loop.sidecar_upsert_failed` emit is
+wrapped best-effort and the counter is incremented before it, so an event-logging
+throw can no longer re-veto actuation — closing the residual the 2026-06-17 external
+review flagged.

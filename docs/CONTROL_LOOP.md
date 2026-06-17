@@ -230,9 +230,9 @@ The current status JSON also publishes `last_raw_demand_pct` and
 demand from the smoothed demand and final rate-limited setpoint.
 
 Per-channel failure state is also surfaced in `control_runtime.json`:
-`sensor_failed`, `consecutive_sensor_failures`, `circuit_breaker_open`, and
-`consecutive_write_failures`. The JSON remains rate-limited; use the event log
-for exact transition timing.
+`sensor_failed`, `consecutive_sensor_failures`, `circuit_breaker_open`,
+`consecutive_write_failures`, and `consecutive_sidecar_persist_failures`. The JSON
+remains rate-limited; use the event log for exact transition timing.
 
 ## Lifecycle Commands
 
