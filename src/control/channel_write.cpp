@@ -305,7 +305,47 @@ void TryApplyChannelSetpoint(
     // its 100% safe-mode command. A safe-mode command bypasses the breaker; a
     // successful write below closes it, a failed one leaves it open and loud.
     if (channel.circuit_breaker_open && !evaluation.safety_override) {
-        return;
+        // FEAT-0011 (REQ-COOLWRITE-*): half-open probe. While the write-failure
+        // breaker is open, suppress normal writes EXCEPT a bounded probe -- when
+        // more cooling is wanted (the computed setpoint exceeds the last applied
+        // duty) and at least kBreakerProbeBackoff has elapsed since the last
+        // probe, let one write through so a recovered actuator can self-heal. A
+        // successful write below closes the breaker; a failed one keeps it open.
+        // This avoids both a permanent lock-out and spamming a genuinely-failing
+        // actuator every tick. (safety_override already bypassed this gate.)
+        const bool cooling_wanted =
+            std::isnan(channel.last_issued_pct) ||
+            setpoint > channel.last_issued_pct;
+        const bool backoff_elapsed =
+            channel.last_probe_time ==
+                std::chrono::steady_clock::time_point{} ||
+            (now_steady - channel.last_probe_time) >=
+                ChannelState::kBreakerProbeBackoff;
+        if (!cooling_wanted || !backoff_elapsed) {
+            return;
+        }
+        channel.last_probe_time = now_steady;
+        // Best-effort, consistent with the sidecar-failure path
+        // (REQ-WRITESAFE-06): event logging on this write path must not veto the
+        // probe write below. last_probe_time is already set, so the backoff holds
+        // even if the event append throws.
+        try {
+            AppendControlLoopEvent(
+                context.runtime_home,
+                RuntimeLogEvent{
+                        .event_type = "control_loop.circuit_breaker_probe",
+                    .detail = "half-open probe: testing actuator recovery on "
+                              "rising cooling demand while the write-failure "
+                              "breaker is open",
+                    .channel = channel.config.channel,
+                    .tick_count = tick_count,
+                    .observed_temp_c = observed_temp_c,
+                    .setpoint_pct = setpoint,
+                    .success = false,
+                });
+        } catch (...) {
+            // best-effort only; the probe write must proceed.
+        }
     }
 
     PendingWriteEntry entry;
