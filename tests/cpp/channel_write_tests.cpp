@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -87,6 +88,47 @@ class ThrowingPendingWritesStore
     }
     void QueueRemove(std::uint32_t) override {}
 };
+
+// Like ThrowingPendingWritesStore, but the exception message carries invalid
+// UTF-8 bytes so the failure-path event's JSON serialization (nlohmann dump())
+// throws — used to exercise the "event logging must not veto actuation"
+// guarantee (FEAT-0010 REQ-WRITESAFE-06).
+class Utf8ThrowingPendingWritesStore
+    : public svg_mb_control::PendingWritesStoreInterface {
+ public:
+    void Upsert(const svg_mb_control::PendingWriteEntry&) override {
+        throw std::runtime_error(
+            std::string("sidecar persist failed \xFF\xFE invalid-utf8"));
+    }
+    void QueueRemove(std::uint32_t) override {}
+};
+
+// Returns true if any file under <home>/logs contains `needle`. Asserts runtime
+// event emission without depending on the exact event-log filename.
+bool EventLogContains(const std::filesystem::path& home,
+                      const std::string& needle) {
+    const std::filesystem::path logs = home / "logs";
+    std::error_code ec;
+    if (!std::filesystem::exists(logs, ec)) {
+        return false;
+    }
+    for (const auto& entry :
+         std::filesystem::recursive_directory_iterator(logs, ec)) {
+        if (ec) {
+            break;
+        }
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        std::ifstream file(entry.path(), std::ios::binary);
+        const std::string content((std::istreambuf_iterator<char>(file)),
+                                  std::istreambuf_iterator<char>());
+        if (content.find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // A fresh, empty runtime-home directory for the pending-writes sidecar and the
 // control-loop event log. The name carries a per-process salt (UniqueTempSuffix)
@@ -442,6 +484,55 @@ void TestSidecarBaselineSurvivesStaleAndAbsentEntry() {
     std::filesystem::remove_all(home, ec);
 }
 
+// FEAT-0010 REQ-WRITESAFE-03: the persist-failure path emits the
+// control_loop.sidecar_upsert_failed runtime event.
+void TestSidecarPersistFailureEmitsEvent() {
+    const std::filesystem::path home = MakeTempHome("persist_fail_event");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel =
+        MakeReadyChannel(/*breaker_open=*/false);
+    ThrowingPendingWritesStore store;
+    RecordingFanWriter writer;
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(60.0, /*safety_override=*/false);
+    RunWrite(context, channel, eval, writer, store);
+
+    ExpectTrue(EventLogContains(home, "control_loop.sidecar_upsert_failed"),
+               "the persist-failure path emits control_loop.sidecar_upsert_failed");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// FEAT-0010 REQ-WRITESAFE-06: event logging on the persist-failure path is
+// best-effort and must NOT veto the fan write. A throw from event serialization
+// (here, a non-UTF-8 exception message that makes the event JSON dump throw) is
+// swallowed and the computed duty is still applied.
+void TestEventLogThrowDoesNotVetoActuation() {
+    const std::filesystem::path home = MakeTempHome("persist_fail_logthrow");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel =
+        MakeReadyChannel(/*breaker_open=*/false);
+    Utf8ThrowingPendingWritesStore store;
+    RecordingFanWriter writer;
+
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(60.0, /*safety_override=*/false);
+    try {
+        RunWrite(context, channel, eval, writer, store);
+    } catch (...) {
+        // Pre-fix, the pre-actuation event-serialization throw escapes here;
+        // post-fix it is swallowed and control never reaches this point.
+    }
+
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "an event-log throw on the persist-failure path does not veto actuation");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
 }  // namespace
 
 int main() {
@@ -456,6 +547,8 @@ int main() {
     TestSidecarPersistFailureCounterResetsOnSuccess();
     TestSidecarPersistFailureDegradesHealth();
     TestSidecarBaselineSurvivesStaleAndAbsentEntry();
+    TestSidecarPersistFailureEmitsEvent();
+    TestEventLogThrowDoesNotVetoActuation();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " channel write test failure(s)\n";
