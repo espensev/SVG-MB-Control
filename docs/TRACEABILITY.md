@@ -59,6 +59,7 @@ Result values:
 | `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed behind default-off gates. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
 | `FEAT-0008` Watchdog hung-worker recovery | Implemented | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
+| `FEAT-0009` Controller scheduling-priority elevation | Draft (held) | Not buildable; design capture only, held at promotion gate 1 pending the FEAT-0009 §12 A/B contention experiment (whether the cadence degradation under `above`-load is scheduling-bound rather than file-lock bound). |
 
 ## 3. Requirement map
 
@@ -134,6 +135,20 @@ Result values:
 | `REQ-WATCHDOG-02` | T, R | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; review vs the additive `supervisor.*force_terminate*` event types in `RUNTIME_HOME.md`. | pass |
 | `REQ-WATCHDOG-03` | T, R | Same integration test seeds an orphaned `pending_writes.json` entry the force-killed relaunch reconciles to `[]`; review that the escalation leaves the `app_main.cpp` startup `ReconcilePendingWrites` path unchanged. | pass |
 | `REQ-WATCHDOG-04` | T, R | `test_graceful_worker_is_not_force_terminated` (no escalation on a graceful stop) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard / PID-corroboration refusal, single-shot bound); trigger gated on `stop_result == 2`. | pass |
+
+### FEAT-0009 - Controller scheduling-priority elevation
+
+Held at Draft; verification homes are planned, results are `pending (held-Draft)`
+until the FEAT-0009 §12 A/B contention experiment authorizes promotion.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-PRIORITY-01` | T, R | `ProcessPriority` seam unit test (level→class/thread mapping, raise-only, `REALTIME` unreachable) + review of the `app_main.cpp` startup apply site. | pending (held-Draft) |
+| `REQ-PRIORITY-02` | T, R | `process_priority` enum/default config-parse test; review that a non-aggressive value disables the elevation (relaunch-applied, no rebuild). | pending (held-Draft) |
+| `REQ-PRIORITY-03` | M, R | (R) review every inter-tick/retry wait on the elevated thread is a kernel wait (`wait_until` in `control_scheduler.cpp` + backoff `sleep_for` in `json_io.cpp`); (M) hard promotion blocker — worker CPU% near zero between ticks while elevated. | pending (held-Draft) |
+| `REQ-PRIORITY-04` | T, M, R | Recovery-against-elevated-worker test (FEAT-0008 force-terminate at priority 15); (M) live force-terminate of an elevated suspended worker; (R) review that the `--restart` killer process and supervisor are elevated (a raised task `<Priority>` does not propagate to the killer). | pending (held-Draft) |
+| `REQ-PRIORITY-05` | M, R | (M) §12 experiment shows no system-wide responsiveness regression / no `Global\Access_PCI` stall increase; review that no spin is held across the mutex/file-I/O wait. | pending (held-Draft) |
+| `REQ-PRIORITY-06` | M | (M) §12 A/B experiment result; promotion blocked until it shows a scheduling-attributable degradation reduction. | pending (held-Draft) |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 
