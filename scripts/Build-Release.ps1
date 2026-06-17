@@ -486,7 +486,9 @@ Write-Host "Release dir : $ReleaseRoot"
 if ($sourceCommit) {
     Write-Host "Commit      : $sourceCommit"
 }
-Get-ChildItem -LiteralPath $ReleaseRoot -File | Format-Table Name, @{Label='Size'; Expression={'{0:N0} bytes' -f $_.Length}} -AutoSize
+if (Test-Path -LiteralPath $ReleaseRoot) {
+    Get-ChildItem -LiteralPath $ReleaseRoot -File | Format-Table Name, @{Label='Size'; Expression={'{0:N0} bytes' -f $_.Length}} -AutoSize
+}
 Write-Host "SHA256      : $mainExeHash"
 if ($testsRun) {
     Write-Host "Tests       : passed"
