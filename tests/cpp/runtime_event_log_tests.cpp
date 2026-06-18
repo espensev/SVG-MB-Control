@@ -43,7 +43,7 @@ bool Contains(const std::vector<std::string>& lines,
     return false;
 }
 
-void TestRotationAndArchivePrune() {
+void TestRotationUsesActiveStartAndPrunesArchives() {
     using namespace std::chrono_literals;
     const auto runtime_home = MakeTempRuntimeHome("rotate");
     const auto event_path =
@@ -66,7 +66,7 @@ void TestRotationAndArchivePrune() {
 
     std::filesystem::last_write_time(
         event_path,
-        std::filesystem::file_time_type::clock::now() - 2h);
+        std::filesystem::file_time_type::clock::now());
     std::filesystem::last_write_time(
         stale_archive,
         std::filesystem::file_time_type::clock::now() - 48h);
@@ -76,6 +76,7 @@ void TestRotationAndArchivePrune() {
         svg_mb_control::RuntimeEventLogOptions{
             .rotate_hours = 1u,
             .retain_days = 1u,
+            .active_started_at = std::chrono::system_clock::now() - 2h,
         });
 
     svg_mb_control::RuntimeLogEvent new_event;
@@ -186,13 +187,14 @@ void TestConcurrentAppendRotationKeepsWholeLines() {
                "seed append succeeds");
     std::filesystem::last_write_time(
         event_path,
-        std::filesystem::file_time_type::clock::now() - 2h);
+        std::filesystem::file_time_type::clock::now());
 
     svg_mb_control::ConfigureRuntimeEventLogRetention(
         event_path,
         svg_mb_control::RuntimeEventLogOptions{
             .rotate_hours = 1u,
             .retain_days = 1u,
+            .active_started_at = std::chrono::system_clock::now() - 2h,
         });
 
     std::vector<int> append_results(8, 0);
@@ -246,7 +248,7 @@ void TestConcurrentAppendRotationKeepsWholeLines() {
 }  // namespace
 
 int main() {
-    TestRotationAndArchivePrune();
+    TestRotationUsesActiveStartAndPrunesArchives();
     TestWriteAppliedReductionPreservesDiagnostics();
     TestConcurrentAppendRotationKeepsWholeLines();
     return g_failures == 0 ? 0 : 1;

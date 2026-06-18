@@ -115,10 +115,11 @@ Implemented behavior lives at the event append site `AppendRuntimeEvent`
 
 - **Age rotation (mirrors the CSV path).** `control-loop`, `read-loop`, and
   `evidence-log` register their event paths with `log_rotate_hours` and
-  `log_retain_days`. When the active event JSONL is older than the configured
-  rotate age, it is renamed into `logs/archive/<active-stem>_<timestamp>.jsonl`;
-  archives older than the retention window are pruned. A `0` rotate or retain
-  value disables that part of the bound.
+  `log_retain_days`. When the active event JSONL's registered active-start time
+  is older than the configured rotate age, it is renamed into
+  `logs/archive/<active-stem>_<timestamp>.jsonl`; frequent appends do not refresh
+  the deadline. Archives older than the retention window are pruned. A `0`
+  rotate or retain value disables that part of the bound.
 - **Severity-aware persistence.** The control loop samples routine `info`
   `control_loop.write_applied` events (tick 1 and every 240th tick by default).
   Events with `warning`, `error`, or `critical` severity and lifecycle/transition
@@ -234,7 +235,7 @@ Verify legend:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-EVENTRET-01 | pass | `tests/cpp/runtime_event_log_tests.cpp::TestRotationAndArchivePrune` rotates an aged active event JSONL, prunes an expired event archive, and keeps the new active event; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling. Full `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-18 |
+| REQ-EVENTRET-01 | pass | `tests/cpp/runtime_event_log_tests.cpp::TestRotationUsesActiveStartAndPrunesArchives` rotates an aged active event JSONL with a fresh last-write mtime, prunes an expired event archive, and keeps the new active event; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling. Full `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-18 |
 | REQ-EVENTRET-02 | pass | `TestConcurrentAppendRotationKeepsWholeLines` appends concurrently across a rotation boundary, then parses every active/archive line as JSON; implementation review confirms single-call append and in-process rotation/append serialization. | 2026-06-18 |
 | REQ-EVENTRET-03 | pass | `TestWriteAppliedReductionPreservesDiagnostics` drops routine `write_applied` ticks 2/4/5 while retaining tick 1, tick 3, `control_loop.write_failed`, and `control_loop.shutdown`. | 2026-06-18 |
 | REQ-EVENTRET-04 | pass | The event payload schema stays `svg_mb_control.event.v1`; unconfigured append paths keep historical behavior, and `CachedEventCount` remains the active-file count source. Runtime event-log tests and full `Test-LocalCI` passed. | 2026-06-18 |
@@ -246,4 +247,6 @@ age-based rotation, not size-based rotation. Reused existing
 The routine `control_loop.write_applied` policy is sample-first (tick 1 and every
 240th tick by default), not drop-all. The torn-write cause is not root-caused,
 but the implementation bounds this feature's risk by retaining single-call append
-and adding a whole-line rotation/concurrency test.
+and adding a whole-line rotation/concurrency test. Rotation is keyed to the
+registered active-start time, not file last-write mtime, so steady appends do not
+postpone the configured rotation deadline.

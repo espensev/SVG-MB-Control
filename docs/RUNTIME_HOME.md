@@ -331,9 +331,11 @@ while higher values batch mirror writes and disk flushes. Pending mirror rows
 are flushed again on rotation and shutdown. The runtime manifest records the
 active CSV flush policy and interval. Runtime pruning removes old archive CSV
 chunks together with their matching archive manifest sidecar. Event JSONL
-rotation reuses the same `log_rotate_hours` age and `log_retain_days` archive
-retention window. Routine `info` `control_loop.write_applied` events are sampled
-in the control loop to bound growth, while warnings, errors, critical events, and
+rotation reuses the same `log_rotate_hours` active-file age and
+`log_retain_days` archive retention window; the rotation deadline is based on
+when the active event file was registered/opened, not on the file's last-write
+time. Routine `info` `control_loop.write_applied` events are sampled in the
+control loop to bound growth, while warnings, errors, critical events, and
 lifecycle/transition events remain persisted within the retained window.
 
 For offline cleanup, use `svg-mb-control analyze prune`. It defaults to

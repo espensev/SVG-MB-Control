@@ -25,6 +25,10 @@ checkable.
 
 ## 2026-06-18
 
+- **Fixed** — FEAT-0015 event JSONL rotation now uses the registered active-file
+  start time instead of the file's last-write mtime. Frequent control-loop
+  appends no longer postpone `log_rotate_hours`; the regression test keeps the
+  active file mtime fresh and still verifies rotation/archive pruning.
 - **Done** — FEAT-0015/0016 runtime disk-growth retention implemented and
   verified with `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` (CTest + hermetic
   tests green): event JSONL rotates into `logs\archive\*_events_<timestamp>.jsonl`
