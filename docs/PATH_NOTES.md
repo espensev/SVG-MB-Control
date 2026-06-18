@@ -23,6 +23,25 @@ checkable.
 
 ---
 
+## 2026-06-18
+
+- **Added** — issue #4 (runtime disk growth) intake specs, held-Draft: `FEAT-0015`
+  event JSONL retention bound (`REQ-EVENTRET-*`; append-only at
+  `runtime_event_log.cpp:210`, no rotation/retention) and `FEAT-0016` analyze-DB
+  age/size run-purge + reclaim (`REQ-DBRETAIN-*`; `analyze prune` deletes ingested
+  CSV bundles only, no `DELETE FROM runs` by age and no `VACUUM` in `src/`). Both at
+  promotion gate 3 pending maintainer direction; registry + `TRACEABILITY.md` rows
+  added; `tests/test_feature_specs.py` green (5/5). PR #9.
+- **Fixed** — retired the stale top of the 2026-06-14 value-ranked discovery backlog:
+  **HR-2** (#1, "wedged worker has no force-recovery") and the **HR-1** PID-reuse
+  input (#12) are resolved by `FEAT-0008` (Implemented, live-verified 2026-06-16,
+  postdating the doc): `EscalateForceTerminate` is wired at `app_main.cpp:204` on
+  `stop_result == 2` with image-guard/PID-corroboration. Annotated both rows + the
+  plan doc's top recommendation; **HR-4** (DST/backward-clock staleness clamp) stays
+  open. Noted **W7-1** (`log_retain_days==0`/`log_rotate_hours==0` silently disable
+  CSV pruning/rotation, `runtime_csv_archive.cpp:403,452`) as the same disk-growth
+  family to fold into the `FEAT-0016` decision.
+
 ## 2026-06-14
 
 - **Added** — two-pass discovery fan-out over the codebase for reliability/

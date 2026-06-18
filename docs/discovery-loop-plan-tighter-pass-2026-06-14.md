@@ -41,11 +41,13 @@ target — none is authorized by an Accepted + build-authorized FEAT.
 
 ## Top recommendation (do these first)
 
-1. **HR-2 — wedged-but-alive worker has no force-recovery** (G1, high, **verified**). The one
-   state the watchdog claims to own (`stale`/health=2) has no force-kill fallback; the existing
-   recovery-gap audit *misclassifies* it as "Recovered". Highest-ranked verified finding; the
-   load-bearing evidence is a reproducible grep (`TerminateProcess|taskkill|Stop-Process` = none
-   in `src`) plus the audit's own misclassification — well above the noise floor.
+1. **HR-2 — wedged-but-alive worker has no force-recovery** — **RESOLVED by FEAT-0008**
+   (Implemented, live-verified 2026-06-16, postdating this 2026-06-14 doc). A bounded
+   force-terminate escalation now runs on the `stop_result == 2` hung-worker case
+   (`EscalateForceTerminate`, `src/app/app_main.cpp:204`), with image-guard / PID-corroboration.
+   The "`TerminateProcess|taskkill|Stop-Process` = none in `src`" evidence is stale, and the
+   recovery-gap audit's "Recovered" classification is now correct. Retired; no longer the binding
+   hazard. (HR-1 PID-reuse is also closed by the same FEAT-0008 guard; HR-4 DST clamp stays open.)
 2. **EH-2/3/4/5 — silent write/append failures** (G1, **verified**, evidence-integrity).
    Discarded `bool` returns make CSV-row, snapshot-publish, and event-log write failures silent;
    an event-log append failure hides every other error report. One coherent design fix.

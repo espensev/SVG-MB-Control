@@ -15,11 +15,34 @@ Score is relative, for ordering only — not a precision metric.
 
 ---
 
+## Update 2026-06-18 — items resolved since this 2026-06-14 snapshot
+
+This ranking predates work that has since landed. Re-check against `git log`,
+`docs/features/`, and `docs/TRACEABILITY.md` before acting on a row:
+
+- **HR-2 (#1, the overall top hazard) is RESOLVED.** `FEAT-0008` landed a bounded
+  force-terminate escalation (Implemented, live-verified 2026-06-16, postdating
+  this doc): `EscalateForceTerminate` is wired at `src/app/app_main.cpp:204` on the
+  `stop_result == 2` hung-worker case, with image-guard / PID-corroboration. The
+  "`TerminateProcess|taskkill|Stop-Process` = none in `src`" evidence this row rests
+  on is now stale. The recovery-gap audit's "Recovered" classification is correct
+  post-FEAT-0008.
+- **HR-1 (PID-reuse, part of #12) is RESOLVED** by the same FEAT-0008 image-guard /
+  PID-corroboration refusal (`REQ-WATCHDOG-04`). **HR-4** (DST / backward-clock
+  staleness clamp, `runtime_health.cpp`) remains open.
+- **Issue #4 disk-growth** now has intake specs: `FEAT-0015` (event-log retention)
+  and `FEAT-0016` (analyze-DB run-purge). **W7-1 (#15)** — `log_retain_days == 0` /
+  `log_rotate_hours == 0` silently disabling CSV pruning/rotation
+  (`runtime_csv_archive.cpp:403,452`) — is the same disk-growth family and should be
+  reconciled into the `FEAT-0016` decision (guard the zero-config case).
+
+---
+
 ## Tier 1 — Do first (highest value)
 
 | # | Target | Pass | Goal/Sev | Effort | Reach | Score | Why this rank |
 |---|---|---|---|---|---|---|---|
-| 1 | **HR-2** — wedged-but-alive worker has no force-recovery; watchdog only does a cooperative `--restart` that times out | 1 | G1/high | med | live | **1.50** | Live mechanism, fans freeze at last duty; the one state the watchdog claims to own and the audit *misclassifies* as recovered. The binding hazard. |
+| 1 | ~~**HR-2** — wedged-but-alive worker has no force-recovery~~ **RESOLVED by FEAT-0008** (see 2026-06-18 update) | 1 | G1/high | med | live | **1.50** | Was the binding hazard; force-terminate escalation landed + live-verified 2026-06-16. Retired. |
 | 2 | **W2-2** — duplicate channel number silently accepted → two state machines fight one fan + crash-recovery sidecar baseline corruption | 2 | G1/high | **low** | latent | **1.80** | Highest value/effort: a one-pass validator add. Operator-typo trigger keeps it latent, but blast radius (actuation + recovery corruption) is broad. |
 
 ## Tier 2 — High value (G1, verified, clear path)
@@ -35,7 +58,7 @@ Score is relative, for ordering only — not a precision metric.
 | 9 | **HW-01+CONC-3+F1** — SampleCpuCycles affinity path weaker than its own validation probe (no confirm-spin, ignored restore, no RAII, untested) | 1 | G1/med | med | latent | **0.40** | Evidence-correctness for FEAT-0006; default-off/log-only/quarantined so not thermal. |
 | 10 | **W9-1+W9-2** — both tasks `Interactive` logon → no pre-logon recovery; b03aa76 boot-trigger rationale is false (doc-drift masks it) | 2 | G1+G3/med | med | latent | **0.40** | Worst case behind unverifiable auto-logon state; W9-2 doc-drift is load-bearing. |
 | 11 | **F3** — incident-proven SIO init-retry (5×250ms) + transient-read retry (3×75ms) have no automated test | 1 | G1/med | med | live | **0.80** | Shipped reliability code with zero coverage; test, not a defect. |
-| 12 | **HR-1+HR-4** — watchdog liveness defeatable by PID-reuse (HR-1) and backward-clock/DST staleness clamp (HR-4) | 1 | G1/med(HR-4) | med | latent | **0.48** | HR-4's DST fall-back is a once-a-year guaranteed trigger; hardens HR-2's detection inputs. |
+| 12 | **HR-1+HR-4** — watchdog liveness defeatable by PID-reuse (HR-1, **RESOLVED by FEAT-0008**) and backward-clock/DST staleness clamp (**HR-4 still open**) | 1 | G1/med(HR-4) | med | latent | **0.48** | HR-1 PID-reuse closed by the FEAT-0008 image-guard/PID-corroboration; HR-4's DST fall-back is a once-a-year guaranteed trigger, still open. |
 
 ## Tier 3 — Medium value
 
