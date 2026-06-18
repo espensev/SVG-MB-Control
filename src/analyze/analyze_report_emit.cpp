@@ -402,6 +402,16 @@ void EmitJsonReport(const ReportOptions& options,
           {"max", OptToJson(cc.ratio_max)}}},
         {"acquisition_counts", cc.acquisition_counts},
     };
+    const auto& gp = data.gpu_power;
+    doc["gpu_power"] = {
+        {"sample_count", gp.sample_count},
+        {"avg_mw", OptToJson(gp.avg_mw)},
+        {"mw",
+         {{"p50", OptToJson(gp.mw_p50)},
+          {"p90", OptToJson(gp.mw_p90)},
+          {"max", OptToJson(gp.mw_max)}}},
+        {"acquisition_counts", gp.acquisition_counts},
+    };
     doc["robustness"] = {
         {"authority_reasserted", data.authority_reasserted},
         {"write_failures", data.write_failures},
@@ -557,6 +567,13 @@ void EmitTextReport(const ReportOptions& options,
        << " ratio_p90=" << OptToText(cc.ratio_p90)
        << " ratio_max=" << OptToText(cc.ratio_max)
        << " acquisition=" << CountsToText(cc.acquisition_counts) << '\n';
+    const auto& gp = data.gpu_power;
+    os << "gpu_power: samples=" << gp.sample_count
+       << " avg_mw=" << OptToText(gp.avg_mw)
+       << " mw_p50=" << OptToText(gp.mw_p50)
+       << " mw_p90=" << OptToText(gp.mw_p90)
+       << " mw_max=" << OptToText(gp.mw_max)
+       << " acquisition=" << CountsToText(gp.acquisition_counts) << '\n';
     os << "events: severity_counts="
        << CountsToText(data.event_severity_counts)
        << " error_code_counts="

@@ -554,6 +554,50 @@ CpuCyclesSummary SummariseCpuCycles(Database& db, std::int64_t run_id,
     return ComputeCpuCycles(windows, std::move(acquisition_counts), p0_mhz);
 }
 
+// FEAT-0020 (REQ-PWRLOG-02/-05) derived GPU board power. Mirrors the de-dup
+// structure of SummarisePackagePower but with INSTANTANEOUS-sample math:
+// collapse to one row per gpu_power_sample_id (GROUP BY - a no-op under the
+// per-tick read, and the correct de-dup if a future cached cadence mirrors a
+// sample across ticks), keep only samples with a non-null mw, and hand the
+// distinct instantaneous milliwatt values plus the acquisition-state provenance
+// to the pure ComputeGpuPower (mean + percentile, NOT a Sigma-energy integral).
+// The queries reference the v11 GPU power columns, so a pre-v11 DB read by this
+// binary throws "no such column"; the single try/catch degrades that to an empty
+// (unavailable) summary rather than failing the whole report.
+GpuPowerSummary SummariseGpuPower(Database& db, std::int64_t run_id) {
+    std::map<std::string, int> acquisition_counts;
+    std::vector<double> sample_mw;
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(gpu_power_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+        Statement win = db.Prepare(
+            "SELECT MAX(gpu_power_mw) "
+            "FROM tick_samples WHERE run_id = ?1 "
+            "AND gpu_power_sample_id IS NOT NULL AND gpu_power_sample_id > 0 "
+            "AND gpu_power_mw IS NOT NULL "
+            "GROUP BY gpu_power_sample_id");
+        win.BindInt(1, run_id);
+        while (win.Step()) {
+            if (win.ColumnIsNull(0)) {
+                continue;
+            }
+            sample_mw.push_back(win.ColumnDouble(0));
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: gpu-power query failed: " << ex.what() << '\n';
+        return ComputeGpuPower({}, {});
+    }
+    return ComputeGpuPower(std::move(sample_mw),
+                           std::move(acquisition_counts));
+}
+
 // Loads tick_channel_samples for run_id and aggregates per-channel stats:
 // setpoint/boost maxima, reversal count via the kReversalDeadbandPct gate,
 // primary-source counts, and total_writes range. Channels are created

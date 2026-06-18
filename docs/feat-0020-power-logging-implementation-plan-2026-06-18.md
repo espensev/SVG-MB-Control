@@ -17,6 +17,75 @@ by it, and it does not by itself authorize a release publish or live flip.**
 
 ---
 
+## Implementation status (updated 2026-06-18, post-build evaluation)
+
+Tracks B/C/D/E/F are implemented in the working tree and validated by
+`.\scripts\Test-LocalCI.ps1 -KeepBuildDir` on 2026-06-18:
+Release build passed, CTest `13/13`, and hermetic Python tests `169/169`.
+Landed:
+
+- **Track B (GPU side):** `GpuTempSample` power fields (`gpu_reader.h`), a
+  board-power-only NVML read helper on the per-tick thermal-fast path
+  (`gpu_probe.cpp` + `gpu_reader.cpp`), read identity (`gpu_power_sample_id` /
+  `gpu_power_time_ms`), `MergeGpuTelemetry` plumb
+  (`direct_runtime_snapshot.cpp`), `RuntimeGpuSnapshot` fields
+  (`runtime_snapshot.h`), and 5 control-loop CSV columns
+  (`runtime_csv_rows.cpp`).
+- **Track C (analyzer):** schema `v10→v11` (`analyze_db.{h,cpp}` + migration
+  ladder), CSV parse (`analyze_csv.{h,cpp}`), positional INSERT `?42..?46`
+  (`analyze_ingest_db.cpp`), `SummariseGpuPower`/`ComputeGpuPower`
+  mean+p50/p90/max (`analyze_report_queries.cpp`, `analyze_report_data.{h,cpp}`),
+  JSON+text emit (`analyze_report_emit.cpp`).
+- **Track D (operator workflow):** `scripts/Set-EnergyLoggingProfile.ps1`
+  `-Enable/-Disable/-DryRun`, packaged via `scripts/Build-Release.ps1`.
+- **Track E (operator/runtime docs):** `README.md`, `docs/RUNTIME_HOME.md`, and
+  `docs/RUNTIME_LOGGING_AND_EVALUATION.md` describe the new fields and flip
+  workflow.
+- **Track F (tests):** CSV header/row (`csv_rows_tests.cpp`,
+  `test_control_loop.py` incl. no-false-zero), analyzer migration v9→v11 +
+  old-archive degrade + GPU distribution-vs-integral (`test_analyze_ingest.py`),
+  and operator dry-run workflow (`test_energy_logging_profile.py`).
+
+### Hot-path correction closed
+
+The initial implementation routed `sample_thermal_fast` through the full
+`poll_power` helper, which can also issue the undocumented NVAPI per-rail
+topology read. That was corrected before commit: `gpu_probe.cpp` now splits
+`poll_nvml_board_power` from the richer `poll_power` path, and the per-tick
+thermal-fast path calls only the NVML board-power helper. The slower evidence
+tiers still use full `poll_power` where `power_rails` are legitimate evidence.
+
+### Remaining work (not yet done)
+
+1. Release publish remains a separate authorization gate.
+2. Live flip/restart remains a separate live-runtime authorization gate.
+3. Live M-evidence gate (gate 6 / REQ-PWRLOG-04) — separately authorized; capture
+   a same-machine/same-build **pre-flip 250 ms baseline** as the comparator first.
+
+### Build/packaging obligations (folded from the retired build-chain review)
+
+The existing chain is adequate; **no new build entrypoint is needed.** Use
+`.\scripts\Test-LocalCI.ps1 -KeepBuildDir` (= `Build-Release.ps1
+-NoStopProcesses -NoPublish`: build, package to `dist\`, CTest, pytest discovery;
+no `release\` publish, no live-worker stop). The current FEAT-0020 edit areas are
+already in `svg_mb_control_core`, and the C++ tests extend existing registered
+test executables, so **no CMake change is required by the work landed so far.**
+Obligations that trigger only when the corresponding file is added:
+
+- When `scripts\Set-EnergyLoggingProfile.ps1` is created, add it to `$DistExtras`
+  in `scripts\Build-Release.ps1` **in the same change**, and update the README
+  release-output list. Do **not** add it to `$DistExtras` before the script
+  exists — the package helper warns and skips missing extras (noisy, ships
+  nothing).
+- If a **new** C++ source file is added (rather than extending existing
+  runtime/analyzer files), register it in `svg_mb_control_core` in
+  `CMakeLists.txt`. Extending `tests/cpp/csv_rows_tests.cpp` or
+  `tests/cpp/analyze_report_tests.cpp` needs no CMake change.
+- Release publishing (`build-release.ps1` without `-NoPublish`) and any live
+  restart remain separate authorization gates.
+
+---
+
 ## 0. Evaluation — what changed vs the existing plan/spec
 
 The existing plan is **directionally sound**: it keeps power observational (control
@@ -239,15 +308,15 @@ two-phase pattern ("Accepted ≠ build-authorized", per FEAT-0006).
 1. [x] Update `FEAT-0020` spec: marker set `{disabled,unavailable,quarantine}`; §11 → per-tick read + 5-field cadence-agnostic schema; §7 → keep 5 fields (REQ-PWRLOG-02-compliant); §13 wording (gate 6 post-flip). (Track E)
 2. [x] Update D-PWRLOG-1: cadence decision, GPU mean/percentile math, operator Disable/Enable pair, governance inversion; mark **Current** (closes gate 3).
 3. [x] Add REQ-PWRLOG rows to `docs/TRACEABILITY.md`; add FEAT-0020 registry row (closes gate 5).
-4. [ ] Verify `RuntimeSnapshot`/`GpuTempSample` structs; add `power_mw`/`power_source` to the GPU reader and plumb `gpu_power_mw`/`_source`/`_acquisition` onto `RuntimeSnapshot` (sample_id/time_ms come from tick context, not the GPU struct). (Track B; §3.1 schema decided = 5-field)
-5. [ ] Add the single `get_power_usage` read into the `ThermalFast` GPU path (`gpu_probe.cpp:451-457`/`gpu_reader.cpp:446`), `has_nvml`-guarded, nonzero-gated source.
-6. [ ] Plumb power fields through `MergeGpuTelemetry` (`direct_runtime_snapshot.cpp:106-114`).
-7. [ ] Add 5 GPU columns to control-loop header (`runtime_csv_rows.cpp:584`, after `:613`) **and** row (`:634`, in `:665-678`) at identical ordinal positions.
-8. [ ] Analyzer v10→v11: bump `kSchemaVersion`, `kSchemaSql`, migration ladder, CSV parse, positional INSERT, `SummariseGpuPower` (mean/percentile), report assembly, JSON+text emit. (Track C)
-9. [ ] Add `Set-EnergyLoggingProfile.ps1 -Enable/-Disable` (Disable/Enable Safety Revert task + User env + `--restart`). (Track D)
-10. [ ] Tests: CSV header/row, analyzer old-archive degrade + migration + GPU-math-≠-integral, control-identity, script workflow. (Track F)
-11. [ ] Update `README.md`, `RUNTIME_HOME.md`, `RUNTIME_LOGGING_AND_EVALUATION.md`. (Track E)
-12. [ ] Run `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` + `python tests/test_feature_specs.py` → all green.
+4. [x] Verify `RuntimeSnapshot`/`GpuTempSample` structs; add `power_mw`/`power_source` to the GPU reader and plumb `gpu_power_mw`/`_source`/`_acquisition` onto `RuntimeSnapshot`. (Track B)
+5. [x] Add the single NVML `get_power_usage` read into the `ThermalFast` GPU path via the board-power-only helper (no per-tick NVAPI topology read). (Track B)
+6. [x] Plumb power fields through `MergeGpuTelemetry` (`direct_runtime_snapshot.cpp`). (Track B)
+7. [x] Add 5 GPU columns to control-loop header **and** row at identical ordinal positions. (Track B)
+8. [x] Analyzer v10→v11: bump `kSchemaVersion`, `kSchemaSql`, migration ladder, CSV parse, positional INSERT, `SummariseGpuPower` (mean/percentile), report assembly, JSON+text emit. (Track C)
+9. [x] Add `Set-EnergyLoggingProfile.ps1 -Enable/-Disable` (Disable/Enable Safety Revert task + User env + restart) **and packaging** (`$DistExtras`/README). (Track D)
+10. [x] Tests: CSV header/row, analyzer old-archive degrade + migration + GPU-math-≠-integral, control-identity (response source stays `primary_curve`), and operator dry-run workflow. (Track F)
+11. [x] Update `README.md`, `RUNTIME_HOME.md`, `RUNTIME_LOGGING_AND_EVALUATION.md`. (Track E)
+12. [x] Run `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` + `python tests/test_feature_specs.py` → all green (covered by full local CI; CTest `13/13`, hermetic Python `169/169`).
 13. [ ] **STOP — request release/live authorization**. Repo-local implementation is authorized by accepted FEAT-0020, but release publishing and live flip remain separate.
 14. [ ] **STOP — request explicit live-runtime authorization** (`AGENTS.md` §Live Runtime Safety) before any worker restart/flip.
 15. [ ] Capture pre-flip 250 ms baseline → run `-Enable` profile + `--restart` → capture post-flip window (CPU energy sample ids present, GPU power present, `loop_work_duration_ms`/health within baseline, no power-derived response source, old archives still ingest).

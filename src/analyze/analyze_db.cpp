@@ -79,6 +79,11 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     cpu_aperf_delta REAL,
     cpu_mperf_delta REAL,
     cpu_cycles_acquisition TEXT,
+    gpu_power_sample_id INTEGER,
+    gpu_power_time_ms REAL,
+    gpu_power_mw REAL,
+    gpu_power_source TEXT,
+    gpu_power_acquisition TEXT,
     PRIMARY KEY (run_id, tick_count)
 );
 
@@ -641,6 +646,38 @@ void MigrateSchema(Database& db) {
                 "TEXT");
         }
         SetSchemaVersion(db, 10);
+    }
+    if (version <= 10) {
+        // FEAT-0020 (REQ-PWRLOG-02/-05): additive nullable GPU board-power
+        // evidence columns mirrored from the control-loop CSV
+        // (gpu_power_sample_id, gpu_power_time_ms, gpu_power_mw,
+        // gpu_power_source, gpu_power_acquisition). Old archives lack them;
+        // ingest binds NULL and the report summary skips absent samples (no
+        // false zero). gpu_power_mw is INSTANTANEOUS board milliwatts, not an
+        // accumulating energy counter, so the report derives mean/percentile,
+        // not the CPU Sigma-energy/Sigma-window integral.
+        if (!ColumnExists(db, "tick_samples", "gpu_power_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_sample_id "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_time_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_time_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_mw")) {
+            db.Exec("ALTER TABLE tick_samples ADD COLUMN gpu_power_mw REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_source")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_source TEXT");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_acquisition")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_acquisition "
+                "TEXT");
+        }
+        SetSchemaVersion(db, 11);
     }
 }
 

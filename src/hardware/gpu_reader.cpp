@@ -8,7 +8,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdint>
 #include <exception>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -137,6 +140,30 @@ std::int64_t GetInt64EnvOrDefault(const char* name, std::int64_t fallback) {
     }
 }
 
+// Monotonic milliseconds since the first call, used to stamp the GPU power read
+// time (FEAT-0020 read-timestamp). The origin is process-wide so consecutive
+// rows are directly comparable; the absolute value is not wall-clock.
+std::int64_t MonotonicGpuReadMs() {
+    static const auto origin = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - origin)
+        .count();
+}
+
+// FEAT-0020: finalize the GPU power read identity. A fresh nonzero read
+// (acquisition == "nvml") advances the per-reader counter and stamps the read
+// timestamp; any other outcome leaves the counter where it is (a repeated
+// sample id makes a stale/missing value explicit) and blanks the timestamp.
+void FinalizeGpuPowerIdentity(GpuTempSample& out, std::uint64_t& counter) {
+    if (out.power_acquisition == "nvml") {
+        out.power_sample_id = ++counter;
+        out.power_time_ms = static_cast<double>(MonotonicGpuReadMs());
+    } else {
+        out.power_sample_id = counter;
+        out.power_time_ms = std::numeric_limits<double>::quiet_NaN();
+    }
+}
+
 GpuTempSample MakeSimGpuTempSample() {
     GpuTempSample out;
     out.available = true;
@@ -146,6 +173,19 @@ GpuTempSample MakeSimGpuTempSample() {
         "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C", 80.75);
     out.gpu_name = GetEnvOrDefault(
         "SVG_MB_CONTROL_SIM_GPU_NAME", "Simulated NVIDIA GPU");
+    // FEAT-0020 simulated GPU board power. Default 0 means "no power reading"
+    // so GPU-thermal sim tests that do not opt in keep blank power (no false
+    // zero); a nonzero value simulates a fresh "nvml" board-power read.
+    const std::uint32_t sim_power_mw = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_NVML_POWER_MW", 0u);
+    if (sim_power_mw != 0u) {
+        out.power_mw = static_cast<double>(sim_power_mw);
+        out.power_source = GetEnvOrDefault(
+            "SVG_MB_CONTROL_SIM_GPU_POWER_SOURCE", "nvml");
+        out.power_acquisition = "nvml";
+    } else {
+        out.power_acquisition = "unavailable";
+    }
     return out;
 }
 
@@ -389,6 +429,9 @@ struct GpuReader::Impl {
     std::string init_warning;
     std::string gpu_name;
     GpuTempSample last_sample;
+    // FEAT-0020 GPU board-power read counter (advances only on a fresh nonzero
+    // read; see FinalizeGpuPowerIdentity).
+    std::uint64_t power_sample_counter = 0u;
 };
 
 GpuReader::GpuReader() : impl_(std::make_unique<Impl>()) {
@@ -426,13 +469,20 @@ const GpuTempSample& GpuReader::Sample() {
     out.hotspot_c = 0.0;
     out.gpu_name.clear();
     out.last_warning.clear();
+    // FEAT-0020: default to no live power reading; the success path below sets
+    // "nvml". last_sample is reused across ticks, so reset these explicitly.
+    out.power_acquisition = "unavailable";
+    out.power_source = "unknown";
+    out.power_mw = std::numeric_limits<double>::quiet_NaN();
 
     if (SimGpuEnabled()) {
         out = MakeSimGpuTempSample();
+        FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
         return out;
     }
     if (SimGpuUnavailable()) {
         out.last_warning = "GPU reader disabled by environment";
+        FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
         return out;
     }
 
@@ -440,11 +490,13 @@ const GpuTempSample& GpuReader::Sample() {
         out.last_warning = impl_->init_warning.empty()
             ? std::string("not initialized")
             : impl_->init_warning;
+        FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
         return out;
     }
     GpuSnapshot snap;
     if (!impl_->reader.sample(0, snap, GpuSampleMode::ThermalFast)) {
         out.last_warning = "sample failed";
+        FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
         return out;
     }
     out.available = true;
@@ -452,6 +504,15 @@ const GpuTempSample& GpuReader::Sample() {
     out.memjn_c = snap.memjn_c;
     out.hotspot_c = snap.hotspot_c;
     out.gpu_name = impl_->gpu_name;
+    // FEAT-0020 board power from the same thermal-fast sample (poll_power is
+    // included in sample_thermal_fast). nonzero-gated: a zero reading means no
+    // live board power (no false zero), so it stays "unavailable".
+    if (snap.nvml_power_mw != 0u) {
+        out.power_mw = static_cast<double>(snap.nvml_power_mw);
+        out.power_source = gpu_power_source_name(snap.power_source);
+        out.power_acquisition = "nvml";
+    }
+    FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
     return out;
 }
 
@@ -502,6 +563,7 @@ struct GpuReader::Impl {
     std::string init_warning =
         "gpu_telemetry not linked at build time";
     GpuTempSample last_sample;
+    std::uint64_t power_sample_counter = 0u;
 };
 
 GpuReader::GpuReader() : impl_(std::make_unique<Impl>()) {}
@@ -521,17 +583,26 @@ const GpuTempSample& GpuReader::Sample() {
     out.hotspot_c = 0.0;
     out.gpu_name.clear();
     out.last_warning.clear();
+    // FEAT-0020: GPU telemetry is not built into this binary, so board power is
+    // structurally "disabled" (distinct from an enabled-build "unavailable").
+    out.power_acquisition = "disabled";
+    out.power_source = "unknown";
+    out.power_mw = std::numeric_limits<double>::quiet_NaN();
 
     if (SimGpuEnabled()) {
         out = MakeSimGpuTempSample();
+        FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
         return out;
     }
     if (SimGpuUnavailable()) {
         out.last_warning = "GPU reader disabled by environment";
+        out.power_acquisition = "unavailable";
+        FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
         return out;
     }
 
     out.last_warning = init_warning();
+    FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
     return out;
 }
 

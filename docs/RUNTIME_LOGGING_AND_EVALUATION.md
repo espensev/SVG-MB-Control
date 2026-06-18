@@ -141,7 +141,9 @@ logging replacement.
   adds **read-only AMD RAPL package energy** (off by default; enable with
   `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`): `cpu_pkg_energy_delta_uj` over
   `cpu_power_window_ms`, keyed by `cpu_power_sample_id`, with provenance in
-  `cpu_pkg_energy_acquisition` (`disabled`/`unavailable`/`quarantine`/`validated`).
+  `cpu_pkg_energy_acquisition` (the live loop emits `disabled`/`unavailable`/
+  `quarantine`; `validated` is applied post-capture by the promotion script, never
+  by the running worker).
   Average package power is derived, not logged:
   `(cpu_pkg_energy_delta_uj / 1e6) / (cpu_power_window_ms / 1000)` over distinct
   sample ids — heat dissipated (average package watts); pairing it with fan RPM
@@ -160,6 +162,22 @@ logging replacement.
   energy and cycle windows carry separate sample ids and no join rule is
   specified yet (see `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
   `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
+- The FEAT-0020 layer adds **read-only GPU board power** to the same standard
+  control-loop CSV: `gpu_power_mw` (instantaneous NVML board milliwatts), keyed by
+  `gpu_power_sample_id` and stamped with `gpu_power_time_ms` (the GPU power read
+  timestamp), with the source in `gpu_power_source` (`nvml`/`unknown`) and
+  provenance in `gpu_power_acquisition` (`disabled`/`unavailable`/`nvml`). It is
+  one `nvmlDeviceGetPowerUsage` read added to the per-tick GPU thermal sample (not
+  the foreground `evidence-log` path) and is logging-only — never a control input.
+  Because the value is instantaneous (not an accumulating energy counter),
+  `analyze report` summarizes it as mean / p50 / p90 / max over distinct
+  `gpu_power_sample_id` samples (schema v11), **not** the time-weighted
+  Sigma-energy integral used for CPU package power. GPU power needs no env gate; it
+  records whenever NVML returns a nonzero reading. To turn on the comparable CPU
+  package-energy columns in the standard loop (and have the profile survive the
+  boot/logon safety revert), use `scripts/Set-EnergyLoggingProfile.ps1 -Enable` /
+  `-Disable` (`-DryRun` previews without touching live runtime); the live flip
+  needs explicit live-runtime authorization.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in

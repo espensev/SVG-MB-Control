@@ -39,6 +39,19 @@ struct RuntimeGpuSnapshot {
     double hotspot_c = 0.0;
     std::string gpu_name;
     std::string last_warning;
+
+    // FEAT-0020 read-only GPU board power (REQ-PWRLOG-02), copied from the GPU
+    // reader's per-tick thermal+power sample. Logging-only; never a control
+    // input. Carried in-memory to the control-loop CSV; not serialized to the
+    // snapshot JSON sidecar. acquisition: "disabled" | "unavailable" | "nvml".
+    // sample_id advances only on a fresh nonzero NVML read (a repeated id marks
+    // a stale/mirrored value); time_ms/mw are blank (NaN) when no live read, so
+    // no false zero is emitted.
+    std::string power_acquisition = "disabled";
+    std::string power_source = "unknown";
+    std::uint64_t power_sample_id = 0u;
+    double power_time_ms = std::numeric_limits<double>::quiet_NaN();
+    double power_mw = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct RuntimeSnapshot {

@@ -307,7 +307,16 @@ Behavior:
   evidence (FEAT-0006) from which `analyze report` derives the cycle-weighted
   APERF/MPERF ratio over distinct sample-id windows — and effective frequency
   (ratio × P0) only when `--p0-mhz <mhz>` supplies the base frequency, since
-  no logged field records P0.
+  no logged field records P0. The nullable `tick_samples.gpu_power_sample_id` /
+  `gpu_power_time_ms` / `gpu_power_mw` / `gpu_power_source` /
+  `gpu_power_acquisition` columns carry the read-only GPU board-power evidence
+  (FEAT-0020) from which `analyze report` derives mean / p50 / p90 / max over
+  distinct sample-id samples — instantaneous board power, not an energy integral.
+  GPU power records automatically on the standard loop whenever NVML returns a
+  reading; to also enable the comparable CPU package-energy columns there, run
+  `scripts\Set-EnergyLoggingProfile.ps1 -Enable` (and `-Disable` to revert,
+  `-DryRun` to preview) — it sets `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled` and
+  keeps the profile from being undone by the boot/logon energy safety-revert task.
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.

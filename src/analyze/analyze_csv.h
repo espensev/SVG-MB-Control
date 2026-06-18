@@ -90,6 +90,15 @@ struct ParsedTickRow {
     std::optional<double> cpu_aperf_delta;
     std::optional<double> cpu_mperf_delta;
     std::optional<std::string> cpu_cycles_acquisition;
+    // FEAT-0020 read-only GPU board-power evidence (nullable; blank in old
+    // archives and when there is no live nonzero NVML read). gpu_power_mw is
+    // instantaneous board milliwatts (not an energy counter), summarized as
+    // mean/percentile by the report.
+    std::optional<std::int64_t> gpu_power_sample_id;
+    std::optional<double> gpu_power_time_ms;
+    std::optional<double> gpu_power_mw;
+    std::optional<std::string> gpu_power_source;
+    std::optional<std::string> gpu_power_acquisition;
     std::vector<ParsedFanSample> fans;
     std::vector<ParsedChannelSample> channels;
 };

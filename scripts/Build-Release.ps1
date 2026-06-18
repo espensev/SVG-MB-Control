@@ -73,6 +73,7 @@ $DistExtras          = @(
     'docs'
     'scripts\Start-EvalDashboard.ps1'
     'scripts\Common-Python.ps1'
+    'scripts\Set-EnergyLoggingProfile.ps1'
     'tools\eval_dashboard'
     'config\control.example.json'
     'config\machines'

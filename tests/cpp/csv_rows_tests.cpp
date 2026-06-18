@@ -94,6 +94,14 @@ svg_mb_control::RuntimeSnapshot MakeSnapshot() {
     snapshot.gpu.available = true;
     snapshot.gpu.gpu_name = "SimGPU";
     snapshot.gpu.core_c = 60.0;
+    // FEAT-0020 read-only GPU board power (control-loop CSV only). A fresh
+    // nonzero NVML read: sample_id advanced, read timestamp stamped, source and
+    // acquisition both "nvml".
+    snapshot.gpu.power_sample_id = 4u;
+    snapshot.gpu.power_time_ms = 1234.0;
+    snapshot.gpu.power_mw = 275000.0;
+    snapshot.gpu.power_source = "nvml";
+    snapshot.gpu.power_acquisition = "nvml";
     for (std::uint32_t channel : {0u, 2u, 6u}) {
         RuntimeFanSnapshot& fan = UpsertRuntimeFanChannel(snapshot, channel);
         fan.channel = channel;
@@ -276,6 +284,24 @@ void TestControlLoopAligned() {
     ExpectField(header_fields, row_fields, "channel1_observed_temp_c", "",
                 "control-loop row");
     ExpectField(header_fields, row_fields, "channel6_correction_pct", "",
+                "control-loop row");
+    // FEAT-0020 GPU board power columns (control-loop only; not in read-loop or
+    // evidence-log headers). Header/row alignment is already covered by
+    // ExpectAligned above; these lock the names, placement, and value format.
+    ExpectContains(header, "gpu_power_sample_id", "control-loop header");
+    ExpectContains(header, "gpu_power_time_ms", "control-loop header");
+    ExpectContains(header, "gpu_power_mw", "control-loop header");
+    ExpectContains(header, "gpu_power_source", "control-loop header");
+    ExpectContains(header, "gpu_power_acquisition", "control-loop header");
+    ExpectField(header_fields, row_fields, "gpu_power_sample_id", "4",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_power_time_ms", "1234.000",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_power_mw", "275000.000",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_power_source", "nvml",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_power_acquisition", "nvml",
                 "control-loop row");
 }
 

@@ -610,7 +610,12 @@ std::string BuildControlLoopCsvHeader() {
            << ",cpu_cycles_window_ms"
            << ",cpu_aperf_delta"
            << ",cpu_mperf_delta"
-           << ",cpu_cycles_acquisition";
+           << ",cpu_cycles_acquisition"
+           << ",gpu_power_sample_id"
+           << ",gpu_power_time_ms"
+           << ",gpu_power_mw"
+           << ",gpu_power_source"
+           << ",gpu_power_acquisition";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
@@ -676,6 +681,16 @@ std::string BuildControlLoopCsvRow(
     AppendCsvFieldDouble(csv, snapshot.cpu_aperf_delta);
     AppendCsvFieldDouble(csv, snapshot.cpu_mperf_delta);
     AppendCsvFieldString(csv, snapshot.cpu_cycles_acquisition);
+    // FEAT-0020 read-only GPU board power (from snapshot.gpu, logging-only;
+    // never a control input). sample_id blank when 0 (no sample yet / not
+    // advanced on a skipped or failed read); time_ms/mw blank (NaN) when there
+    // is no live read; source/acquisition are always state strings.
+    AppendCsvFieldIf(csv, snapshot.gpu.power_sample_id != 0u,
+                     snapshot.gpu.power_sample_id);
+    AppendCsvFieldDouble(csv, snapshot.gpu.power_time_ms);
+    AppendCsvFieldDouble(csv, snapshot.gpu.power_mw);
+    AppendCsvFieldString(csv, snapshot.gpu.power_source);
+    AppendCsvFieldString(csv, snapshot.gpu.power_acquisition);
 
     static const RuntimeControlChannelLogState kEmptyChannel{};
     for (std::uint32_t channel = 0u;

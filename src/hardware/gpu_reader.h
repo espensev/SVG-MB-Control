@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -20,6 +21,18 @@ struct GpuTempSample {
     double hotspot_c = 0.0;      // 0.0 when sensor absent (e.g., RTX 5090)
     std::string gpu_name;
     std::string last_warning;
+
+    // FEAT-0020 read-only GPU board power (logging-only; never a control input),
+    // produced on the per-tick thermal sample. acquisition: "disabled" (GPU
+    // telemetry not built in) | "unavailable" (no live nonzero read) | "nvml".
+    // power_mw / power_time_ms are blank (NaN) unless a fresh nonzero NVML read
+    // succeeded; power_sample_id advances only on such a read (a repeated id
+    // marks a stale value), so no false zero is emitted.
+    std::string power_acquisition = "disabled";
+    std::string power_source = "unknown";
+    std::uint64_t power_sample_id = 0u;
+    double power_time_ms = std::numeric_limits<double>::quiet_NaN();
+    double power_mw = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct GpuEvidenceFanState {

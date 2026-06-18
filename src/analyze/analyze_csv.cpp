@@ -312,6 +312,16 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         GetField(fields, header, "cpu_mperf_delta"));
     row.cpu_cycles_acquisition = AsText(
         GetField(fields, header, "cpu_cycles_acquisition"));
+    row.gpu_power_sample_id = AsInt(
+        GetField(fields, header, "gpu_power_sample_id"));
+    row.gpu_power_time_ms = AsDouble(
+        GetField(fields, header, "gpu_power_time_ms"));
+    row.gpu_power_mw = AsDouble(
+        GetField(fields, header, "gpu_power_mw"));
+    row.gpu_power_source = AsText(
+        GetField(fields, header, "gpu_power_source"));
+    row.gpu_power_acquisition = AsText(
+        GetField(fields, header, "gpu_power_acquisition"));
 
     for (std::uint32_t fi = 0u; fi < 64u; ++fi) {
         const std::string prefix = "fan" + std::to_string(fi) + "_";

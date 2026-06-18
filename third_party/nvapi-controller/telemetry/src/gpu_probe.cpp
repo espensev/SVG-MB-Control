@@ -63,6 +63,7 @@ struct GpuProbe::Impl {
     /* ---- Polling helpers (shared across sample tiers) ---- */
     void poll_thermals_undoc(const GpuBackendContext& g, GpuSnapshot& snap) const;
     void poll_common_medium(const GpuBackendContext& g, GpuSnapshot& snap) const;
+    void poll_nvml_board_power(const GpuBackendContext& g, GpuSnapshot& snap) const;
     void poll_power(const GpuBackendContext& g, GpuSnapshot& snap) const;
     void poll_fans(const GpuBackendContext& g, GpuSnapshot& snap) const;
     void poll_slow_data(const GpuBackendContext& g, GpuSnapshot& snap) const;
@@ -181,14 +182,19 @@ void GpuProbe::Impl::poll_common_medium(const GpuBackendContext& g,
     }
 }
 
-void GpuProbe::Impl::poll_power(const GpuBackendContext& g,
-                                 GpuSnapshot& snap) const {
-    /* NVML board total */
+void GpuProbe::Impl::poll_nvml_board_power(const GpuBackendContext& g,
+                                           GpuSnapshot& snap) const {
     if (g.info.has_nvml) {
         nvml_.get_power_usage(g.nvml_device, snap.nvml_power_mw);
         if (snap.nvml_power_mw != 0)
             snap.power_source = GpuPowerSource::Nvml;
     }
+}
+
+void GpuProbe::Impl::poll_power(const GpuBackendContext& g,
+                                 GpuSnapshot& snap) const {
+    /* NVML board total */
+    poll_nvml_board_power(g, snap);
 
     /* Undoc NVAPI per-rail topology.
      * PowerTopologyGetStatus (0xEDCF624E) returns per-domain power breakdowns,
@@ -453,6 +459,12 @@ bool GpuProbe::sample_thermal_fast(int gpu_index, GpuSnapshot& snap) const {
     auto& g = impl_->gpus_[gpu_index];
     snap.gpu_index = gpu_index;
     impl_->poll_thermals_undoc(g, snap);
+    // svg-mb-control FEAT-0020: include one has_nvml-guarded, nonzero-gated
+    // nvmlDeviceGetPowerUsage read so the control loop's per-tick thermal sample
+    // also carries board power (snap.nvml_power_mw / power_source). This fast
+    // path intentionally skips poll_power's optional NVAPI per-rail topology and
+    // performs only the single NVML board-power read used by GpuReader::Sample().
+    impl_->poll_nvml_board_power(g, snap);
     return true;
 }
 

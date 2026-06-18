@@ -20,9 +20,9 @@ implementation plan has outpaced the governing FEAT-0020 spec and D-PWRLOG-1
 decision record.
 
 Resolution update: this review was applied to FEAT-0020 v0.2 and D-PWRLOG-1 on
-2026-06-18. Use `docs/feat-0020-actionability-plan-2026-06-18.md` for the
-current work split and stop points. This note remains as the critical record of
-the issues that had to be reconciled.
+2026-06-18. Use `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`
+for the current work split, implementation status, and stop points. This note
+remains as the critical record of the issues that had to be reconciled.
 
 ## Findings
 

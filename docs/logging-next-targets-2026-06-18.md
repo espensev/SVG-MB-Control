@@ -7,7 +7,7 @@
 **Companion docs:** `docs/as-is-logging-opportunities-2026-06-18.md`,
 `docs/power-logging-flip-plan-2026-06-18.md`,
 `docs/feat-0020-critical-evaluation-2026-06-18.md`,
-`docs/feat-0020-actionability-plan-2026-06-18.md`,
+`docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`,
 `docs/features/FEAT-0020-standard-control-loop-power-logging.md`,
 `docs/features/FEAT-0021-standard-control-loop-gpu-workload-context-logging.md`
 

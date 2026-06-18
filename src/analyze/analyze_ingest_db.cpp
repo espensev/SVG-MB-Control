@@ -169,10 +169,12 @@ void InsertTickRows(Database& db,
         "cpu_power_sample_id, cpu_power_window_ms, cpu_pkg_energy_delta_uj,"
         "cpu_pkg_energy_acquisition,"
         "cpu_cycles_sample_id, cpu_cycles_window_ms, cpu_aperf_delta,"
-        "cpu_mperf_delta, cpu_cycles_acquisition"
+        "cpu_mperf_delta, cpu_cycles_acquisition,"
+        "gpu_power_sample_id, gpu_power_time_ms, gpu_power_mw,"
+        "gpu_power_source, gpu_power_acquisition"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,"
         "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,"
-        "?33,?34,?35,?36,?37,?38,?39,?40,?41)");
+        "?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46)");
 
     Statement fan = db.Prepare(
         "INSERT INTO tick_fan_samples("
@@ -225,6 +227,11 @@ void InsertTickRows(Database& db,
         tick.BindOptionalDouble(39, row.cpu_aperf_delta);
         tick.BindOptionalDouble(40, row.cpu_mperf_delta);
         tick.BindOptionalText(41, row.cpu_cycles_acquisition);
+        tick.BindOptionalInt(42, row.gpu_power_sample_id);
+        tick.BindOptionalDouble(43, row.gpu_power_time_ms);
+        tick.BindOptionalDouble(44, row.gpu_power_mw);
+        tick.BindOptionalText(45, row.gpu_power_source);
+        tick.BindOptionalText(46, row.gpu_power_acquisition);
         tick.Step();
         tick.Reset();
 

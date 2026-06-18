@@ -111,6 +111,12 @@ void MergeGpuTelemetry(RuntimeSnapshot& snapshot,
     snapshot.gpu.hotspot_c = gpu_sample.hotspot_c;
     snapshot.gpu.gpu_name = gpu_sample.gpu_name;
     snapshot.gpu.last_warning = gpu_sample.last_warning;
+    // FEAT-0020 read-only GPU board power (logging-only; never a control input).
+    snapshot.gpu.power_acquisition = gpu_sample.power_acquisition;
+    snapshot.gpu.power_source = gpu_sample.power_source;
+    snapshot.gpu.power_sample_id = gpu_sample.power_sample_id;
+    snapshot.gpu.power_time_ms = gpu_sample.power_time_ms;
+    snapshot.gpu.power_mw = gpu_sample.power_mw;
 }
 
 void MergeFanTelemetry(RuntimeSnapshot& snapshot,

@@ -361,6 +361,9 @@ plus:
   `cpu_cycles_window_ms`, `cpu_aperf_delta`, `cpu_mperf_delta`, and
   `cpu_cycles_acquisition` (APERF/MPERF read per-core; the analyzer derives
   effective frequency, not logged)
+- GPU board-power fields (additive, FEAT-0020, read-only, control-loop CSV
+  only): `gpu_power_sample_id`, `gpu_power_time_ms`, `gpu_power_mw`,
+  `gpu_power_source`, and `gpu_power_acquisition`
 - per-channel observed temperature, setpoint, feedforward demand, correction,
   thermal-pressure boost, primary temperature source, write count,
   active-write flag, and baseline flag
@@ -390,6 +393,20 @@ longer than ~3 s, or an implied average power above a 400 W ceiling) — no fals
 zero. Average package power is **not logged**; it is derived later as
 `(cpu_pkg_energy_delta_uj / 1e6) / (cpu_power_window_ms / 1000)` over distinct
 sample ids. Older archives without these columns remain valid (name-bound).
+
+The GPU board-power fields (FEAT-0020) come from one NVML
+`nvmlDeviceGetPowerUsage` read added to the existing per-tick GPU thermal sample
+(no separate `evidence-log` pass). They are logging-only and are never a control
+input. `gpu_power_acquisition` is `nvml` on a fresh nonzero read, `unavailable`
+when the read returns zero, NVML is absent, or the GPU is unavailable, or
+`disabled` when the binary was built without GPU telemetry.
+`gpu_power_mw` (instantaneous board milliwatts) and `gpu_power_time_ms` (the GPU
+power read timestamp, monotonic ms) are blank when there is no live read — no
+false zero. `gpu_power_sample_id` advances only on a fresh nonzero read, so a
+repeated id marks a stale/mirrored value; the analyzer de-duplicates on the
+distinct id and summarizes the instantaneous samples as mean / p50 / p90 / max,
+**not** the time-weighted energy integral used for CPU package power. Older
+archives without these columns remain valid (name-bound).
 
 The 2026-06-09 rebuild/publish confirms these columns in the live header: the
 session `2026-06-09T02:32:40` (git_hash `dd2c02214128`, `256` columns) contains
