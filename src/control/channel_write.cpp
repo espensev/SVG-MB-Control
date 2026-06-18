@@ -357,10 +357,16 @@ void TryApplyChannelSetpoint(
     entry.started_iso = std::string(eval_iso);
     entry.child_pid = 0u;
     try {
-        pending_store.Upsert(entry);
-        // Persist succeeded: the crash-recovery record is current and the store
-        // has self-healed, so clear any prior persist-failure degradation.
-        channel.consecutive_sidecar_persist_failures = 0u;
+        const bool persisted = pending_store.Upsert(entry);
+        // FEAT-0019 (REQ-WRITEHOT-06): clear the persist-failure degradation only
+        // when an actual synchronous persist ran (persisted == true). A deferred
+        // same-baseline Upsert (persisted == false) performs no write, so it must
+        // not falsely self-heal a still-missing activation record; tick_runner
+        // clears the counter via ClearSidecarPersistFailures once a successful
+        // end-of-tick Flush() puts that record on disk.
+        if (persisted) {
+            channel.consecutive_sidecar_persist_failures = 0u;
+        }
     } catch (const std::exception& e) {
         // FEAT-0010 (REQ-WRITESAFE-01/02): a sidecar persist failure must NOT
         // veto the fan write. PendingWritesStore::Upsert already updated its
@@ -441,6 +447,12 @@ void TryApplyChannelSetpoint(
             .setpoint_pct = setpoint,
             .success = true,
         });
+}
+
+void ClearSidecarPersistFailures(std::vector<ChannelState>& channels) {
+    for (ChannelState& channel : channels) {
+        channel.consecutive_sidecar_persist_failures = 0u;
+    }
 }
 
 }  // namespace svg_mb_control

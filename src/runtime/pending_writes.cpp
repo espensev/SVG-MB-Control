@@ -163,13 +163,17 @@ void PendingWritesStore::Adopt(std::vector<PendingWriteEntry> entries) {
     dirty_ = false;
 }
 
-void PendingWritesStore::Upsert(const PendingWriteEntry& entry) {
+bool PendingWritesStore::Upsert(const PendingWriteEntry& entry) {
     if (!loaded_) {
         Load();
     }
     bool replaced = false;
+    bool baseline_changed = false;
     for (auto& existing : entries_) {
         if (existing.channel == entry.channel) {
+            baseline_changed =
+                existing.baseline_duty_raw != entry.baseline_duty_raw ||
+                existing.baseline_mode_raw != entry.baseline_mode_raw;
             existing = entry;
             replaced = true;
             break;
@@ -178,11 +182,21 @@ void PendingWritesStore::Upsert(const PendingWriteEntry& entry) {
     if (!replaced) {
         entries_.push_back(entry);
     }
-    // Upsert MUST persist synchronously: the control loop relies on the
-    // sidecar reflecting any in-flight fan write before ApplyDuty runs so
-    // that a crash mid-write leaves a record from which recovery can
-    // restore the captured baseline.
-    Persist();
+    // FEAT-0019 (REQ-WRITEHOT-01/04): persist synchronously only when the
+    // recovery-relevant identity changes — a new channel entry (first
+    // activation) or a changed captured baseline. ReconcilePendingWrites
+    // restores from (channel, baseline_duty_raw, baseline_mode_raw) only and
+    // never reads target_pct, so a same-baseline target_pct/hold/started_iso
+    // change does not need a synchronous write before ApplyDuty: it marks the
+    // store dirty and the existing end-of-tick Flush() writes it (off the hot
+    // path). The in-memory entry is updated above either way, so the FEAT-0010
+    // non-vetoing actuation path is unaffected.
+    if (!replaced || baseline_changed) {
+        Persist();  // clears dirty_; throws on filesystem failure
+        return true;
+    }
+    dirty_ = true;
+    return false;
 }
 
 void PendingWritesStore::QueueRemove(std::uint32_t channel) {
@@ -201,11 +215,12 @@ void PendingWritesStore::QueueRemove(std::uint32_t channel) {
     }
 }
 
-void PendingWritesStore::Flush() {
+bool PendingWritesStore::Flush() {
     if (!dirty_) {
-        return;
+        return false;
     }
-    Persist();
+    Persist();  // clears dirty_; throws on filesystem failure
+    return true;
 }
 
 void PendingWritesStore::Persist() {
