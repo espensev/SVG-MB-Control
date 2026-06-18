@@ -1,7 +1,7 @@
 # FEAT-0020 implementation plan — standard control-loop power logging (CPU + GPU)
 
 **Project:** svg-mb-control
-**Status:** Implementation-authorized plan — live flip not authorized
+**Status:** Implemented + live flip executed 2026-06-18 (gate 6 closed; PR [#20](https://github.com/espensev/SVG-MB-Control/pull/20))
 **Updated:** 2026-06-18
 **Companion spec:** `docs/features/FEAT-0020-standard-control-loop-power-logging.md`
 **Decision record:** `docs/power-logging-flip-plan-2026-06-18.md` (D-PWRLOG-1, `Current`)
@@ -317,10 +317,10 @@ two-phase pattern ("Accepted ≠ build-authorized", per FEAT-0006).
 10. [x] Tests: CSV header/row, analyzer old-archive degrade + migration + GPU-math-≠-integral, control-identity (response source stays `primary_curve`), and operator dry-run workflow. (Track F)
 11. [x] Update `README.md`, `RUNTIME_HOME.md`, `RUNTIME_LOGGING_AND_EVALUATION.md`. (Track E)
 12. [x] Run `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` + `python tests/test_feature_specs.py` → all green (covered by full local CI; CTest `13/13`, hermetic Python `169/169`).
-13. [ ] **STOP — request release/live authorization**. Repo-local implementation is authorized by accepted FEAT-0020, but release publishing and live flip remain separate.
-14. [ ] **STOP — request explicit live-runtime authorization** (`AGENTS.md` §Live Runtime Safety) before any worker restart/flip.
-15. [ ] Capture pre-flip 250 ms baseline → run `-Enable` profile + `--restart` → capture post-flip window (CPU energy sample ids present, GPU power present, `loop_work_duration_ms`/health within baseline, no power-derived response source, old archives still ingest).
-16. [ ] Fill §14 verification log; close gate 6.
+13. [x] Release authorization granted; PR [#20](https://github.com/espensev/SVG-MB-Control/pull/20) opened.
+14. [x] Explicit live-runtime authorization granted 2026-06-18 (maintainer chose all-at-once: deploy + enable).
+15. [x] Captured pre-flip 250 ms baseline → `Build-Release.ps1` deploy of `1ea44c7` → `Set-EnergyLoggingProfile.ps1 -Enable` → captured post-flip window: CPU energy sample ids present, GPU power present, loop timing within envelope (mean unchanged; under-load max 14.6 ms), `channel0_response_source=primary_curve`, old archives still ingest (55 runs under v11). Results: `docs/feat-0020-live-flip-validation-results-2026-06-18.md`.
+16. [x] Filled §14 verification log; gate 6 closed.
 
 ---
 
