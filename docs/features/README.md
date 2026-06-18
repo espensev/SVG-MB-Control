@@ -9,6 +9,49 @@
 own detailed spec **before** it is implemented, so the implementation can be
 checked against the written spec afterward.
 
+## Current priority
+
+Read-first index of in-flight and next feature work. It aggregates the priority
+and decision view that is otherwise split between the §5 registry (per-feature
+status) and the topical backlog in `docs/next_steps.md` (a maintained backlog,
+current through the 2026-06-17 write-path closeout, but prose-organized and
+silent on FEAT-0009 and the disk-growth retention below). It links those rather
+than restating them; the §5 registry stays authoritative for per-feature status
+and `git log` for what shipped. Keep it current when a feature's status or the
+decision queue changes. A fuller standing review is
+`docs/spec-and-backlog-structure-assessment-2026-06-18.md`.
+
+**Active — `Accepted`, buildable when implementation is authorized:**
+
+- **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
+  implementation/evidence, not promotion: enabled-path live RAPL evidence, the
+  `quarantine → validated` marker (manual), and the corrected per-core cycle
+  read. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006 downstream work).
+- **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
+  implemented; build when authorized.
+
+**Decisions or gates owed (not buildable until cleared):**
+
+| Spec | What it owes (source section) |
+|---|---|
+| **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
+| **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
+| **FEAT-0004** (`Draft`) | Promotion gate 3 (§13): write and mark current the §9 design-decision record for the PawnIO-availability health signal — an operator-visible gap, not buildable until that record exists. |
+| **FEAT-0015 / FEAT-0016** | Retention bounds for the runtime SQLite DB and event JSONL (GitHub issue #4). No in-repo spec yet — intake on draft PR #9, not on `main`; not in `docs/next_steps.md`. |
+
+**Held design-capture (a `Draft`, not open work):** **FEAT-0003** — selectable
+control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
+
+**Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
+write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
+`Implemented` and merged; FEAT-0014 is the one non-blocking remainder.
+
+**Other backlogs (per-topic, not duplicated here):** `docs/next_steps.md`
+(maintained topical backlog), `docs/PATH_NOTES.md` §"Ideas / backlog",
+`docs/discovery-loop-targets-value-ranked-2026-06-14.md` (ranked discovery
+candidates), `docs/STRUCTURE_AND_STABILITY.md` §Migration Order ("Remaining
+polish"), and the `docs/*-plan-*.md` gated roadmaps.
+
 ## 1. What this is
 
 This folder holds one **feature spec** per planned feature, written from
@@ -110,8 +153,8 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
 | [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Selectable control-law profile with hot-swap | `REQ-PROFILE-*` | Draft |
-| [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Draft |
-| FEAT-0005 | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Reserved (body parked in `_parked/`) |
+| [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
+| [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |
 | FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |
 | [FEAT-0008](FEAT-0008-watchdog-hung-worker-recovery.md) | Watchdog hung-worker recovery (force-kill escalation) | `REQ-WATCHDOG-*` | Done (v1 complete: force-terminate escalation + `--restart` wiring landed; C++ unit + Python suspend-based integration tests pass; live deterministic suspend recovery evidence passed; natural load hard-freeze premise closed as not reproducible by load on this system; post-v1 options remain in FEAT-0008 §11) |
