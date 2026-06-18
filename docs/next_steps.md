@@ -2,7 +2,8 @@
 
 ## Status
 
-Reviewed and rewritten 2026-06-09; FEAT-0008 status refreshed 2026-06-16.
+Reviewed and rewritten 2026-06-09; FEAT-0008 status refreshed 2026-06-16; the
+write-path safety review (FEAT-0010–0014) was **closed 2026-06-17** (see below).
 These are review notes and a backlog, not work
 authorization: per `AGENTS.md` (Feature Intake Gate), product-code work for a new
 capability, schema/status/log field, CLI surface, or shipped-config behavior must
@@ -14,6 +15,46 @@ item against the current repo; the correction is recorded under "Prior list" so
 the reasoning is auditable.
 
 ## Grounded backlog
+
+### Write-path safety review (FEAT-0010–0014) — CLOSED 2026-06-17
+
+The 2026-06-17 external review of the control/write safety path (handoff in
+`Handoff/`) was worked to its acceptance bar and **closed**. All blocking and
+recommended-decidable findings are implemented, merged, and CI-verified on `main`;
+each is `Implemented` with a current decision record and `REQ-*` rows in
+`docs\TRACEABILITY.md` (governance `test_feature_specs` 5/5):
+
+- **FEAT-0010** — a sidecar-persist fault no longer vetoes the fan write (finding
+  H1); v0.3 added `REQ-WRITESAFE-06` (failure-path event logging is best-effort /
+  non-vetoing).
+- **FEAT-0011** — bounded half-open breaker probe (one write per 5 s on rising
+  cooling demand) so a recovered actuator self-heals (finding 5).
+- **FEAT-0012** — a corrupt `pending_writes.json` is quarantined to
+  `pending_writes.json.corrupt` and startup proceeds instead of relaunch-thrashing
+  (finding H2).
+- **FEAT-0013** — a CPU-input dropout on a `max_cpu_gpu_source_aware` channel now
+  trips the existing safe mode instead of being masked by the GPU fallback (finding
+  #1); all six live channels were affected.
+
+Remaining, **all non-blocking** (backlog, not authorized work):
+
+- **FEAT-0014** (`REQ-RESTOREGUARD-*`, Draft/held) — reconcile/restore does not
+  consult the blocked-channel runtime policy. A blocked-channel sidecar entry is
+  unreachable under the shipped single-profile config and the fail direction is
+  bounded/one-shot; promote only if a multi-profile config makes it reachable.
+- **Live (M) validation on hardware** — none of the four was runtime-reproduced on
+  the box (the review required C++ tests, which are met). Recommended next
+  confidence tier, especially FEAT-0013 (drop the real CPU sensor, observe safe
+  mode) and FEAT-0012 (corrupt a live sidecar, observe the quarantine break the
+  thrash loop).
+- **Linux-only CI nicety** — `tests/test_eval_dashboard.py` `…server_help` should
+  skip when neither `powershell` nor `pwsh` is present (only fails on non-Windows
+  review runners; the shipped CI is Windows). Trivial.
+- **Known scoped residuals** (recorded, not defects): legacy `MaxCpuGpu` still has
+  the CPU-dropout masking gap FEAT-0013 fixed for source-aware (unused live);
+  FEAT-0013 safe mode is the existing rate-limited ramp to 100%, not an instant
+  jump; FEAT-0012 health stays degraded until `pending_writes.json.corrupt` is
+  removed (deliberate — so the lost-records signal is acknowledged).
 
 ### Require fresh runtime evidence before changing cadence/floor defaults
 The shipped profile is a `250 ms` control tick and `250 ms` write cooldown. Per
