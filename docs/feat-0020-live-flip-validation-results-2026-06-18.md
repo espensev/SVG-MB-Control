@@ -93,8 +93,15 @@ settled); `cpu_pkg_energy_acquisition` = `quarantine` (never live `validated`);
 
 ## 4. Control identity (REQ-PWRLOG-03)
 
-`channel0_response_source` was `primary_curve` for 100 % of every sampled window
-(296 + 144 + 996 rows). Power is logged, not consumed by the control law.
+`channel0_response_source` was `primary_curve` for 100 % of the idle windows
+(296 + 144 rows). Over the full 4264-row enabled session — during which the GPU
+loaded to 560 W — the source was `primary_curve` plus the existing
+**GPU-temperature**-driven boosts (`gpu_airflow`, `midband_pressure`), never any
+power-derived term: `primary_curve` 1336, `+midband_pressure+gpu_airflow` 2058,
+`+midband_pressure` 611, `+gpu_airflow` 259. The control law responded to GPU
+**heat** (temperature) via its pre-existing terms while `gpu_power_mw` was merely
+logged — confirming power is observed, not consumed. `power_anticipation.h` stays
+unwired by `src/control`/`src/runtime`.
 
 ## 5. Verdict
 
