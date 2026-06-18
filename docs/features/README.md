@@ -1,7 +1,7 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.4   **Updated:** 2026-06-16
+**Status:** Accepted   **Version:** 0.5   **Updated:** 2026-06-18
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/MEASUREMENT_GATE.md`
@@ -121,3 +121,8 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0012](FEAT-0012-startup-tolerates-corrupt-pending-writes-sidecar.md) | Startup quarantines a corrupt `pending_writes.json` and proceeds as empty instead of fatally aborting the worker into a relaunch-thrash loop | `REQ-SIDECARRESIL-*` | Done (2026-06-17; Direction A — quarantine + proceed + event + degraded health; C++ + smoke tests green) |
 | [FEAT-0013](FEAT-0013-source-aware-primary-dropout-safe-mode.md) | Source-aware channels enter safe mode on primary-source dropout (a CPU dropout on a max-blend channel now trips the existing safe-mode mechanism instead of being masked by GPU) | `REQ-SRCSAFE-*` | Done (2026-06-17; reuses the 3-miss sensor-failure trip; C++ tests green) |
 | [FEAT-0014](FEAT-0014-reconcile-restore-blocked-channel-guard.md) | Reconcile/restore honor the runtime blocked-channel write policy | `REQ-RESTOREGUARD-*` | Draft (held — real restore-path gap, not reachable by the shipped single-profile config; pending maintainer direction) |
+| [FEAT-0017](FEAT-0017-faster-fan-reaction-under-load.md) | Faster fan reaction under load (control-response retune: joint rise-rate + step-cap raise, asymmetric, lane-targeted) | `REQ-REACT-*` | Draft (held — lanes/target ceiling undecided; pending a response-evaluation Pass-3 validation) |
+| [FEAT-0018](FEAT-0018-adaptive-cadence-enablement.md) | Adaptive-cadence enablement under thermal transient (engage the dormant `poll_tick_floor_ms` engine) | `REQ-CADENCE-*` | Draft (held — crosses the measurement gate; pending the floor characterization pass) |
+| [FEAT-0019](FEAT-0019-sidecar-persist-off-hot-path.md) | Sidecar persistence off the actuation hot path (identity-gated `Persist()`; build-ready) | `REQ-WRITEHOT-*` | Draft (build-ready — behavior-preserving for recovery; only the decision record is pending) |
+| [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Accepted (implementation authorized 2026-06-18; D-PWRLOG-1 Current; per-tick 5-field GPU power slice; live-flip M-evidence deferred) |
+| [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Draft (held — sequenced behind FEAT-0020; D-GPUCTX-1 is Proposed and combined GPU sample cadence evidence is pending) |

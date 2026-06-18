@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.4   **Updated:** 2026-06-16
+**Status:** Accepted   **Version:** 0.5   **Updated:** 2026-06-18
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -65,6 +65,11 @@ Result values:
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Done | Implemented 2026-06-17 (Direction A; decision `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md` Current). A corrupt `pending_writes.json` is quarantined to `pending_writes.json.corrupt` and the startup reconcile proceeds as empty instead of aborting into a relaunch-thrash loop; emits `reconcile.sidecar_quarantined` and degrades health (`sidecar_quarantined_present`). Collapses the former duplicate sidecar read. §14 filled; CTest + pytest green. |
 | `FEAT-0013` Source-aware primary-dropout safe mode | Done | Implemented 2026-06-17 (decision `docs/source-aware-cpu-dropout-decision-2026-06-17.md` Current). A CPU dropout on a `max_cpu_gpu_source_aware` channel (CPU seen, now gone, GPU present) now counts toward the existing 3-miss sensor-failure trip and enters safe mode (`safety_override` + response source `source_aware_cpu_dropout_safe_mode`), reusing the `CpuOnly` mechanism; recovers on CPU return. Only new state is the additive `cpu_input_was_available` flag. §14 filled; CTest green. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
+| `FEAT-0017` Faster fan reaction under load (control-response retune) | Draft (held) | Not buildable; design capture (`docs/control-latency-reduction-design-2026-06-18.md` D-REACT-1, Proposed). Config-only joint rise-rate + step-cap raise, asymmetric, lane-targeted; held pending the decision on lanes/target ceiling and a response-evaluation Pass-3 validation. Does not cross the measurement gate. |
+| `FEAT-0018` Adaptive-cadence enablement under thermal transient | Draft (held) | Not buildable; design capture (D-CADENCE-1, Proposed). Engages the dormant `poll_tick_floor_ms` engine; **crosses `MEASUREMENT_GATE.md`** (adaptive floor below the shipped profile), held until the floor characterization evidence exists. |
+| `FEAT-0019` Sidecar persistence off the actuation hot path | Draft | Not buildable yet; build-ready design capture (D-WRITEHOT-1, Proposed). Identity-gated `Persist()` removes the per-tick sidecar write from the actuation hot path; behavior-preserving for recovery, held only at promotion gate 3 (decision record Proposed). |
+| `FEAT-0020` Standard control-loop power logging | Accepted | Implementation authorized 2026-06-18 (D-PWRLOG-1 Current; all 7 promotion gates met). Buildable: CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp. `T`/`B`/`R` verification lands with the implementation; the `M` runtime cadence evidence (REQ-PWRLOG-04) and the live flip stay deferred to a separately authorized live-runtime window. Implementation plan: `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
+| `FEAT-0021` Standard control-loop GPU workload context logging | Draft | Not buildable yet; D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Proposed, and combined GPU power/context sample cadence evidence is pending. Sequenced behind FEAT-0020 so the immediate power-logging target can stay narrow. |
 
 ## 3. Requirement map
 
@@ -208,6 +213,79 @@ the maintainer authorizes promotion (gate 3).
 | `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending (held-Draft) |
 | `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
 | `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
+
+### FEAT-0017 - Faster fan reaction under load (control-response retune)
+
+Held at Draft; verification homes are planned, results `not buildable` until the
+decision record settles the lanes/target ceiling (gate 3) and a response-evaluation
+Pass-3 validation exists.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-REACT-01` | T, R | Config-contract test that each retuned lane raised both `rise_rate_pct_per_min` and `max_setpoint_step_pct` (effective rise ceiling rose); review the ceiling identity vs `docs/control-latency-reduction-design-2026-06-18.md` §2.1. | not buildable |
+| `REQ-REACT-02` | T, R | Config-contract test that no retuned lane raised `fall_rate_pct_per_min` / `demand_smoothing_fall_alpha` / `decay_latch_pct_per_min` above the shipped value (rise-asymmetry). | not buildable |
+| `REQ-REACT-03` | R | Review the config diff vs `MEASUREMENT_GATE.md` / `CONTROL_PIPELINE_MATH.md`: curves, blend, channels, cadence, cooldown, deadband, overlays unchanged. | not buildable |
+| `REQ-REACT-04` | M | Live combined-load (Pass 3) capture via `analyze ingest` + `analyze report`: before/after reaction improved; CPU Tctl / GPU memory percentiles within band; no post-startup authority reasserts. | not buildable |
+| `REQ-REACT-05` | T | `tests/test_config_contracts.py::test_release_intake_low_end_curves_follow_machine_policy` stays green (channels `2`/`3` keep `>= 4%` spacing). | not buildable |
+
+### FEAT-0018 - Adaptive-cadence enablement under thermal transient
+
+Held at Draft; **crosses the measurement gate**, results `not buildable` until the
+floor characterization evidence exists (gate 6) and the decision record settles the
+floor/thresholds (gate 3).
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-CADENCE-01` | T, M | Config-load test that the shipped config sets `poll_tick_floor_ms` in `[25, poll_tick_ms)`; existing `ComputeCadence` unit tests cover full-slew→floor; (M) a transient capture reaches the floor. | not buildable |
+| `REQ-CADENCE-02` | T | Config-load / `ComputeCadence` tests: `start < full`; relax returns to `poll_tick_ms` after slew subsides; no tighten below `cadence_slew_start_c_per_s`. | not buildable |
+| `REQ-CADENCE-03` | M | Characterization capture: steady-state achieved interval, `loop_slip_ms`, `loop_overrun`, process CPU% within `MEASUREMENT_GATE.md` exit criteria. | not buildable |
+| `REQ-CADENCE-04` | R, M | Review the config diff (`write_cooldown_ms`/channels unchanged); runtime evidence that write frequency stays bounded by deadband + cooldown. | not buildable |
+| `REQ-CADENCE-05` | M, R | The `MEASUREMENT_GATE.md` characterization summary exists (AMD/SIO/GPU cadence + fan-write response at the floor); review the chosen floor/thresholds are justified by it. | not buildable |
+
+### FEAT-0019 - Sidecar persistence off the actuation hot path
+
+Build-ready design capture; results `not buildable` until the decision record is
+promoted to Current at implementation authorization (gate 3).
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-WRITEHOT-01` | T | C++ test (sidecar file-existence over a temp runtime home): an `Upsert` changing only `target_pct` on a same-baseline entry performs no synchronous file write; a first entry and a baseline change each persist one synchronously. | not buildable |
+| `REQ-WRITEHOT-02` | T, R | C++ test: a sidecar from several same-baseline `Upsert`s reconciles to restore each channel's baseline; review `ReconcilePendingWrites` consumes only `(channel, baseline_duty_raw, baseline_mode_raw)`. | not buildable |
+| `REQ-WRITEHOT-03` | T | C++ test: the first `Upsert` for a channel persists before the simulated `ApplyDuty` (activation record on disk before actuation). | not buildable |
+| `REQ-WRITEHOT-04` | T | C++ test: a skipped same-baseline update is written by `Flush()`; `QueueRemove` + `Flush` removal path unchanged; a baseline re-capture triggers a fresh synchronous persist. | not buildable |
+| `REQ-WRITEHOT-05` | R | Review `docs/RUNTIME_HOME.md` (clarified `target_pct`/`started_iso` ≤1-tick-stale/advisory semantics; schema unchanged) and that no consumer reads `target_pct` as authoritative per-tick current. | not buildable |
+| `REQ-WRITEHOT-06` | T, R | C++ test: after a forced identity-change persist failure, a following same-baseline `Upsert` does not reset `consecutive_sidecar_persist_failures`; review the changed `channel_write.cpp` reset site vs FEAT-0010. | not buildable |
+
+### FEAT-0020 - Standard control-loop power logging
+
+Accepted and implementation-authorized. Results are `pending` until
+implementation fills the owning spec's verification log. `REQ-PWRLOG-04`
+remains pending until a separately authorized live-runtime flip provides the
+same-machine/same-build cadence evidence.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-PWRLOG-01` | T, M, R | Config/script or startup test for exact CPU RAPL env gate; runtime CSV evidence with nonempty CPU energy sample ids; review vs FEAT-0006 marker semantics. | pending |
+| `REQ-PWRLOG-02` | T, M, R | CSV header/row test for GPU power fields; runtime CSV evidence with nonempty GPU power samples; review no false-zero behavior. | pending |
+| `REQ-PWRLOG-03` | T, R | Control-loop tests/review showing power fields are not read by setpoint/boost/write code; review `docs/CONTROL_PIPELINE_MATH.md` needs no identity change. | pending |
+| `REQ-PWRLOG-04` | M, R | Runtime evidence from the standard 250 ms profile: achieved interval, slip/overrun, process CPU%, and health remain within the current measurement-gate envelope; review GPU read cadence. | pending (live M deferred) |
+| `REQ-PWRLOG-05` | T, R | Analyzer ingest/report tests for new fields and old archives; review CPU watts derivation remains FEAT-0006-derived, not double-logged. | pending |
+| `REQ-PWRLOG-06` | T, M, R | Script/workflow test or dry-run review for flip/revert; live verification only after explicit authorization; README/operator docs review. | pending |
+
+### FEAT-0021 - Standard control-loop GPU workload context logging
+
+Held at Draft; results `not buildable` until D-GPUCTX-1 is promoted to Current
+and combined GPU power/context sample cadence evidence exists. Sequenced behind
+FEAT-0020.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-GPUCTX-01` | T, R | CSV header/row tests for the context fields; review field names against `docs/RUNTIME_HOME.md` and `docs/RUNTIME_LOGGING_AND_EVALUATION.md`. | not buildable |
+| `REQ-GPUCTX-02` | T, R | Unit/integration seam test or review proving the context is sourced from the in-repo GPU reader/evidence path and does not require `evidence-log` foreground mode. | not buildable |
+| `REQ-GPUCTX-03` | T, R | Control-loop tests/review showing context fields are not read by setpoint, boost, response-source, write, breaker, or safety paths. | not buildable |
+| `REQ-GPUCTX-04` | M, R | Runtime evidence from the standard 250 ms profile: achieved interval, slip/overrun, process CPU%, and health stay inside the current measurement envelope. | not buildable |
+| `REQ-GPUCTX-05` | T, R | Analyzer ingest/report tests for archives with and without the new fields; review report output treats context as optional. | not buildable |
+| `REQ-GPUCTX-06` | T, R | CSV header tests and review confirm wide diagnostic fields remain out of the v1 standard-log slice. | not buildable |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 

@@ -18,11 +18,11 @@ the reasoning is auditable.
 
 ### Write-path safety review (FEAT-0010–0014) — CLOSED 2026-06-17
 
-The 2026-06-17 external review of the control/write safety path (handoff in
-`Handoff/`) was worked to its acceptance bar and **closed**. All blocking and
-recommended-decidable findings are implemented, merged, and CI-verified on `main`;
-each is `Implemented` with a current decision record and `REQ-*` rows in
-`docs\TRACEABILITY.md` (governance `test_feature_specs` 5/5):
+The 2026-06-17 external review of the control/write safety path was worked to its
+acceptance bar and **closed**. All blocking and recommended-decidable findings
+are implemented, merged, and CI-verified on `main`; each is `Implemented` with a
+current decision record and `REQ-*` rows in `docs\TRACEABILITY.md` (governance
+`test_feature_specs` 5/5):
 
 - **FEAT-0010** — a sidecar-persist fault no longer vetoes the fan write (finding
   H1); v0.3 added `REQ-WRITESAFE-06` (failure-path event logging is best-effort /
@@ -63,6 +63,43 @@ write-path/watchdog specs (`FEAT-0008/0010/0011/0012/0013`) were promoted
   FEAT-0013 safe mode is the existing rate-limited ramp to 100%, not an instant
   jump; FEAT-0012 health stays degraded until `pending_writes.json.corrupt` is
   removed (deliberate — so the lost-records signal is acknowledged).
+
+### Control latency reduction (FEAT-0017 / FEAT-0018 / FEAT-0019) — intake 2026-06-18
+
+A latency audit of the control path (design record
+`docs\control-latency-reduction-design-2026-06-18.md`) found the
+"fan reaction under load" budget is governed by three mechanisms, two of which are
+dormant or conservatively tuned. The findings are captured as three **Draft**
+specs (not authorized work; each names its gate):
+
+- **FEAT-0019** (`REQ-WRITEHOT-*`) — **build-ready**, start here. Identity-gated
+  *synchronous* sidecar `Persist()`: persist synchronously only when `(channel,
+  baseline_duty_raw, baseline_mode_raw)` changes, and defer same-baseline churn to
+  the existing once-per-tick end-of-tick `Flush()`, so no fsync'd atomic replace runs
+  before `ApplyDuty` during a ramp. Recovery (`write_orchestrator.cpp`) and health
+  (`runtime_health.cpp`) are verified to ignore `target_pct`, so it is
+  behavior-preserving for crash recovery; one cross-feature detail is keeping a
+  deferred `Upsert` from falsely clearing FEAT-0010's persist-failure counter
+  (REQ-WRITEHOT-06). The general fix for the Layer-0 sidecar-race stall surface.
+  Only gate open is the decision record (promote
+  `control-latency-reduction-design-2026-06-18.md` D-WRITEHOT-1 to Current).
+- **FEAT-0017** (`REQ-REACT-*`) — config-only response retune: raise
+  `rise_rate_pct_per_min` **and** `max_setpoint_step_pct` jointly (the binding
+  spike constraint — not the EMA alpha), asymmetric (fast rise, slow fall),
+  lane-targeted to the radiator lanes. Does **not** cross the measurement gate;
+  governed by `response-evaluation-tuning-plan.md`. Held pending the lanes/target
+  decision and a Pass-3 before/after validation.
+- **FEAT-0018** (`REQ-CADENCE-*`) — engage the dormant adaptive-cadence floor
+  (`poll_tick_floor_ms`, `cadence_score.cpp` is shipped-off via `F >= P`).
+  **Crosses `MEASUREMENT_GATE.md`** (adaptive floor below the shipped profile);
+  held until the characterization evidence below exists. Same gate as the
+  "lower fixed cadence" option, so do that evidence pass once and it unblocks both.
+
+Suggested order: FEAT-0019 (code, cheap win, no acoustic trade-off) → FEAT-0017
+(tuning, needs a load pass) → FEAT-0018 (needs the cadence characterization). The
+before/after instrument for all three already exists in the control-loop CSV
+(`last_raw_demand_pct` / `last_smoothed_demand_pct` / setpoint, `loop_slip_ms`,
+`cadence_transient`).
 
 ### Require fresh runtime evidence before changing cadence/floor defaults
 The shipped profile is a `250 ms` control tick and `250 ms` write cooldown. Per
