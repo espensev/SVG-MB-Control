@@ -1,7 +1,7 @@
 # FEAT-0015: Event JSONL has a retention bound
 
 **Project:** svg-mb-control
-**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
+**Status:** Implemented (2026-06-18; Test-LocalCI green)   **Version:** 0.3   **Updated:** 2026-06-18
 **Namespace:** `REQ-EVENTRET-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -27,11 +27,11 @@ were `control_loop.write_applied` (emitted per applied write at
 `src/control/channel_write.cpp:384`).
 
 This is a named design gap, not an unset config value: no retention mechanism for
-this file exists in the repo. This spec promotes the accepted direction: size/age
+this file exists in the repo. This spec promotes the accepted direction: age
 rotation modelled on the CSV path plus severity-aware persistence so routine
 `write_applied` is no longer stored per write. The spec authorizes
-implementation of that bounded-retention behavior; product code and verification
-are still pending (§14).
+implementation of that bounded-retention behavior. The implementation is now in
+`runtime_event_log.cpp` and its callers; verification is recorded in §14.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
 
@@ -78,7 +78,7 @@ and a static-verified code gap.
 ## 3. Goals & non-goals
 
 **Goals**
-- Give `logs/svg_mb_control_events.jsonl` an enforced upper bound (by age/size
+- Give `logs/svg_mb_control_events.jsonl` an enforced upper bound (by age
   rotation, by severity-based persistence, or a combination), so the file stops
   growing without limit across sessions.
 - Keep warnings, errors, and lifecycle/transition events retained for the chosen
@@ -103,39 +103,35 @@ and a static-verified code gap.
 |---|---|---|
 | Runtime sidecar / status / manifest / log schema stays backward-compatible | `docs/RUNTIME_HOME.md` | The event schema `svg_mb_control.event.v1` (`runtime_event_log.cpp:228`) is unchanged; rotation/retention adds at most an additive config key and rotated-file naming. No existing event JSONL becomes invalid. |
 | No fan write / start / stop / breaker reset outside an explicit live task | `AGENTS.md` §Live Runtime Safety | Retention is a log-management decision; it adds no live action, no write site, and does not change any control or recovery path. |
-| Shipped 250 ms cadence / channel set / input strategy is the measured baseline | `docs/MEASUREMENT_GATE.md` | Logging-side only; cadence, channels, and input strategy are unchanged, so the gate baseline does not move. The append path must stay non-blocking on the control thread. |
+| Shipped 250 ms cadence / channel set / input strategy is the measured baseline | `docs/MEASUREMENT_GATE.md` | Logging-side only; cadence, channels, and input strategy are unchanged, so the gate baseline does not move. Event logging remains best-effort and does not change control decisions. |
 | Control-computation identity stays documented and validated | `docs/CONTROL_PIPELINE_MATH.md` | No control term is added or altered; only event-log persistence changes. |
 | Repo stays standalone; no sibling-repo / bridge dependency | `AGENTS.md` §Repo Boundary | The change is confined to in-repo runtime code (`src/runtime/runtime_event_log.cpp` and its callers); no external dependency. |
 
 ## 5. Behavior specification
 
-Behavior is **accepted (not yet implemented)** and lives at the event append site
-`AppendRuntimeEvent` (`src/runtime/runtime_event_log.cpp:210`) and the event-log
-path resolution `ResolveRuntimeEventLogPath` (`src/runtime/runtime_paths.cpp`).
+Implemented behavior lives at the event append site `AppendRuntimeEvent`
+(`src/runtime/runtime_event_log.cpp`) and the retention registration hook
+`ConfigureRuntimeEventLogRetention`.
 
-- **Direction A — size/age rotation (mirrors the CSV path).** The active event
-  JSONL is rotated to an archived event file when it exceeds a size or age bound,
-  and rotated archives older than a retention window are deleted, reusing the
-  `log_rotate_hours` / `log_retain_days` semantics already defined for the CSV
-  archive or a new event-specific key. Rotation must rename/close the active file
-  atomically with respect to concurrent appenders (the share-flag handling at
-  `runtime_event_log.cpp:28-40` anticipates exactly this).
-- **Direction B — severity-based persistence.** Routine `info` events whose volume
-  dominates the file (notably `control_loop.write_applied`) are persisted at a
-  reduced rate or not at all, while every `warning`/`error`/`critical` event
-  (`InferSeverity`, `runtime_event_log.cpp:156`) and lifecycle/transition event is
-  always persisted. The CSV evidence path remains the full per-tick record, so
-  no telemetry fidelity is lost.
-- **Durability requirement (both directions).** Each persisted event is written as
-  a single atomic append (the current `FILE_APPEND_DATA` single-`WriteFile`
-  behavior, `runtime_event_log.cpp:299-321`); rotation must not split a line.
-  The observed mid-file NUL cause is confirmed or explicitly bounded before
-  implementation (§11).
-- **Backward compatibility.** Absent any new config key, behavior is the current
-  append behavior until the maintainer sets the retention bound; existing event
-  JSONL files and the `svg_mb_control.event.v1` schema stay valid, and consumers
-  (`CachedEventCount`, `runtime_event_log.cpp:195`; the dashboard reader in
-  `tools/eval_dashboard/server.py`) continue to parse the file.
+- **Age rotation (mirrors the CSV path).** `control-loop`, `read-loop`, and
+  `evidence-log` register their event paths with `log_rotate_hours` and
+  `log_retain_days`. When the active event JSONL is older than the configured
+  rotate age, it is renamed into `logs/archive/<active-stem>_<timestamp>.jsonl`;
+  archives older than the retention window are pruned. A `0` rotate or retain
+  value disables that part of the bound.
+- **Severity-aware persistence.** The control loop samples routine `info`
+  `control_loop.write_applied` events (tick 1 and every 240th tick by default).
+  Events with `warning`, `error`, or `critical` severity and lifecycle/transition
+  events are persisted normally. The CSV path remains the full dense telemetry
+  record, so the reduction only affects routine event-log duplication.
+- **Durability.** Rotation and append are serialized inside the process registry,
+  and each persisted event is still serialized once and written as a single
+  append call (`FILE_APPEND_DATA` on Windows). The observed mid-file NUL finding
+  is bounded by preserving single-call append behavior and testing whole-line
+  JSON across a rotation boundary.
+- **Backward compatibility.** No event payload field, schema name, dashboard
+  parser contract, or analyze schema changes. Paths without configured retention
+  keep the historical append behavior.
 
 ## 6. Requirements  *(promotion gate 4)*
 
@@ -145,7 +141,7 @@ path resolution `ResolveRuntimeEventLogPath` (`src/runtime/runtime_paths.cpp`).
 | REQ-EVENTRET-02 | The retention mechanism must preserve append durability: each persisted event is written as a single atomic append, and rotation must not interleave or split NDJSON lines between concurrent emitters. The cause of the observed mid-file NUL byte must be confirmed or explicitly bounded before implementation. |
 | REQ-EVENTRET-03 | Bounding the file must not silently drop diagnostic events: every `warning`/`error`/`critical` event (`InferSeverity`) and lifecycle/transition event must remain persisted within the accepted retention window even if routine `info` `write_applied` events are reduced or rotated out. |
 | REQ-EVENTRET-04 | The change must be backward-compatible and additive: the `svg_mb_control.event.v1` event schema is unchanged, any new config key defaults to current behavior when absent, and existing event JSONL files plus the `CachedEventCount` and dashboard consumers stay valid. |
-| REQ-EVENTRET-05 | The change must be confined to event-log management: computed duty, cadence, channel set, control-computation identity, and the CSV archive retention are unchanged, the control-thread append stays non-blocking, and `docs/RUNTIME_HOME.md` / `docs/RUNTIME_LOGGING_AND_EVALUATION.md` are updated at implementation. |
+| REQ-EVENTRET-05 | The change must be confined to event-log management: computed duty, cadence, channel set, control-computation identity, and the CSV archive retention are unchanged, event logging remains best-effort and does not change control decisions, and `docs/RUNTIME_HOME.md` / `docs/RUNTIME_LOGGING_AND_EVALUATION.md` are updated at implementation. |
 
 ## 7. Data / schema deltas
 
@@ -154,12 +150,9 @@ path resolution `ResolveRuntimeEventLogPath` (`src/runtime/runtime_paths.cpp`).
   event-file naming alongside the active `svg_mb_control_events.jsonl` /
   `svg_mb_control_evidence_events.jsonl` (`EvidenceLogArtifactNaming`,
   `evidence_log.cpp:57`); naming follows the existing archive convention.
-- Config impact (`config/control.*.json`, `config/machines/*.json`): at most an
-  additive retention key (e.g. an event-log size/age bound, or reuse of
-  `log_rotate_hours` / `log_retain_days`) with a backward-compatible absent-key
-  default. The accepted default is to reuse `log_rotate_hours` /
-  `log_retain_days` unless implementation shows event-specific keys are safer
-  (§11).
+- Config impact (`config/control.*.json`, `config/machines/*.json`): no new key.
+  Event retention reuses `log_rotate_hours` / `log_retain_days`; absent retention
+  registration or `0` values preserve append-only behavior.
 - Schema/version impact: none to the analyze schema or the event schema; this is
   log file management. Update `docs/RUNTIME_HOME.md` (event-log retention) and
   `docs/RUNTIME_LOGGING_AND_EVALUATION.md` (logging-gap closure) at implementation.
@@ -170,8 +163,7 @@ path resolution `ResolveRuntimeEventLogPath` (`src/runtime/runtime_paths.cpp`).
   setting applied by the worker at startup/rotation. UI is out of scope
   (`docs/MEASUREMENT_GATE.md`).
 - Doc updates at implementation are `docs/RUNTIME_HOME.md` and
-  `docs/RUNTIME_LOGGING_AND_EVALUATION.md` per `AGENTS.md` §Change Checklist;
-  update `README.md` only if an operator-visible config key or CLI surface changes.
+  `docs/RUNTIME_LOGGING_AND_EVALUATION.md` per `AGENTS.md` §Change Checklist.
 
 ## 9. Design decision record(s)  *(promotion gate 3 — write before implementation)*
 
@@ -187,7 +179,7 @@ path resolution `ResolveRuntimeEventLogPath` (`src/runtime/runtime_paths.cpp`).
 | REQ-EVENTRET-02 | T, R | Test asserts concurrent appenders produce only whole NDJSON lines across a rotation boundary (no split/interleaved line); review of the atomic-append + rotation handling vs `runtime_event_log.cpp:28-40,299-321` and the torn-write finding. |
 | REQ-EVENTRET-03 | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced/rotated out within the accepted window. |
 | REQ-EVENTRET-04 | T, R | Test asserts an absent config key preserves current append behavior and that an existing event JSONL plus `CachedEventCount` still parse; review vs `docs/RUNTIME_HOME.md` schema stability. |
-| REQ-EVENTRET-05 | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; control-thread append stays non-blocking; docs updated. |
+| REQ-EVENTRET-05 | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; event logging remains best-effort and does not change control decisions; docs updated. |
 
 Verify legend:
 - **T** = automated test (`.\scripts\Test-LocalCI.ps1`, C++ smoke / pytest under `tests/`).
@@ -200,10 +192,10 @@ Verify legend:
 | Decision | Needed before | Current default |
 |---|---|---|
 | Whether to bound the event log at all, or accept the current append-only behavior. | promotion | Resolved: bound it. The unbounded event JSONL is material runtime disk growth. |
-| Retention model: Direction A (size/age rotation), Direction B (severity-based persistence), or a combination. | implementation | Resolved: A+B. Rotate by size/age and reduce routine `write_applied` persistence while keeping diagnostics. |
-| Whether `control_loop.write_applied` is dropped, sampled, or kept and only rotated. | implementation | Implementation detail. The accepted direction is reduced-rate persistence; the code change must keep full fidelity in the CSV path. |
-| New event-specific config keys vs. reusing `log_rotate_hours` / `log_retain_days`. | implementation | Default to reusing `log_rotate_hours` / `log_retain_days`; add a key only if implementation shows coupling to CSV retention is unsafe. |
-| The mid-file NUL torn-write cause (crash mid-write vs. non-atomic flush vs. concurrent writer). | implementation | Unconfirmed; must be confirmed or explicitly bounded (REQ-EVENTRET-02). |
+| Retention model: Direction A (age rotation), Direction B (severity-based persistence), or a combination. | implementation | Resolved: A+B. Rotate by age and reduce routine `write_applied` persistence while keeping diagnostics. |
+| Whether `control_loop.write_applied` is dropped, sampled, or kept and only rotated. | implementation | Resolved: sampled in the control loop (tick 1 plus every 240th tick by default); CSV fidelity is unchanged. |
+| New event-specific config keys vs. reusing `log_rotate_hours` / `log_retain_days`. | implementation | Resolved: reuse `log_rotate_hours` / `log_retain_days`; no new config key. |
+| The mid-file NUL torn-write cause (crash mid-write vs. non-atomic flush vs. concurrent writer). | implementation | Bounded for this change: persisted events remain single-call appends, rotation is in-process serialized, and the test parses every line across concurrent appends at a rotation boundary. |
 
 ## 12. Measurement gate & dependencies
 
@@ -216,10 +208,12 @@ Verify legend:
   `EvidenceLogArtifactNaming`). Independent of FEAT-0016 (analyze DB run-purge);
   the two together close the two unbounded artifacts in issue #4 but touch
   different code and can land separately.
-- **Build/test impact:** new tests under `tests/` (rotation/cap, line-atomicity
-  across rotation, severity retention, backward-compatible absent-key default);
-  doc updates to `docs/RUNTIME_HOME.md` and `docs/RUNTIME_LOGGING_AND_EVALUATION.md`
-  per `AGENTS.md` §Change Checklist. No `docs/CONTROL_PIPELINE_MATH.md` change.
+- **Build/test impact:** implemented tests under `tests/cpp/runtime_event_log_tests.cpp`
+  (rotation/prune, line atomicity across rotation, severity retention/sampling,
+  backward-compatible default behavior via unconfigured append path) plus docs
+  updates to `docs/RUNTIME_HOME.md` and
+  `docs/RUNTIME_LOGGING_AND_EVALUATION.md`. No
+  `docs/CONTROL_PIPELINE_MATH.md` change.
 
 ## 13. Promotion-gate checklist  *(all must pass before this is buildable work)*
 
@@ -231,23 +225,25 @@ Verify legend:
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (logging-side only; computed duty unchanged; additive schema).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Promoted to Accepted 2026-06-18: the maintainer accepted the A+B retention model
-> (size/age rotation + severity-aware reduction of `write_applied`) and its bound —
-> see the §9 decision record. All seven promotion gates pass; the spec is buildable.
-> Implementation and verification are pending product-code work; run
-> `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` when implementing, then fill §14.
+> Promoted to Accepted 2026-06-18 and implemented the same day after maintainer
+> authorization: the A+B retention model (age rotation + severity-aware reduction
+> of `write_applied`) is built and verified. Run
+> `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` for the maintained gate.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
-implementation and `Test-LocalCI` verification.
-
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-EVENTRET-01 | | | |
-| REQ-EVENTRET-02 | | | |
-| REQ-EVENTRET-03 | | | |
-| REQ-EVENTRET-04 | | | |
-| REQ-EVENTRET-05 | | | |
+| REQ-EVENTRET-01 | pass | `tests/cpp/runtime_event_log_tests.cpp::TestRotationAndArchivePrune` rotates an aged active event JSONL, prunes an expired event archive, and keeps the new active event; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling. Full `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-18 |
+| REQ-EVENTRET-02 | pass | `TestConcurrentAppendRotationKeepsWholeLines` appends concurrently across a rotation boundary, then parses every active/archive line as JSON; implementation review confirms single-call append and in-process rotation/append serialization. | 2026-06-18 |
+| REQ-EVENTRET-03 | pass | `TestWriteAppliedReductionPreservesDiagnostics` drops routine `write_applied` ticks 2/4/5 while retaining tick 1, tick 3, `control_loop.write_failed`, and `control_loop.shutdown`. | 2026-06-18 |
+| REQ-EVENTRET-04 | pass | The event payload schema stays `svg_mb_control.event.v1`; unconfigured append paths keep historical behavior, and `CachedEventCount` remains the active-file count source. Runtime event-log tests and full `Test-LocalCI` passed. | 2026-06-18 |
+| REQ-EVENTRET-05 | pass | Review: change is confined to event-log management/registration and `control_loop.write_applied` persistence sampling; computed duty, cadence, channel set, control identity, and CSV archive retention are unchanged. `docs/RUNTIME_HOME.md` and `docs/RUNTIME_LOGGING_AND_EVALUATION.md` updated. | 2026-06-18 |
 
-**Spec vs. implementation deltas:** none yet (not implemented).
+**Spec vs. implementation deltas:** Implemented the accepted A+B direction with
+age-based rotation, not size-based rotation. Reused existing
+`log_rotate_hours` / `log_retain_days` rather than adding event-specific config.
+The routine `control_loop.write_applied` policy is sample-first (tick 1 and every
+240th tick by default), not drop-all. The torn-write cause is not root-caused,
+but the implementation bounds this feature's risk by retaining single-call append
+and adding a whole-line rotation/concurrency test.

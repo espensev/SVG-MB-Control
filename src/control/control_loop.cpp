@@ -63,6 +63,13 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     ClearRuntimeStopRequest(context.runtime_home);
     const std::string event_log_path =
         ResolveRuntimeEventLogPath(context.runtime_home).string();
+    ConfigureRuntimeEventLogRetention(
+        ResolveRuntimeEventLogPath(context.runtime_home),
+        RuntimeEventLogOptions{
+            .rotate_hours = context.base.log_rotate_hours,
+            .retain_days = context.base.log_retain_days,
+            .reduce_routine_write_applied = true,
+        });
     RuntimeCsvLogger csv_logger(
         context.runtime_home,
         context.base.log_rotate_hours,

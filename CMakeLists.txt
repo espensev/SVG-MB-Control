@@ -330,6 +330,8 @@ if(BUILD_TESTING)
         tests/cpp/control_loop_config_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_csv_rows_tests
         tests/cpp/csv_rows_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_runtime_event_log_tests
+        tests/cpp/runtime_event_log_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_channel_write_tests
         tests/cpp/channel_write_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_force_terminate_tests

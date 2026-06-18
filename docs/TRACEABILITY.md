@@ -65,11 +65,11 @@ Result values:
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Done | Implemented 2026-06-17 (Direction A; decision `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md` Current). A corrupt `pending_writes.json` is quarantined to `pending_writes.json.corrupt` and the startup reconcile proceeds as empty instead of aborting into a relaunch-thrash loop; emits `reconcile.sidecar_quarantined` and degrades health (`sidecar_quarantined_present`). Collapses the former duplicate sidecar read. §14 filled; CTest + pytest green. |
 | `FEAT-0013` Source-aware primary-dropout safe mode | Done | Implemented 2026-06-17 (decision `docs/source-aware-cpu-dropout-decision-2026-06-17.md` Current). A CPU dropout on a `max_cpu_gpu_source_aware` channel (CPU seen, now gone, GPU present) now counts toward the existing 3-miss sensor-failure trip and enters safe mode (`safety_override` + response source `source_aware_cpu_dropout_safe_mode`), reusing the `CpuOnly` mechanism; recovers on CPU return. Only new state is the additive `cpu_input_was_available` flag. §14 filled; CTest green. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
-| `FEAT-0015` Event JSONL retention | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted to Accepted 2026-06-18; decision record `docs/event-log-retention-decision-2026-06-18.md` Current (rotate by age/retention window plus severity-aware reduction of routine `write_applied`, diagnostics retained). |
-| `FEAT-0016` Analyze SQLite DB retention | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted to Accepted 2026-06-18; decision record `docs/analyze-db-run-purge-decision-2026-06-18.md` Current (age-based `analyze prune --db-retain-days`, cascade delete under foreign keys, post-delete reclaim). Immediate derived DB reclaim completed 2026-06-18. |
+| `FEAT-0015` Event JSONL retention | Implemented | Implemented 2026-06-18 (decision record `docs/event-log-retention-decision-2026-06-18.md` Current). Event JSONL rotates on the configured age/retention window, routine `control_loop.write_applied` info events are sampled, diagnostics/lifecycle events remain persisted, and full `Test-LocalCI` passed. |
+| `FEAT-0016` Analyze SQLite DB retention | Implemented | Implemented 2026-06-18 (decision record `docs/analyze-db-run-purge-decision-2026-06-18.md` Current). `analyze prune --db-retain-days` purges old runs under foreign keys, verifies no orphans, reclaims space after deletes, and full `Test-LocalCI` passed. Immediate derived DB reclaim completed 2026-06-18. |
 | `FEAT-0017` Faster fan reaction under load (control-response retune) | Draft (held) | Not buildable; design capture (`docs/control-latency-reduction-design-2026-06-18.md` D-REACT-1, Proposed). Config-only joint rise-rate + step-cap raise, asymmetric, lane-targeted; held pending the decision on lanes/target ceiling and a response-evaluation Pass-3 validation. Does not cross the measurement gate. |
 | `FEAT-0018` Adaptive-cadence enablement under thermal transient | Draft (held) | Not buildable; design capture (D-CADENCE-1, Proposed). Engages the dormant `poll_tick_floor_ms` engine; **crosses `MEASUREMENT_GATE.md`** (adaptive floor below the shipped profile), held until the floor characterization evidence exists. |
-| `FEAT-0019` Sidecar persistence off the actuation hot path | Draft | Not buildable yet; build-ready design capture (D-WRITEHOT-1, Proposed). Identity-gated `Persist()` removes the per-tick sidecar write from the actuation hot path; behavior-preserving for recovery, held only at promotion gate 3 (decision record Proposed). |
+| `FEAT-0019` Sidecar persistence off the actuation hot path | Implemented | Implemented 2026-06-18 (D-WRITEHOT-1 Current). Identity-gated `Persist()` removes the per-tick sidecar write from the actuation hot path (sync only on a baseline-identity change; same-baseline churn deferred to the end-of-tick `Flush()`); behavior-preserving for recovery. REQ-WRITEHOT-06 two-point counter reset (Upsert bool + Flush bool/tick_runner). T/R verified; CTest 14/14. |
 | `FEAT-0020` Standard control-loop power logging | Implemented | Implemented 2026-06-18 (D-PWRLOG-1 Current; full Test-LocalCI green — CTest + 169 hermetic). CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp, summarized by the analyzer (v11) as mean/percentile (not an energy integral). `T`/`B`/`R` verified; the `M` runtime cadence evidence (REQ-PWRLOG-04) and the live flip stay deferred to a separately authorized live-runtime window. Implementation plan: `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
 | `FEAT-0021` Standard control-loop GPU workload context logging | Draft | Not buildable yet; D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Proposed, and combined GPU power/context sample cadence evidence is pending. Sequenced behind FEAT-0020 so the immediate power-logging target can stay narrow. |
 
@@ -230,31 +230,29 @@ the maintainer authorizes promotion (gate 3).
 
 ### FEAT-0015 - Event JSONL retention
 
-Accepted 2026-06-18; implementation pending. Results stay `pending` until the
-event rotation / severity-reduction code lands and the owning spec's §14
-verification log is filled.
+Implemented 2026-06-18. Results mirror the owning spec's §14 verification log.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-EVENTRET-01` | T, R | `.\scripts\Test-LocalCI.ps1`: test writes past the accepted bound and asserts the active event JSONL is rotated/capped or routine `info` is reduced; review vs `docs/event-log-retention-decision-2026-06-18.md`. | pending |
-| `REQ-EVENTRET-02` | T, R | Test asserts concurrent appenders produce only whole NDJSON lines across a rotation boundary; review atomic append and rotation handling vs `runtime_event_log.cpp`. | pending |
-| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced or rotated out within the accepted window. | pending |
-| `REQ-EVENTRET-04` | T, R | Test asserts absent config keeps current append behavior and existing event JSONL plus `CachedEventCount` still parse; review vs `docs/RUNTIME_HOME.md`. | pending |
-| `REQ-EVENTRET-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; docs updated. | pending |
+| `REQ-EVENTRET-01` | T, R | `runtime_event_log_tests.cpp::TestRotationAndArchivePrune` verifies age rotation/archive pruning; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling; review vs decision record. | pass |
+| `REQ-EVENTRET-02` | T, R | `TestConcurrentAppendRotationKeepsWholeLines` parses every active/archive line as JSON after concurrent appends across a rotation boundary; review confirms single-call append and in-process rotation/append serialization. | pass |
+| `REQ-EVENTRET-03` | T | `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` ticks are reduced while `control_loop.write_failed` and `control_loop.shutdown` remain persisted. | pass |
+| `REQ-EVENTRET-04` | T, R | Runtime event-log tests plus review: event payload schema stays `svg_mb_control.event.v1`, unconfigured append paths keep historical behavior, and `CachedEventCount` still reads the active file. | pass |
+| `REQ-EVENTRET-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; event logging remains best-effort and docs updated. | pass |
 
 ### FEAT-0016 - Analyze SQLite DB retention
 
-Accepted 2026-06-18; implementation pending. The 2026-06-18 operational reclaim
-deleted the derived analyzer DB to free 7.80 GiB, but the structural retention
-requirements remain `pending` until the DB purge/reclaim code lands.
+Implemented 2026-06-18. The 2026-06-18 operational reclaim deleted the derived
+analyzer DB to free 7.80 GiB; the structural DB purge/reclaim code now lands in
+`analyze prune`.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-DBRETAIN-01` | T, R | `.\scripts\Test-LocalCI.ps1`: ingest runs spanning the bound, run DB retention, assert out-of-bound runs deleted and in-bound runs retained; review vs `docs/analyze-db-run-purge-decision-2026-06-18.md`. | pending |
-| `REQ-DBRETAIN-02` | T | Test asserts that after purging a run, no `tick_samples` / `tick_fan_samples` / `tick_channel_samples` / `events` rows reference the deleted `run_id`. | pending |
-| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs and no VACUUM when nothing was deleted. | pending |
-| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest and dry-run reports without deleting while `--apply` deletes; review vs `analyze prune` conventions. | pending |
-| `REQ-DBRETAIN-05` | R | Review vs `docs/RUNTIME_HOME.md` / `docs/MEASUREMENT_GATE.md`: analyze schema/version, per-tick fidelity, and existing CSV-bundle prune unchanged; docs updated. | pending |
+| `REQ-DBRETAIN-01` | T, R | `test_analyze_ingest.py::test_db_prune_apply_cascades_and_reclaims` ingests old/recent runs, applies `--db-retain-days 1`, and asserts only the recent run remains; review vs decision record. | pass |
+| `REQ-DBRETAIN-02` | T | `test_db_prune_apply_cascades_and_reclaims` asserts dependent `tick_samples`, `tick_fan_samples`, `tick_channel_samples`, and `events` rows for the deleted run are removed; implementation treats orphan rows as an error. | pass |
+| `REQ-DBRETAIN-03` | T | `test_db_prune_apply_cascades_and_reclaims` asserts page/file-size shrink after deleting old runs; `test_db_prune_zero_retain_days_is_explicit_disable` verifies the disable path. | pass |
+| `REQ-DBRETAIN-04` | T, R | `test_db_prune_dry_run_keeps_old_run` verifies dry-run reports without deleting; apply test re-runs ingest after purge and confirms retained runs still de-duplicate. | pass |
+| `REQ-DBRETAIN-05` | R | Review vs `docs/RUNTIME_HOME.md` / `docs/MEASUREMENT_GATE.md`: analyze schema/version, per-tick fidelity, and existing CSV-bundle prune unchanged; README/runtime docs updated. | pass |
 
 ### FEAT-0017 - Faster fan reaction under load (control-response retune)
 
@@ -286,17 +284,20 @@ floor/thresholds (gate 3).
 
 ### FEAT-0019 - Sidecar persistence off the actuation hot path
 
-Build-ready design capture; results `not buildable` until the decision record is
-promoted to Current at implementation authorization (gate 3).
+Implemented 2026-06-18 (T/R verified; isolated Test-LocalCI green — CTest 14/14,
+169 hermetic, `test_feature_specs` 5/5). D-WRITEHOT-1 promoted to Current (gate 3).
+The change strictly reduces synchronous writes and is behavior-preserving for
+recovery, so no `M` evidence is required by §10. Results mirror the owning spec's
+§14 verification log.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-WRITEHOT-01` | T | C++ test (sidecar file-existence over a temp runtime home): an `Upsert` changing only `target_pct` on a same-baseline entry performs no synchronous file write; a first entry and a baseline change each persist one synchronously. | not buildable |
-| `REQ-WRITEHOT-02` | T, R | C++ test: a sidecar from several same-baseline `Upsert`s reconciles to restore each channel's baseline; review `ReconcilePendingWrites` consumes only `(channel, baseline_duty_raw, baseline_mode_raw)`. | not buildable |
-| `REQ-WRITEHOT-03` | T | C++ test: the first `Upsert` for a channel persists before the simulated `ApplyDuty` (activation record on disk before actuation). | not buildable |
-| `REQ-WRITEHOT-04` | T | C++ test: a skipped same-baseline update is written by `Flush()`; `QueueRemove` + `Flush` removal path unchanged; a baseline re-capture triggers a fresh synchronous persist. | not buildable |
-| `REQ-WRITEHOT-05` | R | Review `docs/RUNTIME_HOME.md` (clarified `target_pct`/`started_iso` ≤1-tick-stale/advisory semantics; schema unchanged) and that no consumer reads `target_pct` as authoritative per-tick current. | not buildable |
-| `REQ-WRITEHOT-06` | T, R | C++ test: after a forced identity-change persist failure, a following same-baseline `Upsert` does not reset `consecutive_sidecar_persist_failures`; review the changed `channel_write.cpp` reset site vs FEAT-0010. | not buildable |
+| `REQ-WRITEHOT-01` | T | C++ test (sidecar file-existence over a temp runtime home): an `Upsert` changing only `target_pct` on a same-baseline entry performs no synchronous file write; a first entry and a baseline change each persist one synchronously. | pass |
+| `REQ-WRITEHOT-02` | T, R | C++ test: a sidecar from several same-baseline `Upsert`s reconciles to restore each channel's baseline; review `ReconcilePendingWrites` consumes only `(channel, baseline_duty_raw, baseline_mode_raw)`. | pass |
+| `REQ-WRITEHOT-03` | T | C++ test: the first `Upsert` for a channel persists before the simulated `ApplyDuty` (activation record on disk before actuation). | pass |
+| `REQ-WRITEHOT-04` | T | C++ test: a skipped same-baseline update is written by `Flush()`; `QueueRemove` + `Flush` removal path unchanged; a baseline re-capture triggers a fresh synchronous persist. | pass |
+| `REQ-WRITEHOT-05` | R | Review `docs/RUNTIME_HOME.md` (clarified `target_pct`/`started_iso` ≤1-tick-stale/advisory semantics; schema unchanged) and that no consumer reads `target_pct` as authoritative per-tick current. | pass |
+| `REQ-WRITEHOT-06` | T, R | C++ test: after a forced identity-change persist failure, a following same-baseline `Upsert` does not reset `consecutive_sidecar_persist_failures`; review the changed `channel_write.cpp` reset site vs FEAT-0010. | pass |
 
 ### FEAT-0020 - Standard control-loop power logging
 

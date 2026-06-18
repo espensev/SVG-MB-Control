@@ -51,6 +51,20 @@ the sidecar were empty — so a corrupt recovery file cannot trap the worker in 
 relaunch loop. The control loop then reasserts authority through its normal startup
 path. The parsed-but-failed-restore case above is unchanged.
 
+## Control-loop sidecar persist cadence (FEAT-0019)
+
+In the control loop, the sidecar is persisted synchronously before `ApplyDuty`
+only on a recovery-relevant identity change — the first write that activates a
+channel (entry created, baseline captured) or a baseline re-capture. Same-baseline
+setpoint churn during a ramp marks the store dirty and is written by the existing
+once-per-tick end-of-tick `Flush()` rather than persisted synchronously, so no
+fsync'd atomic file-replace runs before `ApplyDuty` during a ramp. The
+crash-recovery guarantee is unchanged because the recovery-relevant baseline is
+recorded synchronously at activation and recovery never reads the deferred
+`target_pct` (see `docs/RUNTIME_HOME.md`). A successful `Flush()` rewrites the whole
+sidecar, so any persist-failure health degradation a deferred write self-heals is
+then cleared.
+
 ## Control-loop sidecar persist failure (FEAT-0010)
 
 In the control loop (`TryApplyChannelSetpoint`) the sidecar upsert (Runtime Flow

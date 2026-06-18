@@ -87,6 +87,12 @@ int RunEvidenceLog(const ControlConfig& config,
                                  });
     const std::string event_log_path =
         ResolveRuntimeEventLogPath(runtime_home, naming).string();
+    ConfigureRuntimeEventLogRetention(
+        ResolveRuntimeEventLogPath(runtime_home, naming),
+        RuntimeEventLogOptions{
+            .rotate_hours = config.log_rotate_hours,
+            .retain_days = config.log_retain_days,
+        });
     if (!csv_logger.Open("evidence-log", BuildEvidenceLogCsvHeader())) {
         AppendRuntimeEvent(
             runtime_home,

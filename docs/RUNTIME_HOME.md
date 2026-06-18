@@ -255,6 +255,17 @@ Each entry includes:
 `child_pid` is retained for schema continuity and is written as `0` by the
 current direct runtime.
 
+The schema (`schema_version = 1`) and fields are unchanged. In the control loop,
+the sidecar is persisted synchronously only when a channel's recovery-relevant
+identity (`channel`, `baseline_duty_raw`, `baseline_mode_raw`) changes — first
+activation or a baseline re-capture (FEAT-0019). A same-baseline change to
+`target_pct` / `requested_hold_ms` / `started_iso` is written at the end-of-tick
+`Flush()` instead of synchronously before the fan write, so on disk those fields
+are **advisory and at most one tick stale**. Crash recovery
+(`ReconcilePendingWrites`) restores from `baseline_duty_raw` / `baseline_mode_raw`
+only and never reads `target_pct`, and the `--health` readability check does not
+read it either, so no consumer depends on a per-tick-current value.
+
 ## stop.request.json
 
 Created by `svg-mb-control --stop` and consumed by `read-loop` and
@@ -303,11 +314,14 @@ shared event log under `runtime\logs\`.
 - `archive\svg_mb_control_<mode>_<timestamp>.manifest.json` stores the manifest
   beside the matching archive CSV chunk. The latest manifest path is surfaced in
   `control_runtime.json` as `log_manifest_path`.
-- `svg_mb_control_events.jsonl` stores append-only JSONL events for starts,
+- `svg_mb_control_events.jsonl` stores active JSONL events for starts,
   rotations, write attempts, restores, reconcile work, and failures. Its path
   is surfaced in `control_runtime.json` as `event_log_path`. Event rows include
   normalized `severity` and `error_code` fields so tools can group warnings,
   errors, and critical aborts without parsing the detail string.
+- `archive\svg_mb_control_events_<timestamp>.jsonl` and
+  `archive\svg_mb_control_evidence_events_<timestamp>.jsonl` store rotated event
+  streams. The event payload schema remains `svg_mb_control.event.v1`.
 
 Archive chunk rotation and pruning are controlled by `log_rotate_hours` and
 `log_retain_days` in the control config. `csv_flush_interval_rows` controls
@@ -316,11 +330,18 @@ written to the fixed-path mirror; `1` preserves per-row mirror refreshes,
 while higher values batch mirror writes and disk flushes. Pending mirror rows
 are flushed again on rotation and shutdown. The runtime manifest records the
 active CSV flush policy and interval. Runtime pruning removes old archive CSV
-chunks together with their matching archive manifest sidecar.
+chunks together with their matching archive manifest sidecar. Event JSONL
+rotation reuses the same `log_rotate_hours` age and `log_retain_days` archive
+retention window. Routine `info` `control_loop.write_applied` events are sampled
+in the control loop to bound growth, while warnings, errors, critical events, and
+lifecycle/transition events remain persisted within the retained window.
 
 For offline cleanup, use `svg-mb-control analyze prune`. It defaults to
 dry-run, requires `--apply` for deletion, and only deletes old archive bundles
-that have already been ingested into the SQLite analysis database.
+that have already been ingested into the SQLite analysis database. Add
+`--db-retain-days <days>` to purge analyzer DB runs older than the age bound,
+cascade their dependent rows, and reclaim freed DB pages after deletion; `0`
+explicitly disables the DB-side purge.
 
 For offline evaluation, use `svg-mb-control analyze report` to summarize one
 ingested run: idle/load/cooldown `p50`/`p90`/`max` for CPU Tctl and GPU
@@ -342,7 +363,8 @@ Supervised launches write process stdout/stderr logs in the runtime root:
 
 The supervisor logs its own startup failures to the supervisor stderr log and
 the worker's attached-mode startup/runtime output to the worker logs. Structured
-runtime events remain in `logs\svg_mb_control_events.jsonl`.
+runtime events remain in `logs\svg_mb_control_events.jsonl`; rotated event
+history is retained under `logs\archive\*_events_<timestamp>.jsonl`.
 
 Current-source control-loop CSV rows include the common telemetry/fan columns
 plus:

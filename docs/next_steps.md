@@ -120,7 +120,7 @@ before/after instrument for all three already exists in the control-loop CSV
   combined GPU-sample cadence-cost decision is pending (it adds more per-tick NVML
   reads than FEAT-0020's single board-power call). Not buildable until those clear.
 
-### Runtime disk growth (FEAT-0015 / FEAT-0016) — specs accepted 2026-06-18
+### Runtime disk growth (FEAT-0015 / FEAT-0016) — implemented 2026-06-18
 
 The runtime home was on a disk-fill path after FEAT-0020 widened the standard
 control-loop CSV and enabled live energy logging. The immediate operational
@@ -129,16 +129,18 @@ reclaim is done: the derived analyzer DB
 8,377,511,936 bytes (7.80 GiB). Raw CSV/event files and live sidecars were left
 untouched; `release\runtime` measured 3.439 GiB after the reclaim.
 
-The structural work is now governed by accepted specs:
+The structural work is implemented and verified by
+`.\scripts\Test-LocalCI.ps1 -KeepBuildDir` on 2026-06-18:
 
-- **FEAT-0016** (`REQ-DBRETAIN-*`) — add DB-side retention to `analyze prune`
+- **FEAT-0016** (`REQ-DBRETAIN-*`) — DB-side retention is part of `analyze prune`
   (`--db-retain-days`), cascade-delete old `runs` under `foreign_keys=ON`, and
-  reclaim with a post-delete `VACUUM`. This is the highest disk-growth item
+  reclaim with a post-delete `VACUUM`. This closes the highest disk-growth item
   because the DB had reached 7.80 GiB and is a designed derived sink.
-- **FEAT-0015** (`REQ-EVENTRET-*`) — add event JSONL rotation plus
-  severity-aware reduction of routine `control_loop.write_applied`, while always
-  keeping diagnostic/lifecycle events within the retained window. The live event
-  JSONL was 270.3 MB on 2026-06-18; the logs directory was 3.265 GiB.
+- **FEAT-0015** (`REQ-EVENTRET-*`) — event JSONL rotation reuses
+  `log_rotate_hours` / `log_retain_days`, and routine
+  `control_loop.write_applied` events are sampled while diagnostic/lifecycle
+  events remain persisted within the retained window. The live event JSONL was
+  270.3 MB on 2026-06-18; the logs directory was 3.265 GiB.
 
 ### Require fresh runtime evidence before changing cadence/floor defaults
 The shipped profile is a `250 ms` control tick and `250 ms` write cooldown. Per

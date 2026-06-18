@@ -1,7 +1,7 @@
 # FEAT-0019: Sidecar persistence off the actuation hot path
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-18
+**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-WRITEHOT-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -227,21 +227,21 @@ Verify legend:
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (code-local; cadence/channels unchanged; strictly fewer synchronous writes).
 - [x] 7. Doctrine check: behavior claims grounded with file paths; proposed behavior labeled as proposed; `must`/`should`/`is` per `CLAUDE.md`; no undefined terms.
 
-> Held at Draft (gate 3 open): the direction is captured and verification is mapped,
-> but the decision record is Proposed pending maintainer authorization. This is the
-> most build-ready member of the latency set — promoting D-WRITEHOT-1 to Current and
-> settling the REQ-WRITEHOT-06 counter-reset mechanism (§11) is the remaining work
-> before implementation.
+> Implemented 2026-06-18: all gates pass. D-WRITEHOT-1 was promoted to Current
+> (gate 3) recording the REQ-WRITEHOT-06 two-point counter-reset mechanism, and the
+> code landed TDD. Live-runtime (M) evidence is not required by any §10 row (the
+> change strictly reduces synchronous writes and is behavior-preserving for
+> recovery), so the feature is verified by T/R; a live deploy is a separate step.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-WRITEHOT-01 | | | |
-| REQ-WRITEHOT-02 | | | |
-| REQ-WRITEHOT-03 | | | |
-| REQ-WRITEHOT-04 | | | |
-| REQ-WRITEHOT-05 | | | |
-| REQ-WRITEHOT-06 | | | |
+| REQ-WRITEHOT-01 | pass | T: `pending_writes_store_tests::TestSameBaselineTargetChangeDefersToFlush` — a same-baseline `target_pct` change recreates no sidecar (detected by file existence), while a first entry persists synchronously. Full Test-LocalCI green (CTest 14/14, 169 hermetic). | 2026-06-18 |
+| REQ-WRITEHOT-02 | pass | T: `pending_writes_store_tests::TestRecoveryBaselineRecordedAtActivation` — the `(channel, baseline_duty_raw, baseline_mode_raw)` record is on disk after activation despite later same-baseline churn (read without `Flush`). R: `ReconcilePendingWrites` consumes only those three fields. | 2026-06-18 |
+| REQ-WRITEHOT-03 | pass | T: `pending_writes_store_tests::TestNewChannelPersistsSynchronously` — a new channel's first entry persists synchronously even with another channel's deferred update pending, so the activation record exists before `ApplyDuty`. | 2026-06-18 |
+| REQ-WRITEHOT-04 | pass | T: `TestSameBaselineTargetChangeDefersToFlush` (deferred update written by `Flush()` with the latest `target_pct`), `TestBaselineChangePersistsSynchronously` (re-capture persists a fresh sync write), `TestRemovalIsFlushed` (`QueueRemove`+`Flush` unchanged). | 2026-06-18 |
+| REQ-WRITEHOT-05 | pass | R: `docs/RUNTIME_HOME.md` clarifies `target_pct`/`started_iso` are advisory and ≤1 tick stale (schema unchanged); `docs/WRITE_ORCHESTRATION.md` documents the identity-gated persist cadence; no consumer (`runtime_health.cpp`, `write_orchestrator.cpp`) reads `target_pct` as authoritative. | 2026-06-18 |
+| REQ-WRITEHOT-06 | pass | T: `channel_write_tests::TestDeferredUpsertDoesNotClearPersistFailureCounter` (a deferred same-baseline `Upsert` leaves `consecutive_sidecar_persist_failures` set), `TestClearSidecarPersistFailuresZeroesCounters` (the post-Flush helper), `pending_writes_store_tests::TestFlushReportsWhetherItPersisted` (Flush's bool). R: the guarded reset site in `channel_write.cpp` + `tick_runner.cpp` flush-reset vs FEAT-0010. | 2026-06-18 |
 
-**Spec vs. implementation deltas:** <record at implementation.>
+**Spec vs. implementation deltas:** The REQ-WRITEHOT-06 mechanism is broader than §11's original lean: `Upsert` returns `bool persisted` (channel_write clears the counter only on a real persist — no false clear) **and** `Flush()` returns `bool` with `tick_runner` clearing all `context.channels` via the new `ClearSidecarPersistFailures` helper on a successful full-file flush (no stuck-degraded after a failed activation self-heals through the deferred write). Both points are required because an identity-change `Upsert` sets `dirty_=false`, so a Flush-only reset would never fire (recorded in D-WRITEHOT-1 and §11). Store tests live in a new `tests/cpp/pending_writes_store_tests.cpp`; persist is detected by sidecar file existence. No schema change. Commits `5c3679e` (gate 3) + `4d71e21` (code), validated green in an isolated worktree (CTest 14/14, 169 hermetic, `test_feature_specs` 5/5).
