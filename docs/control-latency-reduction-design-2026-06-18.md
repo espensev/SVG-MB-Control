@@ -143,11 +143,21 @@ reads `target_pct`. So the **synchronous** `Persist()` can be gated on a change 
 that recovery-relevant identity (first activation or baseline re-capture) and
 same-baseline churn deferred to the existing once-per-tick end-of-tick `Flush()`, so
 no fsync'd file-replace runs before `ApplyDuty` during a ramp — with zero change to
-recovery behavior. One cross-feature detail: a deferred `Upsert` returns normally, so
-the FEAT-0010 persist-failure counter reset (`channel_write.cpp`) must be corrected to
-clear only on an actual successful persist, not on a deferred call. This is the
-build-ready direction: behavior-preserving, code-local, not gate-crossing.
-**Status: Proposed.**
+recovery behavior.
+
+Cross-feature mechanism for the FEAT-0010 persist-failure counter (REQ-WRITEHOT-06),
+decided at implementation: `Upsert` returns a `bool persisted`, and
+`channel_write.cpp` clears `consecutive_sidecar_persist_failures` only when that is
+true (fixes the *false clear*: a deferred same-baseline `Upsert` no longer resets the
+counter while a failed activation record is still missing). Because `Persist()`
+rewrites the **whole** sidecar, a successful end-of-tick `Flush()` means every
+channel's record is on disk; so `Flush()` also returns a `bool`, and `tick_runner`
+clears the persist-failure counter for all `context.channels` when it reports a
+successful persist (fixes the *stuck-degraded* case: a failed activation that
+self-heals through the batched deferred write). Both reset points are required: an
+identity-change `Upsert` sets `dirty_ = false`, so a Flush-only reset would no-op and
+never clear it. This is the build-ready direction: behavior-preserving, code-local,
+not gate-crossing. **Status: Current (accepted 2026-06-18).**
 
 ### Not promoted here
 - **Lower the fixed `poll_tick_ms`/`write_cooldown_ms`** — same gate as

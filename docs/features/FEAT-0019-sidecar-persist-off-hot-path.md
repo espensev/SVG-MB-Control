@@ -174,7 +174,7 @@ keeps calling `Upsert` once per changed write.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| [`docs/control-latency-reduction-design-2026-06-18.md`](../control-latency-reduction-design-2026-06-18.md) (D-WRITEHOT-1) | Gate the synchronous persist on the recovery-relevant identity `(channel, baseline_duty_raw, baseline_mode_raw)`; defer same-baseline `target_pct` churn to the batched end-of-tick `Flush()`; correct the FEAT-0010 counter-reset so a deferred `Upsert` does not falsely clear `consecutive_sidecar_persist_failures`; do not reorder persist vs `ApplyDuty` for the activation write; add no new field. | Proposed (promote to Current at implementation authorization) |
+| [`docs/control-latency-reduction-design-2026-06-18.md`](../control-latency-reduction-design-2026-06-18.md) (D-WRITEHOT-1) | Gate the synchronous persist on the recovery-relevant identity `(channel, baseline_duty_raw, baseline_mode_raw)`; defer same-baseline `target_pct` churn to the batched end-of-tick `Flush()`; correct the FEAT-0010 counter-reset so a deferred `Upsert` does not falsely clear `consecutive_sidecar_persist_failures`; do not reorder persist vs `ApplyDuty` for the activation write; add no new field. | Current (accepted 2026-06-18) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -198,7 +198,7 @@ Verify legend:
 | Decision | Needed before | Current default |
 |---|---|---|
 | Whether to add a debug counter for skipped persists (observability) | implementation | omit; the existing `total_writes` and event log already mark actuation, and adding a field touches `RUNTIME_HOME.md` for little value. |
-| How to correct the FEAT-0010 counter so a deferred same-baseline `Upsert` does not falsely clear `consecutive_sidecar_persist_failures` (REQ-WRITEHOT-06): have `Upsert` signal whether it actually persisted and reset only then, or move the reset into the store's successful-`Persist()` path | implementation | lean: `Upsert` exposes a `persisted` result and `channel_write.cpp` resets the counter only when it is true; store-owned reset is the fallback. |
+| How to correct the FEAT-0010 counter so a deferred same-baseline `Upsert` does not falsely clear `consecutive_sidecar_persist_failures` (REQ-WRITEHOT-06) | implementation | **Resolved 2026-06-18 (D-WRITEHOT-1):** two-point reset. `Upsert` returns a `bool persisted`; `channel_write.cpp` clears the counter only when true (kills the *false clear*). `Flush()` also returns a `bool`, and `tick_runner` clears the counter for all `context.channels` on a successful flush, because a full-file `Persist()` makes every channel's record current (kills the *stuck-degraded* case after a failed activation self-heals via the batched write). Both points are needed: an identity-change `Upsert` sets `dirty_=false`, so a Flush-only reset would never fire. |
 | Whether to extend the same identity-gating to the free-function `UpsertPendingWrite` (write-once path) | implementation | leave `UpsertPendingWrite` (write-once orchestrator) as-is; it persists once per write-once invocation, not per tick, so it is not on a ramp hot path. |
 
 ## 12. Measurement gate & dependencies
@@ -221,7 +221,7 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — synchronous `Persist()` on the hot path per changed write; recovery verified to ignore `target_pct`).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — `docs/control-latency-reduction-design-2026-06-18.md` is Proposed; promote to Current at implementation authorization).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/control-latency-reduction-design-2026-06-18.md` D-WRITEHOT-1 promoted to Current 2026-06-18, recording the REQ-WRITEHOT-06 two-point counter-reset mechanism).
 - [x] 4. Concrete `REQ-WRITEHOT-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — C++ tests, contract review (§10), mirrored in `docs/TRACEABILITY.md`.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (code-local; cadence/channels unchanged; strictly fewer synchronous writes).
