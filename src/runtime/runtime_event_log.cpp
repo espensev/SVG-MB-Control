@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cwctype>
 #include <fstream>
+#include <iomanip>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -97,26 +99,32 @@ std::string EventCountKey(const std::filesystem::path& path) {
     return key;
 }
 
-struct EventCountCache {
+struct EventLogRegistry {
     std::mutex mutex;
     std::unordered_map<std::string, std::uint64_t> counts;
+    std::unordered_map<std::string, RuntimeEventLogOptions> options;
 };
 
-EventCountCache& RuntimeEventCountCache() {
-    static EventCountCache cache;
-    return cache;
+EventLogRegistry& RuntimeEventLogRegistry() {
+    static EventLogRegistry registry;
+    return registry;
 }
 
-void NoteEventAppended(const std::filesystem::path& path) {
-    EventCountCache& cache = RuntimeEventCountCache();
-    const std::string key = EventCountKey(path);
-    std::lock_guard<std::mutex> lock(cache.mutex);
-    auto existing = cache.counts.find(key);
-    if (existing == cache.counts.end()) {
-        cache.counts.emplace(key, CountNonEmptyLines(path));
+void NoteEventAppendedLocked(EventLogRegistry& registry,
+                             const std::filesystem::path& path,
+                             const std::string& key) {
+    auto existing = registry.counts.find(key);
+    if (existing == registry.counts.end()) {
+        registry.counts.emplace(key, CountNonEmptyLines(path));
         return;
     }
     ++existing->second;
+}
+
+void ResetEventCountLocked(EventLogRegistry& registry,
+                           const std::string& key,
+                           std::uint64_t value) {
+    registry.counts[key] = value;
 }
 
 void PutOptionalDouble(nlohmann::json& payload,
@@ -190,21 +198,208 @@ std::string InferErrorCode(const RuntimeLogEvent& event,
     return NormalizeEventCode(event.event_type);
 }
 
+std::string FormatEventArchiveTimestamp(
+    std::chrono::system_clock::time_point tp) {
+    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
+    std::tm local{};
+#ifdef _WIN32
+    if (localtime_s(&local, &tt) != 0) {
+        return {};
+    }
+#else
+    if (localtime_r(&tt, &local) == nullptr) {
+        return {};
+    }
+#endif
+    std::ostringstream out;
+    out << std::put_time(&local, "%Y%m%d_%H%M%S");
+    return out.str();
+}
+
+std::string EventArchiveStem(const std::filesystem::path& active_path) {
+    const std::filesystem::path filename = active_path.filename();
+    if (filename.extension() == ".jsonl") {
+        return filename.stem().string();
+    }
+    return filename.string();
+}
+
+std::filesystem::path ResolveEventArchivePath(
+    const std::filesystem::path& active_path,
+    std::chrono::system_clock::time_point now) {
+    const auto archive_dir = active_path.parent_path() / "archive";
+    const std::string stem = EventArchiveStem(active_path);
+    const std::string timestamp = FormatEventArchiveTimestamp(now);
+    const std::string base = stem + "_" +
+        (timestamp.empty() ? std::string("unknown") : timestamp);
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::string name = base;
+        if (attempt > 0) {
+            name += "_";
+            name += std::to_string(attempt);
+        }
+        name += ".jsonl";
+        std::filesystem::path candidate = archive_dir / name;
+        std::error_code ec;
+        if (!std::filesystem::exists(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return archive_dir / (base + "_overflow.jsonl");
+}
+
+void PruneOldEventArchives(const std::filesystem::path& active_path,
+                           const RuntimeEventLogOptions& options) {
+    if (options.retain_days == 0u) {
+        return;
+    }
+    const auto archive_dir = active_path.parent_path() / "archive";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(archive_dir, ec) || ec) {
+        return;
+    }
+    const std::string prefix = EventArchiveStem(active_path) + "_";
+    const auto cutoff = std::filesystem::file_time_type::clock::now() -
+                        std::chrono::hours(
+                            24ll * static_cast<long long>(options.retain_days));
+    for (const auto& entry :
+         std::filesystem::directory_iterator(archive_dir, ec)) {
+        if (ec) {
+            break;
+        }
+        if (!entry.is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+        const std::filesystem::path path = entry.path();
+        const std::string name = path.filename().string();
+        if (path.extension() != ".jsonl" ||
+            name.compare(0, prefix.size(), prefix) != 0) {
+            continue;
+        }
+        const auto mtime = entry.last_write_time(ec);
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        if (mtime < cutoff) {
+            std::filesystem::remove(path, ec);
+            ec.clear();
+        }
+    }
+}
+
+void RotateEventLogIfDueLocked(EventLogRegistry& registry,
+                               const std::filesystem::path& path,
+                               const std::string& key,
+                               const RuntimeEventLogOptions& options) {
+    if (options.rotate_hours == 0u) {
+        return;
+    }
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+        return;
+    }
+    const auto mtime = std::filesystem::last_write_time(path, ec);
+    if (ec) {
+        return;
+    }
+    const auto cutoff = std::filesystem::file_time_type::clock::now() -
+                        std::chrono::hours(options.rotate_hours);
+    if (mtime >= cutoff) {
+        return;
+    }
+
+    const auto archive_path =
+        ResolveEventArchivePath(path, std::chrono::system_clock::now());
+    std::filesystem::create_directories(archive_path.parent_path(), ec);
+    if (ec) {
+        return;
+    }
+    std::filesystem::rename(path, archive_path, ec);
+    if (ec) {
+        return;
+    }
+    ResetEventCountLocked(registry, key, 0u);
+    PruneOldEventArchives(path, options);
+}
+
+bool ShouldPersistEvent(const RuntimeLogEvent& event,
+                        std::string_view severity,
+                        const RuntimeEventLogOptions& options) {
+    if (!options.reduce_routine_write_applied ||
+        event.event_type != "control_loop.write_applied" ||
+        severity != "info") {
+        return true;
+    }
+    if (!event.tick_count.has_value() || *event.tick_count <= 1u) {
+        return true;
+    }
+    const std::uint32_t interval =
+        options.write_applied_sample_interval == 0u
+            ? 1u
+            : options.write_applied_sample_interval;
+    return (*event.tick_count % interval) == 0u;
+}
+
+bool AppendLineAtomic(const std::filesystem::path& path,
+                      const std::string& line) {
+#ifdef _WIN32
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        FILE_APPEND_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    DWORD written = 0u;
+    const BOOL ok = WriteFile(
+        handle,
+        line.data(),
+        static_cast<DWORD>(line.size()),
+        &written,
+        nullptr);
+    CloseHandle(handle);
+    return ok && written == line.size();
+#else
+    std::ofstream stream(path, std::ios::binary | std::ios::app);
+    if (!stream.is_open()) {
+        return false;
+    }
+    stream << line;
+    stream.flush();
+    return stream.good();
+#endif
+}
+
 }  // namespace
 
 std::uint64_t CachedEventCount(const std::filesystem::path& path,
                                bool refresh_from_disk) {
-    EventCountCache& cache = RuntimeEventCountCache();
+    EventLogRegistry& registry = RuntimeEventLogRegistry();
     const std::string key = EventCountKey(path);
-    std::lock_guard<std::mutex> lock(cache.mutex);
-    const auto existing = cache.counts.find(key);
-    if (!refresh_from_disk && existing != cache.counts.end()) {
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    const auto existing = registry.counts.find(key);
+    if (!refresh_from_disk && existing != registry.counts.end()) {
         return existing->second;
     }
 
     const std::uint64_t count = CountNonEmptyLines(path);
-    cache.counts[key] = count;
+    registry.counts[key] = count;
     return count;
+}
+
+void ConfigureRuntimeEventLogRetention(
+    const std::filesystem::path& event_log_path,
+    const RuntimeEventLogOptions& options) {
+    EventLogRegistry& registry = RuntimeEventLogRegistry();
+    const std::string key = EventCountKey(event_log_path);
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    registry.options[key] = options;
 }
 
 bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
@@ -223,6 +418,18 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
         : event.event_time_iso;
     const std::string severity = InferSeverity(event);
     const std::string error_code = InferErrorCode(event, severity);
+    const std::string key = EventCountKey(path);
+
+    EventLogRegistry& registry = RuntimeEventLogRegistry();
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    RuntimeEventLogOptions options;
+    if (auto it = registry.options.find(key); it != registry.options.end()) {
+        options = it->second;
+    }
+    if (!ShouldPersistEvent(event, severity, options)) {
+        return true;
+    }
+    RotateEventLogIfDueLocked(registry, path, key, options);
 
     nlohmann::json payload = {
         {"schema", "svg_mb_control.event.v1"},
@@ -296,42 +503,11 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
     std::string line = payload.dump();
     line.push_back('\n');
 
-#ifdef _WIN32
-    HANDLE handle = CreateFileW(
-        path.wstring().c_str(),
-        FILE_APPEND_DATA | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (handle == INVALID_HANDLE_VALUE) {
+    if (!AppendLineAtomic(path, line)) {
         return false;
     }
-    DWORD written = 0u;
-    const BOOL ok = WriteFile(
-        handle,
-        line.data(),
-        static_cast<DWORD>(line.size()),
-        &written,
-        nullptr);
-    CloseHandle(handle);
-    if (!ok || written != line.size()) {
-        return false;
-    }
-#else
-    std::ofstream stream(path, std::ios::binary | std::ios::app);
-    if (!stream.is_open()) {
-        return false;
-    }
-    stream << line;
-    stream.flush();
-    if (!stream.good()) {
-        return false;
-    }
-#endif
 
-    NoteEventAppended(path);
+    NoteEventAppendedLocked(registry, path, key);
     return true;
 }
 

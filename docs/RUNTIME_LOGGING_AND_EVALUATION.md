@@ -62,9 +62,12 @@ Control owns the runtime logging plane:
   active chunk.
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv` is the retained CSV
   history.
-- `logs\svg_mb_control_events.jsonl` is the append-only event stream for
-  starts, rotations, writes, restores, policy refusals, sensor failures,
-  circuit-breaker transitions, and sidecar warnings.
+- `logs\svg_mb_control_events.jsonl` is the active event stream for starts,
+  rotations, writes, restores, policy refusals, sensor failures,
+  circuit-breaker transitions, and sidecar warnings. It rotates into
+  `logs\archive\*_events_<timestamp>.jsonl` on the configured runtime retention
+  window; routine `control_loop.write_applied` info events are sampled while
+  diagnostic and lifecycle events remain persisted.
 - `logs\svg_mb_control_manifest.json` is the latest native runtime manifest.
   It points at the active archive CSV, live CSV mirror, event log, archive
   manifest, and records row/event counts plus producer identity. Its
@@ -88,8 +91,8 @@ source. Use the CSV for timing and response analysis.
   fresh run is collected with the current shipped config.
 - JSONL events separate discrete control actions and failures from the dense CSV
   stream.
-- Rotation and retention are local config fields, so long runs do not require
-  external cleanup tooling.
+- Rotation and retention are local config fields for CSV and event JSONL, so
+  long runs do not require external cleanup tooling for active runtime logs.
 - Runtime manifests now make a Control run self-describing enough for normal
   validation without an external logger.
 
@@ -212,6 +215,11 @@ Use this loop for controller changes:
    release\svg-mb-control.exe analyze ingest `
      --runtime-home .\release\runtime `
      --db .\release\runtime\svg_mb_control.db
+   release\svg-mb-control.exe analyze prune `
+     --runtime-home .\release\runtime `
+     --db .\release\runtime\svg_mb_control.db `
+     --db-retain-days 30 `
+     --dry-run
    release\svg-mb-control.exe analyze report `
      --runtime-home .\release\runtime `
      --db .\release\runtime\svg_mb_control.db `

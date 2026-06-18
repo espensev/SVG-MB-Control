@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace svg_mb_control {
 
@@ -62,5 +63,14 @@ void TryApplyChannelSetpoint(
     std::string_view eval_iso,
     std::chrono::steady_clock::time_point now_steady,
     std::uint64_t tick_count);
+
+// FEAT-0019 (REQ-WRITEHOT-06): clears every channel's
+// `consecutive_sidecar_persist_failures`. Called by the tick loop after a
+// successful end-of-tick `Flush()` — a successful flush rewrites the whole
+// sidecar, so every channel's recovery record is current and any prior
+// persist-failure degradation (e.g. a failed activation that self-heals through
+// the deferred write) is resolved. Pairs with the identity-gated reset in
+// `TryApplyChannelSetpoint`, which clears only the channel it persisted.
+void ClearSidecarPersistFailures(std::vector<ChannelState>& channels);
 
 }  // namespace svg_mb_control

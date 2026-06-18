@@ -61,10 +61,13 @@ TolerantPendingWritesRead ReadPendingWritesTolerant(
     const std::filesystem::path& runtime_home);
 
 // In-memory cache for the pending-writes sidecar. Avoids re-reading and
-// re-parsing the JSON file on every Upsert/Remove call. Upsert still
-// persists synchronously so the crash-recovery contract (sidecar reflects
-// any in-flight fan write before ApplyDuty runs) is preserved. Remove is
-// queued; callers must invoke Flush() at a safe point (e.g. end of tick).
+// re-parsing the JSON file on every Upsert/Remove call. Upsert persists
+// synchronously only when a channel's captured baseline changes (first
+// activation or re-capture); same-baseline target churn is deferred to Flush()
+// (FEAT-0019), so the crash-recovery contract (sidecar reflects every active
+// channel's captured baseline before ApplyDuty) is preserved while no fsync'd
+// file-replace runs before ApplyDuty during a ramp. Remove is queued; callers
+// must invoke Flush() at a safe point (e.g. end of tick).
 //
 // Not thread-safe: intended for single-threaded use inside the control loop.
 
@@ -76,7 +79,11 @@ TolerantPendingWritesRead ReadPendingWritesTolerant(
 class PendingWritesStoreInterface {
  public:
     virtual ~PendingWritesStoreInterface() = default;
-    virtual void Upsert(const PendingWriteEntry& entry) = 0;
+    // Returns true iff this call performed the synchronous persist (so the
+    // caller can clear its persist-failure health signal only on an actual
+    // write — FEAT-0019 REQ-WRITEHOT-06). A deferred same-baseline change
+    // returns false; a persist that throws propagates the exception.
+    virtual bool Upsert(const PendingWriteEntry& entry) = 0;
     virtual void QueueRemove(std::uint32_t channel) = 0;
 };
 
@@ -92,17 +99,31 @@ class PendingWritesStore : public PendingWritesStoreInterface {
     // the file (lets reconcile parse the sidecar once; FEAT-0012).
     void Adopt(std::vector<PendingWriteEntry> entries);
 
-    // Inserts or replaces the entry for entry.channel and persists the
-    // sidecar to disk synchronously. Throws on filesystem failure.
-    void Upsert(const PendingWriteEntry& entry) override;
+    // Inserts or replaces the entry for entry.channel. Persists the sidecar to
+    // disk synchronously ONLY when the recovery-relevant identity changes — a
+    // new channel entry (first activation) or a changed baseline_duty_raw /
+    // baseline_mode_raw — so the crash-recovery record (sidecar reflects every
+    // active channel's captured baseline before ApplyDuty) is preserved. A
+    // same-baseline target_pct/hold/started_iso change marks the store dirty for
+    // the next Flush() instead of writing synchronously (FEAT-0019), because
+    // those fields are recovery-irrelevant. Returns true iff it persisted
+    // synchronously (false for a deferred change), so the caller clears its
+    // persist-failure health signal only on an actual write (REQ-WRITEHOT-06).
+    // Throws on filesystem failure when it does persist.
+    bool Upsert(const PendingWriteEntry& entry) override;
 
     // Marks the entry for the given channel as removed. Does not touch
     // disk until Flush() is called.
     void QueueRemove(std::uint32_t channel) override;
 
-    // Persists any queued removals to disk if the in-memory state has
-    // changed since the last write. No-op if there is nothing to flush.
-    void Flush();
+    // Persists the in-memory state to disk if it has changed since the last
+    // write (queued removals and FEAT-0019 deferred same-baseline Upserts).
+    // Returns true iff it performed the synchronous persist; false if there was
+    // nothing to flush. A successful flush rewrites the whole sidecar, so every
+    // channel's record is then current (the caller uses this to clear stale
+    // persist-failure health signals — REQ-WRITEHOT-06). Throws on filesystem
+    // failure when it does persist.
+    bool Flush();
 
  private:
     void Persist();

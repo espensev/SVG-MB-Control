@@ -483,20 +483,33 @@ def _write_fixture_plant_model(path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _build_fixture(td: Path, session_start: str = "2026-05-15T03:30:00") -> Path:
-    runtime_home = td / "runtime"
+def _add_archive_fixture(
+    runtime_home: Path,
+    *,
+    session_start: str,
+    stem: str = "svg_mb_control_control-loop_20260515_033000",
+    ticks: int = 3,
+) -> tuple[Path, Path]:
     logs = runtime_home / "logs"
     archive = logs / "archive"
     archive.mkdir(parents=True, exist_ok=True)
 
-    csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
-    manifest_path = archive / "svg_mb_control_control-loop_20260515_033000.manifest.json"
-    _write_fixture_csv(csv_path, session_start)
+    csv_path = archive / f"{stem}.csv"
+    manifest_path = archive / f"{stem}.manifest.json"
+    _write_fixture_csv(csv_path, session_start, ticks=ticks)
     _write_fixture_manifest(
         manifest_path,
         session_start=session_start,
         csv_path=csv_path,
+        row_count=ticks,
     )
+    return csv_path, manifest_path
+
+
+def _build_fixture(td: Path, session_start: str = "2026-05-15T03:30:00") -> Path:
+    runtime_home = td / "runtime"
+    logs = runtime_home / "logs"
+    _add_archive_fixture(runtime_home, session_start=session_start)
     _write_fixture_events(logs / "svg_mb_control_events.jsonl", session_start)
     _write_fixture_plant_model(runtime_home / "plant_model.json")
     return runtime_home
@@ -512,6 +525,12 @@ def _query_one(db: Path, sql: str, params: tuple = ()) -> tuple:
     with contextlib.closing(sqlite3.connect(str(db))) as conn:
         cur = conn.execute(sql, params)
         return cur.fetchone()
+
+
+def _db_pragma_int(db: Path, pragma: str) -> int:
+    with contextlib.closing(sqlite3.connect(str(db))) as conn:
+        cur = conn.execute(f"PRAGMA {pragma}")
+        return cur.fetchone()[0]
 
 
 def _run_ingest(
@@ -834,6 +853,114 @@ class AnalyzeIngestTests(WindowsExeTestCase):
             self.assertTrue(manifest_path.exists())
             self.assertIn("candidates=0", result.stdout)
             self.assertIn("skipped_running=1", result.stdout)
+
+    def test_db_prune_dry_run_keeps_old_run(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "365",
+                "--db-retain-days",
+                "1",
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(_table_count(db_path, "runs"), 1)
+            self.assertEqual(_table_count(db_path, "tick_samples"), 3)
+            self.assertIn("dry_run=true", result.stdout)
+            self.assertIn("db_retain_days=1", result.stdout)
+            self.assertIn("db_candidates=1", result.stdout)
+            self.assertIn("db_deleted_runs=0", result.stdout)
+            self.assertIn("db_reclaim_ran=false", result.stdout)
+
+    def test_db_prune_apply_cascades_and_reclaims(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            logs = runtime_home / "logs"
+            old_session = (
+                datetime.datetime.now() - datetime.timedelta(days=10)
+            ).strftime("%Y-%m-%dT%H:%M:%S")
+            recent_session = datetime.datetime.now().strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            )
+            _add_archive_fixture(
+                runtime_home,
+                session_start=old_session,
+                stem="svg_mb_control_control-loop_20260601_010000",
+                ticks=800,
+            )
+            _add_archive_fixture(
+                runtime_home,
+                session_start=recent_session,
+                stem="svg_mb_control_control-loop_recent",
+                ticks=800,
+            )
+            _write_fixture_events(
+                logs / "svg_mb_control_events.jsonl", old_session
+            )
+
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+            self.assertEqual(_table_count(db_path, "runs"), 2)
+            page_count_before = _db_pragma_int(db_path, "page_count")
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "365",
+                "--db-retain-days",
+                "1",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("dry_run=false", result.stdout)
+            self.assertIn("db_candidates=1", result.stdout)
+            self.assertIn("db_deleted_runs=1", result.stdout)
+            self.assertIn("db_orphan_rows=0", result.stdout)
+            self.assertIn("db_reclaim_ran=true", result.stdout)
+
+            self.assertEqual(_table_count(db_path, "runs"), 1)
+            self.assertEqual(_table_count(db_path, "tick_samples"), 800)
+            self.assertEqual(_table_count(db_path, "tick_fan_samples"), 1600)
+            self.assertEqual(_table_count(db_path, "tick_channel_samples"), 1600)
+            self.assertEqual(_table_count(db_path, "events"), 0)
+            retained = _query_one(
+                db_path,
+                "SELECT session_start FROM runs",
+            )[0]
+            self.assertEqual(retained, recent_session)
+            self.assertLess(_db_pragma_int(db_path, "page_count"), page_count_before)
+            self.assertEqual(_db_pragma_int(db_path, "freelist_count"), 0)
+
+    def test_db_prune_zero_retain_days_is_explicit_disable(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "365",
+                "--db-retain-days",
+                "0",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(_table_count(db_path, "runs"), 1)
+            self.assertIn("db prune disabled: db_retain_days=0", result.stdout)
+            self.assertIn("db_retain_days=0", result.stdout)
+            self.assertIn("db_deleted_runs=0", result.stdout)
 
 
 def _ts(base_iso: str, secs: int) -> str:

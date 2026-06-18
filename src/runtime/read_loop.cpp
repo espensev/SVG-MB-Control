@@ -152,6 +152,12 @@ int ReadLoop::RunUntilStopped() {
     status.snapshot_source = "direct-runtime-snapshot";
     status.event_log_path =
         ResolveRuntimeEventLogPath(impl_->runtime_home).string();
+    ConfigureRuntimeEventLogRetention(
+        ResolveRuntimeEventLogPath(impl_->runtime_home),
+        RuntimeEventLogOptions{
+            .rotate_hours = impl_->config.log_rotate_hours,
+            .retain_days = impl_->config.log_retain_days,
+        });
 
     auto publish_status = [&](const std::string& state,
                               const std::string& detail) {

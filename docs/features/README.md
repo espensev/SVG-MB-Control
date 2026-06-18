@@ -14,23 +14,30 @@ checked against the written spec afterward.
 Read-first index of in-flight and next feature work. It aggregates the priority
 and decision view that is otherwise split between the §5 registry (per-feature
 status) and the topical backlog in `docs/next_steps.md` (a maintained backlog,
-current through the 2026-06-18 FEAT-0020 and disk-retention updates, but
-prose-organized and still silent on FEAT-0009). It links those rather
+current through the 2026-06-18 FEAT-0020 and FEAT-0015/0016 disk-retention
+implementation, but prose-organized and still silent on FEAT-0009). It links
+those rather
 than restating them; the §5 registry stays authoritative for per-feature status
 and `git log` for what shipped. Keep it current when a feature's status or the
 decision queue changes. A fuller standing review is
 `docs/spec-and-backlog-structure-assessment-2026-06-18.md`.
 
-**Active — `Accepted`, buildable when implementation is authorized:**
+**Recently implemented:**
 
-- **FEAT-0016** (`Accepted`) — analyze SQLite DB retention. Immediate safe
+- **FEAT-0016** (`Implemented`) — analyze SQLite DB retention. Immediate safe
   reclaim was completed 2026-06-18 by deleting the derived
   `release/runtime/svg_mb_control.db` (7.80 GiB reclaimed); the product-code work
-  is the accepted `analyze prune --db-retain-days` run-purge plus post-delete
-  reclaim.
-- **FEAT-0015** (`Accepted`) — runtime event JSONL retention. Build the accepted
-  rotation + severity-aware reduction so `logs/svg_mb_control_events.jsonl` stops
-  growing unbounded while diagnostic events remain within the retained window.
+  now adds `analyze prune --db-retain-days` run-purge plus post-delete reclaim.
+- **FEAT-0015** (`Implemented`) — runtime event JSONL retention. Event logs now
+  rotate on the runtime retention window and sample routine
+  `control_loop.write_applied` while diagnostic/lifecycle events remain within
+  the retained window.
+- **FEAT-0019** (`Implemented`) — sidecar persistence off the actuation hot path.
+  D-WRITEHOT-1 is Current; identity-gated persistence and flush-side reset
+  behavior are covered by C++ tests and traceability rows.
+
+**Active — `Accepted`, buildable when implementation is authorized:**
+
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
   implementation/evidence, not promotion: enabled-path live RAPL evidence, the
   `quarantine → validated` marker (manual), and the corrected per-core cycle
@@ -48,7 +55,6 @@ decision queue changes. A fuller standing review is
 |---|---|
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
-| **FEAT-0019** (`Draft`) | §9 / gate 3: promote D-WRITEHOT-1 from Proposed to Current before implementation. The design is build-ready and behavior-preserving, but not buildable until the decision record is current. |
 
 **Held design-capture (a `Draft`, not open work):** **FEAT-0003** — selectable
 control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
@@ -179,10 +185,10 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0012](FEAT-0012-startup-tolerates-corrupt-pending-writes-sidecar.md) | Startup quarantines a corrupt `pending_writes.json` and proceeds as empty instead of fatally aborting the worker into a relaunch-thrash loop | `REQ-SIDECARRESIL-*` | Done (2026-06-17; Direction A — quarantine + proceed + event + degraded health; C++ + smoke tests green) |
 | [FEAT-0013](FEAT-0013-source-aware-primary-dropout-safe-mode.md) | Source-aware channels enter safe mode on primary-source dropout (a CPU dropout on a max-blend channel now trips the existing safe-mode mechanism instead of being masked by GPU) | `REQ-SRCSAFE-*` | Done (2026-06-17; reuses the 3-miss sensor-failure trip; C++ tests green) |
 | [FEAT-0014](FEAT-0014-reconcile-restore-blocked-channel-guard.md) | Reconcile/restore honor the runtime blocked-channel write policy | `REQ-RESTOREGUARD-*` | Draft (held — real restore-path gap, not reachable by the shipped single-profile config; pending maintainer direction) |
-| [FEAT-0015](FEAT-0015-event-log-retention.md) | Event JSONL has a retention bound | `REQ-EVENTRET-*` | Accepted |
-| [FEAT-0016](FEAT-0016-analyze-db-run-purge.md) | Analyze SQLite DB has a retention bound | `REQ-DBRETAIN-*` | Accepted |
+| [FEAT-0015](FEAT-0015-event-log-retention.md) | Event JSONL has a retention bound | `REQ-EVENTRET-*` | Implemented (2026-06-18; rotation + write-applied sampling; Test-LocalCI green) |
+| [FEAT-0016](FEAT-0016-analyze-db-run-purge.md) | Analyze SQLite DB has a retention bound | `REQ-DBRETAIN-*` | Implemented (2026-06-18; `analyze prune --db-retain-days`, cascade purge + reclaim; Test-LocalCI green) |
 | [FEAT-0017](FEAT-0017-faster-fan-reaction-under-load.md) | Faster fan reaction under load (control-response retune: joint rise-rate + step-cap raise, asymmetric, lane-targeted) | `REQ-REACT-*` | Draft (held — lanes/target ceiling undecided; pending a response-evaluation Pass-3 validation) |
 | [FEAT-0018](FEAT-0018-adaptive-cadence-enablement.md) | Adaptive-cadence enablement under thermal transient (engage the dormant `poll_tick_floor_ms` engine) | `REQ-CADENCE-*` | Draft (held — crosses the measurement gate; pending the floor characterization pass) |
-| [FEAT-0019](FEAT-0019-sidecar-persist-off-hot-path.md) | Sidecar persistence off the actuation hot path (identity-gated `Persist()`; build-ready) | `REQ-WRITEHOT-*` | Draft (build-ready — behavior-preserving for recovery; only the decision record is pending) |
+| [FEAT-0019](FEAT-0019-sidecar-persist-off-hot-path.md) | Sidecar persistence off the actuation hot path (identity-gated `Persist()`) | `REQ-WRITEHOT-*` | Implemented (2026-06-18; T/R verified, C++ tests green) |
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Draft (held — sequenced behind FEAT-0020; D-GPUCTX-1 is Proposed and combined GPU sample cadence evidence is pending) |

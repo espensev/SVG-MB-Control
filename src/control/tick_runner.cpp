@@ -254,10 +254,16 @@ bool RunControlTick(ControlRuntimeContext& context,
                                 state.tick_count);
     }
 
-    // Flush any queued pending-write removals once per tick. Upserts
-    // already persisted synchronously inside the loop.
+    // Flush queued pending-write removals and FEAT-0019 deferred same-baseline
+    // upserts once per tick. A successful flush rewrites the whole sidecar, so
+    // every channel's recovery record is then on disk and current; clear any
+    // persist-failure degradation that the deferred write self-healed
+    // (REQ-WRITEHOT-06). Identity-change upserts already persisted synchronously
+    // inside the loop and cleared their own channel's counter.
     try {
-        pending_store.Flush();
+        if (pending_store.Flush()) {
+            ClearSidecarPersistFailures(context.channels);
+        }
     } catch (const std::exception& e) {
         AppendControlLoopEvent(
             context.runtime_home,

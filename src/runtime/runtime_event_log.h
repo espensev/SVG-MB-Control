@@ -37,6 +37,17 @@ struct RuntimeLogEvent {
     std::optional<bool> snapshot_mirror_published;
 };
 
+struct RuntimeEventLogOptions {
+    std::uint32_t rotate_hours = 0u;
+    std::uint32_t retain_days = 0u;
+    bool reduce_routine_write_applied = false;
+    std::uint32_t write_applied_sample_interval = 240u;
+};
+
+void ConfigureRuntimeEventLogRetention(
+    const std::filesystem::path& event_log_path,
+    const RuntimeEventLogOptions& options);
+
 bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
                         const RuntimeLogEvent& event,
                         const RuntimeArtifactNaming& naming =

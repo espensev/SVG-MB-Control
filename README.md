@@ -277,6 +277,7 @@ release\svg-mb-control.exe analyze ingest --runtime-home .\release\runtime --db 
 release\svg-mb-control.exe analyze ingest --force --quiet
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --dry-run
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --retain-days 14 --apply
+release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --db-retain-days 30 --apply
 release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --idle-seconds 300
 release\svg-mb-control.exe analyze report --run 7 --load-threshold-c 70 --json
 release\svg-mb-control.exe analyze report --run 7 --p0-mhz 4300 --json
@@ -328,9 +329,13 @@ Behavior:
   requires `--apply` before deleting files. It only deletes a bundle after the
   run is present in the SQLite ingest DB and the archive is older than
   `--retain-days`; running manifests are always skipped.
-- Runtime retention also removes the matching archive manifest when it prunes an
-  old archive CSV chunk. The global event JSONL and plant-model captures are
-  intentionally not pruned by this first-pass cleanup.
+- Add `--db-retain-days <days>` to the same prune command to delete analyzer DB
+  `runs` older than the age bound, cascade their dependent tick/fan/channel/event
+  rows under SQLite foreign keys, and run one post-delete reclaim. `0` explicitly
+  disables the DB-side purge; dry-run reports candidates without deleting rows.
+- Runtime retention removes the matching archive manifest when it prunes an old
+  archive CSV chunk. Event JSONL files rotate into `logs\archive\*.jsonl` and are
+  pruned by the runtime `log_rotate_hours` / `log_retain_days` window.
 - `analyze report` summarizes one ingested run (the most recent run unless
   `--run <id>` or `--session <ts>` is given). It reports idle/load/cooldown
   `p50`/`p90`/`max` for `cpu_tctl_c` and `gpu_memjn_c`/`gpu_envelope_c`,
@@ -489,9 +494,11 @@ Control writes:
 - `circuit_breaker_reset.request.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
+- `logs\archive\svg_mb_control_events_<timestamp>.jsonl`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
 - `logs\svg_mb_control_evidence.csv`
 - `logs\svg_mb_control_evidence_events.jsonl`
+- `logs\archive\svg_mb_control_evidence_events_<timestamp>.jsonl`
 - `logs\svg_mb_control_evidence_manifest.json`
 - `svg-mb-control.supervisor.stdout.log`
 - `svg-mb-control.supervisor.stderr.log`

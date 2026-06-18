@@ -25,6 +25,12 @@ checkable.
 
 ## 2026-06-18
 
+- **Done** — FEAT-0015/0016 runtime disk-growth retention implemented and
+  verified with `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` (CTest + hermetic
+  tests green): event JSONL rotates into `logs\archive\*_events_<timestamp>.jsonl`
+  on the configured runtime window and samples routine
+  `control_loop.write_applied`; `analyze prune --db-retain-days` purges old
+  analyzer DB runs, cascades dependent rows, and reclaims space after deletes.
 - **Done** — runtime disk-growth retention intake promoted to in-repo specs:
   `docs/features/FEAT-0015-event-log-retention.md` (event JSONL rotation +
   severity-aware reduction) and
