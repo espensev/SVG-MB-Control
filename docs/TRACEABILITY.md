@@ -234,7 +234,7 @@ Implemented 2026-06-18. Results mirror the owning spec's §14 verification log.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-EVENTRET-01` | T, R | `runtime_event_log_tests.cpp::TestRotationAndArchivePrune` verifies age rotation/archive pruning; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling; review vs decision record. | pass |
+| `REQ-EVENTRET-01` | T, R | `runtime_event_log_tests.cpp::TestRotationUsesActiveStartAndPrunesArchives` verifies active-start rotation with a fresh last-write mtime plus archive pruning; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling; review vs decision record. | pass |
 | `REQ-EVENTRET-02` | T, R | `TestConcurrentAppendRotationKeepsWholeLines` parses every active/archive line as JSON after concurrent appends across a rotation boundary; review confirms single-call append and in-process rotation/append serialization. | pass |
 | `REQ-EVENTRET-03` | T | `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` ticks are reduced while `control_loop.write_failed` and `control_loop.shutdown` remain persisted. | pass |
 | `REQ-EVENTRET-04` | T, R | Runtime event-log tests plus review: event payload schema stays `svg_mb_control.event.v1`, unconfigured append paths keep historical behavior, and `CachedEventCount` still reads the active file. | pass |

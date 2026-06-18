@@ -102,7 +102,11 @@ std::string EventCountKey(const std::filesystem::path& path) {
 struct EventLogRegistry {
     std::mutex mutex;
     std::unordered_map<std::string, std::uint64_t> counts;
-    std::unordered_map<std::string, RuntimeEventLogOptions> options;
+    struct RetentionState {
+        RuntimeEventLogOptions options;
+        std::chrono::system_clock::time_point active_started_at;
+    };
+    std::unordered_map<std::string, RetentionState> retention;
 };
 
 EventLogRegistry& RuntimeEventLogRegistry() {
@@ -289,29 +293,28 @@ void PruneOldEventArchives(const std::filesystem::path& active_path,
     }
 }
 
-void RotateEventLogIfDueLocked(EventLogRegistry& registry,
-                               const std::filesystem::path& path,
-                               const std::string& key,
-                               const RuntimeEventLogOptions& options) {
+void RotateEventLogIfDueLocked(
+    EventLogRegistry& registry,
+    const std::filesystem::path& path,
+    const std::string& key,
+    EventLogRegistry::RetentionState& retention_state) {
+    const RuntimeEventLogOptions& options = retention_state.options;
     if (options.rotate_hours == 0u) {
         return;
     }
+    const auto now = std::chrono::system_clock::now();
     std::error_code ec;
     if (!std::filesystem::is_regular_file(path, ec) || ec) {
+        retention_state.active_started_at = now;
         return;
     }
-    const auto mtime = std::filesystem::last_write_time(path, ec);
-    if (ec) {
-        return;
-    }
-    const auto cutoff = std::filesystem::file_time_type::clock::now() -
-                        std::chrono::hours(options.rotate_hours);
-    if (mtime >= cutoff) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
+        now - retention_state.active_started_at);
+    if (elapsed.count() < static_cast<long long>(options.rotate_hours)) {
         return;
     }
 
-    const auto archive_path =
-        ResolveEventArchivePath(path, std::chrono::system_clock::now());
+    const auto archive_path = ResolveEventArchivePath(path, now);
     std::filesystem::create_directories(archive_path.parent_path(), ec);
     if (ec) {
         return;
@@ -321,6 +324,7 @@ void RotateEventLogIfDueLocked(EventLogRegistry& registry,
         return;
     }
     ResetEventCountLocked(registry, key, 0u);
+    retention_state.active_started_at = now;
     PruneOldEventArchives(path, options);
 }
 
@@ -399,7 +403,11 @@ void ConfigureRuntimeEventLogRetention(
     EventLogRegistry& registry = RuntimeEventLogRegistry();
     const std::string key = EventCountKey(event_log_path);
     std::lock_guard<std::mutex> lock(registry.mutex);
-    registry.options[key] = options;
+    registry.retention[key] = EventLogRegistry::RetentionState{
+        .options = options,
+        .active_started_at =
+            options.active_started_at.value_or(std::chrono::system_clock::now()),
+    };
 }
 
 bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
@@ -423,13 +431,18 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
     EventLogRegistry& registry = RuntimeEventLogRegistry();
     std::lock_guard<std::mutex> lock(registry.mutex);
     RuntimeEventLogOptions options;
-    if (auto it = registry.options.find(key); it != registry.options.end()) {
-        options = it->second;
+    EventLogRegistry::RetentionState* retention_state = nullptr;
+    if (auto it = registry.retention.find(key);
+        it != registry.retention.end()) {
+        retention_state = &it->second;
+        options = it->second.options;
     }
     if (!ShouldPersistEvent(event, severity, options)) {
         return true;
     }
-    RotateEventLogIfDueLocked(registry, path, key, options);
+    if (retention_state != nullptr) {
+        RotateEventLogIfDueLocked(registry, path, key, *retention_state);
+    }
 
     nlohmann::json payload = {
         {"schema", "svg_mb_control.event.v1"},

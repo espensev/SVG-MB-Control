@@ -65,9 +65,10 @@ Control owns the runtime logging plane:
 - `logs\svg_mb_control_events.jsonl` is the active event stream for starts,
   rotations, writes, restores, policy refusals, sensor failures,
   circuit-breaker transitions, and sidecar warnings. It rotates into
-  `logs\archive\*_events_<timestamp>.jsonl` on the configured runtime retention
-  window; routine `control_loop.write_applied` info events are sampled while
-  diagnostic and lifecycle events remain persisted.
+  `logs\archive\*_events_<timestamp>.jsonl` on the configured active-file
+  retention window. The deadline is independent of last-write mtime, so frequent
+  appends do not postpone rotation; routine `control_loop.write_applied` info
+  events are sampled while diagnostic and lifecycle events remain persisted.
 - `logs\svg_mb_control_manifest.json` is the latest native runtime manifest.
   It points at the active archive CSV, live CSV mirror, event log, archive
   manifest, and records row/event counts plus producer identity. Its

@@ -2,6 +2,7 @@
 
 #include "runtime_paths.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -42,6 +43,7 @@ struct RuntimeEventLogOptions {
     std::uint32_t retain_days = 0u;
     bool reduce_routine_write_applied = false;
     std::uint32_t write_applied_sample_interval = 240u;
+    std::optional<std::chrono::system_clock::time_point> active_started_at;
 };
 
 void ConfigureRuntimeEventLogRetention(
