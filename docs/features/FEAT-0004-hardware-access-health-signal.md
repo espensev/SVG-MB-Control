@@ -1,7 +1,7 @@
 # FEAT-0004: Hardware-access dependency health signal (PawnIO availability)
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-03
+**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-HWHEALTH-*`
 **Companion to:** `AGENTS.md`, `docs/STRUCTURE_AND_STABILITY.md`, `docs/RUNTIME_HOME.md`, `docs/READ_LOOP.md`, `docs/BUILD_TARGETS_AND_DEPENDENCIES.md`
 **Purpose:** make PawnIO (kernel hardware-access) unavailability a distinct,
@@ -153,15 +153,17 @@ Proposed behavior (not yet implemented):
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| `docs/hwaccess-health-signal-decision-YYYY-MM-DD.md` | Whether the hardware-access-unavailable signal changes the health exit-code mapping (and thus the `task_runner` watchdog contract) or stays additive status/event only; whether read-path and write-path each get their own exit code or only an informational field; and whether a future external recovery agent or the watchdog should act on it. | Needed |
+| `docs/hwaccess-health-signal-decision-2026-06-18.md` | Whether the hardware-access-unavailable signal changes the health exit-code mapping (and thus the `task_runner` watchdog contract) or stays additive status/event only; whether read-path and write-path each get their own exit code or only an informational field; and whether a future external recovery agent or the watchdog should act on it. Settled: additive status + event only, exit codes unchanged; separate read/write fields; acting on the signal is out of scope (D-HWHEALTH-1..5). | Current |
 
-Leaning: **additive status + event, exit codes unchanged in this feature.** The
-audit shows a restart cannot fix a PawnIO-absent condition, so re-routing it to
-the restart-on-`2` path would only induce flapping. The value is making the
-condition *nameable and observable* so the effective fix (driver reload, then
-restart) can be triggered by an operator or an external supervisor. Changing the
-watchdog's restart contract is a separate decision that should not be bundled
-into the observability change.
+Decided (`docs/hwaccess-health-signal-decision-2026-06-18.md`): **additive status
++ event, exit codes unchanged in this feature.** The audit shows a restart cannot
+fix a PawnIO-absent condition, so re-routing it to the restart-on-`2` path would
+only induce flapping. The value is making the condition *nameable and observable*
+so the effective fix (driver reload, then restart) can be triggered by an operator
+or an external supervisor. Changing the watchdog's restart contract is a separate
+decision that is not bundled into this observability change; acting on the signal
+is out of scope (D-HWHEALTH-4), and recovery-gap remediation 2 (operator
+escalation) is recorded as a distinct future feature (D-HWHEALTH-5).
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -203,14 +205,16 @@ Verify legend:
 
 - [x] 1. Problem stated as a named code/contract gap with file:line evidence (§2).
 - [x] 2. Stressed invariants identified — Repo Boundary, Live Runtime Safety, RUNTIME_HOME schema, control identity, Measurement Gate (§4).
-- [ ] 3. Required design decision record written and marked current (§9).
+- [x] 3. Required design decision record written and marked current (§9 — `docs/hwaccess-health-signal-decision-2026-06-18.md`, Current).
 - [x] 4. Concrete `REQ-HWHEALTH-*` IDs assigned (§6).
 - [x] 5. Verification mapped to `Test-LocalCI` / review / runtime evidence (§10).
 - [x] 6. Confirmed it does not violate Live Runtime Safety or Repo Boundary and does not move the Measurement Gate baseline (read-only; no driver management).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`.
 
-> Gate 3 is open: this spec is `Draft` until the design decision record (§9)
-> exists and is marked current. It is not buildable work yet.
+> Accepted 2026-06-18: the §9 design decision record
+> (`docs/hwaccess-health-signal-decision-2026-06-18.md`) is written and Current,
+> closing gate 3. The spec is buildable when implementation is explicitly
+> authorized; Accepted is not itself build authorization.
 
 ## 14. Verification log  *(fill in after the feature is built)*
 

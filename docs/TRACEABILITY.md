@@ -54,8 +54,8 @@ Result values:
 | `FEAT-0001` Hot-swap runtime write policy | Accepted | Buildable when implementation is explicitly authorized; verification pending. |
 | `FEAT-0002` CPU settings evidence logger | Implemented (source/test load layer; label deferred) | Source/test requirements pass except `REQ-CPUSETTINGS-06`, which is deferred; the 2026-06-09 rebuild confirmed the `system_cpu_*` columns in the live CSV header (git_hash `dd2c02214128`, session `2026-06-09T02:32:40`), closing the packaging-evidence gap. |
 | `FEAT-0003` Selectable control-law profile with hot-swap | Draft | Not buildable; design capture only. |
-| `FEAT-0004` Hardware-access dependency health signal | Draft | Not buildable; decision record gate open. |
-| `FEAT-0005` Write actuation confirmation | Reserved (body parked) | Not buildable; body parked in `docs/features/_parked/`, sequenced behind FEAT-0004. |
+| `FEAT-0004` Hardware-access dependency health signal | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted Draft→Accepted 2026-06-18; decision record `docs/hwaccess-health-signal-decision-2026-06-18.md` Current (additive observability; exit codes unchanged). |
+| `FEAT-0005` Write actuation confirmation | Accepted | Buildable when implementation is explicitly authorized; verification pending. Un-parked and promoted Reserved→Accepted 2026-06-18; decision `docs/actuation-confirmation-decision-2026-06-18.md` Current. Accepted scope is Phase-1 RPM-based detection/evidence; Phase-2 escalation is a separate, measurement-gated step. |
 | `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed behind default-off gates. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
 | `FEAT-0008` Watchdog hung-worker recovery | Done | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
@@ -112,12 +112,24 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-HWHEALTH-01` | T, R | Status-field test; review `RUNTIME_HOME.md`. | not buildable |
-| `REQ-HWHEALTH-02` | T | Read-path-down vs write-path-down init outcomes set distinct fields. | not buildable |
-| `REQ-HWHEALTH-03` | T, R | Analyzer/ingest compatibility with old status files; additive-only schema review. | not buildable |
-| `REQ-HWHEALTH-04` | T, M | Tests assert transition events; runtime event-log evidence. | not buildable |
-| `REQ-HWHEALTH-05` | R | Review confirms no driver load/start/restart path. | not buildable |
-| `REQ-HWHEALTH-06` | T | No successful open means unknown/unavailable, never healthy. | not buildable |
+| `REQ-HWHEALTH-01` | T, R | Status-field test; review `RUNTIME_HOME.md`. | pending |
+| `REQ-HWHEALTH-02` | T | Read-path-down vs write-path-down init outcomes set distinct fields. | pending |
+| `REQ-HWHEALTH-03` | T, R | Analyzer/ingest compatibility with old status files; additive-only schema review. | pending |
+| `REQ-HWHEALTH-04` | T, M | Tests assert transition events; runtime event-log evidence. | pending |
+| `REQ-HWHEALTH-05` | R | Review confirms no driver load/start/restart path. | pending |
+| `REQ-HWHEALTH-06` | T | No successful open means unknown/unavailable, never healthy. | pending |
+
+### FEAT-0005 - Write actuation confirmation (non-actuating-write detection)
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-ACTCONFIRM-01` | T | Simulated channel: commanded duty vs observed RPM/duty response over a window. | pending |
+| `REQ-ACTCONFIRM-02` | T | `simulated_fan_writer`: commanded-high-but-flat trips; commanded-zero-and-flat does not. | pending |
+| `REQ-ACTCONFIRM-03` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `WRITE_ORCHESTRATION.md`: Phase-1 changes no duty/cadence/breaker/identity. | pending |
+| `REQ-ACTCONFIRM-04` | T, M | Test asserts additive fields + onset/clear events; runtime event-log evidence. | pending |
+| `REQ-ACTCONFIRM-05` | T, R | Test that detection evaluates during a hold window; review vs the authority-reassert path. | pending |
+| `REQ-ACTCONFIRM-06` | R | Review confirms Phase-2 escalation is absent in Phase 1 and is gated by `MEASUREMENT_GATE.md`. | pending |
+| `REQ-ACTCONFIRM-07` | R | Review: in-repo `FanWriter` telemetry only; no third-party/subprocess/sibling dependency. | pending |
 
 ### FEAT-0006 - CPU work and energy efficiency evidence
 

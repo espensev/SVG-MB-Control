@@ -1,13 +1,7 @@
 # FEAT-0005: Write actuation confirmation (non-actuating-write detection)
 
-> **Reserved / parked 2026-06-06.** Demoted from Draft to Reserved; this full
-> body is preserved under `docs/features/_parked/` pending implementation. The
-> active registry row is in `docs/features/README.md` §5. While parked, this body
-> is not part of the enforced feature set (`tests/test_feature_specs.py`) and its
-> `REQ-ACTCONFIRM-*` rows are not mirrored in `docs/TRACEABILITY.md`.
-
 **Project:** svg-mb-control
-**Status:** Reserved (parked; body preserved)   **Version:** 0.1   **Updated:** 2026-06-06
+**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-ACTCONFIRM-*`
 **Companion to:** `AGENTS.md`, `docs/WRITE_ORCHESTRATION.md`, `docs/CONTROL_LOOP.md`, `docs/CONTROL_PIPELINE_MATH.md`, `docs/RUNTIME_HOME.md`, `docs/MEASUREMENT_GATE.md`
 **Purpose:** detect a fan write that the driver accepts but that does not
@@ -185,17 +179,22 @@ Phase 2 (gated) is escalation.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| `docs/actuation-confirmation-decision-YYYY-MM-DD.md` | The response source (duty readback vs RPM vs both) and its confirmed per-tick availability; the window length and mismatch thresholds relative to the shipped 250 ms cadence; and whether/what Phase-2 escalation is adopted (force safe duty / escalate health / open breaker) and how it is measurement-gated. | Needed |
+| `docs/actuation-confirmation-decision-2026-06-18.md` | The response source (duty readback vs RPM vs both) and its confirmed per-tick availability; the window length and mismatch thresholds relative to the shipped 250 ms cadence; and whether/what Phase-2 escalation is adopted (force safe duty / escalate health / open breaker) and how it is measurement-gated. Settled: per-tick RPM is available (`FanChannelState.rpm`/`tach_valid`); Phase-1 source is RPM gated on `tach_valid`, windowed; Phase-2 escalation deferred behind the Measurement Gate (D-ACTCONFIRM-1..5). | Current |
 
-Leaning: **ship Phase 1 (detection + evidence) first; defer escalation.** A
-read-only detector closes the visibility half of the gap with no Live Runtime
-Safety or Measurement Gate exposure, can be validated against simulated
-non-actuation, and produces the evidence needed to design a safe escalation. RPM
-is the stronger non-actuation signal (it sees a stalled fan that the duty register
-does not), but duty readback is already sampled per tick; the decision record
-must confirm whether control-side per-tick RPM is available before committing to
-it. Escalation that changes duty is a control-affecting authority action and must
-clear the Measurement Gate and `CONTROL_PIPELINE_MATH.md` on its own.
+Decided (`docs/actuation-confirmation-decision-2026-06-18.md`): **ship Phase 1
+(detection + evidence) first; defer escalation.** A read-only detector closes the
+visibility half of the gap with no Live Runtime Safety or Measurement Gate
+exposure, can be validated against simulated non-actuation, and produces the
+evidence needed to design a safe escalation. RPM is the stronger non-actuation
+signal (it sees a stalled fan that the duty register does not), and the open
+question — whether control-side per-tick RPM is available — is resolved
+affirmatively: `FanWriter::ReadAllChannels` returns `FanChannelState.rpm` /
+`tach_valid` each tick (`src/hardware/fan_writer.h:30-43`,
+`src/platform/direct_runtime_snapshot.cpp:218`). Phase-1 detection therefore uses
+**RPM gated on `tach_valid`** as the primary source, with duty readback
+corroborating. Escalation that changes duty is a control-affecting authority
+action and must clear the Measurement Gate and `CONTROL_PIPELINE_MATH.md` on its
+own.
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -243,14 +242,18 @@ Verify legend:
 
 - [x] 1. Problem stated as a named code/contract gap with file:line evidence (§2).
 - [x] 2. Stressed invariants identified — Live Runtime Safety, Measurement Gate, control identity, Repo Boundary, RUNTIME_HOME schema (§4).
-- [ ] 3. Required design decision record written and marked current (§9).
+- [x] 3. Required design decision record written and marked current (§9 — `docs/actuation-confirmation-decision-2026-06-18.md`, Current).
 - [x] 4. Concrete `REQ-ACTCONFIRM-*` IDs assigned (§6).
 - [x] 5. Verification mapped to `Test-LocalCI` / review / runtime evidence (§10).
 - [x] 6. Confirmed Phase 1 does not violate Live Runtime Safety or Repo Boundary and does not move the Measurement Gate baseline; Phase 2 is explicitly gated rather than bundled in.
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`.
 
-> Gate 3 is open: this spec is `Draft` until the design decision record (§9)
-> exists and is marked current. It is not buildable work yet.
+> Accepted 2026-06-18: un-parked (body restored to the enforced set) and promoted
+> Reserved → Accepted; the §9 design decision record
+> (`docs/actuation-confirmation-decision-2026-06-18.md`) is written and Current,
+> closing gate 3. Accepted scope is Phase-1 detection/evidence only; Phase-2
+> escalation is a separate, measurement-gated authorization. Accepted is not
+> itself build authorization.
 
 ## 14. Verification log  *(fill in after the feature is built)*
 
