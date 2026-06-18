@@ -1,7 +1,7 @@
 # FEAT-0020: Standard control-loop power logging
 
 **Project:** svg-mb-control
-**Status:** Accepted (implementation authorized 2026-06-18; live-flip M-evidence deferred)   **Version:** 0.2   **Updated:** 2026-06-18
+**Status:** Implemented (T/B/R verified 2026-06-18; live-flip M-evidence deferred)   **Version:** 0.3   **Updated:** 2026-06-18
 **Namespace:** `REQ-PWRLOG-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -252,11 +252,11 @@ Verify legend:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-PWRLOG-01 | | | |
-| REQ-PWRLOG-02 | | | |
-| REQ-PWRLOG-03 | | | |
-| REQ-PWRLOG-04 | | | |
-| REQ-PWRLOG-05 | | | |
-| REQ-PWRLOG-06 | | | |
+| REQ-PWRLOG-01 | partial | T+R done; live M deferred. T: `tests/test_energy_logging_profile.py` (`-Enable` dry-run sets `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled` and disables the safety-revert task). R: marker semantics preserved — the worker emits `{disabled, unavailable, quarantine}` only, never live `validated` (`amd_reader.cpp`). M: live CSV with nonempty CPU energy sample ids deferred to the authorized flip window. | 2026-06-18 |
+| REQ-PWRLOG-02 | partial | T+R done; live M deferred. T: `csv_rows_tests` (5 GPU columns, header/row aligned), `test_control_loop.py::test_control_loop_logs_gpu_board_power` + `…gpu_power_unavailable_emits_no_false_zero`, `test_analyze_ingest.py::test_report_derives_gpu_power_distribution`. R: blank-plus-marker (no false zero) reviewed. M: live nonempty GPU power samples deferred to the flip window. | 2026-06-18 |
+| REQ-PWRLOG-03 | pass | T: `test_control_loop.py` asserts `channel0_response_source` stays `primary_curve` with GPU power present. R: power is not in `TempInputs`/`EvaluateChannel`; `power_anticipation.h` stays unreferenced by `src/control`/`src/runtime`; `docs/CONTROL_PIPELINE_MATH.md` unchanged. Full Test-LocalCI green (CTest + 169 hermetic). | 2026-06-18 |
+| REQ-PWRLOG-04 | partial | R done; runtime M deferred (gate 6). R: GPU power is one `nvmlDeviceGetPowerUsage` piggybacked on the existing per-tick thermal sample (`gpu_probe.cpp` `poll_nvml_board_power`); CPU energy read stays off the PCI mutex. M: same-machine/same-build pre/post-flip 250 ms cadence evidence (`loop_work_duration_ms`/slip/overrun/`process_cpu_pct`/health) deferred to the authorized live-flip window. | 2026-06-18 |
+| REQ-PWRLOG-05 | pass | T: `test_analyze_ingest.py::test_report_derives_gpu_power_distribution` (mean 233333.33 over 3 de-duplicated samples — not an energy integral), the old-archive degrade case (sample_count 0, `unavailable`), and `test_ingest_migrates_v9_db_to_v10` (ladder to v11). R: CPU watts derivation unchanged, no second CPU watts column; v10→v11 additive positional ingest. | 2026-06-18 |
+| REQ-PWRLOG-06 | partial | T+R done; live M deferred. T: `tests/test_energy_logging_profile.py` (`-Enable`/`-Disable` dry-run toggles the `SVG-MB Energy Safety Revert` task + the User env; requires exactly one mode). R: reversible profile coexists with the safety revert; the FEAT-0006 boot-OFF-guarantee inversion is recorded in D-PWRLOG-1. M: live flip/revert verification deferred to the authorized window. | 2026-06-18 |
 
-**Spec vs. implementation deltas:** <record at implementation.>
+**Spec vs. implementation deltas:** GPU power read is a single `nvmlDeviceGetPowerUsage` added to the vendored `sample_thermal_fast` via `poll_nvml_board_power` (board power only, not the per-rail topology); read-timestamp is a reader-owned monotonic-ms clock (`time_ms` is caller-owned, not stamped by the sampler). Analyzer summary is mean/p50/p90/max over distinct `gpu_power_sample_id` samples (schema v11), explicitly not the CPU Sigma-energy integral. CPU side (Track A) added no worker code. Live-flip M evidence (REQ-PWRLOG-04 and the live parts of -01/-02/-06) is deferred to a separately authorized live-runtime window.

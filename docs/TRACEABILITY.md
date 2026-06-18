@@ -68,7 +68,7 @@ Result values:
 | `FEAT-0017` Faster fan reaction under load (control-response retune) | Draft (held) | Not buildable; design capture (`docs/control-latency-reduction-design-2026-06-18.md` D-REACT-1, Proposed). Config-only joint rise-rate + step-cap raise, asymmetric, lane-targeted; held pending the decision on lanes/target ceiling and a response-evaluation Pass-3 validation. Does not cross the measurement gate. |
 | `FEAT-0018` Adaptive-cadence enablement under thermal transient | Draft (held) | Not buildable; design capture (D-CADENCE-1, Proposed). Engages the dormant `poll_tick_floor_ms` engine; **crosses `MEASUREMENT_GATE.md`** (adaptive floor below the shipped profile), held until the floor characterization evidence exists. |
 | `FEAT-0019` Sidecar persistence off the actuation hot path | Draft | Not buildable yet; build-ready design capture (D-WRITEHOT-1, Proposed). Identity-gated `Persist()` removes the per-tick sidecar write from the actuation hot path; behavior-preserving for recovery, held only at promotion gate 3 (decision record Proposed). |
-| `FEAT-0020` Standard control-loop power logging | Accepted | Implementation authorized 2026-06-18 (D-PWRLOG-1 Current; all 7 promotion gates met). Buildable: CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp. `T`/`B`/`R` verification lands with the implementation; the `M` runtime cadence evidence (REQ-PWRLOG-04) and the live flip stay deferred to a separately authorized live-runtime window. Implementation plan: `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
+| `FEAT-0020` Standard control-loop power logging | Implemented | Implemented 2026-06-18 (D-PWRLOG-1 Current; full Test-LocalCI green — CTest + 169 hermetic). CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp, summarized by the analyzer (v11) as mean/percentile (not an energy integral). `T`/`B`/`R` verified; the `M` runtime cadence evidence (REQ-PWRLOG-04) and the live flip stay deferred to a separately authorized live-runtime window. Implementation plan: `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
 | `FEAT-0021` Standard control-loop GPU workload context logging | Draft | Not buildable yet; D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Proposed, and combined GPU power/context sample cadence evidence is pending. Sequenced behind FEAT-0020 so the immediate power-logging target can stay narrow. |
 
 ## 3. Requirement map
@@ -258,19 +258,20 @@ promoted to Current at implementation authorization (gate 3).
 
 ### FEAT-0020 - Standard control-loop power logging
 
-Accepted and implementation-authorized. Results are `pending` until
-implementation fills the owning spec's verification log. `REQ-PWRLOG-04`
-remains pending until a separately authorized live-runtime flip provides the
-same-machine/same-build cadence evidence.
+Implemented 2026-06-18 (T/B/R verified; full Test-LocalCI green — CTest + 169
+hermetic). Results mirror the owning spec's §14 verification log. The `M`
+(runtime) parts of `REQ-PWRLOG-01/-02/-04/-06` are `partial`/deferred until a
+separately authorized live-runtime flip provides the same-machine/same-build
+cadence and CSV evidence (gate 6).
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-PWRLOG-01` | T, M, R | Config/script or startup test for exact CPU RAPL env gate; runtime CSV evidence with nonempty CPU energy sample ids; review vs FEAT-0006 marker semantics. | pending |
-| `REQ-PWRLOG-02` | T, M, R | CSV header/row test for GPU power fields; runtime CSV evidence with nonempty GPU power samples; review no false-zero behavior. | pending |
-| `REQ-PWRLOG-03` | T, R | Control-loop tests/review showing power fields are not read by setpoint/boost/write code; review `docs/CONTROL_PIPELINE_MATH.md` needs no identity change. | pending |
-| `REQ-PWRLOG-04` | M, R | Runtime evidence from the standard 250 ms profile: achieved interval, slip/overrun, process CPU%, and health remain within the current measurement-gate envelope; review GPU read cadence. | pending (live M deferred) |
-| `REQ-PWRLOG-05` | T, R | Analyzer ingest/report tests for new fields and old archives; review CPU watts derivation remains FEAT-0006-derived, not double-logged. | pending |
-| `REQ-PWRLOG-06` | T, M, R | Script/workflow test or dry-run review for flip/revert; live verification only after explicit authorization; README/operator docs review. | pending |
+| `REQ-PWRLOG-01` | T, M, R | Config/script test for the CPU RAPL profile (`test_energy_logging_profile.py`); runtime CSV energy sample ids (live M, deferred); review vs FEAT-0006 marker semantics. | partial |
+| `REQ-PWRLOG-02` | T, M, R | CSV header/row tests (`csv_rows_tests`, `test_control_loop.py`); analyzer ingest (`test_analyze_ingest.py`); runtime nonempty GPU power samples (live M, deferred); no-false-zero review. | partial |
+| `REQ-PWRLOG-03` | T, R | `test_control_loop.py` asserts response source stays `primary_curve`; review power is not in `TempInputs`/`EvaluateChannel` and `power_anticipation.h` stays unwired; `CONTROL_PIPELINE_MATH.md` unchanged. | pass |
+| `REQ-PWRLOG-04` | M, R | Review: one `nvmlDeviceGetPowerUsage` piggybacked on the per-tick thermal sample (`poll_nvml_board_power`); runtime 250 ms cadence evidence (pre/post-flip) deferred to the authorized live window. | partial |
+| `REQ-PWRLOG-05` | T, R | Analyzer tests for the GPU distribution (mean, not energy integral), old-archive degrade, and v10→v11 migration; review CPU watts derivation unchanged, not double-logged. | pass |
+| `REQ-PWRLOG-06` | T, M, R | `test_energy_logging_profile.py` dry-run flip/revert (`-Enable`/`-Disable`); live flip/revert verification deferred; README/operator docs reviewed. | partial |
 
 ### FEAT-0021 - Standard control-loop GPU workload context logging
 
