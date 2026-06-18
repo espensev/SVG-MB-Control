@@ -930,6 +930,53 @@ void TestClearSidecarPersistFailuresZeroesCounters() {
                "ClearSidecarPersistFailures zeroes all channels' counters");
 }
 
+// FEAT-0019 REQ-WRITEHOT-06: the end-of-tick composition the control loop runs
+// (FlushAndClearPersistFailures) must clear persist-failure counters ONLY when
+// the Flush actually persisted. This pins both branches through real
+// PendingWritesStore state so the tick wiring cannot be mutated to an
+// unconditional clear (which would falsely heal a channel on a quiescent tick)
+// or to never-clear (which would never self-heal) without failing here.
+void TestFlushAndClearPersistFailuresGatesClearOnPersist() {
+    const std::filesystem::path home = MakeTempHome("flush_clear_gated");
+    svg_mb_control::PendingWritesStore store(home);
+
+    svg_mb_control::PendingWriteEntry entry;
+    entry.channel = 2u;
+    entry.baseline_duty_raw = 10u;
+    entry.baseline_mode_raw = 1u;
+    entry.target_pct = 30.0;
+    entry.requested_hold_ms = 0u;
+    entry.started_iso = "2026-06-18T00:00:00";
+    store.Upsert(entry);                 // activation persists synchronously, clears dirty
+    entry.target_pct = 40.0;
+    store.Upsert(entry);                 // same baseline -> deferred (store now dirty)
+
+    std::vector<svg_mb_control::ChannelState> channels(2);
+    channels[0].consecutive_sidecar_persist_failures = 3u;
+    channels[1].consecutive_sidecar_persist_failures = 5u;
+
+    const bool persisted =
+        svg_mb_control::FlushAndClearPersistFailures(store, channels);
+    ExpectTrue(persisted, "a dirty store flushes (returns true)");
+    ExpectTrue(channels[0].consecutive_sidecar_persist_failures == 0u &&
+                   channels[1].consecutive_sidecar_persist_failures == 0u,
+               "a flush that persisted clears every channel's persist-failure "
+               "counter");
+
+    // Store is now clean; a second call must NOT persist and must NOT clear.
+    channels[0].consecutive_sidecar_persist_failures = 7u;
+    const bool persisted_again =
+        svg_mb_control::FlushAndClearPersistFailures(store, channels);
+    ExpectFalse(persisted_again,
+                "a clean store does not flush (returns false)");
+    ExpectTrue(channels[0].consecutive_sidecar_persist_failures == 7u,
+               "a no-op flush leaves persist-failure counters untouched (the "
+               "clear stays gated on the persist)");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
 int main() {
     TestSensorSafeBypassesOpenBreaker();
     TestNonCoolingWriteSuppressedByOpenBreaker();
@@ -946,6 +993,7 @@ int main() {
     TestSidecarPersistFailureCounterResetsOnSuccess();
     TestDeferredUpsertDoesNotClearPersistFailureCounter();
     TestClearSidecarPersistFailuresZeroesCounters();
+    TestFlushAndClearPersistFailuresGatesClearOnPersist();
     TestSidecarPersistFailureDegradesHealth();
     TestSidecarBaselineSurvivesStaleAndAbsentEntry();
     TestSidecarPersistFailureEmitsEvent();

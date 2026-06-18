@@ -255,15 +255,15 @@ bool RunControlTick(ControlRuntimeContext& context,
     }
 
     // Flush queued pending-write removals and FEAT-0019 deferred same-baseline
-    // upserts once per tick. A successful flush rewrites the whole sidecar, so
-    // every channel's recovery record is then on disk and current; clear any
-    // persist-failure degradation that the deferred write self-healed
-    // (REQ-WRITEHOT-06). Identity-change upserts already persisted synchronously
-    // inside the loop and cleared their own channel's counter.
+    // upserts once per tick, and — iff the flush persisted — clear any
+    // persist-failure degradation that the deferred write self-healed: a
+    // successful flush rewrites the whole sidecar, so every channel's recovery
+    // record is then on disk and current (REQ-WRITEHOT-06). Identity-change
+    // upserts already persisted synchronously inside the loop and cleared their
+    // own channel's counter. The persist-gated clear lives in
+    // FlushAndClearPersistFailures so it is unit-testable without a full tick.
     try {
-        if (pending_store.Flush()) {
-            ClearSidecarPersistFailures(context.channels);
-        }
+        FlushAndClearPersistFailures(pending_store, context.channels);
     } catch (const std::exception& e) {
         AppendControlLoopEvent(
             context.runtime_home,

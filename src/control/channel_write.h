@@ -73,4 +73,17 @@ void TryApplyChannelSetpoint(
 // `TryApplyChannelSetpoint`, which clears only the channel it persisted.
 void ClearSidecarPersistFailures(std::vector<ChannelState>& channels);
 
+// FEAT-0019 (REQ-WRITEHOT-06): runs the end-of-tick sidecar `Flush()` and, IFF
+// it actually persisted (Flush returned true — the whole sidecar was rewritten,
+// so every channel's recovery record is now current), clears every channel's
+// `consecutive_sidecar_persist_failures` via `ClearSidecarPersistFailures`.
+// Returns whether the flush persisted. A no-op flush (nothing dirty) returns
+// false and leaves the counters untouched — the clear MUST stay gated on the
+// persist so a quiescent tick cannot falsely heal a channel whose record is not
+// on disk. This is the composition the control tick runs each iteration;
+// factored out so the persist-gated clear is unit-testable without a full
+// `RunControlTick` harness. Propagates a `Flush()` filesystem exception.
+bool FlushAndClearPersistFailures(PendingWritesStore& store,
+                                  std::vector<ChannelState>& channels);
+
 }  // namespace svg_mb_control

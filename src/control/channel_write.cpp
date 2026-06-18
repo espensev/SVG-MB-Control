@@ -455,4 +455,19 @@ void ClearSidecarPersistFailures(std::vector<ChannelState>& channels) {
     }
 }
 
+bool FlushAndClearPersistFailures(PendingWritesStore& store,
+                                  std::vector<ChannelState>& channels) {
+    // Clear ONLY when the flush actually persisted: a successful flush rewrites
+    // the whole sidecar, so every channel's recovery record is then current and
+    // any persist-failure degradation a deferred write self-healed is resolved
+    // (REQ-WRITEHOT-06). A no-op flush (nothing dirty) wrote nothing, so the
+    // counters must stay as-is — clearing them would falsely heal a channel
+    // whose record is not on disk.
+    if (store.Flush()) {
+        ClearSidecarPersistFailures(channels);
+        return true;
+    }
+    return false;
+}
+
 }  // namespace svg_mb_control
