@@ -23,6 +23,25 @@ checkable.
 
 ---
 
+## 2026-06-18
+
+- **Added** — `## Current priority` read-first index at the top of
+  `docs/features/README.md`: the active feature work (FEAT-0006 downstream,
+  FEAT-0001), the decisions/gates-owed queue (FEAT-0014, FEAT-0009, FEAT-0004,
+  and off-main FEAT-0015/0016), and FEAT-0003 noted as held design-capture. It
+  links the per-topic backlogs rather than copying them; the §5 registry stays
+  the authoritative per-feature status. `AGENTS.md` §Navigation now points at it.
+  Gate-safe: `tests/test_feature_specs.py` parses only registry rows whose first
+  cell is a `[FEAT-NNNN](...)` link, so the index block is invisible to it.
+- **Added** — `docs/spec-and-backlog-structure-assessment-2026-06-18.md`: a
+  snapshot review of the spec/plan/backlog structure (the machinery is sound and
+  CI-enforced; the gap was the absence of a single aggregated priority/decision
+  view, which the index above adds). Authorizes nothing.
+- **Idea** — `docs/next_steps.md` is a maintained topical backlog but omits
+  FEAT-0009 and the disk-growth retention (issue #4 / PR #9); fold those in or
+  treat the new `## Current priority` index as the aggregation point. Not done in
+  this pass.
+
 ## 2026-06-14
 
 - **Added** — two-pass discovery fan-out over the codebase for reliability/

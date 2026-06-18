@@ -30,7 +30,8 @@
   `docs\TRACEABILITY.md` for new feature intake, requirement IDs, promotion
   status, and requirement-to-verification mapping. Use
   `docs\FEATURE_VERIFICATION_CHECKLIST.md` while implementing or verifying a
-  feature.
+  feature. Start from the `## Current priority` index at the top of
+  `docs\features\README.md` for the active/next work and the decisions-owed queue.
 - Use `docs\CONTROL_LOOP.md`, `docs\READ_LOOP.md`, and
   `docs\WRITE_ORCHESTRATION.md` for mode-specific runtime behavior.
 - Use `docs\RUNTIME_HOME.md` for runtime sidecars, status fields, health
