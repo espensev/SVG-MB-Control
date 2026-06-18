@@ -301,11 +301,12 @@ FEAT-0020.
 | `REQ-GPUCTX-05` | T, R | Analyzer ingest/report tests for archives with and without the new fields; review report output treats context as optional. | not buildable |
 | `REQ-GPUCTX-06` | T, R | CSV header tests and review confirm wide diagnostic fields remain out of the v1 standard-log slice. | not buildable |
 
-### FEAT-0005 / FEAT-0007 — Reserved (parked)
+### FEAT-0007 — Reserved (parked)
 
-`REQ-ACTCONFIRM-*` (FEAT-0005) and `REQ-RAMTEMP-*` (FEAT-0007) are **not mirrored
-here while their specs are Reserved.** Their requirement rows live in the parked
-bodies under `docs/features/_parked/` and rejoin this map when a spec is promoted
-back to `Draft` (see `docs/features/README.md` §5). This map mirrors only the
-`REQ-*` IDs of the active, enforced feature specs, which is what
+`REQ-RAMTEMP-*` (FEAT-0007) is **not mirrored here while its spec is Reserved.**
+Its requirement rows live in the parked body under `docs/features/_parked/` and
+rejoin this map when the spec is promoted back to `Draft` (see
+`docs/features/README.md` §5). FEAT-0005 was un-parked and promoted to
+`Accepted`; its `REQ-ACTCONFIRM-*` rows are mirrored above. This map mirrors only
+the `REQ-*` IDs of the active, enforced feature specs, which is what
 `tests/test_feature_specs.py` requires.

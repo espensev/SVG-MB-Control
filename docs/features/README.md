@@ -29,6 +29,10 @@ decision queue changes. A fuller standing review is
   read. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006 downstream work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
+- **FEAT-0004** (`Accepted`) — hardware-access dependency health signal. Decision
+  record is current; build when authorized.
+- **FEAT-0005** (`Accepted`) — write actuation confirmation, Phase-1 RPM-based
+  detection/evidence. Decision record is current; build when authorized.
 
 **Decisions or gates owed (not buildable until cleared):**
 
@@ -36,7 +40,7 @@ decision queue changes. A fuller standing review is
 |---|---|
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
-| **FEAT-0004** (`Draft`) | Promotion gate 3 (§13): write and mark current the §9 design-decision record for the PawnIO-availability health signal — an operator-visible gap, not buildable until that record exists. |
+| **FEAT-0019** (`Draft`) | §9 / gate 3: promote D-WRITEHOT-1 from Proposed to Current before implementation. The design is build-ready and behavior-preserving, but not buildable until the decision record is current. |
 | **FEAT-0015 / FEAT-0016** | Retention bounds for the runtime SQLite DB and event JSONL (GitHub issue #4). No in-repo spec yet — intake on draft PR #9, not on `main`; not in `docs/next_steps.md`. |
 
 **Held design-capture (a `Draft`, not open work):** **FEAT-0003** — selectable
@@ -44,7 +48,11 @@ control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
-`Implemented` and merged; FEAT-0014 is the one non-blocking remainder.
+`Implemented` and merged; FEAT-0014 is the one non-blocking remainder. FEAT-0020
+standard control-loop power logging shipped 2026-06-18 — `Implemented` v0.4, live
+flip executed and validated (gate 6 closed; CPU package + GPU board power now log
+on the live control loop). The flip also produced the first enabled-RAPL-on-
+hardware evidence FEAT-0006 was waiting for (`package_power` avg 86.74 W live).
 
 **Other backlogs (per-topic, not duplicated here):** `docs/next_steps.md`
 (maintained topical backlog), `docs/PATH_NOTES.md` §"Ideas / backlog",
