@@ -299,7 +299,7 @@ $$
 B \leftarrow \mathrm{clip}(B, 0, B_{\max}).
 $$
 
-If $T_{\mathrm{obs}} \ge a$ **and** $B < B_{\max}$:
+If $T_{\mathrm{obs}} \ge a$:
 
 $$
 B_k = B_{k-1} + \gamma^{\uparrow} \cdot \sigma_{\mathrm{loc}}(T_{\mathrm{obs}})
@@ -328,8 +328,13 @@ occurs (`BelowStart` release mode). For the `ExplicitRelease` stage (CPU
 low-soak) an undefined input causes decay instead, matching the pre-table
 behavior.
 
-Anti-windup is implicit: integration is gated on $B < B_{\max}$ on the
-rising path. Decay is unconditional on the falling path.
+Anti-windup is enforced by the final ceiling clip $B_k \leftarrow
+\mathrm{clip}(B_k, 0, B_{\max})$, not by gating the rising step: the code
+(`boost_stage.cpp:102-109` `UpdateBoostStage`) integrates whenever
+$T_{\mathrm{obs}} \ge a$ and then clamps to $B_{\max}$, so $B$ never exceeds the
+ceiling and a saturated stage holds at exactly $B_{\max}$. This is equivalent to
+gating integration on $B < B_{\max}$ for the shipped non-negative, monotone-clip
+specs. Decay is unconditional on the falling path.
 
 ### 6.2 Three seconds-scale stages
 
@@ -670,9 +675,10 @@ defined $T^{(c)}_k$; the integrators carry their pre-failure state.
    $\kappa$ (residual cap), the low-band contribution to the final
    setpoint is bounded above by both $\kappa$ and the channel's
    `low_band_max_boost_pct`.
-4. **Anti-windup.** Pressure integrators do not accrue once at ceiling
-   (`boost < max_boost_pct` guard) and unconditionally decay below
-   threshold. They cannot wind up beyond `*_max_boost_pct`.
+4. **Anti-windup.** Pressure integrators are capped at the ceiling by the
+   final clip (`std::clamp(boost, 0, max_boost_pct)` in `UpdateBoostStage`,
+   `boost_stage.cpp:109`), not by gating the rising step, and unconditionally
+   decay below threshold. They cannot wind up beyond `*_max_boost_pct`.
 5. **Smoothness of triggering bands.** $\sigma$ is $C^2$ at both
    endpoints; entering or leaving any band (`midband`, `gpu_airflow`,
    `thermal_pressure`, low-band scales, cadence slew) does not introduce
