@@ -110,8 +110,8 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
 | [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Selectable control-law profile with hot-swap | `REQ-PROFILE-*` | Draft |
-| [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Draft |
-| FEAT-0005 | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Reserved (body parked in `_parked/`) |
+| [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
+| [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |
 | FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |
 | [FEAT-0008](FEAT-0008-watchdog-hung-worker-recovery.md) | Watchdog hung-worker recovery (force-kill escalation) | `REQ-WATCHDOG-*` | Done (v1 complete: force-terminate escalation + `--restart` wiring landed; C++ unit + Python suspend-based integration tests pass; live deterministic suspend recovery evidence passed; natural load hard-freeze premise closed as not reproducible by load on this system; post-v1 options remain in FEAT-0008 §11) |
