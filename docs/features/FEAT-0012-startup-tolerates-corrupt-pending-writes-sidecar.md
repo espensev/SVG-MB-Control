@@ -1,7 +1,7 @@
 # FEAT-0012: Startup tolerates a corrupt pending-writes sidecar
 
 **Project:** svg-mb-control
-**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
+**Status:** Done   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-SIDECARRESIL-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,

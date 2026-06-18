@@ -1,7 +1,7 @@
 # FEAT-0013: Source-aware channels enter safe mode on primary-source dropout
 
 **Project:** svg-mb-control
-**Status:** Implemented   **Version:** 0.2   **Updated:** 2026-06-17
+**Status:** Done   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-SRCSAFE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,

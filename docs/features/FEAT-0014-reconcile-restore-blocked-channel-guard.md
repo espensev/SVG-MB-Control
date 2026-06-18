@@ -257,6 +257,10 @@ Verify legend:
 > entry, and the fail direction is bounded, one-shot, and mode-sanitized).
 > Promotion to Accepted is the maintainer's call and requires the §9 decision
 > record (guard placement + retain-vs-clear). Nothing here authorizes code.
+> Concrete revisit trigger: promote when a shipped config introduces
+> `blocked_channels` other than `[6]` (a multi-profile or profile-swap config), or
+> when a second restore caller is added — either makes a blocked-channel sidecar
+> entry reachable and flips the reachability verdict from "not reachable" to live.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 

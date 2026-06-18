@@ -190,6 +190,10 @@ class EvalDashboardTests(unittest.TestCase):
                 httpd.server_close()
                 thread.join(timeout=2)
 
+    @unittest.skipUnless(
+        shutil.which("powershell") or shutil.which("pwsh"),
+        "no PowerShell host (powershell/pwsh) on PATH",
+    )
     def test_dashboard_server_help(self) -> None:
         result = subprocess.run(
             [
