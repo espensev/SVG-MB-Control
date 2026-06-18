@@ -65,6 +65,8 @@ Result values:
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Done | Implemented 2026-06-17 (Direction A; decision `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md` Current). A corrupt `pending_writes.json` is quarantined to `pending_writes.json.corrupt` and the startup reconcile proceeds as empty instead of aborting into a relaunch-thrash loop; emits `reconcile.sidecar_quarantined` and degrades health (`sidecar_quarantined_present`). Collapses the former duplicate sidecar read. §14 filled; CTest + pytest green. |
 | `FEAT-0013` Source-aware primary-dropout safe mode | Done | Implemented 2026-06-17 (decision `docs/source-aware-cpu-dropout-decision-2026-06-17.md` Current). A CPU dropout on a `max_cpu_gpu_source_aware` channel (CPU seen, now gone, GPU present) now counts toward the existing 3-miss sensor-failure trip and enters safe mode (`safety_override` + response source `source_aware_cpu_dropout_safe_mode`), reusing the `CpuOnly` mechanism; recovers on CPU return. Only new state is the additive `cpu_input_was_available` flag. §14 filled; CTest green. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
+| `FEAT-0015` Event JSONL retention | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted to Accepted 2026-06-18; decision record `docs/event-log-retention-decision-2026-06-18.md` Current (rotate by age/retention window plus severity-aware reduction of routine `write_applied`, diagnostics retained). |
+| `FEAT-0016` Analyze SQLite DB retention | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted to Accepted 2026-06-18; decision record `docs/analyze-db-run-purge-decision-2026-06-18.md` Current (age-based `analyze prune --db-retain-days`, cascade delete under foreign keys, post-delete reclaim). Immediate derived DB reclaim completed 2026-06-18. |
 | `FEAT-0017` Faster fan reaction under load (control-response retune) | Draft (held) | Not buildable; design capture (`docs/control-latency-reduction-design-2026-06-18.md` D-REACT-1, Proposed). Config-only joint rise-rate + step-cap raise, asymmetric, lane-targeted; held pending the decision on lanes/target ceiling and a response-evaluation Pass-3 validation. Does not cross the measurement gate. |
 | `FEAT-0018` Adaptive-cadence enablement under thermal transient | Draft (held) | Not buildable; design capture (D-CADENCE-1, Proposed). Engages the dormant `poll_tick_floor_ms` engine; **crosses `MEASUREMENT_GATE.md`** (adaptive floor below the shipped profile), held until the floor characterization evidence exists. |
 | `FEAT-0019` Sidecar persistence off the actuation hot path | Draft | Not buildable yet; build-ready design capture (D-WRITEHOT-1, Proposed). Identity-gated `Persist()` removes the per-tick sidecar write from the actuation hot path; behavior-preserving for recovery, held only at promotion gate 3 (decision record Proposed). |
@@ -225,6 +227,34 @@ the maintainer authorizes promotion (gate 3).
 | `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending (held-Draft) |
 | `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
 | `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
+
+### FEAT-0015 - Event JSONL retention
+
+Accepted 2026-06-18; implementation pending. Results stay `pending` until the
+event rotation / severity-reduction code lands and the owning spec's §14
+verification log is filled.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-EVENTRET-01` | T, R | `.\scripts\Test-LocalCI.ps1`: test writes past the accepted bound and asserts the active event JSONL is rotated/capped or routine `info` is reduced; review vs `docs/event-log-retention-decision-2026-06-18.md`. | pending |
+| `REQ-EVENTRET-02` | T, R | Test asserts concurrent appenders produce only whole NDJSON lines across a rotation boundary; review atomic append and rotation handling vs `runtime_event_log.cpp`. | pending |
+| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced or rotated out within the accepted window. | pending |
+| `REQ-EVENTRET-04` | T, R | Test asserts absent config keeps current append behavior and existing event JSONL plus `CachedEventCount` still parse; review vs `docs/RUNTIME_HOME.md`. | pending |
+| `REQ-EVENTRET-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; docs updated. | pending |
+
+### FEAT-0016 - Analyze SQLite DB retention
+
+Accepted 2026-06-18; implementation pending. The 2026-06-18 operational reclaim
+deleted the derived analyzer DB to free 7.80 GiB, but the structural retention
+requirements remain `pending` until the DB purge/reclaim code lands.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-DBRETAIN-01` | T, R | `.\scripts\Test-LocalCI.ps1`: ingest runs spanning the bound, run DB retention, assert out-of-bound runs deleted and in-bound runs retained; review vs `docs/analyze-db-run-purge-decision-2026-06-18.md`. | pending |
+| `REQ-DBRETAIN-02` | T | Test asserts that after purging a run, no `tick_samples` / `tick_fan_samples` / `tick_channel_samples` / `events` rows reference the deleted `run_id`. | pending |
+| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs and no VACUUM when nothing was deleted. | pending |
+| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest and dry-run reports without deleting while `--apply` deletes; review vs `analyze prune` conventions. | pending |
+| `REQ-DBRETAIN-05` | R | Review vs `docs/RUNTIME_HOME.md` / `docs/MEASUREMENT_GATE.md`: analyze schema/version, per-tick fidelity, and existing CSV-bundle prune unchanged; docs updated. | pending |
 
 ### FEAT-0017 - Faster fan reaction under load (control-response retune)
 

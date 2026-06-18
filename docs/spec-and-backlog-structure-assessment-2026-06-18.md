@@ -7,6 +7,12 @@ authoritative. This is a point-in-time review of how specs/plans/roadmaps/issues
 are structured and a labeled recommendation for the backlog entry-point; per
 `AGENTS.md` (Feature Intake Gate) it does not authorize product-code work.
 
+**Update later on 2026-06-18:** the disk-growth retention lane called out below
+was promoted to in-repo Accepted specs: `FEAT-0015` (event JSONL retention) and
+`FEAT-0016` (analyze DB retention). This snapshot's original observation is kept
+as historical context; current status lives in `docs/features/README.md`,
+`docs/TRACEABILITY.md`, and `docs/next_steps.md`.
+
 ## 1. Scope and method
 
 Static read (no code changed, no runtime interaction) of the governance and
@@ -16,7 +22,8 @@ planning surfaces: `AGENTS.md`, `docs/features/README.md`,
 `tests/test_feature_specs.py`, the `docs/` file census, and GitHub issues/PRs via
 `gh`. The decision-queue lines in §4 are paraphrased from each spec's
 open-decision section where one exists (FEAT-0014 §11; FEAT-0009 §12 measurement
-gate; FEAT-0004 §13 gate 3); FEAT-0015/0016 have no in-repo spec yet.
+gate; FEAT-0004 §13 gate 3). At this snapshot point, FEAT-0015/0016 had no
+in-repo spec yet; they were promoted later on 2026-06-18.
 
 `docs/` census at `0ee14ea` (includes this assessment): 78 `.md` at the `docs/`
 root (plus 8 under `docs/archive/`), of which 12 `discovery-*`, 8 `*plan*`,
@@ -64,14 +71,14 @@ single surface gives a crisp priority + decisions-owed view.
 
 | Surface | Holds | Limitation |
 |---|---|---|
-| `docs/next_steps.md` | Maintained topical backlog | Current through the 2026-06-17 write-path closeout, but prose/topic-organized and silent on FEAT-0009 and the disk-growth retention (issue #4 / PR #9), so it is not a complete priority view. |
+| `docs/next_steps.md` | Maintained topical backlog | At this snapshot, current through the 2026-06-17 write-path closeout, but prose/topic-organized and silent on FEAT-0009 and the disk-growth retention (issue #4 / PR #9), so it was not a complete priority view. FEAT-0015/0016 were added later on 2026-06-18. |
 | `docs/features/README.md` registry | Feature pipeline + Status | Authoritative per-feature status, but had no priority/sequence or aggregated decision view (the §5 fix adds one). |
 | `docs/PATH_NOTES.md` "Ideas / backlog" | Unscheduled ideas | One of several idea homes. |
 | `docs/discovery-loop-targets-value-ranked-2026-06-14.md` | 40 ranked discovery candidates | Dated snapshot; discovery-scoped, not feature-scoped. |
 | held-Draft specs (FEAT-0009, 0014) | Each spec's open decisions | The decisions owed were not visible in aggregate (see §4). |
 | `docs/STRUCTURE_AND_STABILITY.md` §Migration Order ("Remaining polish"); `CONTROL_SIMPLIFICATION_TARGETS.md`; `LOGGING_IMPROVEMENT_PLAN.md`; `SCRIPT_STACK_REVIEW.md` | Topic backlogs | By-design per-topic. |
 | 8× `docs/*-plan-*.md` | Multi-gate forward roadmaps | By-design per-topic. |
-| GitHub issue #4 + draft PR #9 | Disk-growth retention | Issues are otherwise unused (1 open total). |
+| GitHub issue #4 + draft PR #9 | Disk-growth retention | At this snapshot, issue/PR were the only surfaces. Later on 2026-06-18 this moved into `docs/features/FEAT-0015-*`, `FEAT-0016-*`, and traceability. |
 
 This is **not** an over-supply of documents — the per-topic plans and topic
 backlogs are a deliberate design. The gap is the absence of a single top-level
@@ -88,7 +95,7 @@ calls owed, paraphrased from each spec's open-decision section where one exists:
 | **FEAT-0014** reconcile/restore blocked-channel guard (§11) | Where the guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore functions); whether a skipped blocked-channel entry is cleared or retained; whether `--write-once`'s exit-5 refusal is sufficient. Real gap, not reachable by the shipped single-profile config. |
 | **FEAT-0009** controller priority elevation (§12) | Run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). |
 | **FEAT-0004** hardware-access health signal (§13 gate 3) | Write and mark current the §9 design-decision record before it is buildable. |
-| **FEAT-0015 / FEAT-0016** disk-growth retention (no in-repo spec) | Retention bounds for the runtime SQLite DB and event JSONL. Ties to GitHub issue #4; intake on draft PR #9; not yet on `main`. |
+| **FEAT-0015 / FEAT-0016** disk-growth retention | Snapshot state: no in-repo spec; ties to GitHub issue #4 and draft PR #9. Later on 2026-06-18, both were promoted to Accepted specs on `main`-bound docs. |
 
 Held design-capture (a `Draft`, not on a decision): FEAT-0003 (selectable
 control-law profile) is recorded in `docs/features/README.md` §2 as

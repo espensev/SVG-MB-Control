@@ -14,8 +14,8 @@ checked against the written spec afterward.
 Read-first index of in-flight and next feature work. It aggregates the priority
 and decision view that is otherwise split between the §5 registry (per-feature
 status) and the topical backlog in `docs/next_steps.md` (a maintained backlog,
-current through the 2026-06-17 write-path closeout, but prose-organized and
-silent on FEAT-0009 and the disk-growth retention below). It links those rather
+current through the 2026-06-18 FEAT-0020 and disk-retention updates, but
+prose-organized and still silent on FEAT-0009). It links those rather
 than restating them; the §5 registry stays authoritative for per-feature status
 and `git log` for what shipped. Keep it current when a feature's status or the
 decision queue changes. A fuller standing review is
@@ -23,6 +23,14 @@ decision queue changes. A fuller standing review is
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
+- **FEAT-0016** (`Accepted`) — analyze SQLite DB retention. Immediate safe
+  reclaim was completed 2026-06-18 by deleting the derived
+  `release/runtime/svg_mb_control.db` (7.80 GiB reclaimed); the product-code work
+  is the accepted `analyze prune --db-retain-days` run-purge plus post-delete
+  reclaim.
+- **FEAT-0015** (`Accepted`) — runtime event JSONL retention. Build the accepted
+  rotation + severity-aware reduction so `logs/svg_mb_control_events.jsonl` stops
+  growing unbounded while diagnostic events remain within the retained window.
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
   implementation/evidence, not promotion: enabled-path live RAPL evidence, the
   `quarantine → validated` marker (manual), and the corrected per-core cycle
@@ -41,7 +49,6 @@ decision queue changes. A fuller standing review is
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
 | **FEAT-0019** (`Draft`) | §9 / gate 3: promote D-WRITEHOT-1 from Proposed to Current before implementation. The design is build-ready and behavior-preserving, but not buildable until the decision record is current. |
-| **FEAT-0015 / FEAT-0016** | Retention bounds for the runtime SQLite DB and event JSONL (GitHub issue #4). No in-repo spec yet — intake on draft PR #9, not on `main`; not in `docs/next_steps.md`. |
 
 **Held design-capture (a `Draft`, not open work):** **FEAT-0003** — selectable
 control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
@@ -172,6 +179,8 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0012](FEAT-0012-startup-tolerates-corrupt-pending-writes-sidecar.md) | Startup quarantines a corrupt `pending_writes.json` and proceeds as empty instead of fatally aborting the worker into a relaunch-thrash loop | `REQ-SIDECARRESIL-*` | Done (2026-06-17; Direction A — quarantine + proceed + event + degraded health; C++ + smoke tests green) |
 | [FEAT-0013](FEAT-0013-source-aware-primary-dropout-safe-mode.md) | Source-aware channels enter safe mode on primary-source dropout (a CPU dropout on a max-blend channel now trips the existing safe-mode mechanism instead of being masked by GPU) | `REQ-SRCSAFE-*` | Done (2026-06-17; reuses the 3-miss sensor-failure trip; C++ tests green) |
 | [FEAT-0014](FEAT-0014-reconcile-restore-blocked-channel-guard.md) | Reconcile/restore honor the runtime blocked-channel write policy | `REQ-RESTOREGUARD-*` | Draft (held — real restore-path gap, not reachable by the shipped single-profile config; pending maintainer direction) |
+| [FEAT-0015](FEAT-0015-event-log-retention.md) | Event JSONL has a retention bound | `REQ-EVENTRET-*` | Accepted |
+| [FEAT-0016](FEAT-0016-analyze-db-run-purge.md) | Analyze SQLite DB has a retention bound | `REQ-DBRETAIN-*` | Accepted |
 | [FEAT-0017](FEAT-0017-faster-fan-reaction-under-load.md) | Faster fan reaction under load (control-response retune: joint rise-rate + step-cap raise, asymmetric, lane-targeted) | `REQ-REACT-*` | Draft (held — lanes/target ceiling undecided; pending a response-evaluation Pass-3 validation) |
 | [FEAT-0018](FEAT-0018-adaptive-cadence-enablement.md) | Adaptive-cadence enablement under thermal transient (engage the dormant `poll_tick_floor_ms` engine) | `REQ-CADENCE-*` | Draft (held — crosses the measurement gate; pending the floor characterization pass) |
 | [FEAT-0019](FEAT-0019-sidecar-persist-off-hot-path.md) | Sidecar persistence off the actuation hot path (identity-gated `Persist()`; build-ready) | `REQ-WRITEHOT-*` | Draft (build-ready — behavior-preserving for recovery; only the decision record is pending) |

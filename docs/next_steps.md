@@ -4,6 +4,8 @@
 
 Reviewed and rewritten 2026-06-09; FEAT-0008 status refreshed 2026-06-16; the
 write-path safety review (FEAT-0010–0014) was **closed 2026-06-17** (see below).
+FEAT-0020 shipped and the runtime disk-growth retention specs (FEAT-0015/0016)
+were promoted 2026-06-18.
 These are review notes and a backlog, not work
 authorization: per `AGENTS.md` (Feature Intake Gate), product-code work for a new
 capability, schema/status/log field, CLI surface, or shipped-config behavior must
@@ -117,6 +119,26 @@ before/after instrument for all three already exists in the control-loop CSV
   but still owes its own gates: D-GPUCTX-1 is Proposed (promote to Current) and a
   combined GPU-sample cadence-cost decision is pending (it adds more per-tick NVML
   reads than FEAT-0020's single board-power call). Not buildable until those clear.
+
+### Runtime disk growth (FEAT-0015 / FEAT-0016) — specs accepted 2026-06-18
+
+The runtime home was on a disk-fill path after FEAT-0020 widened the standard
+control-loop CSV and enabled live energy logging. The immediate operational
+reclaim is done: the derived analyzer DB
+`release\runtime\svg_mb_control.db` was deleted on 2026-06-18, reclaiming
+8,377,511,936 bytes (7.80 GiB). Raw CSV/event files and live sidecars were left
+untouched; `release\runtime` measured 3.439 GiB after the reclaim.
+
+The structural work is now governed by accepted specs:
+
+- **FEAT-0016** (`REQ-DBRETAIN-*`) — add DB-side retention to `analyze prune`
+  (`--db-retain-days`), cascade-delete old `runs` under `foreign_keys=ON`, and
+  reclaim with a post-delete `VACUUM`. This is the highest disk-growth item
+  because the DB had reached 7.80 GiB and is a designed derived sink.
+- **FEAT-0015** (`REQ-EVENTRET-*`) — add event JSONL rotation plus
+  severity-aware reduction of routine `control_loop.write_applied`, while always
+  keeping diagnostic/lifecycle events within the retained window. The live event
+  JSONL was 270.3 MB on 2026-06-18; the logs directory was 3.265 GiB.
 
 ### Require fresh runtime evidence before changing cadence/floor defaults
 The shipped profile is a `250 ms` control tick and `250 ms` write cooldown. Per
