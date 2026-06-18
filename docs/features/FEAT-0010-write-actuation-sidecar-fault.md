@@ -1,7 +1,7 @@
 # FEAT-0010: Write actuation survives a sidecar-persistence fault
 
 **Project:** svg-mb-control
-**Status:** Implemented   **Version:** 0.3   **Updated:** 2026-06-17
+**Status:** Done   **Version:** 0.3   **Updated:** 2026-06-18
 **Namespace:** `REQ-WRITESAFE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,

@@ -36,20 +36,28 @@ each is `Implemented` with a current decision record and `REQ-*` rows in
   trips the existing safe mode instead of being masked by the GPU fallback (finding
   #1); all six live channels were affected.
 
-Remaining, **all non-blocking** (backlog, not authorized work):
+Remaining, **all non-blocking** (backlog, not authorized work). Several were
+closed out 2026-06-18 in Phase 0/1 of
+`docs/campaign-complete-sensible-items-2026-06-18.md`; the five Implemented
+write-path/watchdog specs (`FEAT-0008/0010/0011/0012/0013`) were promoted
+`Implemented → Done` on the `T`/`R` acceptance bar (`test_feature_specs` 5/5):
 
 - **FEAT-0014** (`REQ-RESTOREGUARD-*`, Draft/held) — reconcile/restore does not
   consult the blocked-channel runtime policy. A blocked-channel sidecar entry is
   unreachable under the shipped single-profile config and the fail direction is
-  bounded/one-shot; promote only if a multi-profile config makes it reachable.
-- **Live (M) validation on hardware** — none of the four was runtime-reproduced on
-  the box (the review required C++ tests, which are met). Recommended next
-  confidence tier, especially FEAT-0013 (drop the real CPU sensor, observe safe
-  mode) and FEAT-0012 (corrupt a live sidecar, observe the quarantine break the
-  thrash loop).
-- **Linux-only CI nicety** — `tests/test_eval_dashboard.py` `…server_help` should
-  skip when neither `powershell` nor `pwsh` is present (only fails on non-Windows
-  review runners; the shipped CI is Windows). Trivial.
+  bounded/one-shot; promote only if a multi-profile config makes it reachable. The
+  concrete revisit trigger is now explicit in the spec §13 (a config with
+  `blocked_channels` other than `[6]`, or a second restore caller).
+- **Live (M) validation on hardware — DISPOSITIONED 2026-06-18** in
+  `docs/write-path-live-validation-protocol-2026-06-18.md`: acceptance is already
+  met by `T`/`R` (no §10 row requires `M`); live-M is supplementary. FEAT-0010 and
+  FEAT-0012 are live-feasible (the latter via an operator-gated restart); FEAT-0011
+  and FEAT-0013 have no safe production-path trigger and are proxy-only or
+  `T`-only-closed. All live-on-hardware runs are gated behind hardware
+  stabilization (see the system-halt incident).
+- **Linux-only CI nicety — DONE 2026-06-18**: `tests/test_eval_dashboard.py`
+  `test_dashboard_server_help` now skips when neither `powershell` nor `pwsh` is on
+  PATH (`@unittest.skipUnless`).
 - **Known scoped residuals** (recorded, not defects): legacy `MaxCpuGpu` still has
   the CPU-dropout masking gap FEAT-0013 fixed for source-aware (unused live);
   FEAT-0013 safe mode is the existing rate-limited ramp to 100%, not an instant
