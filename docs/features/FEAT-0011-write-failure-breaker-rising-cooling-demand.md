@@ -1,7 +1,7 @@
 # FEAT-0011: Write-failure breaker must not block rising cooling demand
 
 **Project:** svg-mb-control
-**Status:** Draft (held — pending maintainer direction on a recovered-actuator self-heal)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-COOLWRITE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -200,7 +200,7 @@ per-channel state in `src/control/control_runtime_context.h`.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — held-Draft; no decision file created) | Whether to accept the rising-demand-bypass direction at all; if accepted, the bound (high-temperature threshold vs. margin-above-`last_issued_pct` vs. probe-rate limit, or a combination), whether the bound is operator-tunable, and how the futile-write-suppression trade is set. Nothing here authorizes code. | Proposed (pending maintainer direction) |
+| `docs/breaker-rising-cooling-demand-decision-2026-06-18.md` | Accept the rising-demand bypass and its bound: **accepted** — margin above `last_issued_pct` + per-channel probe-rate limit, fixed in code (not operator-tunable in v1); down-or-equal commands stay suppressed. | Accepted 2026-06-18 (current) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -252,21 +252,23 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — static-verified code gap at `channel_write.cpp:307`, corroborated by team-review finding 5 and the recovery-gap audit; not runtime-reproduced).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — held: no decision doc; direction is `Proposed (pending maintainer direction)`. This is the held gate.).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/breaker-rising-cooling-demand-decision-2026-06-18.md`, Accepted 2026-06-18).
 - [x] 4. Concrete `REQ-COOLWRITE-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI`, contract review (§10), to be mirrored in `docs/TRACEABILITY.md` on acceptance.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (breaker-gate decision only; computed duty unchanged; additive schema).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held at Draft 2026-06-17: the maintainer has not authorized this feature. The
-> direction in §5 is proposed, not decided; gate 3 stays open until a maintainer
-> accepts the direction and the bound (§11) and a decision record is written.
+> Promoted to Accepted 2026-06-18: the maintainer accepted the rising-demand-bypass
+> direction and its bound (margin above `last_issued_pct` + per-channel probe-rate
+> limit) — see the §9 decision record. All seven promotion gates pass; the spec is
+> buildable. Implementation and verification are staged for a Windows-host session
+> (this repo's build is Windows-only), after which §14 is filled.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after
-implementation, which is not authorized until the maintainer accepts the §5
-direction and the §11 bound.
+Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
+implementation, which is staged for a Windows-host session where `Test-LocalCI`
+can build and run the C++ tests (this repo's build is Windows-only).
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|

@@ -61,12 +61,12 @@ Result values:
 | `FEAT-0008` Watchdog hung-worker recovery | Implemented | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
 | `FEAT-0009` Controller scheduling-priority elevation | Draft (held) | Not buildable; design capture only, held at promotion gate 1 pending the FEAT-0009 §12 A/B contention experiment (whether the cadence degradation under `above`-load is scheduling-bound rather than file-lock bound). |
 | `FEAT-0010` Write actuation survives a sidecar-persistence fault | Implemented | Implemented 2026-06-17 (decision record `docs/write-actuation-sidecar-fault-decision-2026-06-17.md` current). Fixes runtime-reproduced finding H1: a `pending_writes.json` persist fault no longer vetoes the fan write (incl. the sensor-safe command); it records `control_loop.sidecar_upsert_failed`, increments `consecutive_sidecar_persist_failures` (degrades health), and still actuates. §14 verification log filled; CTest 13/13 green. |
-| `FEAT-0011` Write-failure breaker must not block rising cooling demand | Draft (held) | Not buildable; intake spec for a static-verified code gap at `src/control/channel_write.cpp:307` (open breaker suppresses a rising/more-cooling write so a recovered actuator cannot self-heal). Held at promotion gate 3 pending maintainer direction on the rising-demand-bypass and its bound (§11). |
-| `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Draft (held) | Not buildable; intake only — a corrupt `pending_writes.json` aborts startup reconcile into a watchdog relaunch-thrash loop (steady loop tolerates the same failure). Maintainer has not chosen a direction (A quarantine-whole-file vs. B per-entry skip) or authorized code. |
-| `FEAT-0013` Source-aware primary-dropout safe mode | Draft (held) | Not buildable; design capture only, held at promotion gate 3 (decision record) pending maintainer direction on the dropout failure response. Static-verified finding: on a `max_cpu_gpu_source_aware` channel a CPU-input dropout while GPU remains available resets `consecutive_sensor_failures` (`channel_evaluator.cpp:268-276`) so the 3-miss safe-mode trip never fires and no sensor-failure event is logged. |
-| `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
-| `FEAT-0015` Event JSONL has a retention bound | Draft (held) | Not buildable; intake spec for issue #4 Finding 1. `logs/svg_mb_control_events.jsonl` is append-only with no rotation/retention (`src/runtime/runtime_event_log.cpp:210`); the `log_rotate_hours`/`log_retain_days` keys bound the CSV archive only. Held at promotion gate 3 pending maintainer direction on the retention model (size/age rotation vs. severity-based persistence) and bound (§11). |
-| `FEAT-0016` Analyze SQLite DB has a retention bound | Draft (held) | Not buildable; intake spec for issue #4 Finding 2 (resolved: real telemetry, not bloat). `analyze prune` deletes ingested CSV bundles only; no age/size run-purge and no `VACUUM` exist in `src/`. Held at promotion gate 3 pending maintainer direction on the run-purge bound, where the purge lives, and the reclaim trigger (§11). |
+| `FEAT-0011` Write-failure breaker must not block rising cooling demand | Accepted | Buildable; promoted 2026-06-18 (decision `docs/breaker-rising-cooling-demand-decision-2026-06-18.md`). Rising-demand bypass accepted at `channel_write.cpp:307`, bounded by a margin above `last_issued_pct` + a per-channel probe-rate limit; down-or-equal stays suppressed. Implementation + verification staged for a Windows-host `Test-LocalCI` session (Windows-only build). |
+| `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Accepted | Buildable; promoted 2026-06-18 (decision `docs/corrupt-pending-writes-startup-decision-2026-06-18.md`, Direction A: quarantine the corrupt `pending_writes.json` to a `.corrupt` sibling and proceed empty + event + degraded health). Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
+| `FEAT-0013` Source-aware primary-dropout safe mode | Accepted | Buildable; promoted 2026-06-18 (decision `docs/source-aware-primary-dropout-decision-2026-06-18.md`). A CPU dropout on a `max_cpu_gpu_source_aware` channel now counts toward the 3-miss trip (no reset on the GPU fallback) and forces `kSafeModeFanDuty` + `safety_override`. Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
+| `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Accepted | Buildable; promoted 2026-06-18 (decision `docs/reconcile-restore-blocked-channel-guard-decision-2026-06-18.md`: Control-layer pre-check, retain the skipped entry, explicit restore-time check). Lowest-urgency round — the gap is real but not reachable by the shipped single-profile config. Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
+| `FEAT-0015` Event JSONL has a retention bound | Accepted | Buildable; promoted 2026-06-18 (decision `docs/event-log-retention-decision-2026-06-18.md`, A+B: rotate the event JSONL on the `log_rotate_hours`/`log_retain_days` window + severity-aware reduction of `control_loop.write_applied`, keeping `warning`+). Issue #4 Finding 1. Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
+| `FEAT-0016` Analyze SQLite DB has a retention bound | Accepted | Buildable; promoted 2026-06-18 (decision `docs/analyze-db-run-purge-decision-2026-06-18.md`: age-based `--db-retain-days` purge inside `analyze prune`, cascade-delete old `runs` under `foreign_keys=ON`, post-purge `VACUUM` only when rows were deleted, explicit W7-1 zero-retain guard). Issue #4 Finding 2. Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
 
 ## 3. Requirement map
 
@@ -169,72 +169,72 @@ until the FEAT-0009 §12 A/B contention experiment authorizes promotion.
 
 ### FEAT-0011 - Write-failure breaker must not block rising cooling demand
 
-Held at Draft; verification homes are planned, results `pending (held-Draft)` until
-the maintainer authorizes promotion (gate 3).
+Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
+`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-COOLWRITE-01` | T | C++ open-breaker rising-setpoint test via `src/hardware/simulated_fan_writer.cpp` (`Test-LocalCI`); asserts `ApplyDuty` fires for a rising command on a healthy-sensor channel. | pending (held-Draft) |
-| `REQ-COOLWRITE-02` | T | C++ test: down-or-equal setpoint stays suppressed while the breaker is open; `safety_override` bypass unchanged. | pending (held-Draft) |
-| `REQ-COOLWRITE-03` | T, R | C++ test: bypassed rising write closes the breaker on success (`circuit_breaker_closed`) / leaves it open on failure with `consecutive_write_failures` correct; review vs `docs/WRITE_ORCHESTRATION.md` breaker self-heal. | pending (held-Draft) |
-| `REQ-COOLWRITE-04` | T, R | C++ test: accepted bound prevents an every-tick retry against a persistently-failing actuator; review vs the design decision recording the bound. | pending (held-Draft) |
-| `REQ-COOLWRITE-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; any new status field additive to `docs/RUNTIME_HOME.md`. | pending (held-Draft) |
+| `REQ-COOLWRITE-01` | T | C++ open-breaker rising-setpoint test via `src/hardware/simulated_fan_writer.cpp` (`Test-LocalCI`); asserts `ApplyDuty` fires for a rising command on a healthy-sensor channel. | pending |
+| `REQ-COOLWRITE-02` | T | C++ test: down-or-equal setpoint stays suppressed while the breaker is open; `safety_override` bypass unchanged. | pending |
+| `REQ-COOLWRITE-03` | T, R | C++ test: bypassed rising write closes the breaker on success (`circuit_breaker_closed`) / leaves it open on failure with `consecutive_write_failures` correct; review vs `docs/WRITE_ORCHESTRATION.md` breaker self-heal. | pending |
+| `REQ-COOLWRITE-04` | T, R | C++ test: accepted bound prevents an every-tick retry against a persistently-failing actuator; review vs the design decision recording the bound. | pending |
+| `REQ-COOLWRITE-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity unchanged; any new status field additive to `docs/RUNTIME_HOME.md`. | pending |
 
 ### FEAT-0012 - Startup tolerates a corrupt pending-writes sidecar
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-SIDECARRESIL-01` | T | `tests/` startup-reconcile corrupt-sidecar test (`Test-LocalCI`). | pending (held-Draft) |
-| `REQ-SIDECARRESIL-02` | T | `tests/` quarantine-not-delete test (`Test-LocalCI`). | pending (held-Draft) |
-| `REQ-SIDECARRESIL-03` | T, R | `tests/` event+degraded-health test; review vs `docs/RUNTIME_HOME.md`. | pending (held-Draft) |
-| `REQ-SIDECARRESIL-04` | T, R | `tests/` happy-path reconcile/restore regression test; review vs `docs/WRITE_ORCHESTRATION.md`. | pending (held-Draft) |
-| `REQ-SIDECARRESIL-05` | R | Review vs `docs/MEASUREMENT_GATE.md`, `docs/CONTROL_PIPELINE_MATH.md`, and FEAT-0008 (confinement). | pending (held-Draft) |
+| `REQ-SIDECARRESIL-01` | T | `tests/` startup-reconcile corrupt-sidecar test (`Test-LocalCI`). | pending |
+| `REQ-SIDECARRESIL-02` | T | `tests/` quarantine-not-delete test (`Test-LocalCI`). | pending |
+| `REQ-SIDECARRESIL-03` | T, R | `tests/` event+degraded-health test; review vs `docs/RUNTIME_HOME.md`. | pending |
+| `REQ-SIDECARRESIL-04` | T, R | `tests/` happy-path reconcile/restore regression test; review vs `docs/WRITE_ORCHESTRATION.md`. | pending |
+| `REQ-SIDECARRESIL-05` | R | Review vs `docs/MEASUREMENT_GATE.md`, `docs/CONTROL_PIPELINE_MATH.md`, and FEAT-0008 (confinement). | pending |
 
 ### FEAT-0013 - Source-aware channels enter safe mode on primary-source dropout
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-SRCSAFE-01` | T | C++ test (source-aware sibling of `channel_write_tests.cpp:251`): CPU-available then dropped while GPU remains asserts `consecutive_sensor_failures` increments rather than resetting. | pending (held-Draft) |
-| `REQ-SRCSAFE-02` | T | C++ test: three consecutive CPU-dropout ticks set `safety_override` and command `kSafeModeFanDuty` on a `max_cpu_gpu_source_aware` channel. | pending (held-Draft) |
-| `REQ-SRCSAFE-03` | T, R | C++ test asserts `ChannelSensorEvent::FailureDetected` on trip and `Recovered` on CPU return; review vs `RUNTIME_HOME.md` event list. | pending (held-Draft) |
-| `REQ-SRCSAFE-04` | T | C++ test: a GPU-led channel that never had CPU does not trip the dropout safe mode; a channel that had CPU and lost it does. | pending (held-Draft) |
-| `REQ-SRCSAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: both-inputs-present duty/cadence/channels/identity and total-loss behavior unchanged; new status field additive. | pending (held-Draft) |
+| `REQ-SRCSAFE-01` | T | C++ test (source-aware sibling of `channel_write_tests.cpp:251`): CPU-available then dropped while GPU remains asserts `consecutive_sensor_failures` increments rather than resetting. | pending |
+| `REQ-SRCSAFE-02` | T | C++ test: three consecutive CPU-dropout ticks set `safety_override` and command `kSafeModeFanDuty` on a `max_cpu_gpu_source_aware` channel. | pending |
+| `REQ-SRCSAFE-03` | T, R | C++ test asserts `ChannelSensorEvent::FailureDetected` on trip and `Recovered` on CPU return; review vs `RUNTIME_HOME.md` event list. | pending |
+| `REQ-SRCSAFE-04` | T | C++ test: a GPU-led channel that never had CPU does not trip the dropout safe mode; a channel that had CPU and lost it does. | pending |
+| `REQ-SRCSAFE-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: both-inputs-present duty/cadence/channels/identity and total-loss behavior unchanged; new status field additive. | pending |
 
 ### FEAT-0014 - Reconcile and restore honor the blocked-channel guard
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-RESTOREGUARD-01` | T, R | `ReconcilePendingWrites` skips `RestoreSavedState` for a policy-blocked channel; test with a call-recording/simulated writer + `blocked_channels` policy; review vs `svg_mb_sio.cpp:218-223` guard parity. | pending (held-Draft) |
-| `REQ-RESTOREGUARD-02` | T, R | Blocked-channel skip emits `reconcile.restore_skipped_blocked` and does not fail the reconcile exit code; review vs `docs/WRITE_ORCHESTRATION.md` Reconciliation. | pending (held-Draft) |
-| `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending (held-Draft) |
-| `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
-| `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
+| `REQ-RESTOREGUARD-01` | T, R | `ReconcilePendingWrites` skips `RestoreSavedState` for a policy-blocked channel; test with a call-recording/simulated writer + `blocked_channels` policy; review vs `svg_mb_sio.cpp:218-223` guard parity. | pending |
+| `REQ-RESTOREGUARD-02` | T, R | Blocked-channel skip emits `reconcile.restore_skipped_blocked` and does not fail the reconcile exit code; review vs `docs/WRITE_ORCHESTRATION.md` Reconciliation. | pending |
+| `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending |
+| `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending |
+| `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending |
 
 ### FEAT-0015 - Event JSONL has a retention bound
 
-Held at Draft; verification homes are planned, results `pending (held-Draft)` until
-the maintainer authorizes promotion (gate 3).
+Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
+`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-EVENTRET-01` | T, R | `Test-LocalCI` test writing past the accepted bound asserts the event JSONL is rotated/capped (or routine `info` reduced); review vs the design decision recording the model and bound. | pending (held-Draft) |
-| `REQ-EVENTRET-02` | T, R | Test asserts whole NDJSON lines across a rotation boundary (no split/interleave); review of atomic-append + rotation vs `runtime_event_log.cpp:28-40,299-321` and the torn-write finding. | pending (held-Draft) |
-| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced/rotated out within the window. | pending (held-Draft) |
-| `REQ-EVENTRET-04` | T, R | Test asserts an absent config key preserves current append behavior and existing event JSONL + `CachedEventCount` still parse; review vs `RUNTIME_HOME.md` schema stability. | pending (held-Draft) |
-| `REQ-EVENTRET-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; control-thread append non-blocking; docs updated. | pending (held-Draft) |
+| `REQ-EVENTRET-01` | T, R | `Test-LocalCI` test writing past the accepted bound asserts the event JSONL is rotated/capped (or routine `info` reduced); review vs the design decision recording the model and bound. | pending |
+| `REQ-EVENTRET-02` | T, R | Test asserts whole NDJSON lines across a rotation boundary (no split/interleave); review of atomic-append + rotation vs `runtime_event_log.cpp:28-40,299-321` and the torn-write finding. | pending |
+| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced/rotated out within the window. | pending |
+| `REQ-EVENTRET-04` | T, R | Test asserts an absent config key preserves current append behavior and existing event JSONL + `CachedEventCount` still parse; review vs `RUNTIME_HOME.md` schema stability. | pending |
+| `REQ-EVENTRET-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; control-thread append non-blocking; docs updated. | pending |
 
 ### FEAT-0016 - Analyze SQLite DB has a retention bound
 
-Held at Draft; verification homes are planned, results `pending (held-Draft)` until
-the maintainer authorizes promotion (gate 3).
+Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
+`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-DBRETAIN-01` | T, R | `Test-LocalCI` (`tests/test_analyze_ingest.py` sibling): ingest runs spanning the bound, purge, assert out-of-bound runs deleted and in-bound retained; review vs the design decision recording the bound. | pending (held-Draft) |
-| `REQ-DBRETAIN-02` | T | Test asserts no `tick_samples`/`tick_fan_samples`/`tick_channel_samples`/`events` row references a deleted `run_id` (cascade fired under `foreign_keys = ON`). | pending (held-Draft) |
-| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs (`page_count` drops), and no VACUUM when nothing was deleted. | pending (held-Draft) |
-| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest (`IsManifestPathInDb`/`IsSessionInDb`) and dry-run vs `--apply` behavior; review vs the `analyze prune` dry-run convention. | pending (held-Draft) |
-| `REQ-DBRETAIN-05` | R | Review vs `RUNTIME_HOME.md` / `MEASUREMENT_GATE.md`: analyze schema/`schema_version`, per-tick fidelity, and existing CSV-bundle prune unchanged; offline-only; docs updated. | pending (held-Draft) |
+| `REQ-DBRETAIN-01` | T, R | `Test-LocalCI` (`tests/test_analyze_ingest.py` sibling): ingest runs spanning the bound, purge, assert out-of-bound runs deleted and in-bound retained; review vs the design decision recording the bound. | pending |
+| `REQ-DBRETAIN-02` | T | Test asserts no `tick_samples`/`tick_fan_samples`/`tick_channel_samples`/`events` row references a deleted `run_id` (cascade fired under `foreign_keys = ON`). | pending |
+| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs (`page_count` drops), and no VACUUM when nothing was deleted. | pending |
+| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest (`IsManifestPathInDb`/`IsSessionInDb`) and dry-run vs `--apply` behavior; review vs the `analyze prune` dry-run convention. | pending |
+| `REQ-DBRETAIN-05` | R | Review vs `RUNTIME_HOME.md` / `MEASUREMENT_GATE.md`: analyze schema/`schema_version`, per-tick fidelity, and existing CSV-bundle prune unchanged; offline-only; docs updated. | pending |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 

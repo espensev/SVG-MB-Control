@@ -1,7 +1,7 @@
 # FEAT-0015: Event JSONL has a retention bound
 
 **Project:** svg-mb-control
-**Status:** Draft (held — intake only; maintainer has not chosen a retention model or authorized code)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-EVENTRET-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -173,7 +173,7 @@ event-log path resolution `ResolveRuntimeEventLogPath`
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — held-Draft; no decision file created) | Whether to bound the event log at all; if so, the retention model (Direction A size/age rotation, Direction B severity-based persistence, or a combination), the numeric bound, whether `control_loop.write_applied` is reduced or dropped, whether new config keys are introduced or `log_*` keys reused, and the torn-write root-cause finding. Nothing here authorizes code. | Proposed (pending maintainer direction) |
+| `docs/event-log-retention-decision-2026-06-18.md` | Retention model and bound: **A+B accepted** — rotate the event JSONL on the `log_rotate_hours`/`log_retain_days` window AND reduce routine `control_loop.write_applied` persistence, always keeping `warning`+ and lifecycle events; single atomic append preserved; absent-key default = current behavior. | Accepted 2026-06-18 (current) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -221,21 +221,23 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — runtime-observed in `docs/discovery-runtime-disk-growth-2026-06-14.md` Finding 1 and static-verified at `runtime_event_log.cpp:210`).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — held: no decision doc; direction is `Proposed (pending maintainer direction)`. This is the held gate.).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/event-log-retention-decision-2026-06-18.md`, Accepted 2026-06-18).
 - [x] 4. Concrete `REQ-EVENTRET-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI`, contract review (§10), to be mirrored in `docs/TRACEABILITY.md` on acceptance.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (logging-side only; computed duty unchanged; additive schema).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held at Draft 2026-06-17: the maintainer has not authorized this feature. The
-> directions in §5 are proposed, not decided; gate 3 stays open until a maintainer
-> accepts a retention model and its bound (§11) and a decision record is written.
+> Promoted to Accepted 2026-06-18: the maintainer accepted the A+B retention model
+> (size/age rotation + severity-aware reduction of `write_applied`) and its bound —
+> see the §9 decision record. All seven promotion gates pass; the spec is buildable.
+> Implementation and verification are staged for a Windows-host session (this repo's
+> build is Windows-only), after which §14 is filled.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after
-implementation, which is not authorized until the maintainer accepts a §5
-direction and the §11 bound.
+Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
+implementation, which is staged for a Windows-host session where `Test-LocalCI`
+can build and run the tests (this repo's build is Windows-only).
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|

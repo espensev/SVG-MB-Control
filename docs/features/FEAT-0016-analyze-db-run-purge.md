@@ -1,7 +1,7 @@
 # FEAT-0016: Analyze SQLite DB has a retention bound (age/size run-purge + reclaim)
 
 **Project:** svg-mb-control
-**Status:** Draft (held — intake only; maintainer has not chosen a retention bound or authorized code)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-DBRETAIN-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -175,7 +175,7 @@ prune path (`analyze_prune.cpp`) and the run-delete helpers
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — held-Draft; no decision file created) | Whether to add DB-side retention at all; if so, the bound (age window vs. total-size cap vs. run-count cap, or a combination, and which runs are retained), where the purge lives (extend `analyze prune` vs. a new subcommand), whether VACUUM is automatic post-purge or a separate explicit step, and whether the bound is CLI- or config-driven. Nothing here authorizes code. | Proposed (pending maintainer direction) |
+| `docs/analyze-db-run-purge-decision-2026-06-18.md` | Retention bound, location, and reclaim: **accepted** — age-based `--db-retain-days` purge inside `analyze prune`, cascade-delete old `runs` under `foreign_keys=ON`, one-time `VACUUM` only when rows were deleted; zero retain disables explicitly (W7-1 guard); size/run-count cap deferred. | Accepted 2026-06-18 (current) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -224,21 +224,23 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — runtime-observed in `docs/discovery-runtime-disk-growth-2026-06-14.md` Finding 2 with read-only DB inspection, and static-verified at `analyze_prune.cpp` / `analyze_ingest_db.cpp`).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — held: no decision doc; direction is `Proposed (pending maintainer direction)`. This is the held gate.).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/analyze-db-run-purge-decision-2026-06-18.md`, Accepted 2026-06-18).
 - [x] 4. Concrete `REQ-DBRETAIN-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI`, contract review (§10), to be mirrored in `docs/TRACEABILITY.md` on acceptance.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (offline analyze-side; schema/identity unchanged).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held at Draft 2026-06-17: the maintainer has not authorized this feature. The
-> direction in §5 is proposed, not decided; gate 3 stays open until a maintainer
-> accepts the bound (§11) and a decision record is written.
+> Promoted to Accepted 2026-06-18: the maintainer accepted the age-based run-purge
+> inside `analyze prune` + post-purge VACUUM direction (§9 decision record). All
+> seven promotion gates pass; the spec is buildable. Implementation and
+> verification are staged for a Windows-host session (this repo's build is
+> Windows-only), after which §14 is filled.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after
-implementation, which is not authorized until the maintainer accepts the §5
-direction and the §11 bound.
+Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
+implementation, which is staged for a Windows-host session where `Test-LocalCI`
+can build and run the tests (this repo's build is Windows-only).
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|

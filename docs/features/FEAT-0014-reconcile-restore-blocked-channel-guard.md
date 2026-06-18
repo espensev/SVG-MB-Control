@@ -1,7 +1,7 @@
 # FEAT-0014: Reconcile and restore honor the blocked-channel guard
 
 **Project:** svg-mb-control
-**Status:** Draft (held — investigated; gap is real but not reachable by the shipped single-profile config, pending maintainer direction)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-RESTOREGUARD-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -186,13 +186,13 @@ Behavior is **proposed** (not yet implemented, not yet decided). It would live i
 
 ## 9. Design decision record(s)  *(promotion gate 3 — write before implementation)*
 
-For this held-Draft intake no separate decision file is created; the held posture
-means nothing here authorizes code. The direction is recorded as proposed,
-pending maintainer selection.
+The decision record `docs/reconcile-restore-blocked-channel-guard-decision-2026-06-18.md`
+(Accepted 2026-06-18) settles the guard placement and the retain-vs-clear choice;
+implementation is authorized, staged for a Windows-host build/verify.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — to be written as `docs/reconcile-restore-blocked-channel-guard-decision-YYYY-MM-DD.md` if promoted) | Where the guard lives (Control-layer pre-check in `ReconcilePendingWrites`/`RunWriteOnce` only, vs. also mirroring `channel_blocked` into the vendored restore functions); whether a skipped blocked-channel sidecar entry is cleared or retained; whether `--write-once`'s existing exit-5 refusal is sufficient for the in-process restore or needs an explicit restore-time check. | Proposed (pending maintainer direction) |
+| `docs/reconcile-restore-blocked-channel-guard-decision-2026-06-18.md` | Guard placement and skip lifecycle: **Control-layer pre-check** in `ReconcilePendingWrites`/`RunWriteOnce` (no vendored change in v1); **retain** the skipped blocked-channel entry; add an **explicit restore-time** policy check rather than rely on `--write-once` exit-5 ordering. | Accepted 2026-06-18 (current) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -245,24 +245,25 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — statically verified against `svg_mb_sio.cpp:218-277`, `write_orchestrator.cpp:341-361`; corroborated by `review/svg-mb-control-review-20260617-team-review.md`).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — not written; the held intake leaves guard-placement and retain-vs-clear to the maintainer. This is the held gate.).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/reconcile-restore-blocked-channel-guard-decision-2026-06-18.md`, Accepted 2026-06-18).
 - [x] 4. Concrete `REQ-RESTOREGUARD-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI`, contract review (§10), and mirrored in `docs/TRACEABILITY.md`.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (the change only removes a blocked-channel write; startup/one-shot path; live channels 0-5 unchanged).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held at Draft 2026-06-17: the gap is real on the restore/reconcile code path but
-> is not reachable by the shipped single-profile configuration (the control loop's
-> pre-Upsert `RuntimeFanAllowsWrite` guard prevents a blocked-channel sidecar
-> entry, and the fail direction is bounded, one-shot, and mode-sanitized).
-> Promotion to Accepted is the maintainer's call and requires the §9 decision
-> record (guard placement + retain-vs-clear). Nothing here authorizes code.
+> Promoted to Accepted 2026-06-18: the maintainer accepted the Control-layer
+> pre-check + retain-the-entry + explicit-restore-time-check direction (§9 decision
+> record). The gap remains not reachable by the shipped single-profile config (the
+> pre-`Upsert` `RuntimeFanAllowsWrite` guard prevents a blocked-channel entry, and
+> the fail direction is bounded, one-shot, and mode-sanitized), so this is the
+> lowest-urgency of the four write-path rounds — promoted for correctness and guard
+> parity. Implementation and verification are staged for a Windows-host session.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after
-implementation, which is not authorized until the §9 decision record is written
-and the maintainer promotes the spec.
+Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
+implementation, which is staged for a Windows-host session where `Test-LocalCI`
+can build and run the tests (this repo's build is Windows-only).
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|

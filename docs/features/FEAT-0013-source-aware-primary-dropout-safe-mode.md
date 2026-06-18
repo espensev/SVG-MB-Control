@@ -1,7 +1,7 @@
 # FEAT-0013: Source-aware channels enter safe mode on primary-source dropout
 
 **Project:** svg-mb-control
-**Status:** Draft (held — pending maintainer direction on the primary-dropout safe-mode proposal)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-SRCSAFE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -197,11 +197,11 @@ IDs come from this feature's `REQ-SRCSAFE-*` namespace, reserved in the registry
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none written yet — held-Draft) | The failure response on a confirmed CPU dropout (force `kSafeModeFanDuty` + `safety_override`, vs hold a CPU-derived floor, vs event-only); whether the GPU-dropout symmetric case is in scope; whether the threshold is per-channel-configurable; and the dropout-vs-never-present detection rule. | Proposed (pending maintainer direction) |
+| `docs/source-aware-primary-dropout-decision-2026-06-18.md` | Failure response on a confirmed CPU dropout: **force `kSafeModeFanDuty` + `safety_override`** (mirrors `CpuOnly`); hold-floor and event-only rejected; GPU-dropout symmetric case out of v1; threshold stays `kMaxConsecutiveSensorFailures` (3); arm on the first CPU-available tick. | Accepted 2026-06-18 (current) |
 
-No separate decision file is created while this spec is held at Draft. Nothing here
-authorizes code; the decision record is written before implementation if the maintainer
-promotes the direction.
+The decision record `docs/source-aware-primary-dropout-decision-2026-06-18.md`
+(Accepted 2026-06-18) settles the force-safe-mode response and the v1 scope;
+implementation is authorized, staged for a Windows-host build/verify.
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -249,7 +249,7 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2 — static-verified `channel_evaluator.cpp:219-234,268-276,287-301`; team-review §High source-aware CPU-dropout).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9 — decision record pending maintainer direction on the failure response; this is the held gate).
+- [x] 3. Required design decision record(s) written and marked current (§9 — `docs/source-aware-primary-dropout-decision-2026-06-18.md`, Accepted 2026-06-18).
 - [x] 4. Concrete `REQ-SRCSAFE-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks — `Test-LocalCI` C++ tests and contract review (§10), and mirrored in `docs/TRACEABILITY.md`.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (dropout-path only; normal-operation computed duty unchanged; fail-safe direction; additive schema).
@@ -257,8 +257,9 @@ Verify legend:
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — the feature is held at Draft. Each row is filled after implementation,
-which is not authorized until the maintainer chooses a direction (§9, §13 gate 3).
+Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
+implementation, which is staged for a Windows-host session where `Test-LocalCI`
+can build and run the C++ tests (this repo's build is Windows-only).
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|

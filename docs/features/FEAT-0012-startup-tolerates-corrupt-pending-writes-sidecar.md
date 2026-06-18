@@ -1,7 +1,7 @@
 # FEAT-0012: Startup tolerates a corrupt pending-writes sidecar
 
 **Project:** svg-mb-control
-**Status:** Draft (held — intake only; maintainer has not chosen a direction or authorized code)   **Version:** 0.1   **Updated:** 2026-06-17
+**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
 **Namespace:** `REQ-SIDECARRESIL-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -13,14 +13,11 @@ recoverable transient into a permanent worker-relaunch loop that never runs the
 control loop, so a single bad recovery file cannot leave the fans frozen at the
 last latched PWM while temperature rises.
 
-> **Intake posture (2026-06-17).** This spec structures a known hazard (team
-> review finding H2, `review/svg-mb-control-review-20260617-team-review.md`) and
-> proposes a direction for the maintainer to decide. It does **not** authorize
-> code and does not assert that the fix is decided. The two candidate directions
-> (quarantine-whole-file vs. per-entry skip) are recorded in §11 Open decisions;
-> §9 carries the directional choice as `Proposed (pending maintainer direction)`.
-> No decision record is written, so promotion gate 3 is open and the spec stays
-> held-Draft.
+> **Accepted (2026-06-18).** The maintainer accepted **Direction A** (quarantine
+> the corrupt file and proceed as empty) — see the §9 decision record
+> `docs/corrupt-pending-writes-startup-decision-2026-06-18.md`. All seven promotion
+> gates pass; the spec is buildable. Implementation and verification are staged for
+> a Windows-host session (this repo's build is Windows-only).
 
 ## 1. Summary
 
@@ -232,11 +229,11 @@ the startup/runtime-health path (`src/runtime/runtime_health.cpp`).
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| (none yet — held-Draft intake) | Direction A (quarantine whole file, treat as empty) vs. Direction B (per-entry skip, reconcile the rest); the quarantine naming/retention; whether to reuse `reconcile.sidecar_read_failed` or add a quarantine event; whether the degraded-health condition clears on the next clean session or holds for a window. | Proposed (pending maintainer direction) |
+| `docs/corrupt-pending-writes-startup-decision-2026-06-18.md` | Direction A (quarantine whole file, proceed empty) vs. B (per-entry skip): **A accepted**; quarantine to a fixed `pending_writes.json.corrupt` sibling; reuse `reconcile.sidecar_read_failed` + add `reconcile.sidecar_quarantined`; degraded health clears on the next clean startup. | Accepted 2026-06-18 (current) |
 
-No decision record is written for this held-Draft intake; the held posture means
-nothing here authorizes code. The decision record is written, and a direction
-chosen, only if the maintainer promotes this beyond intake.
+The decision record `docs/corrupt-pending-writes-startup-decision-2026-06-18.md`
+(Accepted 2026-06-18) settles Direction A and the quarantine / event / health
+details; implementation is authorized, staged for a Windows-host build/verify.
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -289,21 +286,20 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from a named code/contract gap (§2 — H2, static-verified against `write_orchestrator.cpp:297-307`, `pending_writes.cpp:14-26,47-70`, `json_io.cpp:162-168`, `app_main.cpp:298-307`, `control_supervisor.cpp:618-668`; the asymmetry vs `control_loop.cpp:150-161`).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, and Measurement Gate where they apply (§4).
-- [ ] 3. Required design decision record(s) written and marked current — OPEN: no decision record is written for this held-Draft intake; the direction (A vs. B) is unchosen and stated as `Proposed (pending maintainer direction)` in §9.
+- [x] 3. Required design decision record(s) written and marked current — `docs/corrupt-pending-writes-startup-decision-2026-06-18.md` (Direction A), Accepted 2026-06-18 (§9).
 - [x] 4. Concrete `REQ-SIDECARRESIL-*` IDs assigned from the namespace (§6).
-- [ ] 5. Verification mapped to real checks and mirrored in `docs/TRACEABILITY.md` — OPEN: §10 maps to `Test-LocalCI` / review, but no tests exist yet and the TRACEABILITY rows are proposed, not mirrored into the file in this intake.
+- [x] 5. Verification mapped to real checks (§10 — `Test-LocalCI` / review) and mirrored in `docs/TRACEABILITY.md` (the `REQ-SIDECARRESIL-*` rows are present). The tests themselves are authored at implementation on a Windows host.
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (startup-read-path only; no fan write added; additive schema).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Held-Draft (intake) 2026-06-17: the maintainer has **not** authorized
-> implementation. This spec structures finding H2 and proposes a direction; it is
-> not buildable work. Promotion gates 3 and 5 stay open until a decision record is
-> written, a direction (A vs. B) is chosen, and the verification is mirrored into
-> `docs/TRACEABILITY.md`. The hazard is static-verified, not runtime-reproduced; a
-> reproduction (seed a corrupt sidecar, observe the relaunch loop) would
-> strengthen §2 before promotion.
+> Promoted to Accepted 2026-06-18: Direction A (quarantine + proceed empty) is
+> accepted (§9 decision record) and the `REQ-SIDECARRESIL-*` verification is
+> mirrored in `docs/TRACEABILITY.md`, so promotion gates 3 and 5 pass with the rest.
+> The hazard is static-verified, not runtime-reproduced; a reproduction (seed a
+> corrupt sidecar, observe the relaunch loop) would further strengthen §2.
+> Implementation and verification are staged for a Windows-host session.
 
-## 14. Verification log  *(fill in after the feature is built — not implemented; held-Draft)*
+## 14. Verification log  *(fill in after the feature is built — Accepted 2026-06-18, not yet implemented)*
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
