@@ -359,8 +359,18 @@ the same responsibility; otherwise they are listed separately.
 
 ## Docs
 
-Current contract and reference docs (the `AGENTS.md` navigation list
-plus other docs that are kept current):
+Feature intake, traceability, and verification:
+
+- `docs/features/README.md` — Feature registry, current priority queue,
+  promotion rules, and decisions-owed index.
+- `docs/features/FEAT-*.md` — Per-feature specs; these are the implementation
+  contracts for feature work once accepted and authorized.
+- `docs/TRACEABILITY.md` — Requirement-to-verification map.
+- `docs/FEATURE_VERIFICATION_CHECKLIST.md` — Checklist used while implementing
+  or verifying features.
+
+Current contract and reference docs (kept aligned with code and shipped
+behavior):
 
 - `docs/STRUCTURE_AND_STABILITY.md` — Module boundaries and migration
   status.
@@ -381,8 +391,34 @@ plus other docs that are kept current):
   baseline (maintained).
 - `docs/response-evaluation-tuning-plan.md` — Response evaluation
   plan (maintained).
-- `docs/source-aware-blend-decision-2026-05-26.md` — Current source-
-  aware blend decision and verification record.
+
+Maintained evaluation and operational records:
+
+- `docs/logging-next-targets-2026-06-18.md` — Current logging-target
+  decision record across FEAT-0020/0021/0022.
+- `docs/runtime-logging-health-decision-2026-06-20.md` — FEAT-0022
+  logging-health decision.
+- `docs/power-temp-comparison-snapshot-2026-06-18.md` — Preserved
+  standard-loop CPU/GPU watts beside temperatures for future comparisons.
+- `docs/cpu-temp-comparison-harness.md` — CPU temperature comparison
+  harness workflow.
+- `docs/next_steps.md` — Maintained topical backlog; not implementation
+  authorization by itself.
+
+Decision and design records that remain useful for navigation:
+
+- `docs/source-aware-blend-decision-2026-05-26.md` — Current
+  source-aware blend decision and verification record.
+- `docs/control-latency-reduction-design-2026-06-18.md` — FEAT-0017,
+  FEAT-0018, and FEAT-0019 latency-audit direction.
+- `docs/profile-hot-swap-decision-2026-06-03.md` — FEAT-0003
+  design-capture decision record; not scheduled work.
+- `docs/hwaccess-health-signal-decision-2026-06-18.md` — FEAT-0004
+  hardware-access health-signal direction.
+- `docs/actuation-confirmation-decision-2026-06-18.md` — FEAT-0005
+  write-actuation confirmation direction.
+- `docs/analyze-db-run-purge-decision-2026-06-18.md` — FEAT-0016
+  analyzer DB retention/prune direction.
 
 Compacted implementation records (closed topics; keep these short and
 do not merge them into operator docs unless the topic is reopened):
@@ -395,9 +431,17 @@ do not merge them into operator docs unless the topic is reopened):
   simplification record.
 - `docs/bench-logging-history.md` — Consolidated history of the older
   Bench-vs-Control logging discovery notes.
+- `docs/modular-profile-hotswap-discussion-2026-06-06.md` — Compacted
+  FEAT-0003 discussion pointer.
+- `docs/modular-profile-hotswap-plan-2026-06-06.md` — Compacted FEAT-0003
+  primitive-table pointer.
+- `docs/profile-hot-swap-allow-live-decision-2026-06-06.md` — Compacted
+  support record; the decision lives in
+  `docs/profile-hot-swap-decision-2026-06-03.md`.
 
 Historical / discovery (per `AGENTS.md`, treat as context, not
-current contract, unless re-validated):
+current contract, unless re-validated). Some files are compacted stubs that
+preserve old links and point to current contracts:
 
 - `docs/adaptive-cadence-design-2026-05-19.md`
 - `docs/discovery-control-optimization-options.md`

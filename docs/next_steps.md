@@ -250,18 +250,21 @@ Partly completed 2026-06-09:
   `docs\bench-logging-history.md`; the archived originals remain under
   `docs\archive\` for audit history.
 
-Still open:
+Current state:
 
-- **Compact**: `modular-profile-hotswap-discussion-2026-06-06.md` (88 KB → short
-  held-design pointer; FEAT-0003 is held Draft) and its `-plan` (lighter — keep the
-  §5 primitive table); fold `profile-hot-swap-allow-live-decision-2026-06-06.md`
-  into the decision doc's D6; consolidate the five `cpu-work-energy-*` files to ~2
-  (merge the live-validation plan into the results doc; fold the resolved
-  `cpu-cycle-counter-source-decision` into `cpu-work-energy-acquisition-decision`),
-  preserving the live forward-gates (quarantine-exit Evaluation, remaining cycle
-  path, open 400 W ceiling); reduce `discovery-control-optimization-options`,
+- **Done 2026-06-20** — compacted
+  `modular-profile-hotswap-discussion-2026-06-06.md` into a short held-design
+  pointer; compacted `modular-profile-hotswap-plan-2026-06-06.md` while
+  preserving the current-law and reusable-primitive tables; compacted
+  `profile-hot-swap-allow-live-decision-2026-06-06.md` into a support pointer to
+  revised D6; reduced `discovery-control-optimization-options`,
   `discovery-dashboard-health-polling`, `discovery-next-logging-targets`, and
   `discovery-gpu-response-refinement` to closed stubs.
+- **Remaining** — consolidate the five `cpu-work-energy-*` files to about two
+  maintained records (merge the live-validation plan into the results doc; fold
+  the resolved `cpu-cycle-counter-source-decision` into
+  `cpu-work-energy-acquisition-decision`), preserving the live forward-gates
+  (quarantine-exit Evaluation, remaining cycle path, open 400 W ceiling).
 - **Keep as-is** (load-bearing or open work): `adaptive-cadence-design`
   (CONTROL_LOOP), `discovery-polling-logging-state` + `discovery-steady-response-control`
   (MEASUREMENT_GATE), `discovery-control-math-performance`
@@ -270,10 +273,9 @@ Still open:
   coverage gaps), and `discovery-gpu-temp-envelope` (sole record of the RTX 5090
   zero-hotspot envelope constraint — lift that fact into `CONTROL_PIPELINE_MATH.md`
   or `COOLING_STRATEGY.md` before removing it, if ever).
-- Then refresh `CODE_MAP.md`'s "## Docs" taxonomy more broadly for decision
-  records, feature-design notes, `cpu-temp-comparison-harness`, `next_steps`,
-  and other secondary docs not yet listed. The 2026-06-09 archive/merge pass only
-  updated the moved/merged file references.
+- **Done 2026-06-20** — refreshed `CODE_MAP.md`'s "## Docs" taxonomy for
+  feature specs, traceability, decision records, current operational/evaluation
+  records, compacted implementation records, and historical/discovery stubs.
 
 Content-drift items from the same assessment were fixed 2026-06-09:
 
