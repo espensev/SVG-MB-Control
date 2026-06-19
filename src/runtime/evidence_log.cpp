@@ -52,6 +52,18 @@ void WaitForNextEvidencePoll(const std::filesystem::path& runtime_home,
     }
 }
 
+std::string BuildCsvWriteFailureDetail(const RuntimeCsvLogger& csv_logger) {
+    std::ostringstream detail;
+    detail << "runtime CSV row write failed";
+    if (!csv_logger.last_error_sink().empty()) {
+        detail << " sink=" << csv_logger.last_error_sink();
+    }
+    if (!csv_logger.last_error_detail().empty()) {
+        detail << " detail=" << csv_logger.last_error_detail();
+    }
+    return detail.str();
+}
+
 }  // namespace
 
 RuntimeArtifactNaming EvidenceLogArtifactNaming() {
@@ -169,6 +181,7 @@ int RunEvidenceLog(const ControlConfig& config,
     // Reused across poll iterations; SampleDirectRuntimeSnapshot fully resets
     // it each call so no telemetry carries over (see direct_runtime_snapshot).
     RuntimeSnapshot runtime_snapshot;
+    bool csv_write_failure_active = false;
 
     while (!stop_requested.load() && !RuntimeStopRequested(runtime_home)) {
         const auto poll_started = std::chrono::steady_clock::now();
@@ -311,13 +324,36 @@ int RunEvidenceLog(const ControlConfig& config,
                     .gpu_evidence = gpu_evidence,
                 }));
             if (!row_written) {
+                if (!csv_write_failure_active) {
+                    AppendRuntimeEvent(
+                        runtime_home,
+                        RuntimeLogEvent{
+                            .mode = "evidence-log",
+                            .event_type =
+                                "runtime_logging.csv_write_failed",
+                            .detail = BuildCsvWriteFailureDetail(csv_logger),
+                            .success = false,
+                            .snapshot_time_iso =
+                                runtime_snapshot.snapshot_time_iso,
+                            .log_csv_path =
+                                csv_logger.active_archive_path().string(),
+                            .event_log_path = event_log_path,
+                            .successful_polls = successful_polls,
+                            .skipped_polls = skipped_polls,
+                            .stale = stale,
+                            .telemetry_available = telemetry_available,
+                        },
+                        naming);
+                    csv_write_failure_active = true;
+                }
+            } else if (csv_write_failure_active) {
                 AppendRuntimeEvent(
                     runtime_home,
                     RuntimeLogEvent{
                         .mode = "evidence-log",
-                        .event_type = "evidence_log.write_failed",
-                        .detail = "evidence CSV row write failed",
-                        .success = false,
+                        .event_type = "runtime_logging.csv_write_recovered",
+                        .detail = "runtime CSV row writes recovered",
+                        .success = true,
                         .snapshot_time_iso =
                             runtime_snapshot.snapshot_time_iso,
                         .log_csv_path =
@@ -329,6 +365,7 @@ int RunEvidenceLog(const ControlConfig& config,
                         .telemetry_available = telemetry_available,
                     },
                     naming);
+                csv_write_failure_active = false;
             }
 
             if (!telemetry_available) {

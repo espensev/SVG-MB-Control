@@ -76,6 +76,9 @@ Control owns the runtime logging plane:
   logging should use this plane, not HWiNFO.
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json` is the
   per-archive manifest for the matching CSV chunk.
+- `logging_health.json` is the last-resort event-log health sidecar at the
+  runtime-home root. It records active/recovered event-log append failure without
+  relying on the failed event stream.
 
 `control_runtime.json` is intentionally a status view, not the per-tick data
 source. Use the CSV for timing and response analysis.
@@ -117,6 +120,12 @@ logging replacement.
   that have not been ingested: it ingests the CSV into a temporary DB with the
   in-repo `svg-mb-control.exe` and forwards native `analyze report` output. All
   analysis is native; the script reimplements nothing.
+- `scripts\extract_cpu_aio_segments.py` extracts compact CPU/AIO response
+  windows directly from control-loop CSV logs. It treats channels `1`, `4`, and
+  `5` as the AIO radiator fan group regardless of intake/exhaust direction,
+  keeps channels `0`, `2`, and `3` as context airflow, and defaults summary
+  metrics to stop at the first GPU-power/GPU-memory confound while still writing
+  the full segment trace for review.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live
@@ -128,11 +137,41 @@ logging replacement.
   Non-fault events use `severity=info` and `error_code=none`; warning, error,
   and critical rows use stable uppercase codes derived from `event_type` unless
   the caller supplies an explicit code.
+- FEAT-0022 Slice A adds logging-health events for CSV sink visibility:
+  `runtime_logging.csv_write_failed` and
+  `runtime_logging.csv_write_recovered`. The event `mode` identifies
+  `control-loop`, `read-loop`, or `evidence-log`; failure rows include
+  `log_csv_path`, `event_log_path`, and a detail string with the failing
+  logger sink when available. These events are rate-limited by an in-memory
+  failure-active flag so a persistent CSV sink failure emits one failure event
+  and one recovery event after a successful write.
+- FEAT-0022 Slice B adds `logging_health.json` for event-log-unwritable
+  visibility. A persistent event-log append failure writes one active marker
+  instead of one fallback file rewrite per event, and the marker is rewritten as
+  recovered after the next successful append. `--health --json` and
+  `--status --json` include `logging_health_*` / `event_log_failure_*` fields
+  and degrade an active otherwise-healthy runtime while the marker is active.
+- FEAT-0022 also adds sticky status/snapshot publication visibility:
+  `runtime_logging.status_publish_failed`,
+  `runtime_logging.status_publish_recovered`,
+  `runtime_logging.snapshot_publish_failed`, and
+  `runtime_logging.snapshot_publish_recovered`. Failed control-loop status
+  publication keeps the forced retry active for the next tick, and failed
+  control-loop `current_state.json` publication advances retry timing only after
+  a successful write.
+- FEAT-0022 Slice C adds analyzer diagnostics for CSV manifest/archive/latest
+  mirror consistency. `analyze report` reads the runtime manifest's
+  `artifacts.csv_latest.path` when available, reports `csv_latest_row_count`,
+  and emits `running_csv_manifest_consistency_warning` for running-session row
+  count disagreement or `closed_csv_manifest_consistency_suspect_evidence` for
+  closed-run disagreement.
 
 ## Remaining Gaps
 
 - CSV chunk files have no closed/ready marker. A reader must treat the active
-  archive path as mutable while Control is running.
+  archive path as mutable while Control is running. Analyzer reports now flag
+  count disagreement as a running warning versus a closed-run suspect-evidence
+  diagnostic, but strict comparisons should still use pinned closed archives.
 - The current-source control-loop CSV has loop timing, process cost, and, after
   FEAT-0002 is present in the packaged binary, whole-system CPU busy time
   (`system_cpu_busy_pct` plus the raw idle/kernel/user deltas and processor
@@ -175,13 +214,24 @@ logging replacement.
   the foreground `evidence-log` path) and is logging-only — never a control input.
   Because the value is instantaneous (not an accumulating energy counter),
   `analyze report` summarizes it as mean / p50 / p90 / max over distinct
-  `gpu_power_sample_id` samples (schema v11), **not** the time-weighted
-  Sigma-energy integral used for CPU package power. GPU power needs no env gate; it
-  records whenever NVML returns a nonzero reading. To turn on the comparable CPU
+  `gpu_power_sample_id` samples (introduced in analyzer schema v11), **not** the
+  time-weighted Sigma-energy integral used for CPU package power. GPU power needs
+  no env gate; it records whenever NVML returns a nonzero reading. To turn on the comparable CPU
   package-energy columns in the standard loop (and have the profile survive the
   boot/logon safety revert), use `scripts/Set-EnergyLoggingProfile.ps1 -Enable` /
   `-Disable` (`-DryRun` previews without touching live runtime); the live flip
   needs explicit live-runtime authorization.
+- The FEAT-0021 layer adds **read-only GPU workload context** beside GPU power:
+  `gpu_context_sample_id`, `gpu_context_time_ms`,
+  `gpu_context_sample_age_ms`, `gpu_context_acquisition`,
+  `gpu_util_gpu_pct`, `gpu_util_mem_pct`, `gpu_pstate`,
+  `gpu_clock_graphics_mhz`, `gpu_clock_memory_mhz`, `gpu_vram_used_mb`, and
+  `gpu_vram_total_mb`. It is a cached in-repo GPU reader sample refreshed at
+  most once per 1000 ms, not another per-tick wide read. Rows between refreshes
+  repeat the same context sample id and carry an increasing sample age. Analyzer
+  schema v12 summarizes context only when present and treats older archives as
+  unavailable. Context is logging-only and never a response source, write gate,
+  breaker input, or fan-duty input.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in
@@ -256,6 +306,18 @@ Use this loop for controller changes:
    Also check `docs\CONTROL_PIPELINE_MATH.md` against the run's CSV/status
    identities: feedforward/correction math, low-band effective-cap behavior,
    cadence bounds, setpoint bounds, and response-source attribution.
+   For CPU/AIO tuning questions where the native report is too broad, extract
+   radiator-focused segments from the same CSV:
+   ```powershell
+   python .\scripts\extract_cpu_aio_segments.py `
+     --runtime-home .\release\runtime `
+     --out-dir .\release\runtime\analysis
+   ```
+   Review the segment index first, then the per-segment trace CSVs. The index
+   separates radiator channels `1/4/5` from context fans `0/2/3` and flags the
+   first GPU confound so CPU-only radiator magnitude is not overstated. Use
+   `--csv <archive.csv>` instead of `--runtime-home` when a comparison needs to
+   be pinned to a closed archive rather than the moving live mirror.
 6. Change one class of knob at a time:
    - curve breakpoints,
    - thermal-pressure boost,

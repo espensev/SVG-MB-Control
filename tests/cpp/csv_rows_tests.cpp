@@ -102,6 +102,20 @@ svg_mb_control::RuntimeSnapshot MakeSnapshot() {
     snapshot.gpu.power_mw = 275000.0;
     snapshot.gpu.power_source = "nvml";
     snapshot.gpu.power_acquisition = "nvml";
+    // FEAT-0021 cached GPU workload context (control-loop CSV only). Mirrors
+    // the same no-false-zero shape as GPU power: sample id/time/age plus
+    // nullable workload values.
+    snapshot.gpu.context_sample_id = 2u;
+    snapshot.gpu.context_time_ms = 1200.0;
+    snapshot.gpu.context_sample_age_ms = 34.0;
+    snapshot.gpu.context_acquisition = "nvml";
+    snapshot.gpu.context_util_gpu_pct = 67;
+    snapshot.gpu.context_util_mem_pct = 21;
+    snapshot.gpu.context_pstate = 0;
+    snapshot.gpu.context_clock_graphics_mhz = 2500u;
+    snapshot.gpu.context_clock_memory_mhz = 10500u;
+    snapshot.gpu.context_vram_used_mb = 8192u;
+    snapshot.gpu.context_vram_total_mb = 16384u;
     for (std::uint32_t channel : {0u, 2u, 6u}) {
         RuntimeFanSnapshot& fan = UpsertRuntimeFanChannel(snapshot, channel);
         fan.channel = channel;
@@ -302,6 +316,41 @@ void TestControlLoopAligned() {
     ExpectField(header_fields, row_fields, "gpu_power_source", "nvml",
                 "control-loop row");
     ExpectField(header_fields, row_fields, "gpu_power_acquisition", "nvml",
+                "control-loop row");
+    // FEAT-0021 GPU workload-context columns.
+    ExpectContains(header, "gpu_context_sample_id", "control-loop header");
+    ExpectContains(header, "gpu_context_time_ms", "control-loop header");
+    ExpectContains(header, "gpu_context_sample_age_ms",
+                   "control-loop header");
+    ExpectContains(header, "gpu_context_acquisition", "control-loop header");
+    ExpectContains(header, "gpu_util_gpu_pct", "control-loop header");
+    ExpectContains(header, "gpu_util_mem_pct", "control-loop header");
+    ExpectContains(header, "gpu_pstate", "control-loop header");
+    ExpectContains(header, "gpu_clock_graphics_mhz", "control-loop header");
+    ExpectContains(header, "gpu_clock_memory_mhz", "control-loop header");
+    ExpectContains(header, "gpu_vram_used_mb", "control-loop header");
+    ExpectContains(header, "gpu_vram_total_mb", "control-loop header");
+    ExpectField(header_fields, row_fields, "gpu_context_sample_id", "2",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_context_time_ms", "1200.000",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_context_sample_age_ms",
+                "34.000", "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_context_acquisition", "nvml",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_util_gpu_pct", "67",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_util_mem_pct", "21",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_pstate", "0",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_clock_graphics_mhz", "2500",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_clock_memory_mhz", "10500",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_vram_used_mb", "8192",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "gpu_vram_total_mb", "16384",
                 "control-loop row");
 }
 

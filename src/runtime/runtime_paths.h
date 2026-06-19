@@ -35,6 +35,8 @@ std::filesystem::path ResolveRuntimeLogManifestPath(
 std::filesystem::path ResolveRuntimeLogManifestPath(
     const std::filesystem::path& runtime_home,
     const RuntimeArtifactNaming& naming);
+std::filesystem::path RuntimeLoggingHealthPath(
+    const std::filesystem::path& runtime_home);
 
 // runtime_home / "control_runtime.json" — the path of the dual-schema
 // (control-loop / read-loop) runtime status sidecar.

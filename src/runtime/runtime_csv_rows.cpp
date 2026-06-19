@@ -615,7 +615,18 @@ std::string BuildControlLoopCsvHeader() {
            << ",gpu_power_time_ms"
            << ",gpu_power_mw"
            << ",gpu_power_source"
-           << ",gpu_power_acquisition";
+           << ",gpu_power_acquisition"
+           << ",gpu_context_sample_id"
+           << ",gpu_context_time_ms"
+           << ",gpu_context_sample_age_ms"
+           << ",gpu_context_acquisition"
+           << ",gpu_util_gpu_pct"
+           << ",gpu_util_mem_pct"
+           << ",gpu_pstate"
+           << ",gpu_clock_graphics_mhz"
+           << ",gpu_clock_memory_mhz"
+           << ",gpu_vram_used_mb"
+           << ",gpu_vram_total_mb";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
@@ -691,6 +702,29 @@ std::string BuildControlLoopCsvRow(
     AppendCsvFieldDouble(csv, snapshot.gpu.power_mw);
     AppendCsvFieldString(csv, snapshot.gpu.power_source);
     AppendCsvFieldString(csv, snapshot.gpu.power_acquisition);
+    // FEAT-0021 read-only GPU workload context. sample_id blanks when no
+    // context sample is available; cached rows repeat the id and carry a
+    // growing sample_age_ms. Integer sentinels/zeros are blanked so missing
+    // values never become false workload zeros.
+    AppendCsvFieldIf(csv, snapshot.gpu.context_sample_id != 0u,
+                     snapshot.gpu.context_sample_id);
+    AppendCsvFieldDouble(csv, snapshot.gpu.context_time_ms);
+    AppendCsvFieldDouble(csv, snapshot.gpu.context_sample_age_ms);
+    AppendCsvFieldString(csv, snapshot.gpu.context_acquisition);
+    AppendCsvFieldInt32IfAvailable(csv, true,
+                                   snapshot.gpu.context_util_gpu_pct);
+    AppendCsvFieldInt32IfAvailable(csv, true,
+                                   snapshot.gpu.context_util_mem_pct);
+    AppendCsvFieldInt32IfAvailable(csv, true,
+                                   snapshot.gpu.context_pstate);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_clock_graphics_mhz != 0u,
+                     snapshot.gpu.context_clock_graphics_mhz);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_clock_memory_mhz != 0u,
+                     snapshot.gpu.context_clock_memory_mhz);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_vram_total_mb != 0u,
+                     snapshot.gpu.context_vram_used_mb);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_vram_total_mb != 0u,
+                     snapshot.gpu.context_vram_total_mb);
 
     static const RuntimeControlChannelLogState kEmptyChannel{};
     for (std::uint32_t channel = 0u;

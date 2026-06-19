@@ -245,11 +245,86 @@ void TestConcurrentAppendRotationKeepsWholeLines() {
     std::filesystem::remove_all(runtime_home);
 }
 
+void TestEventLogFailureWritesStickyFallbackAndRecovery() {
+    const auto runtime_home = MakeTempRuntimeHome("fallback");
+    const auto event_path =
+        svg_mb_control::ResolveRuntimeEventLogPath(runtime_home);
+    const auto fallback_path =
+        svg_mb_control::RuntimeLoggingHealthPath(runtime_home);
+
+    std::filesystem::remove(event_path);
+    std::filesystem::create_directories(event_path);
+
+    svg_mb_control::RuntimeLogEvent failed;
+    failed.mode = "control-loop";
+    failed.event_type = "control_loop.write_failed";
+    failed.detail = "simulated event-log append failure";
+    failed.success = false;
+    ExpectFalse(svg_mb_control::AppendRuntimeEvent(runtime_home, failed),
+                "append fails when event-log path is a directory");
+
+    auto fallback = nlohmann::json::parse(
+        std::ifstream(fallback_path, std::ios::binary));
+    ExpectTrue(fallback.value("event_log_failure_active", false),
+               "fallback records active event-log failure");
+    ExpectFalse(fallback.value("event_log_writable", true),
+                "fallback records event log as unwritable");
+    ExpectTrue(fallback.value("last_error_sink", "") == "event_log_append",
+               "fallback records append sink");
+    ExpectTrue(fallback.value("last_failed_event_type", "") ==
+                   "control_loop.write_failed",
+               "fallback records failed event type");
+    ExpectTrue(fallback.value("failure_count", 0) == 1,
+               "fallback is written on first active failure");
+
+    svg_mb_control::RuntimeLogEvent repeated;
+    repeated.mode = "control-loop";
+    repeated.event_type = "control_loop.write_failed_again";
+    repeated.detail = "persistent event-log append failure";
+    repeated.success = false;
+    ExpectFalse(svg_mb_control::AppendRuntimeEvent(runtime_home, repeated),
+                "persistent append failure still returns false");
+
+    fallback = nlohmann::json::parse(
+        std::ifstream(fallback_path, std::ios::binary));
+    ExpectTrue(fallback.value("failure_count", 0) == 1,
+               "persistent failure does not rewrite fallback every append");
+    ExpectTrue(fallback.value("last_failed_event_type", "") ==
+                   "control_loop.write_failed",
+               "persistent failure keeps first sticky fallback detail");
+
+    std::filesystem::remove_all(event_path);
+    svg_mb_control::RuntimeLogEvent recovered;
+    recovered.mode = "control-loop";
+    recovered.event_type = "control_loop.shutdown";
+    recovered.detail = "event log recovered";
+    recovered.success = true;
+    ExpectTrue(svg_mb_control::AppendRuntimeEvent(runtime_home, recovered),
+               "append succeeds after event-log path is unblocked");
+
+    fallback = nlohmann::json::parse(
+        std::ifstream(fallback_path, std::ios::binary));
+    ExpectFalse(fallback.value("event_log_failure_active", true),
+                "fallback clears active failure on recovery");
+    ExpectTrue(fallback.value("event_log_writable", false),
+               "fallback records event log as writable after recovery");
+    ExpectTrue(fallback.value("logging_health_state", "") ==
+                   "event_log_recovered",
+               "fallback records recovered state");
+    ExpectTrue(fallback.value("failure_count", 0) == 2,
+               "recovery fallback records suppressed failure count");
+    ExpectTrue(!fallback.value("last_recovery_time", "").empty(),
+               "recovery fallback records recovery time");
+
+    std::filesystem::remove_all(runtime_home);
+}
+
 }  // namespace
 
 int main() {
     TestRotationUsesActiveStartAndPrunesArchives();
     TestWriteAppliedReductionPreservesDiagnostics();
     TestConcurrentAppendRotationKeepsWholeLines();
+    TestEventLogFailureWritesStickyFallbackAndRecovery();
     return g_failures == 0 ? 0 : 1;
 }

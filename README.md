@@ -289,7 +289,7 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `10`). The schema
+- The DB schema is bootstrapped on first use (schema version `12`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
@@ -312,7 +312,12 @@ Behavior:
   `gpu_power_time_ms` / `gpu_power_mw` / `gpu_power_source` /
   `gpu_power_acquisition` columns carry the read-only GPU board-power evidence
   (FEAT-0020) from which `analyze report` derives mean / p50 / p90 / max over
-  distinct sample-id samples — instantaneous board power, not an energy integral.
+  distinct sample-id samples — instantaneous board power, not an energy
+  integral. The nullable FEAT-0021 `tick_samples.gpu_context_sample_id` /
+  `gpu_context_time_ms` / `gpu_context_sample_age_ms` /
+  `gpu_context_acquisition`, `gpu_util_*`, `gpu_pstate`, `gpu_clock_*`, and
+  `gpu_vram_*` columns carry cached GPU workload context from which
+  `analyze report` emits a `gpu_context` summary only when present.
   GPU power records automatically on the standard loop whenever NVML returns a
   reading; to also enable the comparable CPU package-energy columns there, run
   `scripts\Set-EnergyLoggingProfile.ps1 -Enable` (and `-Disable` to revert,
@@ -347,7 +352,12 @@ Behavior:
   counts. The idle band is the ticks whose elapsed time is below
   `--idle-seconds` (default `300`, matching the evaluation passes); percentiles
   use nearest-rank on sorted ascending values where `p100` is the maximum.
-  `--json` emits the same metrics as a JSON object.
+  It also compares manifest-declared, archive-ingested, and latest-mirror CSV
+  row counts when the runtime manifest names `artifacts.csv_latest.path`.
+  Running mismatches are reported as
+  `running_csv_manifest_consistency_warning`; closed-run mismatches are reported
+  as `closed_csv_manifest_consistency_suspect_evidence`. `--json` emits the
+  same metrics as a JSON object.
 - `analyze report --out <path>` writes the text or JSON report to a file. For
   text reports, a sibling `*.decision.md` record is written automatically unless
   `--no-decision-record` is set. Use `--decision-record-out <path>` or
@@ -356,7 +366,8 @@ Behavior:
   identity, profile/notes/decision context, source artifact hashes, generated
   output hashes, response metrics, channel attribution counts, event
   severity/error-code counts, and diagnostic flags for no-response,
-  slow-response, hot-but-low-setpoint, authority, write, and restore issues.
+  slow-response, hot-but-low-setpoint, CSV evidence consistency, authority,
+  write, and restore issues.
   `analyze report` is read-only; it never writes to fans, the runtime, or the
   database.
 

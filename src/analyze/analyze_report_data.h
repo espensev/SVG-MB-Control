@@ -169,12 +169,32 @@ struct GpuPowerSummary {
     std::map<std::string, int> acquisition_counts;
 };
 
+// FEAT-0021 (REQ-GPUCTX-05) derived GPU workload-context evidence. Samples are
+// de-duplicated by gpu_context_sample_id because the control loop mirrors a
+// cached context sample across rows; sample_age_ms is summarized over rows to
+// show cache staleness. Empty stats mean the archive lacks context or the
+// reader reported unavailable.
+struct GpuContextSummary {
+    int sample_count = 0;
+    PercentileSet sample_age_ms;
+    PercentileSet util_gpu_pct;
+    PercentileSet util_mem_pct;
+    PercentileSet clock_graphics_mhz;
+    PercentileSet clock_memory_mhz;
+    PercentileSet vram_used_mb;
+    PercentileSet vram_total_mb;
+    std::map<std::string, int> pstate_counts;
+    std::map<std::string, int> acquisition_counts;
+};
+
 struct RuntimeManifestEvidence {
     std::filesystem::path config_path;
     std::string config_sha256;
     std::filesystem::path runtime_policy_path;
     std::string runtime_policy_sha256;
     std::filesystem::path events_path;
+    std::filesystem::path csv_latest_path;
+    std::optional<std::int64_t> csv_latest_row_count;
 };
 
 // Aggregated state assembled before output. Both emitters consume this; the
@@ -209,6 +229,7 @@ struct ReportData {
     PackagePowerSummary package_power;
     CpuCyclesSummary cpu_cycles;
     GpuPowerSummary gpu_power;
+    GpuContextSummary gpu_context;
     int authority_reasserted = 0;
     int write_failures = 0;
     int restore_failures = 0;

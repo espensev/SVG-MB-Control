@@ -59,6 +59,8 @@ struct ReadLoopSampleResult {
     bool snapshot_mirror_configured = false;
     bool snapshot_mirror_published = false;
     bool wrote_outputs = false;
+    std::string runtime_home_publish_error;
+    std::string snapshot_mirror_publish_error;
 };
 
 ReadLoopSampleResult PublishSnapshot(
@@ -68,11 +70,15 @@ ReadLoopSampleResult PublishSnapshot(
     ReadLoopSampleResult result;
     result.telemetry_available = RuntimeSnapshotHasTelemetry(runtime_snapshot);
     result.runtime_home_published =
-        WriteRuntimeSnapshotFile(runtime_home, runtime_snapshot);
+        WriteRuntimeSnapshotFile(runtime_home,
+                                 runtime_snapshot,
+                                 &result.runtime_home_publish_error);
     result.snapshot_mirror_configured = !snapshot_mirror_path.empty();
     if (result.snapshot_mirror_configured) {
         result.snapshot_mirror_published = WriteRuntimeSnapshotJsonFile(
-            snapshot_mirror_path, runtime_snapshot);
+            snapshot_mirror_path,
+            runtime_snapshot,
+            &result.snapshot_mirror_publish_error);
     }
     result.wrote_outputs =
         result.runtime_home_published &&
@@ -97,6 +103,124 @@ const char* DescribeReadLoopPollFailure(const ReadLoopSampleResult& result) {
         return "direct sample could not publish runtime home";
     }
     return "direct sample could not publish snapshot mirror";
+}
+
+std::string BuildCsvWriteFailureDetail(const RuntimeCsvLogger& csv_logger) {
+    std::ostringstream detail;
+    detail << "runtime CSV row write failed";
+    if (!csv_logger.last_error_sink().empty()) {
+        detail << " sink=" << csv_logger.last_error_sink();
+    }
+    if (!csv_logger.last_error_detail().empty()) {
+        detail << " detail=" << csv_logger.last_error_detail();
+    }
+    return detail.str();
+}
+
+void AppendCsvWriteFailureEvent(
+    const std::filesystem::path& runtime_home,
+    const RuntimeCsvLogger& csv_logger,
+    const std::string& mode,
+    const std::string& event_log_path,
+    const RuntimeArtifactNaming& naming) {
+    AppendRuntimeEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .mode = mode,
+            .event_type = "runtime_logging.csv_write_failed",
+            .detail = BuildCsvWriteFailureDetail(csv_logger),
+            .success = false,
+            .log_csv_path = csv_logger.active_archive_path().string(),
+            .event_log_path = event_log_path,
+        },
+        naming);
+}
+
+void AppendCsvWriteRecoveredEvent(
+    const std::filesystem::path& runtime_home,
+    const RuntimeCsvLogger& csv_logger,
+    const std::string& mode,
+    const std::string& event_log_path,
+    const RuntimeArtifactNaming& naming) {
+    AppendRuntimeEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .mode = mode,
+            .event_type = "runtime_logging.csv_write_recovered",
+            .detail = "runtime CSV row writes recovered",
+            .success = true,
+            .log_csv_path = csv_logger.active_archive_path().string(),
+            .event_log_path = event_log_path,
+        },
+        naming);
+}
+
+std::string BuildSnapshotPublishFailureDetail(
+    const ReadLoopSampleResult& result,
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& snapshot_mirror_path) {
+    std::ostringstream detail;
+    detail << "runtime snapshot publish failed";
+    if (!result.runtime_home_published) {
+        detail << " runtime_home_path="
+               << (runtime_home / "current_state.json").string();
+        if (!result.runtime_home_publish_error.empty()) {
+            detail << " runtime_home_detail="
+                   << result.runtime_home_publish_error;
+        }
+    }
+    if (result.snapshot_mirror_configured &&
+        !result.snapshot_mirror_published) {
+        detail << " snapshot_mirror_path=" << snapshot_mirror_path.string();
+        if (!result.snapshot_mirror_publish_error.empty()) {
+            detail << " snapshot_mirror_detail="
+                   << result.snapshot_mirror_publish_error;
+        }
+    }
+    return detail.str();
+}
+
+void AppendSnapshotPublishFailureEvent(
+    const std::filesystem::path& runtime_home,
+    const ReadLoopSampleResult& result,
+    const std::filesystem::path& snapshot_mirror_path,
+    const std::string& event_log_path) {
+    AppendRuntimeEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .mode = "read-loop",
+            .event_type = "runtime_logging.snapshot_publish_failed",
+            .detail = BuildSnapshotPublishFailureDetail(
+                result, runtime_home, snapshot_mirror_path),
+            .success = false,
+            .event_log_path = event_log_path,
+            .telemetry_available = result.telemetry_available,
+            .runtime_home_published = result.runtime_home_published,
+            .snapshot_mirror_configured =
+                result.snapshot_mirror_configured,
+            .snapshot_mirror_published =
+                result.snapshot_mirror_published,
+        });
+}
+
+void AppendSnapshotPublishRecoveredEvent(
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& snapshot_mirror_path,
+    const std::string& event_log_path) {
+    std::string detail = "runtime snapshot publish recovered path=" +
+        (runtime_home / "current_state.json").string();
+    if (!snapshot_mirror_path.empty()) {
+        detail += " snapshot_mirror_path=" + snapshot_mirror_path.string();
+    }
+    AppendRuntimeEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .mode = "read-loop",
+            .event_type = "runtime_logging.snapshot_publish_recovered",
+            .detail = detail,
+            .success = true,
+            .event_log_path = event_log_path,
+        });
 }
 
 }  // namespace
@@ -239,6 +363,8 @@ int ReadLoop::RunUntilStopped() {
     // Reused across poll iterations; SampleDirectRuntimeSnapshot fully resets
     // it each call so no telemetry carries over (see direct_runtime_snapshot).
     RuntimeSnapshot runtime_snapshot;
+    bool csv_write_failure_active = false;
+    bool snapshot_publish_failure_active = false;
 
     while (!impl_->stop_requested.load() &&
            !RuntimeStopRequested(impl_->runtime_home)) {
@@ -269,6 +395,22 @@ int ReadLoop::RunUntilStopped() {
             const ReadLoopSampleResult published = PublishSnapshot(
                 runtime_snapshot, impl_->runtime_home,
                 impl_->config.snapshot_path);
+            if (published.telemetry_available &&
+                !published.wrote_outputs &&
+                !snapshot_publish_failure_active) {
+                AppendSnapshotPublishFailureEvent(impl_->runtime_home,
+                                                  published,
+                                                  impl_->config.snapshot_path,
+                                                  status.event_log_path);
+                snapshot_publish_failure_active = true;
+            } else if (published.wrote_outputs &&
+                       snapshot_publish_failure_active) {
+                AppendSnapshotPublishRecoveredEvent(
+                    impl_->runtime_home,
+                    impl_->config.snapshot_path,
+                    status.event_log_path);
+                snapshot_publish_failure_active = false;
+            }
 
             if (published.wrote_outputs && published.telemetry_available) {
                 last_success_time = std::chrono::steady_clock::now();
@@ -290,7 +432,7 @@ int ReadLoop::RunUntilStopped() {
                            static_cast<std::uint64_t>(staleness_threshold_ms);
 
             if (csv_logger.is_open()) {
-                csv_logger.WriteRow(BuildReadLoopCsvRow(
+                const bool row_written = csv_logger.WriteRow(BuildReadLoopCsvRow(
                     runtime_snapshot,
                     RuntimeReadLoopLogState{
                         .telemetry_available = published.telemetry_available,
@@ -305,6 +447,21 @@ int ReadLoop::RunUntilStopped() {
                         .stale = status.stale,
                         .status_detail = status.status_detail,
                     }));
+                if (!row_written && !csv_write_failure_active) {
+                    AppendCsvWriteFailureEvent(impl_->runtime_home,
+                                               csv_logger,
+                                               "read-loop",
+                                               status.event_log_path,
+                                               RuntimeArtifactNaming{});
+                    csv_write_failure_active = true;
+                } else if (row_written && csv_write_failure_active) {
+                    AppendCsvWriteRecoveredEvent(impl_->runtime_home,
+                                                 csv_logger,
+                                                 "read-loop",
+                                                 status.event_log_path,
+                                                 RuntimeArtifactNaming{});
+                    csv_write_failure_active = false;
+                }
             }
 
             if (!published.telemetry_available || !published.wrote_outputs) {

@@ -113,6 +113,34 @@ void ReadManifestIdentity(const nlohmann::json& root,
     sha256_out = JsonStringMember(*it, "sha256");
 }
 
+std::optional<std::int64_t> CountCsvDataRows(
+    const std::filesystem::path& path) {
+    if (path.empty()) {
+        return std::nullopt;
+    }
+    std::ifstream stream(path);
+    if (!stream) {
+        return std::nullopt;
+    }
+    bool header_seen = false;
+    std::int64_t rows = 0;
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty() || line.front() == '#') {
+            continue;
+        }
+        if (!header_seen) {
+            header_seen = true;
+            continue;
+        }
+        ++rows;
+    }
+    return header_seen ? std::optional<std::int64_t>(rows) : std::nullopt;
+}
+
 }  // namespace
 
 // Resolves the target run row. Caller has already opened the DB and verified
@@ -191,6 +219,15 @@ RuntimeManifestEvidence LoadRuntimeManifestEvidence(
 
     const auto artifacts = root.find("artifacts");
     if (artifacts != root.end() && artifacts->is_object()) {
+        const auto latest = artifacts->find("csv_latest");
+        if (latest != artifacts->end() && latest->is_object()) {
+            const std::string path = JsonStringMember(*latest, "path");
+            if (!path.empty()) {
+                evidence.csv_latest_path = path;
+                evidence.csv_latest_row_count =
+                    CountCsvDataRows(evidence.csv_latest_path);
+            }
+        }
         const auto events = artifacts->find("events");
         if (events != artifacts->end() && events->is_object()) {
             const std::string path = JsonStringMember(*events, "path");
@@ -596,6 +633,94 @@ GpuPowerSummary SummariseGpuPower(Database& db, std::int64_t run_id) {
     }
     return ComputeGpuPower(std::move(sample_mw),
                            std::move(acquisition_counts));
+}
+
+GpuContextSummary SummariseGpuContext(Database& db, std::int64_t run_id) {
+    GpuContextSummary summary;
+    auto fill = [](PercentileSet& p, const std::vector<double>& values) {
+        p.n = static_cast<int>(values.size());
+        p.avg = Mean(values);
+        p.p50 = Percentile(values, 50.0);
+        p.p90 = Percentile(values, 90.0);
+        p.p95 = Percentile(values, 95.0);
+        p.p99 = Percentile(values, 99.0);
+        p.max = Percentile(values, 100.0);
+    };
+
+    std::vector<double> sample_age_ms;
+    std::vector<double> util_gpu;
+    std::vector<double> util_mem;
+    std::vector<double> clock_graphics;
+    std::vector<double> clock_memory;
+    std::vector<double> vram_used;
+    std::vector<double> vram_total;
+
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(gpu_context_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            summary.acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+
+        Statement ages = db.Prepare(
+            "SELECT gpu_context_sample_age_ms FROM tick_samples "
+            "WHERE run_id = ?1 AND gpu_context_sample_age_ms IS NOT NULL");
+        ages.BindInt(1, run_id);
+        while (ages.Step()) {
+            sample_age_ms.push_back(ages.ColumnDouble(0));
+        }
+
+        Statement samples = db.Prepare(
+            "SELECT MAX(gpu_util_gpu_pct), MAX(gpu_util_mem_pct), "
+            "MAX(gpu_pstate), MAX(gpu_clock_graphics_mhz), "
+            "MAX(gpu_clock_memory_mhz), MAX(gpu_vram_used_mb), "
+            "MAX(gpu_vram_total_mb) FROM tick_samples WHERE run_id = ?1 "
+            "AND gpu_context_sample_id IS NOT NULL "
+            "AND gpu_context_sample_id > 0 "
+            "GROUP BY gpu_context_sample_id");
+        samples.BindInt(1, run_id);
+        while (samples.Step()) {
+            ++summary.sample_count;
+            if (!samples.ColumnIsNull(0)) {
+                util_gpu.push_back(samples.ColumnDouble(0));
+            }
+            if (!samples.ColumnIsNull(1)) {
+                util_mem.push_back(samples.ColumnDouble(1));
+            }
+            if (!samples.ColumnIsNull(2)) {
+                ++summary.pstate_counts[
+                    std::to_string(samples.ColumnInt(2))];
+            }
+            if (!samples.ColumnIsNull(3)) {
+                clock_graphics.push_back(samples.ColumnDouble(3));
+            }
+            if (!samples.ColumnIsNull(4)) {
+                clock_memory.push_back(samples.ColumnDouble(4));
+            }
+            if (!samples.ColumnIsNull(5)) {
+                vram_used.push_back(samples.ColumnDouble(5));
+            }
+            if (!samples.ColumnIsNull(6)) {
+                vram_total.push_back(samples.ColumnDouble(6));
+            }
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: gpu-context query failed: " << ex.what() << '\n';
+        return {};
+    }
+
+    fill(summary.sample_age_ms, sample_age_ms);
+    fill(summary.util_gpu_pct, util_gpu);
+    fill(summary.util_mem_pct, util_mem);
+    fill(summary.clock_graphics_mhz, clock_graphics);
+    fill(summary.clock_memory_mhz, clock_memory);
+    fill(summary.vram_used_mb, vram_used);
+    fill(summary.vram_total_mb, vram_total);
+    return summary;
 }
 
 // Loads tick_channel_samples for run_id and aggregates per-channel stats:

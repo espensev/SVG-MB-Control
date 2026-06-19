@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     gpu_power_mw REAL,
     gpu_power_source TEXT,
     gpu_power_acquisition TEXT,
+    gpu_context_sample_id INTEGER,
+    gpu_context_time_ms REAL,
+    gpu_context_sample_age_ms REAL,
+    gpu_context_acquisition TEXT,
+    gpu_util_gpu_pct INTEGER,
+    gpu_util_mem_pct INTEGER,
+    gpu_pstate INTEGER,
+    gpu_clock_graphics_mhz INTEGER,
+    gpu_clock_memory_mhz INTEGER,
+    gpu_vram_used_mb INTEGER,
+    gpu_vram_total_mb INTEGER,
     PRIMARY KEY (run_id, tick_count)
 );
 
@@ -678,6 +689,70 @@ void MigrateSchema(Database& db) {
                 "TEXT");
         }
         SetSchemaVersion(db, 11);
+    }
+    if (version <= 11) {
+        // FEAT-0021 (REQ-GPUCTX-01/-05): additive nullable GPU workload
+        // context columns mirrored from the control-loop CSV. Old archives
+        // lack them; ingest binds NULL and the report summary skips absent
+        // context (no false zero). gpu_context_sample_id can repeat across
+        // rows because the controller mirrors a cached context sample with an
+        // increasing gpu_context_sample_age_ms.
+        if (!ColumnExists(db, "tick_samples", "gpu_context_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_context_sample_id "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_context_time_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_context_time_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples",
+                          "gpu_context_sample_age_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_context_sample_age_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_context_acquisition")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_context_acquisition TEXT");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_util_gpu_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_util_gpu_pct "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_util_mem_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_util_mem_pct "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_pstate")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_pstate INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples",
+                          "gpu_clock_graphics_mhz")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_clock_graphics_mhz INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_clock_memory_mhz")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_clock_memory_mhz INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_vram_used_mb")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_vram_used_mb "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_vram_total_mb")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_vram_total_mb "
+                "INTEGER");
+        }
+        SetSchemaVersion(db, 12);
     }
 }
 

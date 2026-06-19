@@ -82,6 +82,19 @@ std::string PathOrNa(const std::filesystem::path& path) {
     return path.empty() ? "n/a" : path.string();
 }
 
+bool CountMismatch(const std::optional<std::int64_t>& a,
+                   const std::optional<std::int64_t>& b) {
+    return a.has_value() && b.has_value() && *a != *b;
+}
+
+bool CsvEvidenceCountsDisagree(const ReportData& data) {
+    return CountMismatch(data.row_count_declared, data.row_count_ingested) ||
+           CountMismatch(data.row_count_declared,
+                         data.manifest_evidence.csv_latest_row_count) ||
+           CountMismatch(data.row_count_ingested,
+                         data.manifest_evidence.csv_latest_row_count);
+}
+
 nlohmann::json ArtifactJson(const std::filesystem::path& path,
                             const std::string& schema = {},
                             const std::string& sha256_override = {}) {
@@ -113,6 +126,8 @@ nlohmann::json BuildAnalysisManifest(const ReportOptions& options,
         {"git_hash", OptStringToJson(data.git_hash)},
         {"row_count_declared", OptIntToJson(data.row_count_declared)},
         {"row_count_ingested", OptIntToJson(data.row_count_ingested)},
+        {"csv_latest_row_count",
+         OptIntToJson(data.manifest_evidence.csv_latest_row_count)},
         {"event_count_declared", OptIntToJson(data.event_count_declared)},
         {"event_count_ingested", OptIntToJson(data.event_count_ingested)},
         {"last_update", OptStringToJson(data.last_update)},
@@ -138,6 +153,11 @@ nlohmann::json BuildAnalysisManifest(const ReportOptions& options,
          ArtifactJson(data.manifest_path,
                       "svg_mb_control.runtime_log_manifest.v1")},
     };
+    if (!data.manifest_evidence.csv_latest_path.empty()) {
+        doc["source_artifacts"]["csv_latest"] = ArtifactJson(
+            data.manifest_evidence.csv_latest_path,
+            "svg_mb_control.log.v1");
+    }
     if (!data.manifest_evidence.config_path.empty()) {
         doc["source_artifacts"]["config"] = ArtifactJson(
             data.manifest_evidence.config_path, {},
@@ -210,6 +230,11 @@ std::vector<std::string> BuildDiagnosticFlags(const ReportOptions& options,
     if (data.restore_failures > 0) {
         flags.push_back("restore_failures_present");
     }
+    if (CsvEvidenceCountsDisagree(data)) {
+        flags.push_back(data.status == "running"
+                            ? "running_csv_manifest_consistency_warning"
+                            : "closed_csv_manifest_consistency_suspect_evidence");
+    }
 
     const bool hot =
         (data.load.cpu_tctl_max &&
@@ -245,6 +270,9 @@ void EmitJsonReport(const ReportOptions& options,
         {"git_hash", OptStringToJson(data.git_hash)},
         {"row_count_declared", OptIntToJson(data.row_count_declared)},
         {"row_count_ingested", OptIntToJson(data.row_count_ingested)},
+        {"csv_latest_path", PathToJson(data.manifest_evidence.csv_latest_path)},
+        {"csv_latest_row_count",
+         OptIntToJson(data.manifest_evidence.csv_latest_row_count)},
         {"event_count_declared", OptIntToJson(data.event_count_declared)},
         {"event_count_ingested", OptIntToJson(data.event_count_ingested)},
         {"ticks", static_cast<std::int64_t>(data.ticks.size())},
@@ -412,6 +440,19 @@ void EmitJsonReport(const ReportOptions& options,
           {"max", OptToJson(gp.mw_max)}}},
         {"acquisition_counts", gp.acquisition_counts},
     };
+    const auto& gc = data.gpu_context;
+    doc["gpu_context"] = {
+        {"sample_count", gc.sample_count},
+        {"sample_age_ms", stats_json(gc.sample_age_ms)},
+        {"util_gpu_pct", stats_json(gc.util_gpu_pct)},
+        {"util_mem_pct", stats_json(gc.util_mem_pct)},
+        {"pstate_counts", gc.pstate_counts},
+        {"clock_graphics_mhz", stats_json(gc.clock_graphics_mhz)},
+        {"clock_memory_mhz", stats_json(gc.clock_memory_mhz)},
+        {"vram_used_mb", stats_json(gc.vram_used_mb)},
+        {"vram_total_mb", stats_json(gc.vram_total_mb)},
+        {"acquisition_counts", gc.acquisition_counts},
+    };
     doc["robustness"] = {
         {"authority_reasserted", data.authority_reasserted},
         {"write_failures", data.write_failures},
@@ -438,10 +479,12 @@ void EmitTextReport(const ReportOptions& options,
        << " load_threshold_c=" << options.load_threshold_c << '\n';
     os << "  rows declared/ingested=" << IntOrNa(data.row_count_declared)
        << "/" << IntOrNa(data.row_count_ingested)
+       << " latest=" << IntOrNa(data.manifest_evidence.csv_latest_row_count)
        << " events declared/ingested="
        << IntOrNa(data.event_count_declared) << "/"
        << IntOrNa(data.event_count_ingested) << '\n';
     os << "  artifacts: csv=" << PathOrNa(data.csv_archive_path)
+       << " latest=" << PathOrNa(data.manifest_evidence.csv_latest_path)
        << " manifest=" << PathOrNa(data.manifest_path) << '\n';
     os << "  band sample counts: idle=" << data.idle.n
        << " load=" << data.load.n << " cooldown=" << data.cool.n << '\n';
@@ -574,6 +617,22 @@ void EmitTextReport(const ReportOptions& options,
        << " mw_p90=" << OptToText(gp.mw_p90)
        << " mw_max=" << OptToText(gp.mw_max)
        << " acquisition=" << CountsToText(gp.acquisition_counts) << '\n';
+    const auto& gc = data.gpu_context;
+    os << "gpu_context: samples=" << gc.sample_count
+       << " util_gpu_pct p50=" << OptToText(gc.util_gpu_pct.p50)
+       << " p90=" << OptToText(gc.util_gpu_pct.p90)
+       << " max=" << OptToText(gc.util_gpu_pct.max)
+       << " util_mem_pct p50=" << OptToText(gc.util_mem_pct.p50)
+       << " p90=" << OptToText(gc.util_mem_pct.p90)
+       << " max=" << OptToText(gc.util_mem_pct.max)
+       << " pstate=" << CountsToText(gc.pstate_counts)
+       << " clock_graphics_mhz p50="
+       << OptToText(gc.clock_graphics_mhz.p50)
+       << " clock_memory_mhz p50=" << OptToText(gc.clock_memory_mhz.p50)
+       << " vram_used_mb p50=" << OptToText(gc.vram_used_mb.p50)
+       << " vram_total_mb p50=" << OptToText(gc.vram_total_mb.p50)
+       << " sample_age_ms max=" << OptToText(gc.sample_age_ms.max)
+       << " acquisition=" << CountsToText(gc.acquisition_counts) << '\n';
     os << "events: severity_counts="
        << CountsToText(data.event_severity_counts)
        << " error_code_counts="
@@ -643,8 +702,10 @@ std::string BuildDecisionRecord(const ReportOptions& options,
     }
 
     os << "\n## Counts\n\n";
-    os << "- Rows declared/ingested: " << IntOrNa(data.row_count_declared)
-       << "/" << IntOrNa(data.row_count_ingested) << '\n';
+    os << "- Rows declared/ingested/latest: "
+       << IntOrNa(data.row_count_declared)
+       << "/" << IntOrNa(data.row_count_ingested)
+       << "/" << IntOrNa(data.manifest_evidence.csv_latest_row_count) << '\n';
     os << "- Events declared/ingested: "
        << IntOrNa(data.event_count_declared) << "/"
        << IntOrNa(data.event_count_ingested) << '\n';

@@ -1,7 +1,7 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.5   **Updated:** 2026-06-18
+**Status:** Accepted   **Version:** 0.5   **Updated:** 2026-06-20
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/MEASUREMENT_GATE.md`
@@ -14,8 +14,8 @@ checked against the written spec afterward.
 Read-first index of in-flight and next feature work. It aggregates the priority
 and decision view that is otherwise split between the §5 registry (per-feature
 status) and the topical backlog in `docs/next_steps.md` (a maintained backlog,
-current through the 2026-06-18 FEAT-0020 and FEAT-0015/0016 disk-retention
-implementation, but prose-organized and still silent on FEAT-0009). It links
+current through the 2026-06-20 FEAT-0022 logging-health intake, but
+prose-organized and still silent on FEAT-0009). It links
 those rather
 than restating them; the §5 registry stays authoritative for per-feature status
 and `git log` for what shipped. Keep it current when a feature's status or the
@@ -24,6 +24,21 @@ decision queue changes. A fuller standing review is
 
 **Recently implemented:**
 
+- **FEAT-0021** (`Implemented`, T/R verified; live M pending) — standard
+  control-loop GPU workload context logging beside FEAT-0020 GPU power. The
+  control CSV now includes a cached, additive context slice for utilization,
+  pstate, graphics/memory clocks, VRAM used/total, and sample identity/time/age.
+  Analyzer schema v12 ingests the optional fields and reports context summaries
+  only when present; older archives degrade as unavailable.
+- **FEAT-0022** (`Implemented`) — runtime logging failure
+  visibility for CSV/archive/mirror/manifest sink failures and event-log append
+  failure. `WriteRow(...)` failures are now observed by control-loop,
+  read-loop, and evidence-log; failures/recoveries emit rate-limited
+  `runtime_logging.csv_write_*` events. Event-log append failure writes sticky
+  `logging_health.json` and degrades health while active. Status/snapshot
+  publish failures now emit sticky failure/recovery events and retry promptly.
+  Analyzer reports now classify running CSV manifest/archive/latest-mirror
+  row-count mismatch as a warning and closed mismatch as suspect evidence.
 - **FEAT-0016** (`Implemented`) — analyze SQLite DB retention. Immediate safe
   reclaim was completed 2026-06-18 by deleting the derived
   `release/runtime/svg_mb_control.db` (7.80 GiB reclaimed); the product-code work
@@ -39,9 +54,12 @@ decision queue changes. A fuller standing review is
 **Active — `Accepted`, buildable when implementation is authorized:**
 
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
-  implementation/evidence, not promotion: enabled-path live RAPL evidence, the
-  `quarantine → validated` marker (manual), and the corrected per-core cycle
-  read. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006 downstream work).
+  follow-through, not package-energy capture: the `quarantine → validated`
+  marker decision (manual), the corrected per-core cycle/effective-frequency
+  evidence, and the deferred CPU-setting label. The enabled live RAPL path is
+  now covered by the FEAT-0020 flip and the power/temperature comparison
+  snapshot. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006 downstream
+  work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
 - **FEAT-0004** (`Accepted`) — hardware-access dependency health signal. Decision
@@ -62,10 +80,15 @@ control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
 `Implemented` and merged; FEAT-0014 is the one non-blocking remainder. FEAT-0020
-standard control-loop power logging shipped 2026-06-18 — `Implemented` v0.4, live
-flip executed and validated (gate 6 closed; CPU package + GPU board power now log
-on the live control loop). The flip also produced the first enabled-RAPL-on-
-hardware evidence FEAT-0006 was waiting for (`package_power` avg 86.74 W live).
+standard control-loop power logging shipped 2026-06-18 — `Implemented` v0.4,
+live flip executed and validated (gate 6 closed; CPU package + GPU board power
+now log on the live control loop). The flip also produced the first enabled-RAPL
+on-hardware evidence FEAT-0006 was waiting for (`package_power` avg 86.74 W
+live). The later `docs/power-temp-comparison-snapshot-2026-06-18.md` preserves
+the standard-loop CPU+GPU watts beside temperatures for future comparisons.
+FEAT-0021 followed on 2026-06-20 with cached GPU workload context in the same
+standard CSV and analyzer v12 support; live cadence M evidence remains the
+deployment check for that added periodic context read.
 
 **Other backlogs (per-topic, not duplicated here):** `docs/next_steps.md`
 (maintained topical backlog), `docs/PATH_NOTES.md` §"Ideas / backlog",
@@ -191,4 +214,5 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0018](FEAT-0018-adaptive-cadence-enablement.md) | Adaptive-cadence enablement under thermal transient (engage the dormant `poll_tick_floor_ms` engine) | `REQ-CADENCE-*` | Draft (held — crosses the measurement gate; pending the floor characterization pass) |
 | [FEAT-0019](FEAT-0019-sidecar-persist-off-hot-path.md) | Sidecar persistence off the actuation hot path (identity-gated `Persist()`) | `REQ-WRITEHOT-*` | Implemented (2026-06-18; T/R verified, C++ tests green) |
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
-| [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Draft (held — sequenced behind FEAT-0020; D-GPUCTX-1 is Proposed and combined GPU sample cadence evidence is pending) |
+| [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M pending) |
+| [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |

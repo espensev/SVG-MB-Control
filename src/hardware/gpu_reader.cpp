@@ -19,6 +19,22 @@ namespace svg_mb_control {
 
 namespace {
 
+constexpr std::chrono::milliseconds kGpuContextRefreshInterval{1000};
+
+struct CachedGpuContext {
+    bool valid = false;
+    std::uint64_t sample_id = 0u;
+    double time_ms = std::numeric_limits<double>::quiet_NaN();
+    std::chrono::steady_clock::time_point sampled_at{};
+    std::int32_t util_gpu_pct = -1;
+    std::int32_t util_mem_pct = -1;
+    std::int32_t pstate = -1;
+    std::uint32_t clock_graphics_mhz = 0u;
+    std::uint32_t clock_memory_mhz = 0u;
+    std::uint32_t vram_used_mb = 0u;
+    std::uint32_t vram_total_mb = 0u;
+};
+
 std::string SimGpuMode() {
     return GetEnvOrDefault("SVG_MB_CONTROL_SIM_GPU_MODE", "disabled");
 }
@@ -164,6 +180,89 @@ void FinalizeGpuPowerIdentity(GpuTempSample& out, std::uint64_t& counter) {
     }
 }
 
+void ResetGpuContextFields(GpuTempSample& out, std::string acquisition) {
+    out.context_acquisition = std::move(acquisition);
+    out.context_sample_id = 0u;
+    out.context_time_ms = std::numeric_limits<double>::quiet_NaN();
+    out.context_sample_age_ms = std::numeric_limits<double>::quiet_NaN();
+    out.context_util_gpu_pct = -1;
+    out.context_util_mem_pct = -1;
+    out.context_pstate = -1;
+    out.context_clock_graphics_mhz = 0u;
+    out.context_clock_memory_mhz = 0u;
+    out.context_vram_used_mb = 0u;
+    out.context_vram_total_mb = 0u;
+}
+
+bool CachedGpuContextHasValue(const CachedGpuContext& cache) {
+    return cache.util_gpu_pct >= 0 ||
+           cache.util_mem_pct >= 0 ||
+           cache.pstate >= 0 ||
+           cache.clock_graphics_mhz != 0u ||
+           cache.clock_memory_mhz != 0u ||
+           cache.vram_total_mb != 0u;
+}
+
+void ApplyCachedGpuContext(GpuTempSample& out,
+                           const CachedGpuContext& cache,
+                           std::chrono::steady_clock::time_point now,
+                           std::string_view fallback_acquisition) {
+    if (!cache.valid) {
+        ResetGpuContextFields(out, std::string(fallback_acquisition));
+        return;
+    }
+    out.context_acquisition = "nvml";
+    out.context_sample_id = cache.sample_id;
+    out.context_time_ms = cache.time_ms;
+    out.context_sample_age_ms =
+        static_cast<double>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - cache.sampled_at).count());
+    out.context_util_gpu_pct = cache.util_gpu_pct;
+    out.context_util_mem_pct = cache.util_mem_pct;
+    out.context_pstate = cache.pstate;
+    out.context_clock_graphics_mhz = cache.clock_graphics_mhz;
+    out.context_clock_memory_mhz = cache.clock_memory_mhz;
+    out.context_vram_used_mb = cache.vram_used_mb;
+    out.context_vram_total_mb = cache.vram_total_mb;
+}
+
+void FinalizeGpuContextIdentity(GpuTempSample& out,
+                                std::uint64_t& counter) {
+    if (out.context_acquisition == "nvml") {
+        out.context_sample_id = ++counter;
+        out.context_time_ms = static_cast<double>(MonotonicGpuReadMs());
+        out.context_sample_age_ms = 0.0;
+    } else {
+        out.context_sample_id = 0u;
+        out.context_time_ms = std::numeric_limits<double>::quiet_NaN();
+        out.context_sample_age_ms = std::numeric_limits<double>::quiet_NaN();
+    }
+}
+
+void FillSimGpuContext(GpuTempSample& out) {
+    out.context_acquisition = GetEnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CONTEXT_ACQUISITION", "nvml");
+    if (out.context_acquisition != "nvml") {
+        ResetGpuContextFields(out, out.context_acquisition);
+        return;
+    }
+    out.context_util_gpu_pct = GetInt32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_UTIL_GPU_PCT", 67);
+    out.context_util_mem_pct = GetInt32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_UTIL_MEM_PCT", 21);
+    out.context_pstate =
+        GetInt32EnvOrDefault("SVG_MB_CONTROL_SIM_GPU_PSTATE", 0);
+    out.context_clock_graphics_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CLOCK_GRAPHICS_MHZ", 2500u);
+    out.context_clock_memory_mhz = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_CLOCK_MEMORY_MHZ", 10500u);
+    out.context_vram_used_mb = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_VRAM_USED_MB", 8192u);
+    out.context_vram_total_mb = GetUint32EnvOrDefault(
+        "SVG_MB_CONTROL_SIM_GPU_VRAM_TOTAL_MB", 16384u);
+}
+
 GpuTempSample MakeSimGpuTempSample() {
     GpuTempSample out;
     out.available = true;
@@ -186,6 +285,7 @@ GpuTempSample MakeSimGpuTempSample() {
     } else {
         out.power_acquisition = "unavailable";
     }
+    FillSimGpuContext(out);
     return out;
 }
 
@@ -323,6 +423,42 @@ GpuEvidenceSample MakeSimGpuEvidenceSample(std::string_view mode_label) {
 }
 
 #ifdef SVG_MB_CONTROL_GPU_TELEMETRY_ENABLED
+std::uint32_t PreferNonZero(std::uint32_t primary, std::uint32_t fallback) {
+    return primary != 0u ? primary : fallback;
+}
+
+CachedGpuContext BuildCachedGpuContext(const GpuSnapshot& fast,
+                                       bool fast_ok,
+                                       const GpuSnapshot& rare,
+                                       bool rare_ok,
+                                       std::uint64_t sample_id,
+                                       std::chrono::steady_clock::time_point now) {
+    CachedGpuContext next;
+    if (!fast_ok && !rare_ok) {
+        return next;
+    }
+    next.sample_id = sample_id;
+    next.sampled_at = now;
+    next.time_ms = static_cast<double>(MonotonicGpuReadMs());
+    if (fast_ok) {
+        next.util_gpu_pct = fast.util_gpu_pct;
+        next.util_mem_pct = fast.util_fb_pct;
+        next.pstate = fast.pstate;
+        next.clock_graphics_mhz = PreferNonZero(
+            fast.nvml_clock_graphics_mhz,
+            fast.clock_graphics_mhz);
+        next.clock_memory_mhz = PreferNonZero(
+            fast.nvml_clock_memory_mhz,
+            fast.clock_memory_mhz);
+    }
+    if (rare_ok && rare.vram_total_mb != 0u) {
+        next.vram_used_mb = rare.vram_used_mb;
+        next.vram_total_mb = rare.vram_total_mb;
+    }
+    next.valid = CachedGpuContextHasValue(next);
+    return next;
+}
+
 GpuSampleMode ToGpuSampleMode(std::string_view mode_label) {
     if (mode_label == "thermal-fast") {
         return GpuSampleMode::ThermalFast;
@@ -432,6 +568,11 @@ struct GpuReader::Impl {
     // FEAT-0020 GPU board-power read counter (advances only on a fresh nonzero
     // read; see FinalizeGpuPowerIdentity).
     std::uint64_t power_sample_counter = 0u;
+    // FEAT-0021 cached workload-context sample counter. The context cache is
+    // refreshed at most once per kGpuContextRefreshInterval; rows in between
+    // mirror the same sample id with an increasing age.
+    std::uint64_t context_sample_counter = 0u;
+    CachedGpuContext context_cache;
 };
 
 GpuReader::GpuReader() : impl_(std::make_unique<Impl>()) {
@@ -462,6 +603,7 @@ std::string GpuReader::init_warning() const {
 }
 
 const GpuTempSample& GpuReader::Sample() {
+    const auto sample_started = std::chrono::steady_clock::now();
     GpuTempSample& out = impl_->last_sample;
     out.available = false;
     out.core_c = 0.0;
@@ -474,15 +616,18 @@ const GpuTempSample& GpuReader::Sample() {
     out.power_acquisition = "unavailable";
     out.power_source = "unknown";
     out.power_mw = std::numeric_limits<double>::quiet_NaN();
+    ResetGpuContextFields(out, "unavailable");
 
     if (SimGpuEnabled()) {
         out = MakeSimGpuTempSample();
         FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+        FinalizeGpuContextIdentity(out, impl_->context_sample_counter);
         return out;
     }
     if (SimGpuUnavailable()) {
         out.last_warning = "GPU reader disabled by environment";
         FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+        ResetGpuContextFields(out, "unavailable");
         return out;
     }
 
@@ -491,12 +636,15 @@ const GpuTempSample& GpuReader::Sample() {
             ? std::string("not initialized")
             : impl_->init_warning;
         FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+        ResetGpuContextFields(out, "unavailable");
         return out;
     }
     GpuSnapshot snap;
     if (!impl_->reader.sample(0, snap, GpuSampleMode::ThermalFast)) {
         out.last_warning = "sample failed";
         FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+        ApplyCachedGpuContext(out, impl_->context_cache, sample_started,
+                              "unavailable");
         return out;
     }
     out.available = true;
@@ -504,15 +652,39 @@ const GpuTempSample& GpuReader::Sample() {
     out.memjn_c = snap.memjn_c;
     out.hotspot_c = snap.hotspot_c;
     out.gpu_name = impl_->gpu_name;
-    // FEAT-0020 board power from the same thermal-fast sample (poll_power is
-    // included in sample_thermal_fast). nonzero-gated: a zero reading means no
-    // live board power (no false zero), so it stays "unavailable".
+    // FEAT-0020 board power from the same thermal-fast sample (the board-power-only
+    // poll_nvml_board_power read is included in sample_thermal_fast; the per-rail
+    // poll_power topology is NOT on this hot path). nonzero-gated: a zero reading
+    // means no live board power (no false zero), so it stays "unavailable".
     if (snap.nvml_power_mw != 0u) {
         out.power_mw = static_cast<double>(snap.nvml_power_mw);
         out.power_source = gpu_power_source_name(snap.power_source);
         out.power_acquisition = "nvml";
     }
     FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+    const bool context_due =
+        !impl_->context_cache.valid ||
+        (sample_started - impl_->context_cache.sampled_at) >=
+            kGpuContextRefreshInterval;
+    if (context_due) {
+        GpuSnapshot fast;
+        GpuSnapshot rare;
+        const bool fast_ok =
+            impl_->reader.sample(0, fast, GpuSampleMode::Fast);
+        const bool rare_ok =
+            impl_->reader.sample(0, rare, GpuSampleMode::Rare);
+        CachedGpuContext next = BuildCachedGpuContext(
+            fast, fast_ok, rare, rare_ok,
+            impl_->context_sample_counter + 1u,
+            std::chrono::steady_clock::now());
+        if (next.valid) {
+            ++impl_->context_sample_counter;
+            impl_->context_cache = next;
+        }
+    }
+    ApplyCachedGpuContext(out, impl_->context_cache,
+                          std::chrono::steady_clock::now(),
+                          "unavailable");
     return out;
 }
 
@@ -564,6 +736,7 @@ struct GpuReader::Impl {
         "gpu_telemetry not linked at build time";
     GpuTempSample last_sample;
     std::uint64_t power_sample_counter = 0u;
+    std::uint64_t context_sample_counter = 0u;
 };
 
 GpuReader::GpuReader() : impl_(std::make_unique<Impl>()) {}
@@ -588,21 +761,25 @@ const GpuTempSample& GpuReader::Sample() {
     out.power_acquisition = "disabled";
     out.power_source = "unknown";
     out.power_mw = std::numeric_limits<double>::quiet_NaN();
+    ResetGpuContextFields(out, "disabled");
 
     if (SimGpuEnabled()) {
         out = MakeSimGpuTempSample();
         FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+        FinalizeGpuContextIdentity(out, impl_->context_sample_counter);
         return out;
     }
     if (SimGpuUnavailable()) {
         out.last_warning = "GPU reader disabled by environment";
         out.power_acquisition = "unavailable";
         FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+        ResetGpuContextFields(out, "unavailable");
         return out;
     }
 
     out.last_warning = init_warning();
     FinalizeGpuPowerIdentity(out, impl_->power_sample_counter);
+    ResetGpuContextFields(out, "disabled");
     return out;
 }
 

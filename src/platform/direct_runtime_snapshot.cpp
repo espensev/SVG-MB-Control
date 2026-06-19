@@ -117,6 +117,22 @@ void MergeGpuTelemetry(RuntimeSnapshot& snapshot,
     snapshot.gpu.power_sample_id = gpu_sample.power_sample_id;
     snapshot.gpu.power_time_ms = gpu_sample.power_time_ms;
     snapshot.gpu.power_mw = gpu_sample.power_mw;
+    // FEAT-0021 read-only GPU workload context (logging-only; never a control
+    // input). Values are cached by GpuReader and mirrored into the control CSV
+    // with an explicit sample age.
+    snapshot.gpu.context_acquisition = gpu_sample.context_acquisition;
+    snapshot.gpu.context_sample_id = gpu_sample.context_sample_id;
+    snapshot.gpu.context_time_ms = gpu_sample.context_time_ms;
+    snapshot.gpu.context_sample_age_ms = gpu_sample.context_sample_age_ms;
+    snapshot.gpu.context_util_gpu_pct = gpu_sample.context_util_gpu_pct;
+    snapshot.gpu.context_util_mem_pct = gpu_sample.context_util_mem_pct;
+    snapshot.gpu.context_pstate = gpu_sample.context_pstate;
+    snapshot.gpu.context_clock_graphics_mhz =
+        gpu_sample.context_clock_graphics_mhz;
+    snapshot.gpu.context_clock_memory_mhz =
+        gpu_sample.context_clock_memory_mhz;
+    snapshot.gpu.context_vram_used_mb = gpu_sample.context_vram_used_mb;
+    snapshot.gpu.context_vram_total_mb = gpu_sample.context_vram_total_mb;
 }
 
 void MergeFanTelemetry(RuntimeSnapshot& snapshot,

@@ -33,6 +33,22 @@ struct GpuTempSample {
     std::uint64_t power_sample_id = 0u;
     double power_time_ms = std::numeric_limits<double>::quiet_NaN();
     double power_mw = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0021 read-only GPU workload context. This is a cached, logging-only
+    // sample beside board power; it is never a control input. acquisition:
+    // "disabled" | "unavailable" | "nvml". sample_age_ms shows how old the
+    // cached context is when mirrored into a control-loop row.
+    std::string context_acquisition = "disabled";
+    std::uint64_t context_sample_id = 0u;
+    double context_time_ms = std::numeric_limits<double>::quiet_NaN();
+    double context_sample_age_ms = std::numeric_limits<double>::quiet_NaN();
+    std::int32_t context_util_gpu_pct = -1;
+    std::int32_t context_util_mem_pct = -1;
+    std::int32_t context_pstate = -1;
+    std::uint32_t context_clock_graphics_mhz = 0u;
+    std::uint32_t context_clock_memory_mhz = 0u;
+    std::uint32_t context_vram_used_mb = 0u;
+    std::uint32_t context_vram_total_mb = 0u;
 };
 
 struct GpuEvidenceFanState {

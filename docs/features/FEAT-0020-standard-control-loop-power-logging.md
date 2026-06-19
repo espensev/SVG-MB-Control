@@ -1,7 +1,7 @@
 # FEAT-0020: Standard control-loop power logging
 
 **Project:** svg-mb-control
-**Status:** Implemented (T/B/R/M verified 2026-06-18; live flip deployed + validated, gate 6 closed)   **Version:** 0.4   **Updated:** 2026-06-18
+**Status:** Implemented (T/B/R/M verified 2026-06-18; live flip deployed + validated, gate 6 closed)   **Version:** 0.5   **Updated:** 2026-06-18
 **Namespace:** `REQ-PWRLOG-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -13,37 +13,41 @@ control-loop logs for comparison, without changing control behavior.
 
 ## 1. Summary
 
-The standard control loop already logs CPU temperature, GPU temperature, fan
-state, loop timing, and the FEAT-0006 CPU energy columns. In the current live
-runtime, the CPU energy columns remain disabled by environment, and GPU power is
-available only in foreground `evidence-log` CSVs. This feature plans the flip to
-record comparable CPU package power and GPU power in the same standard
-control-loop CSV while keeping the fan-control law temperature-driven.
+The standard control loop logs CPU temperature, GPU temperature, fan state, loop
+timing, FEAT-0006 CPU package-energy columns, and FEAT-0020 GPU board-power
+columns in the same CSV. The 2026-06-18 live flip starts the worker with
+`SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`, leaves CPU cycles disabled by default,
+and records GPU board power through the in-repo NVML path. The fan-control law
+remains temperature-driven; power is logging/evaluation context only.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
 
-Observed runtime evidence on 2026-06-18 showed `control_runtime.json` healthy and
-standard control-loop CSV rows active, but the last 1200 sampled rows had
-`cpu_pkg_energy_acquisition=disabled`, `cpu_cycles_acquisition=disabled`, no CPU
-energy sample ids, and no GPU power columns. The current `release` environment
-had `SVG_MB_CONTROL_RAPL_ENERGY_MODE=disabled` and
+Pre-implementation runtime evidence on 2026-06-18 showed
+`control_runtime.json` healthy and standard control-loop CSV rows active, but the
+last 1200 sampled rows had `cpu_pkg_energy_acquisition=disabled`,
+`cpu_cycles_acquisition=disabled`, no CPU energy sample ids, and no GPU power
+columns. The `release` environment had
+`SVG_MB_CONTROL_RAPL_ENERGY_MODE=disabled` and
 `SVG_MB_CONTROL_CPU_CYCLES_MODE=disabled`, and the latest
 `scripts/Reset-EnergyToDisabled.ps1` safety-revert log confirmed those markers
-were held disabled immediately before the current worker started.
+were held disabled immediately before the pre-flip worker started.
 
-The code/contract gap is split:
+The implemented closure split the original code/contract gap:
 
 - CPU package energy already has an accepted read-only acquisition feature
-  (`FEAT-0006`) and existing control-loop CSV columns, but the standard runtime
-  profile does not enable the acquisition gate.
+  (`FEAT-0006`) and existing control-loop CSV columns; FEAT-0020 adds the
+  reversible standard runtime profile that enables the acquisition gate.
 - GPU power has an in-repo evidence source (`GpuReader::SampleEvidence` and
-  `gpu_evidence_nvml_power_mw` in foreground `evidence-log`) but the standard
-  control-loop CSV only logs GPU temperatures.
+  `gpu_evidence_nvml_power_mw` in foreground `evidence-log`); FEAT-0020 adds the
+  five standard control-loop CSV fields for board-power comparison.
 
 For tuning and comparison, CPU package power and GPU power need to be visible in
 the same standard runtime log window. Running a separate `evidence-log` is useful
 for diagnostics, but it is not the same time-aligned stream as the deployed
-control loop.
+control loop. The live flip evidence is saved in
+`docs/feat-0020-live-flip-validation-results-2026-06-18.md`, and the later
+standard-loop comparison snapshot is saved in
+`docs/power-temp-comparison-snapshot-2026-06-18.md`.
 
 ## 3. Goals & non-goals
 
@@ -112,9 +116,10 @@ field set is (decided 2026-06-18, D-PWRLOG-1):
 - `gpu_power_sample_id` — a GPU-power read counter that advances only when a fresh
   board-power read succeeds; it does not advance on a skipped or failed read, so a
   repeated id makes a stale/mirrored value explicit.
-- `gpu_power_time_ms` — the timestamp of the GPU power read itself (the sampler's
-  per-read clock), not the control-tick time; this carries a read-latency/staleness
-  signal for the REQ-PWRLOG-04 cadence evidence.
+- `gpu_power_time_ms` — the timestamp of the GPU power read itself (a reader-owned
+  monotonic clock stamped by `GpuReader` at the board-power read), not the
+  control-tick time; this carries a read-latency/staleness signal for the
+  REQ-PWRLOG-04 cadence evidence.
 - `gpu_power_mw` — instantaneous board-total milliwatts; blank when unavailable.
 - `gpu_power_source` — `unknown` unless the NVML read returns nonzero, then `nvml`.
 - `gpu_power_acquisition` — `disabled` / `unavailable` / `nvml` marker.
@@ -228,9 +233,9 @@ Verify legend:
 ## 12. Measurement gate & dependencies
 
 - **Measurement gate:** does not change cadence, write cooldown, live channels,
-  or controller strategy. It does add read/log work to the control loop, so
-  promotion requires runtime cadence/process-resource evidence before the flip
-  becomes standard.
+  or controller strategy. It adds read/log work to the control loop, and the
+  2026-06-18 live flip closed the runtime cadence/process-resource evidence gate
+  before the profile was treated as standard.
 - **Depends on:** FEAT-0006 CPU energy acquisition; existing GPU evidence reader;
   analyzer ingest/report support.
 - **Build/test impact:** CSV row tests, analyzer ingest/report tests, config or
@@ -259,4 +264,12 @@ Verify legend:
 | REQ-PWRLOG-05 | pass | T: `test_analyze_ingest.py::test_report_derives_gpu_power_distribution` (mean 233333.33 over 3 de-duplicated samples — not an energy integral), the old-archive degrade case (sample_count 0, `unavailable`), and `test_ingest_migrates_v9_db_to_current_schema` (ladder to v11). R: CPU watts derivation unchanged, no second CPU watts column; v10→v11 additive positional ingest. M (live flip 2026-06-18): live `analyze ingest` migrated 55 runs / 1.9 M tick samples (old v9/v10 archives → v11, all still ingest); report run 318 emitted `gpu_power` (mean/percentile) and `package_power` (single time-weighted derivation) blocks. | 2026-06-18 |
 | REQ-PWRLOG-06 | pass | T+R+M. T: `tests/test_energy_logging_profile.py` (`-Enable`/`-Disable` dry-run toggles the `SVG-MB Energy Safety Revert` task + the User env; requires exactly one mode). R: reversible profile coexists with the safety revert; the FEAT-0006 boot-OFF-guarantee inversion is recorded in D-PWRLOG-1. M (live flip 2026-06-18): `-Enable` disabled the `SVG-MB Energy Safety Revert` task (→ `Disabled`), set User `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`, and restarted the worker tree (verified live); `-Disable` reversibility documented in the results doc. | 2026-06-18 |
 
-**Spec vs. implementation deltas:** GPU power read is a single `nvmlDeviceGetPowerUsage` added to the vendored `sample_thermal_fast` via `poll_nvml_board_power` (board power only, not the per-rail topology); read-timestamp is a reader-owned monotonic-ms clock (`time_ms` is caller-owned, not stamped by the sampler). Analyzer summary is mean/p50/p90/max over distinct `gpu_power_sample_id` samples (schema v11), explicitly not the CPU Sigma-energy integral. CPU side (Track A) added no worker code. Live-flip M evidence (REQ-PWRLOG-04 and the live parts of -01/-02/-06) was captured under explicit live-runtime authorization on 2026-06-18 (deploy of `1ea44c7` + `Set-EnergyLoggingProfile.ps1 -Enable`); see `docs/feat-0020-live-flip-validation-results-2026-06-18.md`. The added per-tick NVML read measured fastest under GPU load (max 14.6 ms vs the 250 ms period); the residual multi-100 ms/second tick-work spikes are pre-existing and environmental (present on the old build, anti-correlated with GPU load).
+**Spec vs. implementation deltas:** GPU power read is a single `nvmlDeviceGetPowerUsage` added to the vendored `sample_thermal_fast` via `poll_nvml_board_power` (board power only, not the per-rail topology); read-timestamp is a reader-owned monotonic-ms clock stamped by `GpuReader` at the board-power read (`time_ms` is set by the reader, not inherited from the control-tick time and not stamped by the `gpu_probe` thermal-fast sampler). Analyzer summary is mean/p50/p90/max over distinct `gpu_power_sample_id` samples (schema v11), explicitly not the CPU Sigma-energy integral. CPU side (Track A) added no worker code. Live-flip M evidence (REQ-PWRLOG-04 and the live parts of -01/-02/-06) was captured under explicit live-runtime authorization on 2026-06-18 (deploy of `1ea44c7` + `Set-EnergyLoggingProfile.ps1 -Enable`); see `docs/feat-0020-live-flip-validation-results-2026-06-18.md`. The added per-tick NVML read measured fastest under GPU load (max 14.6 ms vs the 250 ms period); the residual multi-100 ms/second tick-work spikes are pre-existing and environmental (present on the old build, anti-correlated with GPU load).
+
+**Follow-up comparison snapshot:** `docs/power-temp-comparison-snapshot-2026-06-18.md`
+preserves a later standard-loop window where CPU package power and GPU board
+power are logged beside CPU/GPU temperatures. It records 1228 CPU package-energy
+windows (`cpu_pkg_energy_acquisition=quarantine` throughout), CPU package power
+up to 168.288 W, and GPU board power up to 601.490 W. That note is the current
+temperature-vs-power comparison anchor; raw runtime CSV stays under ignored
+`release/`.

@@ -35,6 +35,14 @@ fan-policy metadata published in `current_state.json`.
 If `snapshot_path` is configured, it also mirrors the same current-state JSON to
 that location.
 
+Snapshot and status publication failures are visible through the additive
+logging-health events in `logs\svg_mb_control_events.jsonl`. A failed
+runtime-home or configured snapshot-mirror publish emits one sticky
+`runtime_logging.snapshot_publish_failed` event per active failure and a
+`runtime_logging.snapshot_publish_recovered` event after publication succeeds.
+Status publication uses `runtime_logging.status_publish_failed` and
+`runtime_logging.status_publish_recovered`.
+
 ## Runtime Flow
 
 1. Resolve config and runtime home.

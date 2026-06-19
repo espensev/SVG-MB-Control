@@ -16,6 +16,7 @@ Control owns these files:
 - `control_runtime.json`
 - `control_supervisor.json`
 - `control_health.json`
+- `logging_health.json`
 - `pending_writes.json`
 - `pending_writes.json.corrupt` (a quarantined corrupt pending-writes sidecar;
   FEAT-0012 — additive, absence reads as "no corruption seen")
@@ -163,7 +164,10 @@ to persist the `pending_writes.json` sidecar entry; the fan write still actuates
 
 `control_runtime.json` is a status publication. In the current implementation,
 it is rate-limited and should not be treated as a per-tick log. Use the active
-CSV chunk for per-tick analysis.
+CSV chunk for per-tick analysis. A failed control status publish keeps the
+forced-status retry active so the next tick retries instead of waiting for the
+normal status cadence. Status publish failures and recoveries are reported
+through the logging-health events described under `logs\`.
 
 The maintained numerical contract for these per-channel status fields and their
 matching CSV columns lives in `docs\CONTROL_PIPELINE_MATH.md`. Update that file
@@ -209,25 +213,71 @@ Fields:
 - `last_health_reason`
 - `last_health_exit_code`
 - `last_health_time`
+- `logging_health_present`
+- `event_log_failure_active`
+- `event_log_failure_last_time`
+- `event_log_failure_path`
+
+The logging-health fields are additive. They summarize the last health
+assessment's view of `logging_health.json` so status dashboards can carry the
+most recent event-log failure signal without re-evaluating.
+
+## logging_health.json
+
+Written by the runtime event-log appender when `logs\svg_mb_control_events.jsonl`
+or an alternate event stream cannot be appended. It is intentionally stored at
+the runtime-home root, not under `logs\`, so it can still be written when the
+`logs\` directory or event-log file path is the failed surface. Schema version
+`1` uses schema `svg_mb_control.logging_health.v1`.
+
+Fields:
+
+- `schema_version`
+- `schema`
+- `logging_health_state`: `event_log_unwritable` or `event_log_recovered`
+- `event_log_failure_active`
+- `event_log_writable`
+- `event_log_path`
+- `first_failure_time`
+- `last_failure_time`
+- `last_recovery_time`
+- `failure_count`
+- `last_error_sink`
+- `last_error_detail`
+- `last_failed_event_type`
+- `updated_time`
+
+The sidecar is sticky and rate-limited: a persistent append failure writes the
+active marker on the first observed failure, keeps later failed appends in memory
+instead of rewriting the file every tick, and rewrites the sidecar as recovered
+after the next successful append. If a worker restarts while the sidecar is
+active, the first successful append probes and clears the stale active marker.
 
 ## Health command
 
 `svg-mb-control --health --json` and `svg-mb-control --status --json` read
-`control_runtime.json`, `control_supervisor.json`, `stop.request.json`, and
-`pending_writes.json` and emit a schema-versioned health payload. The health
+`control_runtime.json`, `control_supervisor.json`, `logging_health.json`,
+`stop.request.json`, and `pending_writes.json` and emit a schema-versioned
+health payload. The health
 payload merges the supervisor sidecar fields (`supervisor_state_present`,
 `supervisor_pid`, `supervisor_active`, `worker_restart_count`,
 `last_worker_pid`, `last_worker_started_time`, `last_worker_restart_time`,
 `last_worker_exit_time`, `last_worker_exit_code`) and the worker's
-`last_successful_restore_time`. `supervisor_state_present` is `false` and the
-merged supervisor fields keep their defaults when `control_supervisor.json` is
-absent. The `--health` path also persists the assessment to
-`control_health.json`. Health states are:
+`last_successful_restore_time`. It also reports `logging_health_file`,
+`logging_health_present`, `event_log_failure_active`,
+`event_log_failure_state`, `event_log_failure_count`,
+`event_log_failure_path`, `event_log_failure_first_time`,
+`event_log_failure_last_time`, `event_log_failure_recovery_time`,
+`event_log_failure_sink`, and `event_log_failure_detail`.
+`supervisor_state_present` is `false` and the merged supervisor fields keep
+their defaults when `control_supervisor.json` is absent. The `--health` path
+also persists the assessment to `control_health.json`. Health states are:
 
 - `healthy`: process is active, status is fresh, and no stop request or degraded
   channel state is present.
 - `degraded`: process is active but an operator-visible issue exists, such as an
-  open channel breaker or stop request.
+  open channel breaker, stop request, or active event-log failure recorded in
+  `logging_health.json`.
 - `stale`: process is active but status freshness is older than the configured
   staleness threshold, or telemetry is explicitly marked stale.
 - `stopped`: no usable active worker is present.
@@ -354,6 +404,14 @@ options it can also write compact analysis artifacts with source hashes and
 diagnostic flags. It is read-only and does not touch the runtime home unless an
 operator explicitly chooses an output path there.
 
+FEAT-0022 analyzer diagnostics compare the manifest-declared row count, the
+ingested archive CSV row count, and, when `artifacts.csv_latest.path` is present
+and readable, the fixed latest-mirror data-row count. `analyze report` exposes
+the mirror count as `csv_latest_row_count`; count disagreement is reported as
+`running_csv_manifest_consistency_warning` while the manifest status is
+`running`, and as `closed_csv_manifest_consistency_suspect_evidence` for closed
+runs.
+
 ## Process logs
 
 Supervised launches write process stdout/stderr logs in the runtime root:
@@ -388,6 +446,12 @@ plus:
 - GPU board-power fields (additive, FEAT-0020, read-only, control-loop CSV
   only): `gpu_power_sample_id`, `gpu_power_time_ms`, `gpu_power_mw`,
   `gpu_power_source`, and `gpu_power_acquisition`
+- GPU workload-context fields (additive, FEAT-0021, read-only, control-loop
+  CSV only): `gpu_context_sample_id`, `gpu_context_time_ms`,
+  `gpu_context_sample_age_ms`, `gpu_context_acquisition`,
+  `gpu_util_gpu_pct`, `gpu_util_mem_pct`, `gpu_pstate`,
+  `gpu_clock_graphics_mhz`, `gpu_clock_memory_mhz`, `gpu_vram_used_mb`, and
+  `gpu_vram_total_mb`
 - per-channel observed temperature, setpoint, feedforward demand, correction,
   thermal-pressure boost, primary temperature source, write count,
   active-write flag, and baseline flag
@@ -432,13 +496,27 @@ distinct id and summarizes the instantaneous samples as mean / p50 / p90 / max,
 **not** the time-weighted energy integral used for CPU package power. Older
 archives without these columns remain valid (name-bound).
 
-The 2026-06-09 rebuild/publish confirms these columns in the live header: the
-session `2026-06-09T02:32:40` (git_hash `dd2c02214128`, `256` columns) contains
-the five `system_cpu_*` columns and the off-by-default FEAT-0006
-`cpu_pkg_energy_*` columns. Only genuinely older archives that predate the
-rebuild (for example the prior `2026-05-28` package) lack the `system_cpu_*`
-columns; bind columns by header name and treat only those as pre-FEAT-0002 for
-whole-system CPU analysis. See
+The GPU workload-context fields (FEAT-0021) come from the in-repo GPU reader's
+bounded context sample path. The control loop keeps the FEAT-0020 per-tick
+thermal/power sample unchanged, then refreshes a cached fast/rare context sample
+at most once per 1000 ms. Intervening rows repeat `gpu_context_sample_id` and
+increase `gpu_context_sample_age_ms`; missing values stay blank with
+`gpu_context_acquisition=unavailable` or `disabled`, so unavailable workload
+context is never logged as false zero. The v1 standard row includes utilization,
+pstate, graphics/memory clocks, and VRAM used/total only. Wide diagnostics such
+as throttle reasons, PCIe, voltage, GPU fans, power rails, and raw thermal slots
+remain in `evidence-log`, not in the default control-loop CSV. Analyzer schema
+v12 de-duplicates context by distinct `gpu_context_sample_id` and reports the
+block only when present. Older archives without these columns remain valid
+(name-bound).
+
+The 2026-06-09 rebuild/publish confirms the older FEAT-0002/FEAT-0006 columns
+in the live header: the session `2026-06-09T02:32:40` (git_hash
+`dd2c02214128`, `256` columns) contains the five `system_cpu_*` columns and the
+off-by-default FEAT-0006 `cpu_pkg_energy_*` columns. Only genuinely older
+archives that predate the rebuild (for example the prior `2026-05-28` package)
+lack the `system_cpu_*` columns; bind columns by header name and treat only
+those as pre-FEAT-0002 for whole-system CPU analysis. See
 `docs/cpu-settings-evidence-logger-decision-2026-06-04.md`.
 
 The JSONL event stream uses schema `svg_mb_control.event.v1`. It is the source
@@ -447,6 +525,30 @@ restore results, policy refusals, sidecar warnings, sensor failure/recovery, and
 circuit-breaker transitions. Normal rows use `severity=info` and
 `error_code=none`; warning/error/critical rows use stable uppercase event codes
 such as `CONTROL_LOOP_WRITE_FAILED`.
+
+Runtime logging-health events are additive rows on the same event schema.
+FEAT-0022 Slice A emits `runtime_logging.csv_write_failed` when a CSV archive,
+fixed mirror, flush, or manifest update failure is observed through
+`RuntimeCsvLogger::WriteRow(...)`, and
+`runtime_logging.csv_write_recovered` after a later successful row write. The
+event `mode` identifies `control-loop`, `read-loop`, or `evidence-log`; failure
+details include the active CSV path, event-log path, and a detail string with
+the logger sink when available. These events do not change fan-control behavior.
+
+FEAT-0022 also emits `runtime_logging.status_publish_failed` /
+`runtime_logging.status_publish_recovered` for sticky `control_runtime.json`
+publication failure/recovery, and
+`runtime_logging.snapshot_publish_failed` /
+`runtime_logging.snapshot_publish_recovered` for `current_state.json` or
+configured snapshot-mirror publication failure/recovery. Control-loop
+`current_state.json` retry timing advances only after a successful publish, so a
+failed publish is retried on the next tick instead of after the normal snapshot
+interval. These events are observational only.
+
+FEAT-0022 Slice B covers the case where the event log itself cannot be appended.
+In that case the append path writes the sticky `logging_health.json` sidecar
+described above. Health/status JSON reads that sidecar and degrades an active
+otherwise-healthy runtime while `event_log_failure_active=true`.
 
 Supervisor process-lifecycle events include `supervisor.worker_started`,
 `supervisor.worker_exited`, and `supervisor.worker_restart_scheduled`. When a

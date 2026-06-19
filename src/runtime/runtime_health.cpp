@@ -25,12 +25,54 @@ namespace svg_mb_control {
 
 namespace {
 
+std::uint64_t JsonUInt64Or(const nlohmann::json& value,
+                           std::string_view key,
+                           std::uint64_t fallback = 0u) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_number_unsigned()) {
+        return found->get<std::uint64_t>();
+    }
+    if (found != value.end() && found->is_number_integer()) {
+        const auto raw = found->get<std::int64_t>();
+        if (raw >= 0) {
+            return static_cast<std::uint64_t>(raw);
+        }
+    }
+    return fallback;
+}
+
 void FillSidecarHealth(RuntimeHealthResult* result) {
     if (result == nullptr) {
         return;
     }
 
     result->stop_request_present = RuntimeStopRequested(result->runtime_home);
+    result->logging_health_path =
+        RuntimeLoggingHealthPath(result->runtime_home);
+
+    const auto logging_health =
+        TryReadJsonObject(result->logging_health_path, "logging health");
+    if (logging_health.has_value()) {
+        result->logging_health_present = true;
+        result->event_log_failure_active =
+            JsonBoolOr(*logging_health, "event_log_failure_active");
+        result->event_log_failure_count =
+            JsonUInt64Or(*logging_health, "failure_count");
+        result->event_log_failure_state =
+            JsonStringOr(*logging_health, "logging_health_state");
+        result->event_log_failure_path =
+            JsonStringOr(*logging_health, "event_log_path");
+        result->event_log_failure_first_time =
+            JsonStringOr(*logging_health, "first_failure_time");
+        result->event_log_failure_last_time =
+            JsonStringOr(*logging_health, "last_failure_time");
+        result->event_log_failure_recovery_time =
+            JsonStringOr(*logging_health, "last_recovery_time");
+        result->event_log_failure_sink =
+            JsonStringOr(*logging_health, "last_error_sink");
+        result->event_log_failure_detail =
+            JsonStringOr(*logging_health, "last_error_detail");
+    }
 
     try {
         const std::vector<PendingWriteEntry> entries =
@@ -177,6 +219,13 @@ void AssessHealthState(RuntimeHealthResult& result,
         return;
     }
 
+    if (result.event_log_failure_active) {
+        SetState(&result, RuntimeHealthState::kDegraded,
+                 "event log is currently unwritable (inspect "
+                 "logging_health.json)");
+        return;
+    }
+
     if (result.status != "running") {
         SetState(&result, RuntimeHealthState::kDegraded,
                  "runtime status is not running");
@@ -198,6 +247,11 @@ void PersistHealthAssessment(const RuntimeHealthResult& result) {
     payload["last_health_exit_code"] = RuntimeHealthExitCode(result.state);
     payload["last_health_time"] =
         FormatLocalIso8601(std::chrono::system_clock::now());
+    payload["logging_health_present"] = result.logging_health_present;
+    payload["event_log_failure_active"] = result.event_log_failure_active;
+    payload["event_log_failure_last_time"] =
+        result.event_log_failure_last_time;
+    payload["event_log_failure_path"] = result.event_log_failure_path;
     std::string write_error;
     if (!TryWriteJsonFileAtomic(result.runtime_home / "control_health.json",
                                 payload, 2, &write_error)) {
@@ -280,6 +334,20 @@ nlohmann::json RuntimeHealthToJson(const RuntimeHealthResult& result) {
     payload["degraded_channel_count"] = result.degraded_channel_count;
     payload["last_successful_restore_time"] =
         result.last_successful_restore_time;
+    payload["logging_health_file"] = result.logging_health_path.string();
+    payload["logging_health_present"] = result.logging_health_present;
+    payload["event_log_failure_active"] = result.event_log_failure_active;
+    payload["event_log_failure_state"] = result.event_log_failure_state;
+    payload["event_log_failure_count"] = result.event_log_failure_count;
+    payload["event_log_failure_path"] = result.event_log_failure_path;
+    payload["event_log_failure_first_time"] =
+        result.event_log_failure_first_time;
+    payload["event_log_failure_last_time"] =
+        result.event_log_failure_last_time;
+    payload["event_log_failure_recovery_time"] =
+        result.event_log_failure_recovery_time;
+    payload["event_log_failure_sink"] = result.event_log_failure_sink;
+    payload["event_log_failure_detail"] = result.event_log_failure_detail;
     payload["supervisor_state_present"] = result.supervisor_state_present;
     payload["supervisor_pid"] = result.supervisor_pid;
     payload["supervisor_active"] = result.supervisor_active;
@@ -329,6 +397,15 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
         if (!result.last_successful_restore_time.empty()) {
             std::cout << "  last_successful_restore: "
                       << result.last_successful_restore_time << '\n';
+        }
+        if (result.event_log_failure_active) {
+            std::cout << "  logging_health: event log unwritable\n"
+                      << "  logging_health_file: "
+                      << result.logging_health_path.string() << '\n';
+            if (!result.event_log_failure_last_time.empty()) {
+                std::cout << "  event_log_failure_last_time: "
+                          << result.event_log_failure_last_time << '\n';
+            }
         }
         if (result.supervisor_state_present) {
             std::cout << "  supervisor_pid: " << result.supervisor_pid

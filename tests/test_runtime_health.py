@@ -175,6 +175,42 @@ class RuntimeHealthTests(WindowsExeTestCase):
                 payload["last_successful_restore_time"], "2026-05-18T09:30:15"
             )
 
+    def test_health_json_degrades_for_active_event_log_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            self._write_healthy_status(runtime_home)
+            _write_json(
+                runtime_home / "logging_health.json",
+                {
+                    "schema_version": 1,
+                    "schema": "svg_mb_control.logging_health.v1",
+                    "logging_health_state": "event_log_unwritable",
+                    "event_log_failure_active": True,
+                    "event_log_writable": False,
+                    "event_log_path": str(runtime_home / "logs" / "events.jsonl"),
+                    "first_failure_time": "2026-06-20T10:00:00",
+                    "last_failure_time": "2026-06-20T10:00:01",
+                    "last_recovery_time": "",
+                    "failure_count": 2,
+                    "last_error_sink": "event_log_append",
+                    "last_error_detail": "simulated append failure",
+                    "last_failed_event_type": "control_loop.write_failed",
+                    "updated_time": "2026-06-20T10:00:01",
+                },
+            )
+            config_path = _write_read_loop_config(td, runtime_home=runtime_home)
+
+            exit_code, payload, _ = self._run_health(config_path)
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(payload["health_state"], "degraded")
+            self.assertTrue(payload["logging_health_present"])
+            self.assertTrue(payload["event_log_failure_active"])
+            self.assertEqual(payload["event_log_failure_count"], 2)
+            self.assertEqual(payload["event_log_failure_sink"], "event_log_append")
+            self.assertIn("event log is currently unwritable", payload["reason"])
+
     def test_health_persists_control_health_json(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

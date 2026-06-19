@@ -228,10 +228,14 @@ bool RuntimeCsvLogger::OpenNewChunk() {
     std::error_code ec;
     std::filesystem::create_directories(archive_dir_, ec);
     if (ec) {
+        SetLastError("archive_dir",
+                     "failed to create archive directory: " + ec.message());
         return false;
     }
     std::filesystem::create_directories(logs_dir_, ec);
     if (ec) {
+        SetLastError("logs_dir",
+                     "failed to create logs directory: " + ec.message());
         return false;
     }
 
@@ -249,12 +253,18 @@ bool RuntimeCsvLogger::OpenNewChunk() {
     archive_stream_.open(active_archive_path_,
                          std::ios::binary | std::ios::trunc);
     if (!archive_stream_.is_open()) {
+        SetLastError("archive_open",
+                     "failed to open archive CSV: " +
+                         active_archive_path_.string());
         active_archive_path_.clear();
         active_manifest_path_.clear();
         return false;
     }
     mirror_stream_.open(mirror_path_, std::ios::binary | std::ios::trunc);
     if (!mirror_stream_.is_open()) {
+        SetLastError("mirror_open",
+                     "failed to open fixed CSV mirror: " +
+                         mirror_path_.string());
         archive_stream_.close();
         active_archive_path_.clear();
         active_manifest_path_.clear();
@@ -298,12 +308,17 @@ void RuntimeCsvLogger::WritePrologue() {
 
 bool RuntimeCsvLogger::FlushStreams() {
     if (!archive_stream_.is_open() && !mirror_stream_.is_open()) {
+        SetLastError("streams_closed",
+                     "archive and fixed mirror streams are closed");
         return false;
     }
 
     if (archive_stream_.is_open()) {
         archive_stream_.flush();
         if (!archive_stream_.good()) {
+            SetLastError("archive_flush",
+                         "failed to flush archive CSV: " +
+                             active_archive_path_.string());
             return false;
         }
     }
@@ -311,25 +326,36 @@ bool RuntimeCsvLogger::FlushStreams() {
         if (!mirror_pending_rows_.empty()) {
             mirror_stream_ << mirror_pending_rows_;
             if (!mirror_stream_.good()) {
+                SetLastError("mirror_write",
+                             "failed to write fixed CSV mirror: " +
+                                 mirror_path_.string());
                 return false;
             }
             mirror_pending_rows_.clear();
         }
         mirror_stream_.flush();
         if (!mirror_stream_.good()) {
+            SetLastError("mirror_flush",
+                         "failed to flush fixed CSV mirror: " +
+                             mirror_path_.string());
             return false;
         }
     }
     rows_since_flush_ = 0u;
+    ClearLastError();
     return true;
 }
 
-void RuntimeCsvLogger::WriteManifest(std::string_view status) {
+bool RuntimeCsvLogger::WriteManifest(std::string_view status) {
     if (active_archive_path_.empty() || active_manifest_path_.empty()) {
-        return;
+        SetLastError("manifest_path",
+                     "active archive manifest path is not available");
+        return false;
     }
     if (status == "running" && rows_since_flush_ > 0u && is_open()) {
-        FlushStreams();
+        if (!FlushStreams()) {
+            return false;
+        }
     }
 
     const std::filesystem::path event_log_path =
@@ -367,19 +393,31 @@ void RuntimeCsvLogger::WriteManifest(std::string_view status) {
     const bool manifest_ok =
         TryWriteJsonFileAtomic(manifest_path_, payload, 2, &manifest_error);
     if (!active_ok || !manifest_ok) {
+        std::string detail;
         std::cerr << "warning: failed to write runtime log manifest under "
                   << runtime_home_.string() << '\n';
         if (!active_ok) {
             std::cerr << "  active_manifest: "
                       << active_manifest_path_.string() << '\n'
                       << "  detail: " << active_error << '\n';
+            detail += "active_manifest=" + active_manifest_path_.string() +
+                      " detail=" + active_error;
         }
         if (!manifest_ok) {
             std::cerr << "  latest_manifest: " << manifest_path_.string()
                       << '\n'
                       << "  detail: " << manifest_error << '\n';
+            if (!detail.empty()) {
+                detail += "; ";
+            }
+            detail += "latest_manifest=" + manifest_path_.string() +
+                      " detail=" + manifest_error;
         }
+        SetLastError("manifest_write", std::move(detail));
+        return false;
     }
+    ClearLastError();
+    return true;
 }
 
 void RuntimeCsvLogger::CloseActiveChunk(std::string_view status) {
@@ -462,11 +500,16 @@ bool RuntimeCsvLogger::MaybeRotate() {
 
 bool RuntimeCsvLogger::WriteRow(std::string_view row) {
     if (!is_open()) {
+        SetLastError("streams_closed",
+                     "cannot write CSV row because archive or mirror stream is closed");
         return false;
     }
 
     archive_stream_ << row << '\n';
     if (!archive_stream_.good()) {
+        SetLastError("archive_write",
+                     "failed to write archive CSV row: " +
+                         active_archive_path_.string());
         return false;
     }
     mirror_pending_rows_.append(row);
@@ -477,8 +520,11 @@ bool RuntimeCsvLogger::WriteRow(std::string_view row) {
         return false;
     }
     if ((row_count_ % kRuntimeManifestUpdateIntervalRows) == 0u) {
-        WriteManifest("running");
+        if (!WriteManifest("running")) {
+            return false;
+        }
     }
+    ClearLastError();
     return true;
 }
 
@@ -508,6 +554,24 @@ const std::filesystem::path& RuntimeCsvLogger::manifest_path() const {
 
 std::uint64_t RuntimeCsvLogger::row_count() const {
     return row_count_;
+}
+
+const std::string& RuntimeCsvLogger::last_error_sink() const {
+    return last_error_sink_;
+}
+
+const std::string& RuntimeCsvLogger::last_error_detail() const {
+    return last_error_detail_;
+}
+
+void RuntimeCsvLogger::SetLastError(std::string sink, std::string detail) {
+    last_error_sink_ = std::move(sink);
+    last_error_detail_ = std::move(detail);
+}
+
+void RuntimeCsvLogger::ClearLastError() {
+    last_error_sink_.clear();
+    last_error_detail_.clear();
 }
 
 }  // namespace svg_mb_control

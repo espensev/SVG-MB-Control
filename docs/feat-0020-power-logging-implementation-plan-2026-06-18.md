@@ -161,8 +161,8 @@ What the evidence settles:
 per-tick by default, but make the schema independent of the cadence decision the gate-6
 measurement might overturn:
 
-- `gpu_power_sample_id` — per-tick: `tick_count`; cached: the bounded sample id
-- `gpu_power_time_ms` — per-tick: `snapshot_time`; cached: the cached-read timestamp
+- `gpu_power_sample_id` — per-tick (shipped): a reader-owned counter that advances only on a fresh successful NVML read (holds on skip/fail); cached: the bounded sample id
+- `gpu_power_time_ms` — per-tick (shipped): a reader-owned monotonic clock stamped at the board-power read (`MonotonicGpuReadMs()`); cached: the cached-read timestamp
 - `gpu_power_mw` — instantaneous board mW; blank when unavailable (no false zero)
 - `gpu_power_source` — `unknown` unless NVML returns nonzero, then `nvml` (`gpu_probe.cpp:188-190`)
 - `gpu_power_acquisition` — `disabled` / `unavailable` / `nvml` marker
@@ -192,7 +192,7 @@ latency probe first — was considered and not chosen.)
 | Snapshot plumb | `src/platform/direct_runtime_snapshot.cpp:106-114` (`MergeGpuTelemetry`) + read site `:204` | Copy new GPU power fields into `RuntimeSnapshot` (mirror `pkg_energy_*` merge `:86-89`). |
 | RuntimeSnapshot struct | `src/runtime/runtime_snapshot.h` (`RuntimeGpuSnapshot`) | Add the GPU power fields. |
 | Control-loop CSV **header** | `src/runtime/runtime_csv_rows.cpp:584` (`BuildControlLoopCsvHeader`), after the FEAT-0006 block `:613` | Add the 5 GPU power header literals adjacent to the cpu power block — **control-loop only, NOT** the shared `BuildCommonCsvPrefix` (that would also add them to read-loop/evidence-log CSVs). |
-| Control-loop CSV **row** | `src/runtime/runtime_csv_rows.cpp:634` (`BuildControlLoopCsvRow`), `:665-678` block | Add matching `AppendCsvFieldIf`/`AppendCsvFieldDouble` (NaN→blank) + `AppendCsvFieldString` calls at the **identical ordinal position** as the header edit. Source `gpu_power_mw`/`_source`/`_acquisition` from `snapshot.gpu.*`; under per-tick set `gpu_power_sample_id`=`tick_count` and `gpu_power_time_ms`=`snapshot_time` (both already in the row context). |
+| Control-loop CSV **row** | `src/runtime/runtime_csv_rows.cpp:634` (`BuildControlLoopCsvRow`), `:665-678` block | Add matching `AppendCsvFieldIf`/`AppendCsvFieldDouble` (NaN→blank) + `AppendCsvFieldString` calls at the **identical ordinal position** as the header edit. Source `gpu_power_mw`/`_source`/`_acquisition` **and** `gpu_power_sample_id`/`gpu_power_time_ms` from `snapshot.gpu.*` — the reader populates the success-gated counter + `MonotonicGpuReadMs()` timestamp in `GpuReader`'s `FinalizeGpuPowerIdentity`; the row builder does **not** derive them from `tick_count`/`snapshot_time`. |
 
 Drift guard (low-sev): header (`:605-613`) and row (`:665-678`) are hand-aligned in two
 separate functions with **no shared schema array and no CSV schema-version token**. Add
@@ -278,7 +278,7 @@ unaffected; only the boot-time-OFF guarantee changes.
 | Area | Test | Asserts |
 |---|---|---|
 | CSV header/row | `tests/test_control_loop.py` | New 5 GPU columns present at the expected ordinal position; blank `gpu_power_mw` + marker when unavailable (no false zero). |
-| Analyzer old-archive degrade | `tests/test_analyze_ingest.py` (mirror `ENERGY_FIELDS`/`CYCLE_FIELDS` `:100-120`, `:1222`, `:1260`) | Pre-v11 CSV/DB ingests; report degrades to unavailable; `test_ingest_migrates_v10_db_to_v11`; `schema_version=='11'` (`:572-576`). |
+| Analyzer old-archive degrade | `tests/test_analyze_ingest.py` (mirror `ENERGY_FIELDS`/`CYCLE_FIELDS` `:100-120`, `:1222`, `:1260`) | Pre-v11 CSV/DB ingests; report degrades to unavailable; `test_ingest_migrates_v9_db_to_current_schema`; `schema_version=='11'` (`:572-576`). |
 | GPU summary math | new analyzer report test | `SummariseGpuPower` produces **mean/percentile**, result **≠** any Σenergy/Σwindow integral on a known instantaneous-mW fixture (catches C2 silently-wrong number). |
 | Control identity | C++ test / review | Power fields not read by `EvaluateChannel`/boost/write path; `power_anticipation.h` stays unreferenced by `src/control`/`src/runtime` (only `tests/cpp/power_anticipation_tests.cpp`). |
 | Script/workflow | script test or dry-run review | `Set-EnergyLoggingProfile.ps1 -Enable/-Disable` toggles the User var + Disable/Enable-ScheduledTask; revert coexistence. |

@@ -52,6 +52,22 @@ struct RuntimeGpuSnapshot {
     std::uint64_t power_sample_id = 0u;
     double power_time_ms = std::numeric_limits<double>::quiet_NaN();
     double power_mw = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0021 read-only GPU workload context, copied from the GPU reader's
+    // cached context sample. Logging-only; never a control input. Carried
+    // in-memory to the control-loop CSV; not serialized to snapshot JSON.
+    // acquisition: "disabled" | "unavailable" | "nvml".
+    std::string context_acquisition = "disabled";
+    std::uint64_t context_sample_id = 0u;
+    double context_time_ms = std::numeric_limits<double>::quiet_NaN();
+    double context_sample_age_ms = std::numeric_limits<double>::quiet_NaN();
+    std::int32_t context_util_gpu_pct = -1;
+    std::int32_t context_util_mem_pct = -1;
+    std::int32_t context_pstate = -1;
+    std::uint32_t context_clock_graphics_mhz = 0u;
+    std::uint32_t context_clock_memory_mhz = 0u;
+    std::uint32_t context_vram_used_mb = 0u;
+    std::uint32_t context_vram_total_mb = 0u;
 };
 
 struct RuntimeSnapshot {
@@ -120,8 +136,10 @@ double FindRuntimeAmdSensorTemperature(const RuntimeSnapshot& snapshot,
 
 std::string SerializeRuntimeSnapshotJson(const RuntimeSnapshot& snapshot);
 bool WriteRuntimeSnapshotJsonFile(const std::filesystem::path& target_path,
-                                  const RuntimeSnapshot& snapshot);
+                                  const RuntimeSnapshot& snapshot,
+                                  std::string* error_message = nullptr);
 bool WriteRuntimeSnapshotFile(const std::filesystem::path& runtime_home,
-                              const RuntimeSnapshot& snapshot);
+                              const RuntimeSnapshot& snapshot,
+                              std::string* error_message = nullptr);
 
 }  // namespace svg_mb_control

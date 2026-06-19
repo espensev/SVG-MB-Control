@@ -222,17 +222,26 @@ std::string SerializeRuntimeSnapshotJson(const RuntimeSnapshot& snapshot) {
 }
 
 bool WriteRuntimeSnapshotJsonFile(const std::filesystem::path& target_path,
-                                  const RuntimeSnapshot& snapshot) {
+                                  const RuntimeSnapshot& snapshot,
+                                  std::string* error_message) {
     if (target_path.empty()) {
+        if (error_message != nullptr) {
+            *error_message = "snapshot target path is empty";
+        }
         return false;
     }
-    return TryWriteJsonFileAtomic(target_path, RuntimeSnapshotToJson(snapshot));
+    return TryWriteJsonFileAtomic(target_path,
+                                  RuntimeSnapshotToJson(snapshot),
+                                  2,
+                                  error_message);
 }
 
 bool WriteRuntimeSnapshotFile(const std::filesystem::path& runtime_home,
-                              const RuntimeSnapshot& snapshot) {
+                              const RuntimeSnapshot& snapshot,
+                              std::string* error_message) {
     return WriteRuntimeSnapshotJsonFile(runtime_home / "current_state.json",
-                                        snapshot);
+                                        snapshot,
+                                        error_message);
 }
 
 }  // namespace svg_mb_control

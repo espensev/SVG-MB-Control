@@ -99,6 +99,19 @@ struct ParsedTickRow {
     std::optional<double> gpu_power_mw;
     std::optional<std::string> gpu_power_source;
     std::optional<std::string> gpu_power_acquisition;
+    // FEAT-0021 read-only GPU workload-context evidence (nullable; blank in
+    // old archives and when no cached context sample is available).
+    std::optional<std::int64_t> gpu_context_sample_id;
+    std::optional<double> gpu_context_time_ms;
+    std::optional<double> gpu_context_sample_age_ms;
+    std::optional<std::string> gpu_context_acquisition;
+    std::optional<std::int64_t> gpu_util_gpu_pct;
+    std::optional<std::int64_t> gpu_util_mem_pct;
+    std::optional<std::int64_t> gpu_pstate;
+    std::optional<std::int64_t> gpu_clock_graphics_mhz;
+    std::optional<std::int64_t> gpu_clock_memory_mhz;
+    std::optional<std::int64_t> gpu_vram_used_mb;
+    std::optional<std::int64_t> gpu_vram_total_mb;
     std::vector<ParsedFanSample> fans;
     std::vector<ParsedChannelSample> channels;
 };

@@ -103,22 +103,48 @@ before/after instrument for all three already exists in the control-loop CSV
 (`last_raw_demand_pct` / `last_smoothed_demand_pct` / setpoint, `loop_slip_ms`,
 `cadence_transient`).
 
-### Standard control-loop power logging (FEAT-0020 / FEAT-0021) — FEAT-0020 SHIPPED 2026-06-18
+### Standard control-loop power/context logging (FEAT-0020 / FEAT-0021)
 
 - **FEAT-0020** (`REQ-PWRLOG-*`) — **Implemented v0.4, live flip executed and
   validated** (`T`/`B`/`R`/`M`, gate 6 closed). CPU package power (enabled FEAT-0006
   RAPL) and a 5-field GPU board-power slice now log on the live standard control
-  loop; analyzer summarizes both at schema v11. The per-tick NVML read was shown not
+  loop; analyzer introduced both at schema v11; current schema v12 also carries
+  FEAT-0021 context. The per-tick NVML read was shown not
   to move the 250 ms baseline (clean under GPU load; idle-only spikes are pre-existing
   and environmental). Live state: the `SVG-MB Energy Safety Revert` task is **disabled**
   and `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled` (the D-PWRLOG-1 steady state);
   reverse with `scripts/Set-EnergyLoggingProfile.ps1 -Disable`. Evidence:
-  `docs/feat-0020-live-flip-validation-results-2026-06-18.md`. PR #20.
-- **FEAT-0021** (`REQ-GPUCTX-*`, Draft/held) — GPU workload context (utilization,
-  clocks, pstate, VRAM) beside GPU power. Was sequenced behind FEAT-0020 (now done),
-  but still owes its own gates: D-GPUCTX-1 is Proposed (promote to Current) and a
-  combined GPU-sample cadence-cost decision is pending (it adds more per-tick NVML
-  reads than FEAT-0020's single board-power call). Not buildable until those clear.
+  `docs/feat-0020-live-flip-validation-results-2026-06-18.md`. The follow-up
+  `docs/power-temp-comparison-snapshot-2026-06-18.md` preserves the standard-loop
+  CPU package watts and GPU board watts beside temperatures for future
+  comparisons. PR #20.
+- **FEAT-0021** (`REQ-GPUCTX-*`, Implemented 2026-06-20; T/R verified, live M
+  pending) — GPU workload context now logs beside GPU power as a cached 1000 ms
+  context slice: utilization, clocks, pstate, VRAM used/total, and explicit
+  sample identity/time/age/acquisition. Analyzer schema v12 ingests and reports
+  the optional context block while older archives report it unavailable. The
+  live deployment check remains REQ-GPUCTX-04: compare achieved interval,
+  slip/overrun, process CPU%, and health against the current 250 ms envelope.
+
+### Runtime logging failure visibility (FEAT-0022) — implemented 2026-06-20
+
+- **FEAT-0022** (`REQ-LOGHEALTH-*`, Implemented) —
+  current evidence-integrity target promoted from the 2026-06-20 startup
+  investigation and the older EH-2/EH-3/EH-4/EH-5 discovery finding. Slice A is
+  shipped: `RuntimeCsvLogger` records sink/detail for CSV/archive/mirror/manifest
+  failures; control-loop, read-loop, and evidence-log observe `WriteRow(...)`
+  failures; and the runtime emits rate-limited
+  `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered`
+  events. Verified by `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` on
+  2026-06-20. Slice B added sticky `logging_health.json` and health degradation
+  for event-log append failure. The status/snapshot retry slice added sticky
+  status/snapshot publish failure/recovery events, prompt retry after failed
+  control status publication, and control snapshot retry timing that advances
+  only after a successful write. Slice C added `analyze report` consistency
+  diagnostics for manifest-declared, archive-ingested, and latest-mirror CSV row
+  count disagreement: running sessions warn, closed runs are suspect evidence.
+  Keep CSV byte-cap retention separate unless later evidence ties it directly to
+  evidence loss.
 
 ### Runtime disk growth (FEAT-0015 / FEAT-0016) — implemented 2026-06-18
 
@@ -169,8 +195,11 @@ Governed by FEAT-0006 and the `REQ-CPUEFF-*` rows in `docs\TRACEABILITY.md`.
   (`SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`): **ran live on hardware 2026-06-18**
   via the FEAT-0020 flip — `cpu_pkg_energy_acquisition=quarantine`, `cpu_power_*`
   populating, analyzer `package_power` avg 86.74 W (see
-  `docs/feat-0020-live-flip-validation-results-2026-06-18.md`). The marker stays
-  `quarantine` (the `quarantine → validated` Evaluation gate below is unchanged).
+  `docs/feat-0020-live-flip-validation-results-2026-06-18.md`). The later
+  standard-loop snapshot captured 1228 package-energy windows with CPU and GPU
+  watts beside temperatures (`docs/power-temp-comparison-snapshot-2026-06-18.md`).
+  The marker stays `quarantine` (the `quarantine → validated` Evaluation gate
+  below is unchanged).
 - The `quarantine` → `validated` Evaluation gate for `cpu_pkg_energy_acquisition`
   (this is never set automatically).
 - Cycle-counter / work-numerator: **resolved — no new module**

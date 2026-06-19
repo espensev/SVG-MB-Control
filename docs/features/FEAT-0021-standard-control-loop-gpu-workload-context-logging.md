@@ -1,7 +1,7 @@
 # FEAT-0021: Standard control-loop GPU workload context logging
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-18
+**Status:** Implemented (T/R; live M pending)   **Version:** 0.2   **Updated:** 2026-06-20
 **Namespace:** `REQ-GPUCTX-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -16,12 +16,13 @@ control behavior.
 
 ## 1. Summary
 
-The standard control-loop CSV currently logs GPU temperatures and, once
-FEAT-0020 is implemented, is expected to log GPU power. This feature captures a
-follow-up logging slice for the workload context behind that power: GPU
-utilization, pstate, graphics/memory clocks, and VRAM pressure. The fields are
-observational only and must use the same in-repo GPU evidence source family as
-foreground `evidence-log`.
+The standard control-loop CSV logs GPU temperatures and FEAT-0020 GPU board
+power. This feature adds the follow-up logging slice for the workload context
+behind that power: GPU utilization, pstate, graphics/memory clocks, and VRAM
+pressure. The fields are observational only and use the in-repo GPU reader /
+evidence source family. The shipped implementation mirrors a cached context
+sample into each control-loop row with an explicit sample age instead of adding
+a wide read to every 250 ms tick.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
 
@@ -72,11 +73,14 @@ the likely next target is a small workload-context mirror beside GPU power.
 
 ## 5. Behavior specification
 
-The standard control-loop CSV must add a bounded GPU workload-context slice only
-after FEAT-0020's GPU power sample path has a settled cadence/read-cost decision
-or this feature records its own equivalent decision.
+The standard control-loop CSV adds a bounded GPU workload-context slice beside
+FEAT-0020 GPU board power. The implementation keeps the existing per-tick
+`ThermalFast` + board-power read unchanged, then refreshes a cached context
+sample at most once per 1000 ms through the in-repo `GpuReader` fast/rare sample
+family. Rows between refreshes repeat the same context sample id and expose the
+current `gpu_context_sample_age_ms`.
 
-Preferred v1 field set:
+Implemented v1 field set:
 
 - `gpu_context_sample_id`
 - `gpu_context_time_ms`
@@ -94,9 +98,10 @@ The implementation may rename fields during the required decision record, but
 the final set must keep sample identity/time/age and an acquisition marker.
 Missing values must be blank/null with an acquisition marker, never false zero.
 
-If the implementation reuses the same sample as FEAT-0020 GPU power, the sample
-identity may be shared or duplicated by name, but analyzer/reporting must be
-able to prove which power and context values came from the same GPU sample.
+The context sample identity is separate from FEAT-0020 GPU power because the
+power read remains per tick while context is cached. Analyzer/reporting can
+compare the values by row timestamp and by the explicit power/context sample
+ids and context sample age.
 
 The fields must not feed any control computation. Response-source names remain
 the existing temperature/control names and must not gain a GPU-workload-derived
@@ -115,7 +120,7 @@ source in this feature.
 
 ## 7. Data / schema deltas
 
-- Proposed new control-loop CSV fields:
+- New control-loop CSV fields:
   `gpu_context_sample_id`, `gpu_context_time_ms`,
   `gpu_context_sample_age_ms`, `gpu_context_acquisition`,
   `gpu_util_gpu_pct`, `gpu_util_mem_pct`, `gpu_pstate`,
@@ -129,8 +134,10 @@ source in this feature.
   none required for v1 unless implementation adds a status mirror. If a status
   mirror is added, update `docs/RUNTIME_HOME.md` and this spec first.
 - Schema/version impact:
-  additive control-loop CSV schema. Analyzer code must handle missing fields in
-  older archives.
+  additive control-loop CSV schema. Analyzer schema v12 adds nullable
+  `tick_samples.gpu_context_*`, `gpu_util_*`, `gpu_pstate`,
+  `gpu_clock_*`, and `gpu_vram_*` columns. Older archives without these fields
+  ingest/report as unavailable.
 
 ## 8. CLI / config / operator surface deltas
 
@@ -143,7 +150,7 @@ default, and interaction with FEAT-0020 before implementation.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| [`docs/logging-next-targets-2026-06-18.md`](../logging-next-targets-2026-06-18.md) (D-GPUCTX-1) | Whether GPU workload context follows FEAT-0020 as a separate feature, the minimal field set, and the rule that wide diagnostics stay in `evidence-log` by default. | Proposed |
+| [`docs/logging-next-targets-2026-06-18.md`](../logging-next-targets-2026-06-18.md) (D-GPUCTX-1) | FEAT-0021 remains separate from FEAT-0020; v1 uses the 11-field cached context slice; wide diagnostics stay out of the standard row. | Current |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
@@ -152,7 +159,7 @@ default, and interaction with FEAT-0020 before implementation.
 | REQ-GPUCTX-01 | T, R | CSV header/row tests for the context fields; review field names against `docs/RUNTIME_HOME.md` and `docs/RUNTIME_LOGGING_AND_EVALUATION.md`. |
 | REQ-GPUCTX-02 | T, R | Unit/integration seam test or review proving the context is sourced from the in-repo GPU reader/evidence path and does not require `evidence-log` foreground mode. |
 | REQ-GPUCTX-03 | T, R | Control-loop tests/review showing context fields are not read by setpoint, boost, response-source, write, breaker, or safety paths. |
-| REQ-GPUCTX-04 | M, R | Runtime evidence from the standard 250 ms profile: achieved interval, slip/overrun, process CPU%, and health stay inside the current measurement envelope. |
+| REQ-GPUCTX-04 | T, R, M | Local CI and review prove the shipped implementation does not widen the per-tick thermal/power read and refreshes context at a bounded 1000 ms cache cadence; first live deployment should still review achieved interval/slip/overrun/process CPU% against the existing envelope. |
 | REQ-GPUCTX-05 | T, R | Analyzer ingest/report tests for archives with and without the new fields; review report output treats context as optional. |
 | REQ-GPUCTX-06 | T, R | CSV header tests and review confirm wide diagnostic fields remain out of the v1 standard-log slice. |
 
@@ -166,18 +173,19 @@ Verify legend:
 
 | Decision | Needed before | Current default |
 |---|---|---|
-| Separate FEAT-0021 vs FEAT-0020 revision | implementation | Keep separate so FEAT-0020 can land narrowly. |
-| Exact field names | implementation | Use `gpu_context_*` for sample identity/state and short `gpu_*` names for values. |
-| Enablement model | implementation | Enable only with the standard power-logging profile unless a separate config knob proves necessary. |
-| Sample cadence | implementation/runtime evidence | Reuse FEAT-0020's bounded GPU sample cadence if available; otherwise prove this feature's cadence separately. |
-| NVML vs non-NVML value preference | implementation | Prefer available NVML utilization/clocks where the existing evidence sample exposes them, with blanks when unavailable. |
+| Separate FEAT-0021 vs FEAT-0020 revision | implemented | Kept separate; FEAT-0020 remains the power-only feature. |
+| Exact field names | implemented | Uses `gpu_context_*` for sample identity/state and short `gpu_*` names for values. |
+| Enablement model | implemented | No config knob; context is emitted in the standard control-loop CSV with nullable values. |
+| Sample cadence | implemented / live M pending | Per-tick thermal/power read unchanged; context refresh is cached at 1000 ms. Live cadence evidence remains a deployment check. |
+| NVML vs non-NVML value preference | implemented | Uses the in-repo GPU reader fast/rare sample family; values stay blank when unavailable. |
 
 ## 12. Measurement gate & dependencies
 
-- **Measurement gate:** does not intentionally change cadence, write cooldown,
-  live channels, or controller strategy, but it adds read/log work to the
-  control loop. Promotion requires runtime cadence/process-resource evidence or
-  a proven shared sample path from FEAT-0020.
+- **Measurement gate:** does not change cadence, write cooldown, live channels,
+  or controller strategy. The implementation avoids widening every tick by
+  caching context for at least 1000 ms. First live deployment should still review
+  runtime cadence/process-resource evidence because it introduces periodic GPU
+  context reads.
 - **Depends on:** FEAT-0020 GPU power logging decision/cadence work, existing GPU
   evidence reader, analyzer ingest/report support.
 - **Build/test impact:** CSV row tests, analyzer ingest/report tests, control
@@ -189,21 +197,26 @@ Verify legend:
 
 - [x] 1. Problem statement sourced from observed runtime evidence or a named code/contract gap (§2).
 - [x] 2. Stressed invariant(s) identified, including Repo Boundary, Live Runtime Safety, Measurement Gate, control identity, and runtime schema stability (§4).
-- [ ] 3. Required design decision record(s) written and marked current (§9; D-GPUCTX-1 is Proposed, not Current).
+- [x] 3. Required design decision record(s) written and marked current (§9; D-GPUCTX-1 is Current).
 - [x] 4. Concrete `REQ-GPUCTX-*` IDs assigned from the reserved namespace (§6).
 - [x] 5. Verification mapped to real checks and mirrored in `docs/TRACEABILITY.md` (§10).
-- [ ] 6. Confirmed it does not violate Live Runtime Safety or Repo Boundary, and does not silently move the Measurement Gate baseline; runtime cadence evidence is still pending (§12).
+- [x] 6. Confirmed it does not violate Live Runtime Safety or Repo Boundary, and does not silently move the Measurement Gate baseline; live cadence evidence remains tracked under REQ-GPUCTX-04 before/at deployment (§12).
 - [x] 7. Doctrine check: claims are grounded; proposed behavior is labeled proposed; no undefined vague terms.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-GPUCTX-01 | | | |
-| REQ-GPUCTX-02 | | | |
-| REQ-GPUCTX-03 | | | |
-| REQ-GPUCTX-04 | | | |
-| REQ-GPUCTX-05 | | | |
-| REQ-GPUCTX-06 | | | |
+| REQ-GPUCTX-01 | pass | T+R. `runtime_csv_rows.cpp` emits the 11 additive context fields; `csv_rows_tests` locks header/row alignment and values; `test_control_loop.py::test_control_loop_logs_gpu_board_power` verifies simulated live rows include context fields. `Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-20 |
+| REQ-GPUCTX-02 | pass | T+R. `GpuReader::Sample()` owns the context cache and sources values from the in-repo GPU reader fast/rare sample family; simulation uses the same in-repo reader seam. No `evidence-log` foreground process, sibling repo, or subprocess bridge is required. | 2026-06-20 |
+| REQ-GPUCTX-03 | pass | T+R. Context fields are copied only into `RuntimeGpuSnapshot` and the control CSV/analyzer; `channel_evaluator` still consumes only GPU temperatures via `GpuControlEnvelopeC`. `test_control_loop.py` keeps `channel0_response_source=primary_curve` with GPU power/context present. | 2026-06-20 |
+| REQ-GPUCTX-04 | partial | T+R pass: implementation keeps the existing per-tick thermal/power sample and refreshes context at most once per 1000 ms; full `Test-LocalCI.ps1 -KeepBuildDir` passed with no timing-resource regressions in simulated runs. Live 250 ms runtime M evidence was not collected in this change and remains a deployment check. | 2026-06-20 |
+| REQ-GPUCTX-05 | pass | T+R. Analyzer schema v12 adds nullable context columns; `test_analyze_ingest.py::test_report_derives_gpu_context_distribution` verifies ingest/report summary, `...old archive...` coverage verifies missing fields report unavailable, and the v9 migration test now migrates through v12. | 2026-06-20 |
+| REQ-GPUCTX-06 | pass | T+R. CSV header tests and review confirm v1 standard rows include only utilization, pstate, graphics/memory clocks, VRAM used/total, identity/time/age/acquisition. Wide fields such as throttle reasons, PCIe, voltage, GPU fans, power rails, and raw thermal slots remain out of the standard row. | 2026-06-20 |
 
-**Spec vs. implementation deltas:** <record at implementation.>
+**Spec vs. implementation deltas:** The final design does not reuse the exact
+per-tick FEAT-0020 power sample for context. It keeps FEAT-0020 power per tick
+and adds a separate cached FEAT-0021 context sample with a 1000 ms minimum
+refresh interval and explicit `gpu_context_sample_age_ms`. `REQ-GPUCTX-04`
+therefore remains `partial` until live runtime cadence evidence is reviewed at
+deployment.

@@ -164,6 +164,9 @@ Primary metrics:
 - CPU package power p50 / p90,
 - GPU memory / core p50 / p90 / max,
 - per-channel RPM / duty p50 / p90 / max,
+- AIO radiator fan-group response for channels `1/4/5` specifically:
+  setpoint/RPM deltas, response-source counts, and CPU Tctl/package-power
+  context before any GPU-power/GPU-memory confound,
 - first duty increase time after load starts,
 - cooldown time until CPU Tctl and GPU memory return near baseline.
 
@@ -238,6 +241,12 @@ CPU response is mandatory. Each controlled channel uses a separate
 `cpu_override_curve` and the per-channel demand is
 `max(primary_curve, cpu_override_curve)` (see
 `CONTROL_PIPELINE_MATH.md` §4.4). Currently shipped behavior:
+
+For CPU/AIO response evaluation, treat the radiator group as channels `1`, `4`,
+and `5` regardless of intake/exhaust direction. Channels `2` and `3` can help
+case airflow and pressure, but they do not directly cool the AIO radiator, so
+they should be summarized as context when deciding whether radiator magnitude is
+too low.
 
 - channels `1`, `5` carry the highest-authority CPU override — `max_cpu_gpu_source_aware`
   blend, `thermal_pressure_max_boost_pct = 20.0`, override curve jumps

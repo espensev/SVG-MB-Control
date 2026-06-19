@@ -1,6 +1,7 @@
 #include "runtime_status.h"
 
 #include "json_io.h"
+#include "runtime_event_log.h"
 #include "runtime_paths.h"
 #include "runtime_util.h"
 
@@ -8,7 +9,10 @@
 
 #include <array>
 #include <cmath>
+#include <cctype>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace svg_mb_control {
 
@@ -16,6 +20,71 @@ namespace {
 
 double JsonNumberOrZero(double value) {
     return std::isnan(value) ? 0.0 : value;
+}
+
+struct StatusPublishRegistry {
+    std::mutex mutex;
+    std::unordered_map<std::string, bool> active_failures;
+};
+
+StatusPublishRegistry& RuntimeStatusPublishRegistry() {
+    static StatusPublishRegistry registry;
+    return registry;
+}
+
+std::string NormalizeStatusPublishKey(const std::filesystem::path& path) {
+    std::string key = path.lexically_normal().string();
+    for (char& ch : key) {
+        ch = static_cast<char>(
+            std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return key;
+}
+
+void ReportStatusPublishResult(const std::filesystem::path& runtime_home,
+                               const std::string& mode,
+                               const std::string& event_log_path,
+                               bool success,
+                               const std::string& write_error) {
+    const std::filesystem::path status_path = RuntimeStatusPath(runtime_home);
+    const std::string key = NormalizeStatusPublishKey(status_path);
+    bool should_report_failure = false;
+    bool should_report_recovery = false;
+    {
+        StatusPublishRegistry& registry = RuntimeStatusPublishRegistry();
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        bool& active_failure = registry.active_failures[key];
+        if (!success && !active_failure) {
+            active_failure = true;
+            should_report_failure = true;
+        } else if (success && active_failure) {
+            active_failure = false;
+            should_report_recovery = true;
+        }
+    }
+
+    if (!should_report_failure && !should_report_recovery) {
+        return;
+    }
+
+    std::string detail = "runtime status publish ";
+    detail += should_report_failure ? "failed" : "recovered";
+    detail += " path=" + status_path.string();
+    if (should_report_failure && !write_error.empty()) {
+        detail += " detail=" + write_error;
+    }
+
+    AppendRuntimeEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .mode = mode.empty() ? std::string("runtime") : mode,
+            .event_type = should_report_failure
+                ? "runtime_logging.status_publish_failed"
+                : "runtime_logging.status_publish_recovered",
+            .detail = detail,
+            .success = should_report_recovery,
+            .event_log_path = event_log_path,
+        });
 }
 
 nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
@@ -192,7 +261,15 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
         payload["controlled_channels"].push_back(ChannelStatusToJson(channel));
     }
 
-    return TryWriteJsonFileAtomic(RuntimeStatusPath(runtime_home), payload);
+    std::string write_error;
+    const bool success = TryWriteJsonFileAtomic(
+        RuntimeStatusPath(runtime_home), payload, 2, &write_error);
+    ReportStatusPublishResult(runtime_home,
+                              mode_label,
+                              event_log_path,
+                              success,
+                              write_error);
+    return success;
 }
 
 bool WriteReadLoopStatus(const std::filesystem::path& runtime_home,
@@ -213,7 +290,15 @@ bool WriteReadLoopStatus(const std::filesystem::path& runtime_home,
     payload["log_csv_path"] = status.log_csv_path;
     payload["log_manifest_path"] = status.log_manifest_path;
     payload["event_log_path"] = status.event_log_path;
-    return TryWriteJsonFileAtomic(RuntimeStatusPath(runtime_home), payload);
+    std::string write_error;
+    const bool success = TryWriteJsonFileAtomic(
+        RuntimeStatusPath(runtime_home), payload, 2, &write_error);
+    ReportStatusPublishResult(runtime_home,
+                              "read-loop",
+                              status.event_log_path,
+                              success,
+                              write_error);
+    return success;
 }
 
 }  // namespace svg_mb_control

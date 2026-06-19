@@ -131,6 +131,24 @@ GPU_POWER_FIELDS = [
 ]
 GPU_POWER_HEADER = ",".join(GPU_POWER_FIELDS)
 
+# FEAT-0021 read-only GPU workload-context columns (schema v12), trailing the
+# GPU power columns. The base CSV_FIELDS schema deliberately omits them so old
+# archive fixtures keep testing the nullable path.
+GPU_CONTEXT_FIELDS = [
+    "gpu_context_sample_id",
+    "gpu_context_time_ms",
+    "gpu_context_sample_age_ms",
+    "gpu_context_acquisition",
+    "gpu_util_gpu_pct",
+    "gpu_util_mem_pct",
+    "gpu_pstate",
+    "gpu_clock_graphics_mhz",
+    "gpu_clock_memory_mhz",
+    "gpu_vram_used_mb",
+    "gpu_vram_total_mb",
+]
+GPU_CONTEXT_HEADER = ",".join(GPU_CONTEXT_FIELDS)
+
 
 def _csv_row(values: dict[str, str]) -> str:
     missing = [field for field in CSV_FIELDS if field not in values]
@@ -326,6 +344,7 @@ def _write_fixture_manifest(
     *,
     session_start: str,
     csv_path: Path,
+    csv_latest_path: Path | None = None,
     status: str = "finished",
     row_count: int = 3,
     event_count: int = 5,
@@ -354,6 +373,11 @@ def _write_fixture_manifest(
             },
         },
     }
+    if csv_latest_path is not None:
+        payload["artifacts"]["csv_latest"] = {
+            "path": str(csv_latest_path),
+            "schema": "svg_mb_control.log.v1",
+        }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -604,7 +628,7 @@ class AnalyzeIngestTests(WindowsExeTestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "11")
+            self.assertEqual(schema[0], "12")
 
             run = _query_one(
                 db_path,
@@ -1070,6 +1094,41 @@ def _build_report_fixture(
     return runtime_home
 
 
+def _build_consistency_fixture(
+    td: Path,
+    *,
+    status: str,
+    manifest_is_live: bool,
+    declared_rows: int,
+    archive_ticks: int,
+    latest_ticks: int,
+    session_start: str = "2026-05-15T03:30:00",
+) -> Path:
+    runtime_home = td / "runtime"
+    logs = runtime_home / "logs"
+    archive = logs / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
+    latest_path = logs / "svg_mb_control_output.csv"
+    manifest_path = (
+        logs / "svg_mb_control_manifest.json"
+        if manifest_is_live
+        else archive / "svg_mb_control_control-loop_20260515_033000.manifest.json"
+    )
+    _write_fixture_csv(csv_path, session_start, ticks=archive_ticks)
+    _write_fixture_csv(latest_path, session_start, ticks=latest_ticks)
+    _write_fixture_manifest(
+        manifest_path,
+        session_start=session_start,
+        csv_path=csv_path,
+        csv_latest_path=latest_path,
+        status=status,
+        row_count=declared_rows,
+        event_count=0,
+    )
+    return runtime_home
+
+
 def _run_report(
     runtime_home: Path,
     db_path: Path,
@@ -1134,6 +1193,21 @@ _GPU_POWER_SAMPLES = [
     ("4", "250.000", "", "nvml", "nvml"),
 ]
 
+# (sample_id, time_ms, age_ms, acquisition, util_gpu, util_mem, pstate,
+# graphics_clock, memory_clock, vram_used, vram_total) per tick. Sample ids
+# repeat to prove report de-duplicates cached context rows while age remains
+# row-based.
+_GPU_CONTEXT_SAMPLES = [
+    ("", "", "", "unavailable", "", "", "", "", "", "", ""),
+    ("1", "1000.000", "0.000", "nvml", "20", "10", "2", "1000", "8000", "2048", "16384"),
+    ("1", "1000.000", "250.000", "nvml", "20", "10", "2", "1000", "8000", "2048", "16384"),
+    ("2", "2000.000", "0.000", "nvml", "80", "40", "0", "2500", "10500", "8192", "16384"),
+    ("2", "2000.000", "250.000", "nvml", "80", "40", "0", "2500", "10500", "8192", "16384"),
+    ("3", "3000.000", "0.000", "nvml", "60", "30", "0", "2300", "10000", "6144", "16384"),
+    ("3", "3000.000", "250.000", "nvml", "60", "30", "0", "2300", "10000", "6144", "16384"),
+    ("4", "4000.000", "0.000", "nvml", "", "", "", "", "", "", ""),
+]
+
 
 def _write_energy_csv(path: Path, session_start: str) -> None:
     lines = [
@@ -1141,10 +1215,15 @@ def _write_energy_csv(path: Path, session_start: str) -> None:
         "# mode=control-loop",
         f"# session_start={session_start}",
         CSV_HEADER + "," + ENERGY_HEADER + "," + CYCLE_HEADER + ","
-        + GPU_POWER_HEADER,
+        + GPU_POWER_HEADER + "," + GPU_CONTEXT_HEADER,
     ]
-    for i, (energy, cycles, gpu_power) in enumerate(
-        zip(_ENERGY_WINDOWS, _CYCLE_WINDOWS, _GPU_POWER_SAMPLES)
+    for i, (energy, cycles, gpu_power, gpu_context) in enumerate(
+        zip(
+            _ENERGY_WINDOWS,
+            _CYCLE_WINDOWS,
+            _GPU_POWER_SAMPLES,
+            _GPU_CONTEXT_SAMPLES,
+        )
     ):
         base = _control_loop_fixture_row(
             wall=_ts(session_start, i),
@@ -1162,6 +1241,7 @@ def _write_energy_csv(path: Path, session_start: str) -> None:
         lines.append(
             base + "," + ",".join(energy) + "," + ",".join(cycles)
             + "," + ",".join(gpu_power)
+            + "," + ",".join(gpu_context)
         )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1301,6 +1381,73 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertEqual(
                 obj["gpu_power"]["acquisition_counts"]["unavailable"], 30
             )
+            self.assertEqual(obj["gpu_context"]["sample_count"], 0)
+            self.assertEqual(obj["gpu_context"]["util_gpu_pct"]["count"], 0)
+            self.assertEqual(
+                obj["gpu_context"]["acquisition_counts"]["unavailable"], 30
+            )
+
+    def test_report_warns_on_running_csv_manifest_count_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_consistency_fixture(
+                td,
+                status="running",
+                manifest_is_live=True,
+                declared_rows=10,
+                archive_ticks=3,
+                latest_ticks=2,
+            )
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            self.assertEqual(obj["run"]["row_count_declared"], 10)
+            self.assertEqual(obj["run"]["row_count_ingested"], 3)
+            self.assertEqual(obj["run"]["csv_latest_row_count"], 2)
+            self.assertIn(
+                "running_csv_manifest_consistency_warning",
+                obj["diagnostic_flags"],
+            )
+            self.assertNotIn(
+                "closed_csv_manifest_consistency_suspect_evidence",
+                obj["diagnostic_flags"],
+            )
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn("rows declared/ingested=10/3 latest=2", text)
+            self.assertIn("running_csv_manifest_consistency_warning", text)
+
+    def test_report_marks_closed_csv_manifest_mismatch_suspect(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_consistency_fixture(
+                td,
+                status="completed",
+                manifest_is_live=False,
+                declared_rows=10,
+                archive_ticks=3,
+                latest_ticks=3,
+            )
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            flags = json.loads(result.stdout)["diagnostic_flags"]
+            self.assertIn(
+                "closed_csv_manifest_consistency_suspect_evidence",
+                flags,
+            )
+            self.assertNotIn("running_csv_manifest_consistency_warning", flags)
 
     def test_report_derives_time_weighted_package_power(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -1371,6 +1518,62 @@ class AnalyzeReportTests(WindowsExeTestCase):
                 runtime_home, db_path, "--idle-seconds", "1"
             ).stdout
             self.assertIn("gpu_power: samples=3 avg_mw=233333.333", text)
+
+    def test_report_derives_gpu_context_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            row = _query_one(
+                db_path,
+                "SELECT gpu_context_sample_id, gpu_context_time_ms, "
+                "gpu_context_sample_age_ms, gpu_context_acquisition, "
+                "gpu_util_gpu_pct, gpu_util_mem_pct, gpu_pstate, "
+                "gpu_clock_graphics_mhz, gpu_clock_memory_mhz, "
+                "gpu_vram_used_mb, gpu_vram_total_mb FROM tick_samples "
+                "WHERE tick_count=4",
+            )
+            self.assertEqual(row[0], 2)
+            self.assertEqual(row[1], 2000.0)
+            self.assertEqual(row[2], 0.0)
+            self.assertEqual(row[3], "nvml")
+            self.assertEqual(row[4], 80)
+            self.assertEqual(row[5], 40)
+            self.assertEqual(row[6], 0)
+            self.assertEqual(row[7], 2500)
+            self.assertEqual(row[8], 10500)
+            self.assertEqual(row[9], 8192)
+            self.assertEqual(row[10], 16384)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            gc = json.loads(result.stdout)["gpu_context"]
+            # 8 ticks carry 4 context sample ids, but sample id 4 has all
+            # workload values blank. It still counts as a context identity;
+            # metric distributions skip each blank value independently.
+            self.assertEqual(gc["sample_count"], 4)
+            self.assertEqual(gc["util_gpu_pct"]["p50"], 60.0)
+            self.assertEqual(gc["util_gpu_pct"]["p90"], 80.0)
+            self.assertEqual(gc["util_mem_pct"]["p50"], 30.0)
+            self.assertEqual(gc["pstate_counts"]["0"], 2)
+            self.assertEqual(gc["pstate_counts"]["2"], 1)
+            self.assertEqual(gc["clock_graphics_mhz"]["max"], 2500.0)
+            self.assertEqual(gc["clock_memory_mhz"]["p50"], 10000.0)
+            self.assertEqual(gc["vram_used_mb"]["p90"], 8192.0)
+            self.assertEqual(gc["vram_total_mb"]["p50"], 16384.0)
+            self.assertEqual(gc["sample_age_ms"]["max"], 250.0)
+            self.assertEqual(gc["acquisition_counts"]["nvml"], 7)
+            self.assertEqual(gc["acquisition_counts"]["unavailable"], 1)
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn("gpu_context: samples=4", text)
+            self.assertIn("util_gpu_pct p50=60.000", text)
 
     def test_report_derives_cycle_ratio_and_effective_frequency(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -1472,7 +1675,7 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
 
             with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
-                for col in CYCLE_FIELDS + GPU_POWER_FIELDS:
+                for col in CYCLE_FIELDS + GPU_POWER_FIELDS + GPU_CONTEXT_FIELDS:
                     conn.execute(
                         f"ALTER TABLE tick_samples DROP COLUMN {col}"
                     )
@@ -1489,8 +1692,9 @@ class AnalyzeReportTests(WindowsExeTestCase):
                     "SELECT value FROM schema_meta WHERE key='schema_version'"
                 ).fetchone()[0]
             # The migration ladder runs to the current head: v9->v10 adds the
-            # cycle columns, v10->v11 adds the FEAT-0020 GPU power columns.
-            self.assertEqual(version, "11")
+            # cycle columns, v10->v11 adds FEAT-0020 GPU power, and v11->v12
+            # adds FEAT-0021 GPU workload context.
+            self.assertEqual(version, "12")
 
             result = _run_report(
                 runtime_home, db_path, "--idle-seconds", "1", "--json"
@@ -1502,6 +1706,9 @@ class AnalyzeReportTests(WindowsExeTestCase):
             gp = json.loads(result.stdout)["gpu_power"]
             self.assertEqual(gp["sample_count"], 3)
             self.assertEqual(gp["mw"]["max"], 300000.0)
+            gc = json.loads(result.stdout)["gpu_context"]
+            self.assertEqual(gc["sample_count"], 4)
+            self.assertEqual(gc["clock_graphics_mhz"]["max"], 2500.0)
 
     def test_report_degrades_when_energy_columns_missing(self) -> None:
         # An old (schema-8) DB read by a schema-9 binary: report.cpp checks only

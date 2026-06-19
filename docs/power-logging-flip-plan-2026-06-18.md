@@ -6,11 +6,13 @@
 **Decision id:** D-PWRLOG-1
 **Companion spec:** `docs/features/FEAT-0020-standard-control-loop-power-logging.md`
 
-## 1. Current gates found
+## 1. Gates Found
 
-This plan keeps the shipped control law unchanged and only opens the logging
-path needed to compare CPU package power against GPU power in the same standard
-control-loop CSV.
+This plan kept the shipped control law unchanged and opened only the logging path
+needed to compare CPU package power against GPU power in the same standard
+control-loop CSV. The implementation and live flip are now complete; current
+evidence lives in `docs/feat-0020-live-flip-validation-results-2026-06-18.md` and
+`docs/power-temp-comparison-snapshot-2026-06-18.md`.
 
 ### CPU package power gate
 
@@ -20,15 +22,15 @@ control-loop CSV.
   `cpu_pkg_energy_delta_uj`, and `cpu_pkg_energy_acquisition`.
 - Enable gate: `SVG_MB_CONTROL_RAPL_ENERGY_MODE` must be exactly `enabled`
   when `AmdReader` starts. Anything else is treated as disabled.
-- Current live state observed 2026-06-18: process/user environment had
+- Pre-flip live state observed 2026-06-18: process/user environment had
   `SVG_MB_CONTROL_RAPL_ENERGY_MODE=disabled`; the recent control-loop rows
   therefore carried `cpu_pkg_energy_acquisition=disabled` and no energy deltas.
 - Restart gate: the reader consumes the environment at startup, so an operational
   flip requires an explicit worker restart through the documented repo workflow.
 - Safety-revert gate: `scripts/Reset-EnergyToDisabled.ps1` and the
-  `SVG-MB Energy Safety Revert` task currently drive the persistent environment
-  back to disabled. A standard logging flip must update the operator workflow so
-  the revert does not silently undo the intended logging profile.
+  `SVG-MB Energy Safety Revert` task drove the persistent environment back to
+  disabled before the flip. The standard logging profile now disables that task
+  while enabled, and `scripts/Set-EnergyLoggingProfile.ps1 -Disable` restores it.
 - Trust marker gate: when enabled, the existing FEAT-0006 marker may remain
   `quarantine`; the logging flip must not promote it to `validated`. Validation
   stays the FEAT-0006 maintainer decision.
@@ -45,16 +47,13 @@ control-loop CSV.
 - Existing source: `GpuReader::SampleEvidence(...)` and the foreground
   `evidence-log` CSV path already expose `gpu_evidence_nvml_power_mw` and
   `gpu_evidence_power_source`.
-- Gap: the standard `control-loop` CSV does not carry GPU power columns, only
-  GPU temperature fields (`gpu_core_c`, `gpu_memjn_c`, `gpu_hotspot_c`).
-- Schema gate: adding GPU power to `control-loop` is a runtime-log schema change,
-  so it needs an owning feature spec, traceability rows, CSV/analyzer tests, and
-  updates to `docs/RUNTIME_HOME.md` and
-  `docs/RUNTIME_LOGGING_AND_EVALUATION.md` at implementation.
-- Cadence gate: a GPU power read on the control hot path must not move the
-  shipped 250 ms cadence baseline. The implementation must either use a bounded
-  cached sample cadence with sample id/timestamp fields or prove by runtime
-  evidence that per-tick reads keep loop timing inside the current profile.
+- Pre-implementation gap: the standard `control-loop` CSV did not carry GPU
+  power columns, only GPU temperature fields (`gpu_core_c`, `gpu_memjn_c`,
+  `gpu_hotspot_c`).
+- Schema gate: closed by FEAT-0020 with additive fields, analyzer schema v11,
+  traceability rows, CSV/analyzer tests, and runtime docs updates.
+- Cadence gate: closed by the 2026-06-18 live flip. The per-tick board-power read
+  kept loop timing inside the shipped 250 ms profile in the recorded evidence.
 
 ## 2. Current decision
 
@@ -85,32 +84,32 @@ control-loop CSV.
    timing remains within the shipped cadence envelope, and no control response
    source names change because of power.
 
-## 3. Required implementation plan
+## 3. Completed implementation plan
 
-1. Implement against accepted `FEAT-0020`.
-2. Add a narrow GPU power sample surface for control-loop logging.
+1. Implemented against accepted `FEAT-0020`.
+2. Added a narrow GPU power sample surface for control-loop logging.
    - Current decision: per-tick board-power read with a cadence-agnostic
      five-field schema.
-   - Gate: prove the added read cost in the post-implementation live evidence
+   - Gate: proved the added read cost in the post-implementation live evidence
      window before standardizing the live flip.
-3. Extend the control-loop CSV schema additively.
-4. Extend analyzer ingest/reporting additively.
-5. Add tests:
+3. Extended the control-loop CSV schema additively.
+4. Extended analyzer ingest/reporting additively.
+5. Added tests:
    - CSV header/row tests for new GPU power fields.
    - Analyzer old-archive compatibility tests.
    - Control identity review/tests showing power fields are not consumed by
      setpoint computation.
    - Config/operator workflow tests or script tests for the CPU RAPL logging
      profile and revert behavior.
-6. Update docs:
+6. Updated docs:
    - `README.md`
    - `docs/RUNTIME_HOME.md`
    - `docs/RUNTIME_LOGGING_AND_EVALUATION.md`
    - `docs/features/FEAT-0020-standard-control-loop-power-logging.md`
    - `docs/TRACEABILITY.md`
-7. Validate locally with `.\scripts\Test-LocalCI.ps1 -KeepBuildDir`.
-8. Only after explicit live-runtime authorization, deploy/restart through the
-   documented repo workflow and collect a short verification window.
+7. Validated locally with `.\scripts\Test-LocalCI.ps1 -KeepBuildDir`.
+8. After explicit live-runtime authorization, deployed/restarted through the
+   documented repo workflow and collected the verification window.
 
 ## 4. Flip verification checklist
 

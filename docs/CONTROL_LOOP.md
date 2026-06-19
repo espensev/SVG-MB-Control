@@ -130,6 +130,10 @@ evaluated in Horner form in the curve lookup path.
 1. Resolve config, runtime home, and runtime policy.
 2. Initialize the direct fan backend.
 3. On each tick, sample AMD, GPU, and fan telemetry in-process.
+   FEAT-0020 GPU board power is copied from the per-tick GPU thermal sample.
+   FEAT-0021 GPU workload context is copied from a cached GPU reader sample
+   refreshed at most once per 1000 ms; it is emitted to CSV with sample age and
+   is not part of temperature selection or fan-control decisions.
 4. Append the sampled row to the active CSV chunk and refresh the fixed live
    CSV mirror on the configured flush interval.
 5. Capture the baseline duty and mode for each configured channel.
@@ -173,6 +177,13 @@ active worker `process_id`, active log paths, and per-channel totals plus last
 observed values. The status JSON is rate-limited, so it is a live status view
 rather than the per-tick data source. The control-loop CSV carries the same
 timing fields per row:
+
+If `control_runtime.json` publication fails, the loop keeps the forced status
+write active and retries on the next tick. If `current_state.json` publication
+fails, the snapshot retry timer is not advanced, so the next tick retries the
+publish instead of waiting for the normal snapshot interval. Both failure classes
+emit sticky `runtime_logging.status_publish_*` or
+`runtime_logging.snapshot_publish_*` events.
 
 - `loop_started_wall_clock`
 - `loop_finished_wall_clock`
