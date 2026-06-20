@@ -63,9 +63,9 @@ fastest and cleanest (max 14.6 ms, zero ticks > 50 ms). This refutes the
 The old build (no hot-path NVML call, energy off) over its full 38 991-tick session
 (`…115446.csv`) had `loop_work_duration_ms` mean 3.50, p50 1.76, p99 20.70, **max
 3274 ms**, with 28 ticks > 100 ms, 9 > 250 ms, and **5 > 1000 ms**. So sub-second
-to ~3 s tick-work spikes are a machine-level background phenomenon (consistent with
-the documented OS/HW instability on this box), present without FEAT-0020. The
-enabled session's single burst (ticks 29–34, ~7 s after restart, GPU idle) is within
+to ~3 s tick-work spikes are a machine-level background phenomenon present without
+FEAT-0020. The enabled session's single burst (ticks 29–34, ~7 s after restart,
+GPU idle) is within
 that pre-existing envelope and did not recur across the following ~960 ticks, and did
 not trigger a watchdog recycle (worker PIDs stable since 14:40:35).
 

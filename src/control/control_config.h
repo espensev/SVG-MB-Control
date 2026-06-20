@@ -9,6 +9,8 @@ namespace svg_mb_control {
 
 struct ControlConfig {
     std::filesystem::path source_path;
+    std::string profile_name;
+    std::string profile_resolution_source = "default";
     std::uint32_t schema_version = 1u;
     std::string default_mode;
     std::filesystem::path snapshot_path;

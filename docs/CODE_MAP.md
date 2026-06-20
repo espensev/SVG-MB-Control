@@ -273,6 +273,9 @@ the same responsibility; otherwise they are listed separately.
   `config/machines/snd-desk.cooling.policy.json` cooling-policy contract.
 - `tests/test_control_loop.py` — `control-loop` mode end-to-end
   hermetic coverage.
+- `tests/test_cpu_temp_power.py` — Coverage for the power-normalized CPU
+  temperature evaluator script, including package-watt banding and
+  GPU-confound splitting.
 - `tests/test_eval_dashboard.py` — `tools/eval_dashboard` HTTP API
   coverage.
 - `tests/test_evidence_log.py` — `evidence-log` mode coverage.
@@ -314,6 +317,10 @@ the same responsibility; otherwise they are listed separately.
 - `scripts/Compare-CpuTemps.ps1` — read-only harness that bins control-loop
   CSV `cpu_tctl_c` by sustained `system_cpu_busy_pct` into idle/low/high and
   records a per-setting comparison ledger.
+- `scripts/analyze_cpu_temp_power.py` — read-only evaluator that bins distinct
+  FEAT-0006 CPU package-energy windows by package watts, reports apparent
+  `theta C/W`, separates GPU-confounded windows, and reads radiator/context
+  channel membership from the machine cooling policy.
 - `scripts/Install-CpuTempBaselineTask.ps1` — registers/removes a scheduled
   task that runs `Compare-CpuTemps.ps1` on a cadence for a long-term baseline.
 
@@ -401,7 +408,8 @@ Maintained evaluation and operational records:
 - `docs/power-temp-comparison-snapshot-2026-06-18.md` — Preserved
   standard-loop CPU/GPU watts beside temperatures for future comparisons.
 - `docs/cpu-temp-comparison-harness.md` — CPU temperature comparison
-  harness workflow.
+  harness workflow, current busy-band trend snapshot, and power-normalized
+  companion method.
 - `docs/next_steps.md` — Maintained topical backlog; not implementation
   authorization by itself.
 
@@ -442,17 +450,18 @@ do not merge them into operator docs unless the topic is reopened):
 - `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md` — Compacted
   support record; the decision lives in
   `docs/profile-hot-swap-decision-2026-06-03.md`.
+- `docs/archive/` — Historical discovery, parked planning, and evidence records
+  that are useful for audit trails but should not be treated as current
+  navigation or implementation queues.
 
 Historical / discovery (per `AGENTS.md`, treat as context, not
-current contract, unless re-validated). Some files are compacted stubs that
-preserve old links and point to current contracts:
+current contract, unless re-validated). Closed redirect stubs for control
+optimization, dashboard health polling, GPU response refinement, and next
+logging targets were folded into the current contract docs/backlog on
+2026-06-20 and deleted to reduce Markdown sprawl:
 
 - `docs/adaptive-cadence-design-2026-05-19.md`
-- `docs/discovery-control-optimization-options.md`
-- `docs/discovery-dashboard-health-polling.md`
-- `docs/discovery-gpu-response-refinement.md`
 - `docs/discovery-gpu-temp-envelope.md`
-- `docs/archive/discovery-next-logging-targets.md`
 - `docs/archive/spec-and-backlog-structure-assessment-2026-06-18.md`
 - `docs/discovery-polling-logging-state.md`
 - `docs/discovery-recovery-gap-audit-2026-06-04.md`

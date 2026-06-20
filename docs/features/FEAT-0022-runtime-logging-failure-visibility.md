@@ -46,7 +46,7 @@ active archive/manifest later catch up, which is documented mutable-active-file
 behavior but still easy to misread during operator checks.
 
 The older discovery note
-`docs\discovery-loop-plan-tighter-pass-2026-06-14.md` records the broader
+`docs\archive\discovery-loop-plan-tighter-pass-2026-06-14.md` records the broader
 EH-2/EH-3/EH-4/EH-5 family: discarded CSV row returns, status/snapshot publish
 return handling, event-log append returns that are often ignored, and a
 `cerr`-only write-orchestrator reporting path. That file is historical context;

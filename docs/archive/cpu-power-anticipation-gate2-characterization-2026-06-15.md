@@ -4,7 +4,7 @@ Status: **measurement record (neutral).** This document records the inputs,
 methods, and numeric outputs of the Gate 2(a) characterization for the proposed
 power-anticipation boost. It draws no go/no-go conclusion. Interpretation against
 the plan's decision criteria is owned by
-`docs/cpu-power-feedforward-plan-2026-06-10.md` §5 (Gates) and §6 (Evaluation),
+`docs/archive/cpu-power-feedforward-plan-2026-06-10.md` §5 (Gates) and §6 (Evaluation),
 and by the maintainer; nothing here authorizes or rejects work.
 
 Scope:

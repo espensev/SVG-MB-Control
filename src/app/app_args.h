@@ -18,6 +18,7 @@ namespace svg_mb_control {
 struct CliOptions {
     std::filesystem::path config_path;
     bool config_path_explicit = false;
+    std::string profile_name;
     bool foreground_launch = false;
     bool supervisor_launch = false;
     bool confirm_start = false;

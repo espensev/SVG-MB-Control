@@ -69,10 +69,10 @@ checkable.
   10 seams, 36 findings → 26 verified survivors. Pass 2 (`wf_32fc8e34-cee`, 54
   agents): the 12 pass-1-critic-flagged unscanned seams, 40 findings → 25
   survivors. New docs:
-  `docs/discovery-loop-targets-value-ranked-2026-06-14.md` (master value-ranked
-  list, 40 clustered candidates), `docs/discovery-loop-plan-tighter-pass-2026-06-14.md`
-  (full evidence per item + Now/Next/Later), `docs/loop-checkpoint-tighter-pass-targets.md`
-  (resume checkpoint), `docs/loop-rotation-state.md` (seam coverage).
+  `docs/archive/discovery-loop-targets-value-ranked-2026-06-14.md` (master value-ranked
+  list, 40 clustered candidates), `docs/archive/discovery-loop-plan-tighter-pass-2026-06-14.md`
+  (full evidence per item + Now/Next/Later), `docs/archive/loop-checkpoint-tighter-pass-targets.md`
+  (resume checkpoint), `docs/archive/loop-rotation-state.md` (seam coverage).
 - **Added** — two corrections the verify layer caught vs a solo read, recorded in
   the docs: the `duty_pct→duty_raw` conversion is CORRECT
   (`fan_sio.cpp:830`, only a test gap remains, W3-3); and the
@@ -129,7 +129,7 @@ checkable.
   ~120 LOC), TS-3 (shared Windows-gate test base, ~40 LOC), HP-1 (delete the
   test-only 3-arg `BuildControlLoopCsvRow` overload); one sweep claim
   rejected (Build-Release double hash is deliberate copy verification).
-- **Added / Idea** — `docs/cpu-power-feedforward-plan-2026-06-10.md`: planning
+- **Added / Idea** — `docs/archive/cpu-power-feedforward-plan-2026-06-10.md`: planning
   scaffold for a CPU package-power anticipation boost (a fifth
   `kBoostStageSpecs` stage keyed on derived watts), explicitly NOT authorized
   work — the v1 energy decision bans control use, so the path is gated:

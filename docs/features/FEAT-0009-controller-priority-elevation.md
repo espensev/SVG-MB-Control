@@ -35,25 +35,20 @@ both `CreateProcessW` launch sites
 (`src/platform/task_runner.cpp:133`, `src/control/control_supervisor.cpp:348`) pass
 **no** priority-class creation flag, and no install script sets a scheduled-task
 `<Priority>`, so the worker inherits the Windows Task Scheduler default (priority 7,
-the BelowNormal region). Under the reproduction protocol
-(`docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md`), `above`-priority
-synthetic load (`cpu-synth-load --priority above`) coincided with a control-loop
-stall in **1 of 3** runs and degraded the tick cadence (~1 tick/s) in the others
-(`docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`); the controller is
-outranked by such load.
+the BelowNormal region). Under competing `above`-priority synthetic load, the
+controller can be outranked and cadence can degrade. That observation is not enough
+to prove priority elevation is the right lever.
 
 **The motivation is bounded by an unresolved causal question, stated here
 honestly:** the Phase-1 analysis attributes that stall to a *coincidence of a
-file-lock (sidecar `Upsert` error 5) and the 10 s staleness recycle*
-(`docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §1, §3.1) — **not solely** to
-controller CPU starvation: the proximate trigger is the file-lock + staleness
-coincidence, of which sustained CPU starvation is one contributing leg (plan §1
-leg b). "The load was high-priority" does not establish "the stall was a
-scheduling stall." Raising the controller's priority cannot shorten a file-lock
-wait. Therefore the observed degradation is real and evidence-sourced, but the
-evidence that *this lever* addresses it does **not yet exist**. This spec exists to
-gate the experiment that would obtain that evidence (§12), and stays held-Draft
-until it does — the same posture as `FEAT-0003` (design captured, not promoted).
+file-lock (sidecar `Upsert` error 5) and the 10 s staleness recycle* — **not
+solely** to controller CPU starvation. "The load was high-priority" does not
+establish "the stall was a scheduling stall." Raising the controller's priority
+cannot shorten a file-lock wait. Therefore the observed degradation is real, but
+the evidence that *this lever* addresses it does **not yet exist**. This spec
+exists to gate the experiment that would obtain that evidence (§12), and stays
+held-Draft until it does — the same posture as `FEAT-0003` (design captured, not
+promoted).
 
 ## 3. Goals & non-goals
 
@@ -66,10 +61,8 @@ until it does — the same posture as `FEAT-0003` (design captured, not promoted
   held, or is rejected.
 
 **Non-goals**
-- The file-lock / sidecar-gate write-path stall (that is lever **L0-A1**, the plan's
-  primary write-path fix, and the prerequisite the plan ranks ahead of this one).
-- `REALTIME_PRIORITY_CLASS` or any thread priority above 15 (forbidden by the
-  Layer-0 invariants, `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §7).
+- The file-lock / sidecar-gate write-path stall.
+- `REALTIME_PRIORITY_CLASS` or any thread priority above 15.
 - CPU affinity / pinning, processor-group placement, or I/O-priority tuning.
 - Any change to control-loop cadence, channel set, or control math.
 
@@ -78,8 +71,8 @@ until it does — the same posture as `FEAT-0003` (design captured, not promoted
 | Invariant | Source | How this feature stays inside it |
 |---|---|---|
 | No fan write / start / stop / breaker reset outside an explicit live task | `AGENTS.md` §Live Runtime Safety | Priority is a process/thread scheduling attribute applied once at worker startup; it issues no actuation. The default is reversible from config plus a worker relaunch with no rebuild (REQ-PRIORITY-02). |
-| Only-raise-never-lower priority; **no `REALTIME_PRIORITY_CLASS`** | `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §7 | The mechanism only raises from the inherited BelowNormal baseline and caps at `TIME_CRITICAL` (15); `inherit` is a no-op; `REALTIME` is never selectable (REQ-PRIORITY-01). |
-| Fail-safe floor: fans hold last PWM on stall; SMU 95 °C + SuperIO/EC backstop unaffected | `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §7 | Priority does not touch the write gate or the hardware backstops; a skipped fan write remains the existing safe state. |
+| Only-raise-never-lower priority; **no `REALTIME_PRIORITY_CLASS`** | This spec | The mechanism only raises from the inherited BelowNormal baseline and caps at `TIME_CRITICAL` (15); `inherit` is a no-op; `REALTIME` is never selectable (REQ-PRIORITY-01). |
+| Fail-safe floor: fans hold last PWM on stall; SMU 95 °C + SuperIO/EC backstop unaffected | This spec | Priority does not touch the write gate or the hardware backstops; a skipped fan write remains the existing safe state. |
 | Watchdog recovery of a hung worker must still preempt the worker | `docs/features/FEAT-0008-watchdog-hung-worker-recovery.md` | The supervisor **and the `svg-mb-control.exe --restart` process that executes the force-terminate** are elevated so the kill path is not outranked by a worker at 15; a raised scheduled-task `<Priority>` alone does not reach that child (REQ-PRIORITY-04). |
 | Shipped 250 ms cadence / channel set is the measured baseline | `docs/MEASUREMENT_GATE.md` | No cadence, channel-count, or mixed-input change; priority does not move the measurement baseline (§12). |
 | Runtime sidecar / status / manifest schema stays backward-compatible | `docs/RUNTIME_HOME.md` | Only an additive optional config key and an additive startup event; no existing runtime-home file, archive, or config becomes invalid (§7). |
@@ -211,15 +204,13 @@ Verify legend:
   cadence, no added live channels, no broader mixed-input strategy). The
   characterization evidence required before promotion is the **A/B contention
   experiment**: launch the live controller via an *external wrapper* at the candidate
-  priority (no product code), re-run the reproduction protocol repeatedly under
-  `above`-priority load, and compare cadence-degradation / stall rate on vs off, plus
+  priority (no product code), run repeated `above`-priority load trials, and
+  compare cadence-degradation / stall rate on vs off, plus
   a system-wide responsiveness check (REQ-PRIORITY-05/06). Because the stall is
   probabilistic, success = degradation rate reduced across many runs, not a single
   pass.
 - **Depends on:** `FEAT-0008` (the recovery path it co-elevates and must not
-  regress). The Layer-0 plan ranks **L0-A1** (sidecar-upsert retry) ahead of this
-  lever; this spec defers to that ordering by remaining held-Draft until the
-  experiment justifies it.
+  regress). This spec remains held-Draft until the experiment justifies it.
 - **Build/test impact:** a `ProcessPriority` seam + unit test; a
   recovery-against-elevated-worker test; the watchdog task XML `<Priority>` change;
   the external experiment wrapper (a script, not product code). No

@@ -1,7 +1,7 @@
 #pragma once
 
 // Pure math for the proposed CPU package-power anticipation boost stage
-// (docs/cpu-power-feedforward-plan-2026-06-10.md §4). DESIGN SUPPORT ONLY:
+// (docs/archive/cpu-power-feedforward-plan-2026-06-10.md §4). DESIGN SUPPORT ONLY:
 // nothing in the runtime calls this header yet. The v1 energy decision
 // (docs/cpu-work-energy-acquisition-decision-2026-06-07.md §Scope) bans
 // control use of the energy telemetry, and live wiring stays gated behind

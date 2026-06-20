@@ -2,7 +2,7 @@
 
 ## Status
 
-Current as of 2026-06-09.
+Current as of 2026-06-20.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
@@ -10,7 +10,9 @@ profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
 `deadband_pct<=0.25` in the shipped configs.
 
 The completed implementation sequencing is summarized in
-`docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
+`docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`; the current
+operator workflow lives here. Later FEAT-0020/0021/0022 logging and analyzer
+additions are reflected below and in the owning feature specs.
 
 **Finding (closed 2026-06-09) - active package header drift (2026-06-07):** on
 2026-06-07 the live packaged runtime was a stale `2026-05-28T12:15:11Z` build
@@ -126,6 +128,12 @@ logging replacement.
   keeps channels `0`, `2`, and `3` as context airflow, and defaults summary
   metrics to stop at the first GPU-power/GPU-memory confound while still writing
   the full segment trace for review.
+- `scripts\analyze_cpu_temp_power.py` summarizes CPU/Tctl by sustained CPU
+  package-power bands from the standard control-loop CSV. It de-duplicates the
+  mirrored FEAT-0006 package-energy rows by `cpu_power_sample_id`, derives
+  package watts, applies a same-power-band dwell gate, and carries GPU power /
+  GPU memory plus policy-marked radiator response context so temperature
+  comparisons are not ranked by raw Tctl alone.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live
@@ -318,6 +326,20 @@ Use this loop for controller changes:
    first GPU confound so CPU-only radiator magnitude is not overstated. Use
    `--csv <archive.csv>` instead of `--runtime-home` when a comparison needs to
    be pinned to a closed archive rather than the moving live mirror.
+   For CPU temperature comparisons after FEAT-0020 power logging, also run the
+   package-power view:
+   ```powershell
+   python .\scripts\analyze_cpu_temp_power.py `
+     --runtime-home .\release\runtime `
+     --machine-policy .\config\machines\snd-desk.cooling.policy.json `
+     --ambient-c 21 `
+     --out .\release\runtime\analysis\cpu-temp-power-latest.md `
+     --json-out .\release\runtime\analysis\cpu-temp-power-latest.json `
+     --window-csv-out .\release\runtime\analysis\cpu-temp-power-latest-windows.csv
+   ```
+   Compare same package-power band, ambient, GPU confound state, and radiator
+   setpoint/RPM context. Use the older busy-band ledger for long-term trend
+   continuity, not as the final arbiter once package watts are available.
 6. Change one class of knob at a time:
    - curve breakpoints,
    - thermal-pressure boost,

@@ -137,6 +137,7 @@ add_library(svg_mb_control_core STATIC
     src/control/channel_write.cpp
     src/control/control_config.cpp
     src/control/control_config_print.cpp
+    src/control/machine_profile.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
     src/control/control_math.cpp
@@ -160,6 +161,7 @@ add_library(svg_mb_control_core STATIC
     src/platform/runtime_singleton.cpp
     src/platform/runtime_util.cpp
     src/platform/service_probe.cpp
+    src/platform/machine_identity.cpp
     src/policy/control_policy.cpp
     src/runtime/csv_util.cpp
     src/runtime/evidence_log.cpp
@@ -346,6 +348,10 @@ if(BUILD_TESTING)
         tests/cpp/power_anticipation_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_pending_writes_store_tests
         tests/cpp/pending_writes_store_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_machine_profile_tests
+        tests/cpp/machine_profile_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_machine_identity_tests
+        tests/cpp/machine_identity_tests.cpp)
 
     # rapl_energy.h is header-only and dependency-free, so this test does not
     # link svg_mb_control_core (keeps it fast and isolated like the math it covers).

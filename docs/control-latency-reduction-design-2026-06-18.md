@@ -1,6 +1,6 @@
 # Control latency reduction — design & directions (2026-06-18)
 
-**Status:** Proposed (design capture; not implementation authorization)
+**Status:** Mixed: D-WRITEHOT-1 implemented; D-REACT-1 and D-CADENCE-1 held.
 **Owns directions for:** `docs/features/FEAT-0017-faster-fan-reaction-under-load.md`,
 `docs/features/FEAT-0018-adaptive-cadence-enablement.md`,
 `docs/features/FEAT-0019-sidecar-persist-off-hot-path.md`
@@ -8,12 +8,10 @@
 `docs/response-evaluation-tuning-plan.md`, `docs/MEASUREMENT_GATE.md`,
 `docs/RUNTIME_HOME.md`
 
-> This is a dated design record (per `docs/features/README.md` §3 promotion gate 3
-> pattern). It captures the latency audit and proposes three directions. It does
-> **not** authorize code: each owning `FEAT-*` spec stays `Draft` until its
-> direction is accepted and (where it applies) its measurement-gate or
-> response-evaluation evidence exists. `must`/`should`/`is` are used per
-> `CLAUDE.md`; current behavior is cited from source.
+> This is a dated design record (per `docs/features/README.md` §3 promotion gate
+> 3 pattern). FEAT-0019 was implemented from D-WRITEHOT-1 on 2026-06-18.
+> FEAT-0017 and FEAT-0018 remain held design directions and still do not
+> authorize code without their owning specs and evidence gates.
 
 ## 1. Why
 
@@ -156,8 +154,9 @@ clears the persist-failure counter for all `context.channels` when it reports a
 successful persist (fixes the *stuck-degraded* case: a failed activation that
 self-heals through the batched deferred write). Both reset points are required: an
 identity-change `Upsert` sets `dirty_ = false`, so a Flush-only reset would no-op and
-never clear it. This is the build-ready direction: behavior-preserving, code-local,
-not gate-crossing. **Status: Current (accepted 2026-06-18).**
+never clear it. This was the implemented D-WRITEHOT-1 direction:
+behavior-preserving, code-local, not gate-crossing. **Status: Current (accepted
+and implemented 2026-06-18).**
 
 ### Not promoted here
 - **Lower the fixed `poll_tick_ms`/`write_cooldown_ms`** — same gate as
@@ -176,10 +175,10 @@ ceiling, and loop slip under the faster floor are directly observable from a liv
 capture analyzed with `svg-mb-control analyze ingest` + `analyze report` — the
 before/after instrument for every direction here.
 
-## 5. Open decisions (carried into the owning specs)
+## 5. Direction decisions (carried into the owning specs)
 
 | Decision | Direction | Needed before | Current lean |
 |---|---|---|---|
 | Which lanes and target ramp time for the retune | D-REACT-1 | implementation | radiator lanes `1`/`4`/`5`; a `~6 s` 40%-step ramp candidate, not chosen |
 | The characterized floor value and slew thresholds | D-CADENCE-1 | implementation (after the gate pass) | `125 ms` floor candidate; thresholds from the characterization run |
-| Whether to add a debug counter for skipped persists | D-WRITEHOT-1 | implementation | omit; the existing event/CSV telemetry is enough |
+| Whether to add a debug counter for skipped persists | D-WRITEHOT-1 | closed at FEAT-0019 implementation | omitted; the existing event/CSV telemetry is enough |

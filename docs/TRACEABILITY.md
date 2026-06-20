@@ -53,12 +53,12 @@ Result values:
 |---|---|---|
 | `FEAT-0001` Hot-swap runtime write policy | Accepted | Buildable when implementation is explicitly authorized; verification pending. |
 | `FEAT-0002` CPU settings evidence logger | Implemented (source/test load layer; label deferred) | Source/test requirements pass except `REQ-CPUSETTINGS-06`, which is deferred; the 2026-06-09 rebuild confirmed the `system_cpu_*` columns in the live CSV header (git_hash `dd2c02214128`, session `2026-06-09T02:32:40`), closing the packaging-evidence gap. |
-| `FEAT-0003` Selectable control-law profile with hot-swap | Draft | Not buildable; design capture only. |
+| `FEAT-0003` Restart-selected control-law profile seam | Draft | Not buildable yet; complete restart-selected Draft sequenced after FEAT-0023 ships/validates the profile catalog and restart switch. |
 | `FEAT-0004` Hardware-access dependency health signal | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted Draft→Accepted 2026-06-18; decision record `docs/hwaccess-health-signal-decision-2026-06-18.md` Current (additive observability; exit codes unchanged). |
 | `FEAT-0005` Write actuation confirmation | Accepted | Buildable when implementation is explicitly authorized; verification pending. Un-parked and promoted Reserved→Accepted 2026-06-18; decision `docs/actuation-confirmation-decision-2026-06-18.md` Current. Accepted scope is Phase-1 RPM-based detection/evidence; Phase-2 escalation is a separate, measurement-gated step. |
 | `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed; the standard power-logging profile now enables package-energy capture through FEAT-0020 while cycles remain opt-in/default-off. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; the 2026-06-18 standard-loop power/temp snapshot preserves CPU and GPU watts beside temperatures; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
-| `FEAT-0008` Watchdog hung-worker recovery | Done | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
+| `FEAT-0008` Watchdog hung-worker recovery | Done | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains; post-v1 options live in FEAT-0008 §11. |
 | `FEAT-0009` Controller scheduling-priority elevation | Draft (held) | Not buildable; design capture only, held at promotion gate 1 pending the FEAT-0009 §12 A/B contention experiment (whether the cadence degradation under `above`-load is scheduling-bound rather than file-lock bound). |
 | `FEAT-0010` Write actuation survives a sidecar-persistence fault | Done | Implemented 2026-06-17 (decision record `docs/write-actuation-sidecar-fault-decision-2026-06-17.md` current). Fixes runtime-reproduced finding H1: a `pending_writes.json` persist fault no longer vetoes the fan write (incl. the sensor-safe command); it records `control_loop.sidecar_upsert_failed`, increments `consecutive_sidecar_persist_failures` (degrades health), and still actuates. §14 verification log filled; CTest 13/13 green. |
 | `FEAT-0011` Write-failure breaker must not block rising cooling demand | Done | Implemented 2026-06-17 (decision `docs/breaker-probe-decision-2026-06-17.md` Current). A bounded half-open probe at `channel_write.cpp:307`: while the breaker is open, a rising cooling demand (setpoint above last applied duty) triggers at most one probe write per 5 s (`kBreakerProbeBackoff`); a successful probe closes the breaker, a failed one keeps it open. `safety_override` unchanged; additive `circuit_breaker_probe` event. §14 filled; CTest green. |
@@ -73,6 +73,7 @@ Result values:
 | `FEAT-0020` Standard control-loop power logging | Implemented | Implemented 2026-06-18 (D-PWRLOG-1 Current; full Test-LocalCI green — CTest + 169 hermetic). CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp, summarized by the analyzer (v11) as mean/percentile (not an energy integral). `T`/`B`/`R`/`M` verified; the live flip executed under explicit live-runtime authorization and gate 6 is closed. Current comparison evidence is `docs/feat-0020-live-flip-validation-results-2026-06-18.md` plus `docs/power-temp-comparison-snapshot-2026-06-18.md`. Archived implementation plan: `docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
 | `FEAT-0021` Standard control-loop GPU workload context logging | Implemented (T/R; live M pending) | D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Current. Implemented 2026-06-20 as an additive cached 1000 ms GPU context slice beside FEAT-0020 GPU power; analyzer schema v12 ingests/reports context optionally. Live 250 ms cadence evidence remains the REQ-GPUCTX-04 deployment check. |
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
+| `FEAT-0023` Machine profiles and restart-based profile switch | Accepted (implementation-authorized) | Buildable now; all 7 promotion gates met and decision `docs/multiprofile-restart-switch-decision-2026-06-20.md` is Current. Restart-based switching accepts the BIOS-auto gap; the control-law/PID seam stays FEAT-0003, sequenced after. |
 
 ## 3. Requirement map
 
@@ -101,19 +102,19 @@ Result values:
 | `REQ-CPUSETTINGS-05` | R | Review confirms logger records raw values only, with no activity classification. | pass |
 | `REQ-CPUSETTINGS-06` | T, R | Optional CPU-settings label propagation test/config review. | deferred |
 
-### FEAT-0003 - Selectable control-law profile with hot-swap
+### FEAT-0003 - Restart-selected control-law profile seam
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
 | `REQ-PROFILE-01` | T, R | Curve-overlay output-equivalence test vs current `EvaluateChannel`; review single call site. | not buildable |
 | `REQ-PROFILE-02` | T | One `PidController` covers P, PI, PD, and PID by gain selection. | not buildable |
-| `REQ-PROFILE-03` | T, R | Config-load tests for absent `controller` and per-law validation. | not buildable |
-| `REQ-PROFILE-04` | T | Profile request applies at tick boundary; validation failure retains running profile and emits rejection. | not buildable |
-| `REQ-PROFILE-05` | T | Swap resets new controller dynamic state by default. | not buildable |
-| `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, and write gates behave identically by controller kind. | not buildable |
-| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision record D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded `allow_live` crossing. | not buildable |
-| `REQ-PROFILE-08` | T | CSV/status tests assert per-channel controller-kind field and kind-aware/nullable law-specific reporting fields. | not buildable |
-| `REQ-PROFILE-09` | T, R | Differing channel-set candidate rejected until FEAT-0001 restore/capture path exists. | not buildable |
+| `REQ-PROFILE-03` | T, R | Config-load tests for absent `controller` and per-law validation after FEAT-0023 profile resolution. | not buildable |
+| `REQ-PROFILE-04` | T, R | FEAT-0023 integration test: profile switch restarts the worker into the new law; review no FEAT-0003 runtime request or tick-boundary swap path exists. | not buildable |
+| `REQ-PROFILE-05` | T | Startup/restart tests assert controller dynamic state is fresh and no PID/curve state carries across a FEAT-0023 profile switch. | not buildable |
+| `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, write gates, and safety slew cap behave identically by controller kind. | not buildable |
+| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a positive non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded opt-in. | not buildable |
+| `REQ-PROFILE-08` | T, R | CSV/status tests assert per-channel controller-kind field and kind-aware/nullable law-specific reporting fields; analyzer tests if ingested. | not buildable |
+| `REQ-PROFILE-09` | R | Review confirms FEAT-0003 adds no channel-set switching semantics and delegates profile/channel-set validation to FEAT-0023. | not buildable |
 | `REQ-PROFILE-10` | R | Review control-identity docs for curve-overlay scope and PID identity reference. | not buildable |
 
 ### FEAT-0004 - Hardware-access dependency health signal
@@ -156,7 +157,7 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-WATCHDOG-01` | T, M | (T) `test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched PID differs); (M) live deploy 2026-06-16 commit `e5bafdb`: suspended live worker pid 44984 force-terminated by the production watchdog `--restart` (`supervisor.worker_force_terminated`, stop_result=2), fresh worker pid 36348, loop resumed ticking. M verifies the recovery **mechanism** under an `NtSuspendProcess` proxy (the deterministic hung-worker trigger); whether a natural 15 s+ hard freeze occurs by load is resolved on evidence — by mechanism the scheduling axis cannot produce it (timer-bound stop poll + balance-set boost + watchdog asymmetry), corroborated by n=6 aggressive cells with 0 force-terminations (`cpu-0609-freeze-classification-2026-06-16.md`; `cpu-loop-survival-live-sweep-findings-2026-06-16.md` Appendix C). Not a recovery-path gap. | pass (T, M) |
+| `REQ-WATCHDOG-01` | T, M | (T) `test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched PID differs); (M) live deploy 2026-06-16 commit `e5bafdb`: suspended live worker pid 44984 force-terminated by the production watchdog `--restart` (`supervisor.worker_force_terminated`, stop_result=2), fresh worker pid 36348, loop resumed ticking. M verifies the recovery **mechanism** under an `NtSuspendProcess` proxy, the deterministic hung-worker trigger. | pass (T, M) |
 | `REQ-WATCHDOG-02` | T, R | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; review vs the additive `supervisor.*force_terminate*` event types in `RUNTIME_HOME.md`. | pass |
 | `REQ-WATCHDOG-03` | T, R | Same integration test seeds an orphaned `pending_writes.json` entry the force-killed relaunch reconciles to `[]`; review that the escalation leaves the `app_main.cpp` startup `ReconcilePendingWrites` path unchanged. | pass |
 | `REQ-WATCHDOG-04` | T, R | `test_graceful_worker_is_not_force_terminated` (no escalation on a graceful stop) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard / PID-corroboration refusal, single-shot bound); trigger gated on `stop_result == 2`. | pass |
@@ -350,6 +351,26 @@ Results mirror the owning spec's §14 verification log.
 | `REQ-LOGHEALTH-06` | T, R, M | `analyze_report_tests` verifies running mismatches emit `running_csv_manifest_consistency_warning` and closed mismatches emit `closed_csv_manifest_consistency_suspect_evidence`; `test_analyze_ingest.py` verifies `analyze report` reads `csv_latest` row counts and surfaces the flags in JSON/text. `Test-LocalCI` passed. | pass |
 | `REQ-LOGHEALTH-07` | T, R | Review: logging-health events/sidecar/health fields are observational and are not read by setpoint computation, write gates, breaker, restore, cadence, or channel policy; `Test-LocalCI` passed. | pass |
 | `REQ-LOGHEALTH-08` | T, R | Event schema remains `svg_mb_control.event.v1`; CSV/status/snapshot logging-health events, `logging_health.json`, and health JSON fields are additive and optional; runtime docs updated; `Test-LocalCI` passed. | pass |
+
+### FEAT-0023 - Machine profiles and restart-based profile switch
+
+Accepted and implementation-authorized 2026-06-20 (all 7 promotion gates met;
+decision `docs/multiprofile-restart-switch-decision-2026-06-20.md` Current).
+Requirements remain `pending` until implementation and verification. The
+control-law/PID seam stays FEAT-0003, restart-selected and sequenced after.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-MPROFILE-01` | T, R | Composition test: resolved default profile == today's `control.release.json` `ControlLoopConfig`; the no-catalog path equals the current single-`--config` load. | pending |
+| `REQ-MPROFILE-02` | T, R | Resolution tests: machine identity resolves a profile; unreadable/unknown identity falls back to the built-in default; identity does not run when `--config`/profile is given. | pending |
+| `REQ-MPROFILE-03` | T, R | Precedence tests `--config` > `--profile`/`SVG_MB_PROFILE` > identity > default; `--show-config` reports the resolved name, source, and path. | pending |
+| `REQ-MPROFILE-04` | T, R | The supervisor consumes a take-once `profile.switch.request.json` naming a target profile; absence means no change; shape reviewed vs `runtime_lifecycle.cpp` breaker-reset. | pending |
+| `REQ-MPROFILE-05` | T, R | Validate-before-activate: an invalid candidate is rejected, the running worker is untouched, a rejection event is emitted, and the request is cleared. | pending |
+| `REQ-MPROFILE-06` | T, R | Graceful worker cycle: a valid switch gracefully stops the worker (restore runs to BIOS auto), escalates to force-terminate only on stop timeout, and respawns without crash backoff and without incrementing `restart_count`. | pending |
+| `REQ-MPROFILE-07` | T, R | Auto-revert: a post-switch startup failure reverts to last-known-good and respawns; `restart_count` resets on a surviving worker; the supervisor survives an operator-switch failure. | pending |
+| `REQ-MPROFILE-08` | T, R | The switch uses the existing graceful restore and adds no no-restore latch path or fan-safety watchdog (review vs `control_loop.cpp` restore + decision D-MPROFILE-2). | pending |
+| `REQ-MPROFILE-09` | T, R | Status/CSV active-profile field + applied/rejected/reverted events; review confirms they are observational and not read by setpoint/write/breaker/restore/cadence/channel policy. | pending |
+| `REQ-MPROFILE-10` | T, R, M | The default profile reproduces the shipped `ControlLoopConfig`; review confirms cadence/cooldown/channel set/identity unchanged; runtime evidence on a deployed default profile. | pending |
 
 ### FEAT-0007 — Reserved (parked)
 

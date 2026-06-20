@@ -9,8 +9,7 @@ characterization/observation method only — **no control-path code, no
 governs execution: forcing a sidecar fault or corrupting a live sidecar and
 observing fan writes is an explicit, operator-present live task.
 **Companion to:** `docs/features/FEAT-0010..0013`, `docs/features/FEAT-0008-watchdog-hung-worker-recovery.md`
-(the `M`-evidence recording model), `docs/TRACEABILITY.md`,
-`docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md` (format model).
+(the `M`-evidence recording model), `docs/TRACEABILITY.md`.
 
 ## 1. Why this exists, and what it is not
 
@@ -31,18 +30,16 @@ defense-in-depth**, not a closure gate.
 
 All three are read-only and already shipped:
 
-1. **NDJSON event log** — `release/runtime/logs/svg_mb_control_events.jsonl`
-   (the verdict-signal log named in
-   `docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md` §2).
+1. **NDJSON event log** — `release/runtime/logs/svg_mb_control_events.jsonl`.
 2. **`control_runtime.json`** per-channel fields:
    `consecutive_sidecar_persist_failures`, `last_response_source`,
    `sensor_failed`, `circuit_breaker_open` (`src/runtime/runtime_status.cpp`).
 3. **`--health` JSON** — `health_state` / `degraded_channel_count` /
    `sidecar_quarantined_present` (`src/runtime/runtime_health.cpp`).
 
-Safety envelope for any live run (mirrors the stall-reproduction protocol §6):
-operator present; cool idle window; back up any file before mutating it; bounded
-duration; the hardware backstops remain in effect. Where a trigger cannot be
+Safety envelope for any live run: operator present; cool idle window; back up any
+file before mutating it; bounded duration; the hardware backstops remain in
+effect. Where a trigger cannot be
 produced safely on the production path, use a **separate runtime-home** (not
 `release\runtime`) with the simulated writer or injected inputs — the `FEAT-0008`
 `NtSuspendProcess` proxy pattern.
@@ -85,8 +82,7 @@ produced safely on the production path, use a **separate runtime-home** (not
   `control_loop.circuit_breaker_probe` at most once per 5 s, then the breaker
   closing on the recovered writer.
 - Otherwise: accept `T`-only and record "not safely reproducible on the production
-  cooling path" — the same honest call `FEAT-0008` §14 made when it rejected the
-  AVX-512 escalation as the wrong instrument.
+  cooling path".
 
 ### FEAT-0013 — source-aware CPU-dropout safe mode
 - **Disposition: proxy-only, or `T`-only-closed — no safe production-path
@@ -100,16 +96,13 @@ produced safely on the production path, use a **separate runtime-home** (not
   true`, the `safety_override`-driven 100% duty, and recovery on CPU return.
 - Otherwise: accept `T`-only and record the scope limit.
 
-## 4. Hardware-stability precondition
+## 4. Live-run precondition
 
-The target box is currently unstable: 6–9 whole-system halts in 11 days across
-five unrelated subsystems, controller as confirmed victim (see project memory
-`system-halt-incident-2026-06-17`). **Live (`M`) runs on hardware are deferred
-until the platform is stabilized** (EXPO → 4800, disable iGPU, MemTest86, off the
-beta BIOS). Proxy validation (FEAT-0011/0013) and the production-path runs
-(FEAT-0010/0012) that do not depend on sustained load may proceed in a cool idle
-window once an operator is present, but a hard-halt mid-run would invalidate the
-evidence.
+Live (`M`) runs on hardware are optional supplementary evidence, not closure gates
+for these features. Run them only with an operator present, a cool idle window,
+bounded duration, and a backup of any file the test mutates. Proxy validation
+(FEAT-0011/0013) remains the preferred path when the production trigger would
+create unnecessary thermal or operational risk.
 
 ## 5. Where `M`-evidence is recorded (when captured)
 
@@ -132,5 +125,5 @@ production-path `M` is recorded as not safely reproducible.
 | FEAT-0013 | proxy-only / `T`-only-closed (no safe production trigger) | `T`/`R` met; `M` not required |
 
 This disposition closes the "live (M) validation" backlog item: it is decided
-(supplementary, gated behind hardware stabilization, proxy-or-`T`-only for two of
-the four), not left as an open obligation.
+(supplementary, proxy-or-`T`-only for two of the four), not left as an open
+obligation.

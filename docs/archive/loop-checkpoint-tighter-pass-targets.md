@@ -106,4 +106,4 @@ the residual is mostly G3-offline / defense-in-depth / already-known. Highest-va
 4. Cheap targeted follow-ups: **schema-validator** skill for CSV cross-layer drift; 01452dc test gap.
 - `/planner` is NOT eligible for any item (no Accepted+build-authorized FEAT).
 
-Source plan feed: `docs/discovery-loop-plan-tighter-pass-2026-06-14.md`.
+Source plan feed: `docs/archive/discovery-loop-plan-tighter-pass-2026-06-14.md`.

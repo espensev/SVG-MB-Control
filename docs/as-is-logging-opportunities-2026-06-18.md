@@ -12,16 +12,18 @@ accepted feature spec before product-code work starts.
 
 Companion context:
 
-- `docs/power-logging-flip-plan-2026-06-18.md` - current CPU/GPU power logging
-  flip plan.
+- `docs/power-logging-flip-plan-2026-06-18.md` - original CPU/GPU power logging
+  flip plan; implementation status now lives in the feature specs and backlog.
 - `docs/logging-next-targets-2026-06-18.md` - recommended target sequence
   after this inventory.
-- `docs/features/FEAT-0020-standard-control-loop-power-logging.md` - draft spec
-  for standard control-loop CPU package power and GPU power.
+- The older completed evidence-log discovery note was folded into
+  `docs/logging-next-targets-2026-06-18.md` and
+  `docs/RUNTIME_LOGGING_AND_EVALUATION.md`; use those maintained docs for the
+  current logging target sequence.
+- `docs/features/FEAT-0020-standard-control-loop-power-logging.md` -
+  implemented spec for standard control-loop CPU package power and GPU power.
 - `docs/features/FEAT-0021-standard-control-loop-gpu-workload-context-logging.md`
-  - draft follow-up spec for GPU workload context beside GPU power.
-- `docs/archive/discovery-next-logging-targets.md` - older completed evidence-log
-  discovery note; useful background, but historical.
+  - implemented follow-up spec for GPU workload context beside GPU power.
 
 Source files checked:
 

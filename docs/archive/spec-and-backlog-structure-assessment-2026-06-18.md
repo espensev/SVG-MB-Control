@@ -74,7 +74,7 @@ single surface gives a crisp priority + decisions-owed view.
 | `docs/next_steps.md` | Maintained topical backlog | At this snapshot, current through the 2026-06-17 write-path closeout, but prose/topic-organized and silent on FEAT-0009 and the disk-growth retention (issue #4 / PR #9), so it was not a complete priority view. FEAT-0015/0016 were added later on 2026-06-18. |
 | `docs/features/README.md` registry | Feature pipeline + Status | Authoritative per-feature status, but had no priority/sequence or aggregated decision view (the §5 fix adds one). |
 | `docs/PATH_NOTES.md` "Ideas / backlog" | Unscheduled ideas | One of several idea homes. |
-| `docs/discovery-loop-targets-value-ranked-2026-06-14.md` | 40 ranked discovery candidates | Dated snapshot; discovery-scoped, not feature-scoped. |
+| `docs/archive/discovery-loop-targets-value-ranked-2026-06-14.md` | 40 ranked discovery candidates | Dated snapshot; discovery-scoped, not feature-scoped. |
 | held-Draft specs (FEAT-0009, 0014) | Each spec's open decisions | The decisions owed were not visible in aggregate (see §4). |
 | `docs/STRUCTURE_AND_STABILITY.md` §Migration Order ("Remaining polish"); `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md`; `docs/archive/implemented-plans/LOGGING_IMPROVEMENT_PLAN.md`; `docs/archive/implemented-plans/SCRIPT_STACK_REVIEW.md` | Topic backlogs | By-design per-topic. |
 | 8× `docs/*-plan-*.md` | Multi-gate forward roadmaps | By-design per-topic. |

@@ -10,6 +10,8 @@
 #include "control_loop.h"
 #include "control_supervisor.h"
 #include "evidence_log.h"
+#include "machine_identity.h"
+#include "machine_profile.h"
 #include "read_loop.h"
 #include "runtime_health.h"
 #include "runtime_lifecycle.h"
@@ -22,12 +24,15 @@
 
 #include "windows_lean.h"
 
+#include <array>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -40,6 +45,62 @@ using svg_mb_control::PrintRuntimeStatus;
 using svg_mb_control::RequestStopAndWait;
 using svg_mb_control::RunMode;
 using svg_mb_control::RunSupervisedLongRunningMode;
+
+std::string GetEnvironmentAsciiString(std::wstring_view name) {
+    std::array<wchar_t, 4096> buffer{};
+    const DWORD length = GetEnvironmentVariableW(
+        std::wstring(name).c_str(), buffer.data(),
+        static_cast<DWORD>(buffer.size()));
+    if (length == 0u || length >= buffer.size()) {
+        return {};
+    }
+    std::string out;
+    out.reserve(length);
+    for (DWORD i = 0; i < length; ++i) {
+        const wchar_t ch = buffer[i];
+        if (ch <= 0 || ch > 127) {
+            return {};
+        }
+        out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
+std::filesystem::path CurrentExecutableDirectoryForProfiles() {
+    std::array<wchar_t, MAX_PATH> buffer{};
+    const DWORD length = GetModuleFileNameW(
+        nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) {
+        return {};
+    }
+    return std::filesystem::path(buffer.data(), buffer.data() + length)
+        .parent_path();
+}
+
+std::vector<std::filesystem::path> DefaultProfileCatalogDirs() {
+    const std::filesystem::path current_exe_dir =
+        CurrentExecutableDirectoryForProfiles();
+    const std::filesystem::path exe_parent =
+        current_exe_dir.empty() ? std::filesystem::path{}
+                                : current_exe_dir.parent_path();
+    const std::filesystem::path exe_grandparent =
+        exe_parent.empty() ? std::filesystem::path{}
+                           : exe_parent.parent_path();
+
+    std::vector<std::filesystem::path> dirs;
+    auto add_root = [&](const std::filesystem::path& root) {
+        if (root.empty()) {
+            return;
+        }
+        dirs.push_back(root / "profiles");
+        dirs.push_back(root / "config" / "profiles");
+    };
+    add_root(current_exe_dir);
+    add_root(exe_parent);
+    add_root(exe_grandparent);
+    add_root(std::filesystem::current_path());
+    return dirs;
+}
 
 }  // namespace
 
@@ -73,6 +134,31 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 options.config_path_explicit = true;
             }
         }
+
+        const auto profile_dirs = DefaultProfileCatalogDirs();
+        const std::string profile_env =
+            GetEnvironmentAsciiString(L"SVG_MB_PROFILE");
+        const std::filesystem::path machine_id_override =
+            svg_mb_control::ResolveRuntimeHomePath(
+                svg_mb_control::ControlConfig{}) /
+            "machine_id.txt";
+        const std::string machine_id =
+            svg_mb_control::ResolveMachineId(machine_id_override);
+        const svg_mb_control::ProfileResolution profile_resolution =
+            svg_mb_control::ResolveProfileSelection(
+                svg_mb_control::ProfileResolutionRequest{
+                    options.config_path,
+                    options.profile_name,
+                    profile_env,
+                    machine_id,
+                },
+                [&](const std::string& profile_name) {
+                    return svg_mb_control::ResolveProfileConfigPath(
+                        profile_dirs, profile_name);
+                });
+        if (!profile_resolution.config_path.empty()) {
+            options.config_path = profile_resolution.config_path;
+        }
         if (options.config_path.empty()) {
             options.config_path =
                 svg_mb_control::ResolveDefaultControlConfigPath();
@@ -90,6 +176,10 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 }
             } else {
                 config = svg_mb_control::LoadControlConfig(absolute_config_path);
+                config->profile_name = profile_resolution.profile_name;
+                config->profile_resolution_source = std::string(
+                    svg_mb_control::ProfileResolutionSourceLabel(
+                        profile_resolution.source));
             }
         }
 

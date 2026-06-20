@@ -19,7 +19,7 @@
 #   .\scripts\Capture-EnergySession.ps1                      # full real session
 #   .\scripts\Capture-EnergySession.ps1 -Rehearse            # no-touch rehearsal
 #   .\scripts\Capture-EnergySession.ps1 -IdleSeconds 60 -LoadSeconds 420 -CooldownSeconds 120
-#   # transient spike-catcher capture (docs/cpu-transient-power-anticipation-plan §8):
+#   # transient spike-catcher capture (docs/archive/cpu-transient-power-anticipation-plan-2026-06-15.md §8):
 #   .\scripts\Capture-EnergySession.ps1 -SpikeLoad -SessionLabel spike-case1   # mid->spike, default 3 bursts
 #   .\scripts\Capture-EnergySession.ps1 -SpikeLoad -Bursts 0 -SessionLabel spike-steady  # §8 case-2 no-disturbance control
 [CmdletBinding()]

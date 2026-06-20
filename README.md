@@ -98,6 +98,9 @@ Release-script outputs:
 - `release\Install-SVG-MB-ControlShortcut.ps1`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
 - `release\Install-SVG-MB-ControlWatchdogScheduledTask.ps1`
+- `release\scripts\Compare-CpuTemps.ps1`
+- `release\scripts\Install-CpuTempBaselineTask.ps1`
+- `release\scripts\analyze_cpu_temp_power.py`
 - `release\resources\pawnio\AMDFamily17.bin` (vendored from PawnIO.Modules
   release 0.2.6; provenance and SHA-256 in
   `third_party\pawnio\README.md`)
@@ -135,20 +138,22 @@ cd .\release
 .\svg-mb-control.exe --health --json
 .\svg-mb-control.exe --show-config
 .\svg-mb-control.exe --show-config --json
+.\svg-mb-control.exe --show-config --profile quiet --json
 .\svg-mb-control.exe --stop
 .\svg-mb-control.exe --restart
 .\svg-mb-control.exe --reset-breakers
 .\svg-mb-control.exe --reset-breakers --reset-breaker-channel 4
 ```
 
-`--show-config` prints an operator-facing summary of the loaded
-`control.json`: schema version, default mode, loop cadence, write timing,
-health/safety thresholds, low-band global state, and per-channel blend,
-source-aware CPU guard, rate limits, smoothing, boost stages, and curve
-endpoints. It does not
-require the controller to be running and reads the same config the worker
-would. `--show-config --json` emits the same fields as a structured JSON
-document for tooling.
+`--show-config` prints an operator-facing summary of the loaded config:
+source path, profile source/name when selected, schema version, default mode,
+loop cadence, write timing, health/safety thresholds, low-band global state, and
+per-channel blend, source-aware CPU guard, rate limits, smoothing, boost stages,
+and curve endpoints. It does not require the controller to be running and reads
+the same config the worker would. `--show-config --json` emits the same fields as
+a structured JSON document for tooling. `--profile <name>` loads
+`config\profiles\<name>.json`; an explicit `--config <path>` wins over
+`--profile`, and `SVG_MB_PROFILE=<name>` is used when no flag is given.
 
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,
@@ -393,6 +398,24 @@ shells the in-repo `svg-mb-control.exe` to `analyze ingest --csv` into a
 temporary database and forwards native `analyze report` output (text or JSON),
 so all analysis is native. Prefer native `analyze ingest` plus `analyze
 report` for new work.
+
+CPU temperature trend and power-normalized comparison:
+
+```powershell
+.\scripts\Compare-CpuTemps.ps1 -Label stock-preoc -AmbientC 21
+python .\scripts\analyze_cpu_temp_power.py `
+  --runtime-home .\release\runtime `
+  --machine-policy .\config\machines\snd-desk.cooling.policy.json `
+  --ambient-c 21 `
+  --out .\release\runtime\analysis\cpu-temp-power-latest.md `
+  --json-out .\release\runtime\analysis\cpu-temp-power-latest.json `
+  --window-csv-out .\release\runtime\analysis\cpu-temp-power-latest-windows.csv
+```
+
+Use `Compare-CpuTemps.ps1` for continuity with the long busy-band baseline. Use
+`analyze_cpu_temp_power.py` when CPU package-energy fields are present, so CPU
+temperature is compared against actual package watts with GPU-confound and
+policy-marked radiator-response context.
 
 Local eval dashboard:
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Phase-B replay analyzer for the transient power-anticipation ("spike catcher")
-campaign (docs/cpu-transient-power-anticipation-plan-2026-06-15.md §8).
+campaign (docs/archive/cpu-transient-power-anticipation-plan-2026-06-15.md §8).
 
 Companion to analyze_power_lead.py (lag scan) and analyze_power_onset.py (step
 onset). Reads a spike-capture session (session.csv + manifest.json +

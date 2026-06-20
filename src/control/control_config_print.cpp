@@ -92,6 +92,10 @@ void PrintTextSummary(std::ostream& out, const ControlConfig& base,
     out << "\n\n";
 
     out << "Schema version: " << base.schema_version << '\n';
+    out << "Profile source: " << base.profile_resolution_source << '\n';
+    if (!base.profile_name.empty()) {
+        out << "Profile name:   " << base.profile_name << '\n';
+    }
     if (!base.default_mode.empty()) {
         out << "Default mode:   " << base.default_mode << '\n';
     }
@@ -265,6 +269,8 @@ nlohmann::json BuildJsonSummary(const ControlConfig& base,
                                 const std::optional<ControlLoopConfig>& loop) {
     nlohmann::json out;
     out["source_path"] = base.source_path.string();
+    out["profile_name"] = base.profile_name;
+    out["profile_resolution_source"] = base.profile_resolution_source;
     out["schema_version"] = base.schema_version;
     out["default_mode"] = base.default_mode;
     out["runtime_home_path"] = base.runtime_home_path.string();

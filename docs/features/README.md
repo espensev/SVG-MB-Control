@@ -11,15 +11,11 @@ checked against the written spec afterward.
 
 ## Current priority
 
-Read-first index of in-flight and next feature work. It aggregates the priority
-and decision view that is otherwise split between the §5 registry (per-feature
-status) and the topical backlog in `docs/next_steps.md` (a maintained backlog,
-current through the 2026-06-20 FEAT-0022 logging-health intake, but
-prose-organized and still silent on FEAT-0009). It links
-those rather
-than restating them; the §5 registry stays authoritative for per-feature status
-and `git log` for what shipped. Keep it current when a feature's status or the
-decision queue changes. A fuller standing review is
+Read-first index of in-flight and next feature work. This is the priority view
+for agents and maintainers; the §5 registry stays authoritative for per-feature
+status and `git log` for what shipped. `docs/next_steps.md` is retained as
+topical background, not as a second priority queue. Keep this block current when
+a feature's status or the decision queue changes. A fuller standing review is
 `docs/archive/spec-and-backlog-structure-assessment-2026-06-18.md`.
 
 **Recently implemented:**
@@ -53,6 +49,10 @@ decision queue changes. A fuller standing review is
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
+- **FEAT-0023** (`Accepted`, implementation-authorized) — machine profiles +
+  restart-based profile switch (machine-base/overlay catalog, identity
+  resolution, supervisor switch-by-restart that accepts the BIOS-auto gap). Build
+  this before FEAT-0003.
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
   follow-through, not package-energy capture: the `quarantine → validated`
   marker decision (manual), the corrected per-core cycle/effective-frequency
@@ -74,8 +74,11 @@ decision queue changes. A fuller standing review is
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
 
-**Held design-capture (a `Draft`, not open work):** **FEAT-0003** — selectable
-control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
+**Sequenced Draft, ready after FEAT-0023:** **FEAT-0003** — restart-selected
+control-law profile seam (PID / P / PI / PD plus the current curve law). All 7
+promotion gates are now filled for the restart-selected shape, but it remains a
+`Draft`: implement FEAT-0023 first, validate the catalog/restart switch, then
+promote FEAT-0003 when that seam is the next build target.
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
@@ -90,11 +93,10 @@ FEAT-0021 followed on 2026-06-20 with cached GPU workload context in the same
 standard CSV and analyzer v12 support; live cadence M evidence remains the
 deployment check for that added periodic context read.
 
-**Other backlogs (per-topic, not duplicated here):** `docs/next_steps.md`
-(maintained topical backlog), `docs/PATH_NOTES.md` §"Ideas / backlog",
-`docs/discovery-loop-targets-value-ranked-2026-06-14.md` (ranked discovery
-candidates), `docs/STRUCTURE_AND_STABILITY.md` §Migration Order ("Remaining
-polish"), and the `docs/*-plan-*.md` gated roadmaps.
+**Background only:** `docs/next_steps.md` and `docs/PATH_NOTES.md` preserve
+topic history; archived discovery/evidence records under `docs/archive/` are not
+implementation queues. Promote useful findings through this feature registry
+before product-code work starts.
 
 ## 1. What this is
 
@@ -148,11 +150,10 @@ Reserved  ->  Draft  ->  Accepted  ->  Implemented  ->  Done
    what shipped.
 
 A spec may sit at **Draft with all promotion gates (§3) checked** when it is
-deliberate design-capture that is not being promoted — for example `FEAT-0003`,
-recorded as not-a-net-benefit and not scheduled. That differs from **Accepted**:
-Accepted means agreed and authorizable (still needing explicit build
-authorization), whereas a held Draft is complete design that is intentionally
-not advancing at all.
+complete design-capture that is sequenced behind another feature or not yet being
+promoted. That differs from **Accepted**: Accepted means agreed and authorizable
+(still needing explicit build authorization unless the spec says otherwise),
+whereas a held/sequenced Draft is complete design that is not buildable yet.
 
 ## 3. Promotion gates
 
@@ -196,12 +197,12 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 |---|---|---|---|
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
-| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Selectable control-law profile with hot-swap | `REQ-PROFILE-*` | Draft |
+| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Draft (complete restart-selected design; sequenced after FEAT-0023) |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |
 | FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |
-| [FEAT-0008](FEAT-0008-watchdog-hung-worker-recovery.md) | Watchdog hung-worker recovery (force-kill escalation) | `REQ-WATCHDOG-*` | Done (v1 complete: force-terminate escalation + `--restart` wiring landed; C++ unit + Python suspend-based integration tests pass; live deterministic suspend recovery evidence passed; natural load hard-freeze premise closed as not reproducible by load on this system; post-v1 options remain in FEAT-0008 §11) |
+| [FEAT-0008](FEAT-0008-watchdog-hung-worker-recovery.md) | Watchdog hung-worker recovery (force-kill escalation) | `REQ-WATCHDOG-*` | Done (v1 complete: force-terminate escalation + `--restart` wiring landed; C++ unit + Python suspend-based integration tests pass; live deterministic suspend recovery evidence passed; post-v1 options remain in FEAT-0008 §11) |
 | [FEAT-0009](FEAT-0009-controller-priority-elevation.md) | Controller scheduling-priority elevation (worker priority raise + recovery co-elevation) | `REQ-PRIORITY-*` | Draft (held — pending the FEAT-0009 §12 A/B contention experiment) |
 | [FEAT-0010](FEAT-0010-write-actuation-sidecar-fault.md) | Write actuation survives a sidecar-persistence fault (sidecar persist failure must not veto the fan write) | `REQ-WRITESAFE-*` | Done (2026-06-17; runtime-reproduced H1; veto removed + additive persist-failure counter, C++ tests green) |
 | [FEAT-0011](FEAT-0011-write-failure-breaker-rising-cooling-demand.md) | Write-failure breaker must not block rising cooling demand (recovered-actuator self-heal in the cooling direction) | `REQ-COOLWRITE-*` | Done (2026-06-17; bounded half-open probe — one write per 5 s on rising cooling demand closes a recovered breaker; C++ tests green) |
@@ -216,3 +217,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M pending) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
+| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay catalog + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap) | `REQ-MPROFILE-*` | Accepted (implementation-authorized 2026-06-20) |

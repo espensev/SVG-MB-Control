@@ -47,7 +47,7 @@ the one build. Each phase is independently shippable.
 | Item | Artifact | Gate / done-when |
 |---|---|---|
 | Linux-only test-skip | one-line `@unittest.skipUnless(shutil.which("powershell") or shutil.which("pwsh"), …)` on `tests/test_eval_dashboard.py:193` `test_dashboard_server_help` (`shutil`/`unittest` already star-imported) | Python lane still runs the test on Windows; skips when no PowerShell host on PATH |
-| Live-M **disposition** (see §4) | new `docs/write-path-live-validation-protocol-2026-06-18.md` (gate-neutral method record; mirrors `docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md`) | decides the live-M item rather than leaving it open; authorizes no code/config/schema change |
+| Live-M **disposition** (see §4) | new `docs/write-path-live-validation-protocol-2026-06-18.md` (gate-neutral method record) | decides the live-M item rather than leaving it open; authorizes no code/config/schema change |
 | FEAT-0014 keep-held confirmation | one-line revisit-trigger clarification in `FEAT-0014` §11/§13 (promote when a config introduces `blocked_channels` other than `[6]`, or a second restore caller appears) | no promotion; `test_feature_specs` stays 5/5 |
 
 Not in Phase 0 (moved to Phase 2): de-staling the `next_steps.md` FEAT-0006 bullets — the
@@ -161,11 +161,10 @@ supplementary defense-in-depth, not a closure gate. Disposition per feature:
   failures then rising demand (the channel parks at last duty meanwhile); FEAT-0013 needs a
   forced CPU-sensor NaN for three ticks. Both are recorded as **proxy-validated** (separate
   runtime-home with the simulated writer / injected inputs — barely beyond the existing
-  C++ tests) **or T-only-closed**, mirroring how FEAT-0008 §14 rejected the AVX-512
-  escalation as the wrong instrument.
-- **Precondition for any live run:** the box is currently unstable (6–9 whole-system halts
-  in 11 days; see Parked §C). Live-M on hardware is deferred until the platform is
-  stabilized; proxy validation has no such dependency.
+  C++ tests) **or T-only-closed**.
+- **Precondition for any live run:** operator present, cool idle window, bounded
+  duration, and backups for any mutated runtime file. Proxy validation has no such
+  production-path dependency.
 
 When/if M evidence is captured, it appends one `M` row to each owning spec's §14 plus a
 `TRACEABILITY.md` mirror (a later docs-only change), following the `FEAT-0008` §14 model.
@@ -174,15 +173,11 @@ When/if M evidence is captured, it appends one `M` row to each owning spec's §1
 
 Listed so nothing is silently dropped; each carries its revisit trigger.
 
-- **Hardware/BIOS instability** (`system-halt-incident` memory) — 6–9 whole-system halts in
-  11 days across five unrelated subsystems; the controller is a confirmed victim. Operator
-  work only (EXPO → 4800, disable iGPU, MemTest86, off the beta BIOS; change one thing for
-  days). **Out-of-band; it gates every load-sensitive experiment below.**
-- **FEAT-0009 §12 priority-contention A/B experiment** — a real repo task, but its results
-  are confounded by the platform instability, and the dominant Layer-0 stall mechanism was
-  already addressed by the merged write-path fixes. Parked behind hardware stabilization.
+- **FEAT-0009 §12 priority-contention A/B experiment** — a real repo task, but the
+  priority lever remains held until an A/B contention run shows a
+  scheduling-attributable benefit. Parked until explicitly requested.
 - **Criterion-4 locked-frequency capture** and **divergent-load feedforward capture** —
-  operator hardware steps; also gated behind a stable box.
+  operator hardware steps; run only when explicitly requested.
 - **FEAT-0008 post-v1 options** (configurable grace period, `--stop` escalation, pre-first-
   write PID-corroboration fallback, image-path canonicalization) — all non-blocking per
   FEAT-0008 §11; current fail directions are safe. Revisit on observed need.

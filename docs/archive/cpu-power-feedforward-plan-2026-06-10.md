@@ -15,7 +15,7 @@ parked. See Outcome below.**
 
 Gate 2 ran for the first time on the three energy-enabled quarantine sessions.
 The method and per-session numbers are recorded neutrally in
-`docs/cpu-power-anticipation-gate2-characterization-2026-06-15.md` (datasets under
+`docs/archive/cpu-power-anticipation-gate2-characterization-2026-06-15.md` (datasets under
 `release/runtime/experiments/energy-quarantine/gate2-characterization-2026-06-15/`).
 
 Result against §5 Gate 2 and §6:
@@ -184,7 +184,7 @@ band $[a,b]$), so the stage would be:
   **Status: ran 2026-06-15 → no-go for the control variant** (Outcome at the top
   of this document; `system_cpu_busy_pct` − watts onset offset 0 s across 3
   sessions). The onset measurement uses the event-onset method in
-  `docs/cpu-power-anticipation-gate2-characterization-2026-06-15.md`; that record
+  `docs/archive/cpu-power-anticipation-gate2-characterization-2026-06-15.md`; that record
   also notes the lag-correlation in `analyze_power_lead.py` does not resolve onset
   lead on a single step (its Appendix A).
 - **Gate 3 — FEAT intake:** new feature spec (next free FEAT number;

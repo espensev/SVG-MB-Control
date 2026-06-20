@@ -1,6 +1,6 @@
 // Throwaway constant-occupancy spike load generator for the proposed transient
 // power-anticipation ("spike catcher") Gate-2 capture
-// (docs/cpu-transient-power-anticipation-plan-2026-06-15.md §8 case 1 / §10 Q1).
+// (docs/archive/cpu-transient-power-anticipation-plan-2026-06-15.md §8 case 1 / §10 Q1).
 //
 // Produces the load case cpu_synth_load.cpp cannot: a SUSTAINED ~99 % busy
 // plateau at LOW package power, with AVX2 power BURSTS injected at CONSTANT

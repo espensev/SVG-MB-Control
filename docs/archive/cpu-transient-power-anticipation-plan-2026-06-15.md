@@ -9,7 +9,7 @@ new implementation-authorized FEAT first (§9). The owning v1 telemetry decision
 energy "must not feed any control path." This document scaffolds a *transient*
 (slope-keyed) sibling of the parked level-keyed power-anticipation boost up to,
 not through, its FEAT intake. It is a companion to
-`docs/cpu-power-feedforward-plan-2026-06-10.md`; that plan's §5 Gates and §6
+`docs/archive/cpu-power-feedforward-plan-2026-06-10.md`; that plan's §5 Gates and §6
 Evaluation own the decision criteria, and this document inherits them.
 
 This revision (2026-06-15) incorporates a four-lens adversarial review (math/
@@ -24,7 +24,7 @@ $B^{\mathrm{spk}}_k$ (slope-keyed, edge-not-level).
 
 ## 1. Need (why the Gate 2 no-go does not close this — and what it leaves open)
 
-The Gate 2 characterization (`docs/cpu-power-anticipation-gate2-characterization-2026-06-15.md`)
+The Gate 2 characterization (`docs/archive/cpu-power-anticipation-gate2-characterization-2026-06-15.md`)
 found, across three sessions, `watts − busy` onset offset = **0.0 s** and
 `Tctl − watts` within ±1 tick of zero. Read against §6 of the companion plan,
 that parks the level-keyed power variant *for control*: `system_cpu_busy_pct` is

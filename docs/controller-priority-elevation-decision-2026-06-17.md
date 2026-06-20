@@ -6,13 +6,9 @@ code. The decision records *which* priority design FEAT-0009 commits to **if** t
 experiment justifies promotion.
 **Owns:** `docs/features/FEAT-0009-controller-priority-elevation.md`
 (`REQ-PRIORITY-*`).
-**Basis:** `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.3 (L0-B, the
-deferred controller-priority lever and its invariants §7); the scheduling-axis
-evidence in `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md` (1/3 stall +
-cadence degradation under `above`-priority load); and the
-`Global\Access_PCI`/whole-system-freeze mechanism in
-`docs/cpu-0609-freeze-classification-2026-06-16.md` §1, which bounds the inversion
-risk below.
+**Basis:** source review of the worker launch path and a held A/B experiment plan
+for testing whether priority elevation helps under competing high-priority CPU
+load.
 **Scope guard:** this record captures the decision and a held-Draft design. Building
 it still requires the §12 contention experiment *and* the `AGENTS.md` Feature Intake
 Gate authorization.
@@ -24,17 +20,14 @@ by inheritance, not design. Neither `CreateProcessW` site
 (`src/platform/task_runner.cpp:133`, `src/control/control_supervisor.cpp:348`) sets a
 priority-class flag, and no install script sets a scheduled-task `<Priority>`, so the
 worker takes the Windows Task Scheduler default (priority 7). Under `above`-priority
-synthetic load the controller is outranked: 1/3 runs stalled, the rest degraded to
-~1 tick/s (`cpu-loop-stall-reproduction-findings-2026-06-16.md`).
+synthetic load the controller can be outranked and cadence can degrade.
 
-**The load-bearing caveat:** the Layer-0 plan attributes that stall to a *file-lock +
-10 s-staleness coincidence* — not *solely* controller CPU starvation, which is one
-contributing leg of that coincidence
-(`cpu-loop-survival-layer0-plan-2026-06-16.md` §1, §3.1). Priority cannot shorten a
+**The load-bearing caveat:** the suspected stall path includes file-lock waits and
+staleness recycling, not solely controller CPU starvation. Priority cannot shorten a
 file-lock wait. So the evidence that *raising priority* addresses the observed
-degradation does not yet exist. This decision is therefore explicitly conditional: it
-fixes the design so the experiment that would settle it can run, and defers building
-to that result.
+degradation does not yet exist. This decision is therefore explicitly conditional:
+it fixes the design so the experiment that would settle it can run, and defers
+building to that result.
 
 ## 2. Decisions
 
@@ -46,9 +39,9 @@ the control path), giving effective priority 15. Applied once at startup.
 
 *Rationale:* the operator chose the brief's original aggressive target. 15 is the top
 of the non-REALTIME range; it strongly resists preemption by `above`/`high` user
-load. Rejected: `REALTIME_PRIORITY_CLASS` (16–31) — forbidden by the Layer-0
-invariant (§7) and unnecessary, since the loop is a 250 ms cadence that sleeps
-between ticks, not a real-time deadline task.
+load. Rejected: `REALTIME_PRIORITY_CLASS` (16–31) — unnecessary and too broad,
+since the loop is a 250 ms cadence that sleeps between ticks, not a real-time
+deadline task.
 
 ### D-PRIO-2 — Config-gated, `inherit` absent-key default, aggressive opt-in, kill-switch
 
@@ -63,7 +56,7 @@ relaunch with no rebuild.
 elevation on upgrade. An `inherit` default is the upgrade-safe choice and is the only
 one consistent with the rest of this decision: the feature is held-Draft because the
 leading hypothesis is the stall is file-lock-bound (priority may buy nothing) and R1
-flags an elevation-driven whole-system risk — so the safe default is to elevate only
+flags a priority-inversion risk — so the safe default is to elevate only
 where an operator opts in, with the §12 experiment the gate that could later justify a
 different shipped default. (An earlier draft proposed default-aggressive-ON; that is
 **rejected here** as inconsistent with the held-Draft / unproven-benefit posture and
@@ -95,10 +88,9 @@ level (because `REALTIME_PRIORITY_CLASS` is forbidden they cannot sit *strictly 
 watchdog task: co-elevating the task without elevating the `--restart` grandchild would
 leave the killer at base 8 and *introduce* the very inversion REQ-PRIORITY-04 forbids.
 The "equal-top round-robins, never starved" property holds only once the killer process
-itself reaches the worker's level — and even then it is a scheduling guarantee for the
-controller/recovery pair, not for the whole-system freeze class (R2). Rejected: relying
-on a no-spin guarantee alone — it does not help if a future change introduces a spin;
-a no-spin invariant is still required separately (see Risks R1).
+itself reaches the worker's level. Rejected: relying on a no-spin guarantee alone —
+it does not help if a future change introduces a spin; a no-spin invariant is still
+required separately (see Risks R1).
 
 ### D-PRIO-4 — Held-Draft until the §12 experiment; the experiment uses no product code
 
@@ -107,18 +99,15 @@ is scheduling-bound. The experiment launches the live controller via an **extern
 wrapper** at the candidate priority — no product code — and compares cadence-degradation
 / stall rate on vs off under `above`-load, with a system-wide responsiveness check.
 
-*Rationale:* honors the plan's "revisit only with measured contention evidence"
-precondition and its ordering (L0-A1 first). A held Draft (the `FEAT-0003` pattern)
+*Rationale:* honors the "revisit only with measured contention evidence"
+precondition. A held Draft (the `FEAT-0003` pattern)
 captures the design without asserting an unproven causal claim. The experiment can
 *kill* the lever — that is an acceptable outcome.
 
 ## 3. Risks & mitigations
 
-- **R1 — `Global\Access_PCI` priority inversion (the serious one).** The tick does
-  PawnIO `DeviceIoControl` under the system-wide `Global\Access_PCI` mutex — the same
-  global lock named as the leading suspect for the 06-09 *whole-system* freeze under
-  saturation (`cpu-0609-freeze-classification-2026-06-16.md` §1; the source rates this
-  ~0.5 confidence, so it is the surviving hypothesis, not an established cause). A
+- **R1 — `Global\Access_PCI` priority inversion.** The tick does PawnIO
+  `DeviceIoControl` under the system-wide `Global\Access_PCI` mutex. A
   priority-15 thread contending that mutex on a saturated box is textbook inversion: a
   lower-priority cross-process *holder* (e.g. HWiNFO64) cannot get scheduled to release,
   and Windows' anti-starvation boost runs on a multi-second cadence. *What actually
@@ -128,18 +117,15 @@ captures the design without asserting an unproven causal claim. The experiment c
   the read degrades to a warning snapshot and fans hold last PWM (fail-safe). Note the
   no-busy-spin property is *necessary but not sufficient*: a clean kernel wait by our
   thread does not un-starve a foreign holder — it only keeps *our* exposure bounded.
-  Whole-system protection is therefore the experiment (D-PRIO-4), which must watch
-  system-wide harm, not just controller stall rate; if the inversion worsens
-  whole-system behavior, the lever is rejected. *Mitigation summary:* bounded mutex wait
-  + fail-safe degrade, blocking PawnIO/file I/O kept as kernel waits, and the
-  no-busy-spin invariant on the elevated thread (REQ-PRIORITY-03/05).
+  The experiment (D-PRIO-4) must watch system responsiveness, not just controller
+  cadence; if the inversion worsens responsiveness, the lever is rejected.
+  *Mitigation summary:* bounded mutex wait + fail-safe degrade, blocking PawnIO/file
+  I/O kept as kernel waits, and the no-busy-spin invariant on the elevated thread
+  (REQ-PRIORITY-03/05).
 - **R2 — recovery actors outranked.** Addressed by D-PRIO-3 — but only once the
   `--restart` killer process is elevated directly, not merely the watchdog task (raising
-  the task `<Priority>` alone leaves the killer at base 8). Residual: the 06-09
-  whole-system class freezes the killer too, where neither priority nor co-elevation
-  helps — that class is outside this lever's and FEAT-0008's envelope (it is the Layer-1
-  hardware-fallback domain).
-- **Misaimed lever.** If the stall is file-lock-bound (the plan's view), priority
+  the task `<Priority>` alone leaves the killer at base 8).
+- **Misaimed lever.** If the stall is file-lock-bound, priority
   yields no measurable benefit. *Mitigation:* D-PRIO-4 makes a null/negative result a
   first-class, acceptable outcome that keeps the lever held or rejects it.
 

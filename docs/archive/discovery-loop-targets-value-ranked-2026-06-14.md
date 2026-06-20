@@ -66,7 +66,7 @@ Score is relative, for ordering only — not a precision metric.
 | 30 | **W5-1** — low-band integrator state machine has no C++ unit test | 2 | G3/low | med | test-gap | Coverage gap on a stateful path; nothing wrong today. |
 | 31 | **W2-4** — curve point missing `temp_c`/`duty_pct` silently dropped → reshaped curve | 2 | G3/low | low | latent | Per-point typo trigger; fold into config-validation pass. |
 | 32 | **G3-02** — three SHA-256-over-BCrypt impls with three hex encoders | 1 | G3/low | low | latent | Identical output today; extract `BytesToLowerHex`, keep streaming. |
-| 33 | **HP-2** — `snapshot_age_ms` re-parses an ISO string the sampler just formatted | 1 | G2/low | low | partly-done | Already in `discovery-control-optimization-options.md`; trivial vs hardware-read budget. |
+| 33 | **HP-2** — `snapshot_age_ms` re-parses an ISO string the sampler just formatted | 1 | G2/low | low | partly-done | Historical control-optimization register was folded into `docs/control-latency-reduction-design-2026-06-18.md`; trivial vs hardware-read budget. |
 | 34 | **DRIFT-1** — `CONTROL_PIPELINE_MATH §6.1` anti-windup guard the integrator doesn't have | 1 | G3/low | low | doc-only | Output byte-identical; already a PATH_NOTES "Idea (verify)". |
 | 35 | **WAC-1** — FEAT-0005 core gap confirmed in code (write success = driver-error-only, no readback) | 2 | G1 | low | parked | Fully covered by parked FEAT-0005; **doc maintenance only**. Per-tick RPM/duty readback IS available → resolves the spec's open question. |
 | 36 | **WAC-3** — shutdown restore-on-exit is itself an unconfirmed write | 2 | G1/G3/low | low | parked | Fold into FEAT-0005 confirmation scope; exits with fans at a temp-tracking duty. |

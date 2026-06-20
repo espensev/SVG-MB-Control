@@ -5,7 +5,7 @@
 
 Tracks which seams the `/loop` discovery operator has swept, so repeated passes rotate to
 fresh areas instead of re-reading covered ground. Not authoritative; see
-`docs/discovery-loop-plan-tighter-pass-2026-06-14.md` for the ranked output.
+`docs/archive/discovery-loop-plan-tighter-pass-2026-06-14.md` for the ranked output.
 
 ## Goal frame (stable)
 

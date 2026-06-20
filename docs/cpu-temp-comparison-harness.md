@@ -2,7 +2,10 @@
 
 ## Status
 
-Current as of 2026-06-09. Tool: `scripts\Compare-CpuTemps.ps1`. Read-only.
+Current as of 2026-06-20. Tools: `scripts\Compare-CpuTemps.ps1` for the
+multi-day busy-band trend, and `scripts\analyze_cpu_temp_power.py` for
+power-normalized comparisons when CPU package-energy fields are present.
+Read-only.
 
 ## Purpose
 
@@ -18,6 +21,12 @@ It fills the one gap left by native `analyze report`: that command bins ticks by
 ingested run at a time (see `AssignBands` in
 `src\analyze\analyze_report_queries.cpp`). This harness instead bins by *measured
 load* and accumulates a cross-setting comparison table.
+
+Power is now available in the standard control-loop CSV through FEAT-0020. For
+new before/after conclusions, use `Compare-CpuTemps.ps1` to preserve continuity
+with the 2026-06-09..2026-06-20 passive baseline, then use
+`scripts\analyze_cpu_temp_power.py` to compare CPU temperature against package
+watts instead of busy percent alone.
 
 ## What it reads
 
@@ -129,6 +138,68 @@ Default output location (gitignored, preserved across publishes):
 
 All numeric parsing and output use invariant culture, so a decimal-comma locale
 does not corrupt the ledger.
+
+## Power-normalized companion
+
+`scripts\analyze_cpu_temp_power.py` consumes a control-loop CSV with
+`cpu_power_sample_id`, `cpu_power_window_ms`, and
+`cpu_pkg_energy_delta_uj`. It groups rows by distinct nonzero package-energy
+sample id, derives package watts once per window, applies a same-power-band dwell
+gate, and reports CPU/Tctl, apparent `theta C/W`, CPU busy percent, GPU power,
+GPU memory junction, and radiator setpoint/RPM context. By default it reads
+`config\machines\snd-desk.cooling.policy.json` to identify radiator channels
+(`1`, `4`, `5`) and context-airflow channels (`0`, `2`, `3`); channel `6` is
+AIO/pump scope and remains excluded.
+
+```powershell
+python .\scripts\analyze_cpu_temp_power.py `
+  --runtime-home .\release\runtime `
+  --machine-policy .\config\machines\snd-desk.cooling.policy.json `
+  --ambient-c 21 `
+  --out .\release\runtime\analysis\cpu-temp-power-latest.md `
+  --json-out .\release\runtime\analysis\cpu-temp-power-latest.json `
+  --window-csv-out .\release\runtime\analysis\cpu-temp-power-latest-windows.csv
+```
+
+Use this report for new conclusions where power fields are present. Compare the
+same package-power band, ambient, GPU confound state, and radiator response
+context. Raw `cpu_tctl_c` alone is not enough once the heat input differs.
+
+## Current trend snapshot
+
+As of the 2026-06-20 passive ledger, the stable comparison is between the two
+large `stock-preoc` config populations:
+
+| Setting/config | Captures | Span | idle p50/p90/max C | low p50/p90/max C | high p50/p90/max C |
+|---|---:|---|---:|---:|---:|
+| `stock-preoc` `b51e542a` | 612 | 2026-06-09..2026-06-16 | 55.25/57.12/72.25 | 66.88/68.75/79.12 | 81.00/83.00/92.38 |
+| `stock-preoc` `45a0a1c7` | 268 | 2026-06-16..2026-06-20 | 49.75/51.38/62.25 | 60.25/62.38/69.75 | 76.50/77.38/88.75 |
+
+Delta from `b51e542a` to `45a0a1c7`:
+
+| Band | p50 delta C | p90 delta C | max delta C |
+|---|---:|---:|---:|
+| idle | -5.50 | -5.74 | -10.00 |
+| low | -6.63 | -6.37 | -9.37 |
+| high | -4.50 | -5.62 | -3.63 |
+
+The post-2026-06-16 config is materially cooler across the observed sustained
+load bands. High-band risk is still governed by the worst post-change observed
+value (`88.75 C`), and future high-power conclusions should use the
+power-normalized companion instead of raw busy-band temperature alone.
+
+The first power-normalized 2026-06-18 CPU-heavy anchor has settled >=160 W
+windows at CPU package W p50/p90/max `185.21/198.21/200.04`, Tctl avg
+`80.94/83.78/87.56 C`, apparent theta `0.315/0.331/0.367 C/W`, and radiator
+group RPM `1741/1806/1815`. The 60-100 W band in that run is GPU-confounded and
+should not be treated as CPU-only cooler evidence.
+
+Follow-up metric todo lives in `docs\next_steps.md` under "CPU temperature /
+power-evaluation follow-ups": APERF/MPERF effective frequency, cycles-per-joule
+join, per-CCD/hotspot temperature, workload/setting labels plus external score,
+reviewed PPT/TDC/EDC/throttle/Vcore/VID sources, GPU context, case air-temp
+evidence when available, and subjective/acoustic notes. Do not require coolant
+temperature on this machine unless a real sensor source appears.
 
 ## Long-term baseline (scheduled task)
 

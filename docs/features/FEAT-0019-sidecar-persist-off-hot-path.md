@@ -13,10 +13,8 @@ identity change and deferring same-baseline setpoint churn to the existing
 once-per-tick end-of-tick `Flush()`, so no fsync'd file-replace runs before
 `ApplyDuty` during a ramp — with no change to crash-recovery behavior.
 
-> Draft / design capture. This is not implementation authorization. The direction
-> is recorded in `docs/control-latency-reduction-design-2026-06-18.md`
-> (D-WRITEHOT-1, Proposed). This is the build-ready direction of the latency set:
-> behavior-preserving for recovery, code-local, and not gate-crossing.
+> Implemented 2026-06-18. D-WRITEHOT-1 is Current; the verification log in §14
+> is the handoff record. FEAT-0017 and FEAT-0018 remain separate held directions.
 
 ## 1. Summary
 
@@ -64,11 +62,11 @@ Named code/contract gap, verified against source:
    so the recovery-relevant identity `(channel, baseline_duty_raw, baseline_mode_raw)`
    is stable across an entire ramp — yet the sidecar is rewritten every tick anyway.
 
-This is the general fix for the Layer-0 sidecar-race stall surface
-(`docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`): FEAT-0010 made a
-persist *fault* non-vetoing, but the persist itself still runs synchronously on the
-hot path. This feature removes the synchronous pre-`ApplyDuty` persist for
-same-baseline churn, deferring it to the existing end-of-tick `Flush()`.
+This is the general reduction of synchronous sidecar I/O on the actuation hot
+path: FEAT-0010 made a persist *fault* non-vetoing, but the persist itself still
+runs synchronously on the hot path. This feature removes the synchronous
+pre-`ApplyDuty` persist for same-baseline churn, deferring it to the existing
+end-of-tick `Flush()`.
 
 ## 3. Goals & non-goals
 
@@ -193,13 +191,13 @@ Verify legend:
 - **M** = manual runtime measurement (runtime CSV / status / event-log evidence; respects `AGENTS.md` §Live Runtime Safety).
 - **R** = code review against the cited contract doc.
 
-## 11. Open decisions
+## 11. Resolved decisions and non-actions
 
-| Decision | Needed before | Current default |
+| Decision | Resolution | Current default |
 |---|---|---|
-| Whether to add a debug counter for skipped persists (observability) | implementation | omit; the existing `total_writes` and event log already mark actuation, and adding a field touches `RUNTIME_HOME.md` for little value. |
-| How to correct the FEAT-0010 counter so a deferred same-baseline `Upsert` does not falsely clear `consecutive_sidecar_persist_failures` (REQ-WRITEHOT-06) | implementation | **Resolved 2026-06-18 (D-WRITEHOT-1):** two-point reset. `Upsert` returns a `bool persisted`; `channel_write.cpp` clears the counter only when true (kills the *false clear*). `Flush()` also returns a `bool`, and `tick_runner` clears the counter for all `context.channels` on a successful flush, because a full-file `Persist()` makes every channel's record current (kills the *stuck-degraded* case after a failed activation self-heals via the batched write). Both points are needed: an identity-change `Upsert` sets `dirty_=false`, so a Flush-only reset would never fire. |
-| Whether to extend the same identity-gating to the free-function `UpsertPendingWrite` (write-once path) | implementation | leave `UpsertPendingWrite` (write-once orchestrator) as-is; it persists once per write-once invocation, not per tick, so it is not on a ramp hot path. |
+| Whether to add a debug counter for skipped persists (observability) | Resolved 2026-06-18 (D-WRITEHOT-1) | Omitted; the existing `total_writes` and event log already mark actuation, and adding a field touches `RUNTIME_HOME.md` for little value. |
+| How to correct the FEAT-0010 counter so a deferred same-baseline `Upsert` does not falsely clear `consecutive_sidecar_persist_failures` (REQ-WRITEHOT-06) | Resolved 2026-06-18 (D-WRITEHOT-1) | Two-point reset. `Upsert` returns a `bool persisted`; `channel_write.cpp` clears the counter only when true (kills the *false clear*). `Flush()` also returns a `bool`, and `tick_runner` clears the counter for all `context.channels` on a successful flush, because a full-file `Persist()` makes every channel's record current (kills the *stuck-degraded* case after a failed activation self-heals via the batched write). Both points are needed: an identity-change `Upsert` sets `dirty_=false`, so a Flush-only reset would never fire. |
+| Whether to extend the same identity-gating to the free-function `UpsertPendingWrite` (write-once path) | Resolved 2026-06-18 (D-WRITEHOT-1) | Leave `UpsertPendingWrite` (write-once orchestrator) as-is; it persists once per write-once invocation, not per tick, so it is not on a ramp hot path. |
 
 ## 12. Measurement gate & dependencies
 

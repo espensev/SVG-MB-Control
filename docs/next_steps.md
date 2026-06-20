@@ -56,8 +56,8 @@ write-path/watchdog specs (`FEAT-0008/0010/0011/0012/0013`) were promoted
   met by `T`/`R` (no §10 row requires `M`); live-M is supplementary. FEAT-0010 and
   FEAT-0012 are live-feasible (the latter via an operator-gated restart); FEAT-0011
   and FEAT-0013 have no safe production-path trigger and are proxy-only or
-  `T`-only-closed. All live-on-hardware runs are gated behind hardware
-  stabilization (see the system-halt incident).
+  `T`-only-closed. Any optional production-path live run still needs an
+  operator-present cool idle window.
 - **Linux-only CI nicety — DONE 2026-06-18**: `tests/test_eval_dashboard.py`
   `test_dashboard_server_help` now skips when neither `powershell` nor `pwsh` is on
   PATH (`@unittest.skipUnless`).
@@ -72,20 +72,16 @@ write-path/watchdog specs (`FEAT-0008/0010/0011/0012/0013`) were promoted
 A latency audit of the control path (design record
 `docs\control-latency-reduction-design-2026-06-18.md`) found the
 "fan reaction under load" budget is governed by three mechanisms, two of which are
-dormant or conservatively tuned. The findings are captured as three **Draft**
-specs (not authorized work; each names its gate):
+dormant or conservatively tuned. The findings now split into one implemented
+hot-path reduction and two held Draft specs:
 
-- **FEAT-0019** (`REQ-WRITEHOT-*`) — **build-ready**, start here. Identity-gated
-  *synchronous* sidecar `Persist()`: persist synchronously only when `(channel,
-  baseline_duty_raw, baseline_mode_raw)` changes, and defer same-baseline churn to
-  the existing once-per-tick end-of-tick `Flush()`, so no fsync'd atomic replace runs
-  before `ApplyDuty` during a ramp. Recovery (`write_orchestrator.cpp`) and health
-  (`runtime_health.cpp`) are verified to ignore `target_pct`, so it is
-  behavior-preserving for crash recovery; one cross-feature detail is keeping a
-  deferred `Upsert` from falsely clearing FEAT-0010's persist-failure counter
-  (REQ-WRITEHOT-06). The general fix for the Layer-0 sidecar-race stall surface.
-  Only gate open is the decision record (promote
-  `control-latency-reduction-design-2026-06-18.md` D-WRITEHOT-1 to Current).
+- **FEAT-0019** (`REQ-WRITEHOT-*`) — **Implemented 2026-06-18**. Identity-gated
+  sidecar persistence now keeps the activation/baseline persist synchronous but
+  defers same-baseline setpoint churn to the end-of-tick `Flush()`, so no fsync'd
+  atomic replace runs before `ApplyDuty` during a ramp. The FEAT-0010
+  persist-failure counter reset was corrected with the two-point `Upsert`/`Flush`
+  mechanism recorded in D-WRITEHOT-1. This item is closed as T/R-verified; live M
+  evidence is not required by the spec.
 - **FEAT-0017** (`REQ-REACT-*`) — config-only response retune: raise
   `rise_rate_pct_per_min` **and** `max_setpoint_step_pct` jointly (the binding
   spike constraint — not the EMA alpha), asymmetric (fast rise, slow fall),
@@ -98,9 +94,10 @@ specs (not authorized work; each names its gate):
   held until the characterization evidence below exists. Same gate as the
   "lower fixed cadence" option, so do that evidence pass once and it unblocks both.
 
-Suggested order: FEAT-0019 (code, cheap win, no acoustic trade-off) → FEAT-0017
-(tuning, needs a load pass) → FEAT-0018 (needs the cadence characterization). The
-before/after instrument for all three already exists in the control-loop CSV
+Remaining order: FEAT-0017 (tuning, needs a load pass) → FEAT-0018 (needs the
+cadence characterization). FEAT-0019 stays here only as closed context for the
+latency audit. The before/after instrument for the remaining directions already
+exists in the control-loop CSV
 (`last_raw_demand_pct` / `last_smoothed_demand_pct` / setpoint, `loop_slip_ms`,
 `cadence_transient`).
 
@@ -118,7 +115,9 @@ before/after instrument for all three already exists in the control-loop CSV
   `docs/feat-0020-live-flip-validation-results-2026-06-18.md`. The follow-up
   `docs/power-temp-comparison-snapshot-2026-06-18.md` preserves the standard-loop
   CPU package watts and GPU board watts beside temperatures for future
-  comparisons. PR #20.
+  comparisons. `scripts/analyze_cpu_temp_power.py` now turns those windows into
+  package-power-banded CPU temperature summaries; the 2026-06-20 trend/method
+  summary is folded into `docs/cpu-temp-comparison-harness.md`. PR #20.
 - **FEAT-0021** (`REQ-GPUCTX-*`, Implemented 2026-06-20; T/R verified, live M
   pending) — GPU workload context now logs beside GPU power as a cached 1000 ms
   context slice: utilization, clocks, pstate, VRAM used/total, and explicit
@@ -126,6 +125,29 @@ before/after instrument for all three already exists in the control-loop CSV
   the optional context block while older archives report it unavailable. The
   live deployment check remains REQ-GPUCTX-04: compare achieved interval,
   slip/overrun, process CPU%, and health against the current 250 ms envelope.
+
+CPU temperature / power-evaluation follow-ups (todo; analysis-only unless a
+feature spec authorizes new runtime fields):
+
+- Keep radiator membership sourced from
+  `config/machines/snd-desk.cooling.policy.json`: channels `1` and `5` are
+  radiator exhaust, channel `4` is front radiator intake, and channel `6` is
+  AIO/pump scope excluded from control/pressure math.
+- Do not require coolant/water temperature for comparisons on this machine; no
+  such sensor is currently available in the repo evidence path.
+- Use radiator `fan1_rpm` / `fan4_rpm` / `fan5_rpm` plus setpoint as fan-side
+  context for CPU package-power comparisons.
+- Add APERF/MPERF effective-frequency context to controlled runs when explicitly
+  enabled, then specify the cycles-per-joule join before treating it as an
+  efficiency score.
+- Add per-CCD / CPU-hotspot temperature context if a first-party source is
+  available.
+- Add workload label, CPU-setting label, and external score capture for
+  controlled CPU runs.
+- Track PPT/TDC/EDC, throttle reason, and Vcore/VID only after a reviewed
+  first-party source decision exists.
+- Keep GPU power/context, case intake/exhaust temperature evidence when
+  available, and subjective/acoustic notes attached to tuning runs.
 
 ### Runtime logging failure visibility (FEAT-0022) — implemented 2026-06-20
 
@@ -182,7 +204,9 @@ hermetic build plus unit/smoke lane) and produces no runtime CSV. Collect runtim
 evidence instead with a live control-loop capture followed by
 `svg-mb-control analyze ingest` + `analyze report`, and/or
 `scripts\Compare-CpuTemps.ps1` for the CPU-temperature-by-load view
-(`docs\cpu-temp-comparison-harness.md`).
+(`docs\cpu-temp-comparison-harness.md`). When package-power fields are present,
+also run `scripts\analyze_cpu_temp_power.py` so CPU temperature is compared
+against actual heat input, not busy percent alone.
 
 ### FEAT-0006 (CPU work/energy) downstream work
 The spec is already `Accepted` (`docs\features\FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
@@ -217,10 +241,7 @@ Governed by FEAT-0006 and the `REQ-CPUEFF-*` rows in `docs\TRACEABILITY.md`.
 FEAT-0008 v1 is implemented and verified: the `--restart` stop-timeout path now
 escalates to a bounded force-terminate, automated C++/Python tests pass, and the
 live deterministic suspend measurement verified the production watchdog recovery
-mechanism. There is no remaining v1 recovery-path evidence to collect. The
-natural load hard-freeze premise is closed on evidence as not reproducible by
-load on this system; the AVX-512 escalation was rejected as the wrong instrument
-for FEAT-0008's worker-specific stop-timeout trigger.
+mechanism. There is no remaining v1 recovery-path evidence to collect.
 
 Remaining items are post-v1 options or hardening only, governed by
 `docs\features\FEAT-0008-watchdog-hung-worker-recovery.md` §11:
@@ -259,16 +280,20 @@ Current state:
   `docs\archive\modular-profile-hotswap-plan-2026-06-06.md` while preserving the
   current-law and reusable-primitive tables; compacted
   `docs\archive\profile-hot-swap-allow-live-decision-2026-06-06.md` into a
-  support pointer to revised D6; reduced `discovery-control-optimization-options`,
-  `discovery-dashboard-health-polling`,
-  `docs\archive\discovery-next-logging-targets.md`, and
-  `discovery-gpu-response-refinement` to closed stubs.
+  support pointer to revised D6; folded the remaining guidance from four closed
+  redirect stubs (control optimization, dashboard health polling, next logging
+  targets, and GPU response refinement) into the current docs/backlog and deleted
+  the stubs.
 - **Done 2026-06-20** — moved completed implementation plans and the executed
   FEAT-0006 live-validation procedure into `docs\archive\implemented-plans\`:
   the completed campaign plan, FEAT-0019 sidecar hot-path plan, FEAT-0020
   critical-evaluation/implementation plans, and the FEAT-0006 live MSR
   validation plan. Also moved the applied testing/hot-path simplification review
   and the older closed simplification/logging/script-stack target records there.
+- **Done 2026-06-20** — moved bulky historical evidence/planning records out of
+  root `docs\`: the two-pass discovery-loop fan-out/checkpoint set, the parked
+  CPU power-anticipation scaffolds and Gate-2 measurement record now live under
+  `docs\archive\`; the FEAT-0008 incident-only evidence records were removed.
 - **Remaining** — finish the CPU work/energy consolidation by folding the
   resolved `cpu-cycle-counter-source-decision` into
   `cpu-work-energy-acquisition-decision`, and then decide whether the older
