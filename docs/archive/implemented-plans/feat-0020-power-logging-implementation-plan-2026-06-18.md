@@ -6,6 +6,10 @@
 **Companion spec:** `docs/features/FEAT-0020-standard-control-loop-power-logging.md`
 **Decision record:** `docs/power-logging-flip-plan-2026-06-18.md` (D-PWRLOG-1, `Current`)
 
+**Archive status:** archived 2026-06-20 as an implemented plan. Use it for audit
+history only; current verification lives in the companion spec,
+`docs/TRACEABILITY.md`, and `docs/feat-0020-live-flip-validation-results-2026-06-18.md`.
+
 This document evaluates the existing flip plan / FEAT-0020 spec against the real
 source and gives a grounded implementation plan. Every claim below was verified
 against source with a `file:line` citation by a 7-dimension verification pass; the

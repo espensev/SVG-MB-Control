@@ -193,8 +193,9 @@ sensor-safe mode, the circuit breaker) remain the safety floor regardless.
 **Revised 2026-06-06 (why).** The original 2026-06-03 form authorized `allow_live`
 *immediately, without first requiring the characterization evidence*, on the ground
 that the crossing was explicit and recorded. A 2026-06-06 review
-(`docs/profile-hot-swap-allow-live-decision-2026-06-06.md`; the measurement-gate
-section of `docs/modular-profile-hotswap-discussion-2026-06-06.md`) found that
+(`docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md`; the
+measurement-gate section of
+`docs/archive/modular-profile-hotswap-discussion-2026-06-06.md`) found that
 `docs/MEASUREMENT_GATE.md` Exit Criteria are measurements, not authorizations, so a
 recorded crossing is *consent, not evidence*; and that the slew cap the floor
 relies on defaults to NaN/off in code (`src/control/control_loop.h:29-31`;
@@ -282,4 +283,4 @@ on defaults to NaN/off in code (`src/control/control_loop.h:29-31`;
 `src/control/channel_evaluator.cpp:55-57`). **Resolved 2026-06-06:** the maintainer
 selected B1+B2 — `allow_live` now requires both the characterization evidence and a
 non-NaN slew cap (the D6 text above is the revised form). The options considered are
-in `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
+in `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md`.

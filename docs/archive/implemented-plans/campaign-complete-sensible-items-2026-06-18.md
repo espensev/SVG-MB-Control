@@ -1,5 +1,9 @@
 # Campaign: complete the remaining sensible items (2026-06-18)
 
+**Archive status:** completed/partly superseded and archived 2026-06-20. This
+file is retained for audit history; current work queues live in
+`docs/features/README.md` and `docs/next_steps.md`.
+
 **Status:** planning note (execution roadmap). This doc is not a feature spec and does
 not itself cross the Feature Intake Gate; each phase below that touches product code or a
 feature spec carries its own gate.

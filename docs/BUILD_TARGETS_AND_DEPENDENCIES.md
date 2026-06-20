@@ -184,7 +184,7 @@ This repo contains no handling, configuration, or test coverage for
 Virtualization-Based Security (VBS), HVCI / Memory Integrity, test signing, or
 the Microsoft vulnerable-driver blocklist. (The only `VBS` string in the repo
 refers to a deprecated `.vbs` watchdog script, not Virtualization-Based
-Security: `docs\SCRIPT_STACK_REVIEW.md`.) The only stated requirement for live
+Security: `docs\archive\implemented-plans\SCRIPT_STACK_REVIEW.md`.) The only stated requirement for live
 hardware access is administrator privileges (above). If a security feature
 blocked the driver, it would surface as an `access_denied` / `no_device`
 `init_warning` from the AMD reader or SIO writer (`src\hardware\amd_reader.cpp`,

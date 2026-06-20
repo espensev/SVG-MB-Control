@@ -420,22 +420,26 @@ Decision and design records that remain useful for navigation:
 - `docs/analyze-db-run-purge-decision-2026-06-18.md` — FEAT-0016
   analyzer DB retention/prune direction.
 
-Compacted implementation records (closed topics; keep these short and
+Compacted / archived records (closed topics; keep these short and
 do not merge them into operator docs unless the topic is reopened):
 
-- `docs/CONTROL_SIMPLIFICATION_TARGETS.md` — Completed simplification
+- `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md` — Completed simplification
   record for the closed 2026-05-26 target list.
-- `docs/LOGGING_IMPROVEMENT_PLAN.md` — Completed logging/analyzer
+- `docs/archive/implemented-plans/LOGGING_IMPROVEMENT_PLAN.md` — Completed logging/analyzer
   implementation record.
-- `docs/SCRIPT_STACK_REVIEW.md` — Completed script-stack
+- `docs/archive/implemented-plans/SCRIPT_STACK_REVIEW.md` — Completed script-stack
   simplification record.
+- `docs/archive/implemented-plans/testing-and-hotpath-simplification-review-2026-06-10.md`
+  — Applied testing/script-stack and runtime hot-path simplification review.
 - `docs/bench-logging-history.md` — Consolidated history of the older
   Bench-vs-Control logging discovery notes.
-- `docs/modular-profile-hotswap-discussion-2026-06-06.md` — Compacted
+- `docs/archive/implemented-plans/` — Completed implementation plans and
+  executed procedures kept for audit history, separated from active plans.
+- `docs/archive/modular-profile-hotswap-discussion-2026-06-06.md` — Compacted
   FEAT-0003 discussion pointer.
-- `docs/modular-profile-hotswap-plan-2026-06-06.md` — Compacted FEAT-0003
+- `docs/archive/modular-profile-hotswap-plan-2026-06-06.md` — Compacted FEAT-0003
   primitive-table pointer.
-- `docs/profile-hot-swap-allow-live-decision-2026-06-06.md` — Compacted
+- `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md` — Compacted
   support record; the decision lives in
   `docs/profile-hot-swap-decision-2026-06-03.md`.
 
@@ -448,7 +452,8 @@ preserve old links and point to current contracts:
 - `docs/discovery-dashboard-health-polling.md`
 - `docs/discovery-gpu-response-refinement.md`
 - `docs/discovery-gpu-temp-envelope.md`
-- `docs/discovery-next-logging-targets.md`
+- `docs/archive/discovery-next-logging-targets.md`
+- `docs/archive/spec-and-backlog-structure-assessment-2026-06-18.md`
 - `docs/discovery-polling-logging-state.md`
 - `docs/discovery-recovery-gap-audit-2026-06-04.md`
 - `docs/discovery-steady-response-control.md`

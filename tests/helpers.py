@@ -29,7 +29,8 @@ BUILD_SCRIPT = REPO_ROOT / "build-release.ps1"
 class WindowsExeTestCase(unittest.TestCase):
     """Base for tests that drive the built exe: skips off-Windows and ensures
     the release build exists, once per test class (TS-3,
-    docs/testing-and-hotpath-simplification-review-2026-06-10.md). Subclasses
+    docs/archive/implemented-plans/testing-and-hotpath-simplification-review-2026-06-10.md).
+    Subclasses
     with extra setUpClass logic call super().setUpClass() first. Pure-math
     tests (e.g. test_power_lead) stay on unittest.TestCase: the gate is
     opt-in, not implicit in discovery.

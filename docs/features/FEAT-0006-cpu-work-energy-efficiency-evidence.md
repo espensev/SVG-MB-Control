@@ -293,7 +293,7 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 > and the v1 acquisition path are agreed. The executable procedure for that
 > one-shot validation — read sets, the affinity-honoring test, plausibility
 > bounds, and the PASS/energy-only/FAIL outcome tree — is
-> [`docs/cpu-work-energy-live-validation-plan-2026-06-07.md`](../cpu-work-energy-live-validation-plan-2026-06-07.md).
+> [`docs/archive/implemented-plans/cpu-work-energy-live-validation-plan-2026-06-07.md`](../archive/implemented-plans/cpu-work-energy-live-validation-plan-2026-06-07.md).
 >
 > **Live validation ran 2026-06-07 — outcome PASS (energy-only) for the energy
 > signal:** RAPL package energy is available and correctly encoded on Family 1Ah.

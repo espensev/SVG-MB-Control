@@ -20,7 +20,7 @@ Companion context:
   for standard control-loop CPU package power and GPU power.
 - `docs/features/FEAT-0021-standard-control-loop-gpu-workload-context-logging.md`
   - draft follow-up spec for GPU workload context beside GPU power.
-- `docs/discovery-next-logging-targets.md` - older completed evidence-log
+- `docs/archive/discovery-next-logging-targets.md` - older completed evidence-log
   discovery note; useful background, but historical.
 
 Source files checked:

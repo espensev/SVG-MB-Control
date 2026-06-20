@@ -1,11 +1,16 @@
 # FEAT-0020 Critical Evaluation
 
+**Archive status:** completed and archived 2026-06-20. This file is retained as
+the pre-implementation review record; current FEAT-0020 status lives in
+`docs/features/FEAT-0020-standard-control-loop-power-logging.md` and
+`docs/TRACEABILITY.md`.
+
 **Project:** svg-mb-control
 **Status:** Review note; reconciled into FEAT-0020 v0.2 and D-PWRLOG-1
 **Updated:** 2026-06-18
 **Reviewed docs:** `docs/features/FEAT-0020-standard-control-loop-power-logging.md`,
 `docs/power-logging-flip-plan-2026-06-18.md`,
-`docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`,
+`docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`,
 `docs/as-is-logging-opportunities-2026-06-18.md`,
 `docs/logging-next-targets-2026-06-18.md`,
 `docs/features/FEAT-0021-standard-control-loop-gpu-workload-context-logging.md`
@@ -20,7 +25,7 @@ implementation plan has outpaced the governing FEAT-0020 spec and D-PWRLOG-1
 decision record.
 
 Resolution update: this review was applied to FEAT-0020 v0.2 and D-PWRLOG-1 on
-2026-06-18. Use `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`
+2026-06-18. Use `docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`
 for the current work split, implementation status, and stop points. This note
 remains as the critical record of the issues that had to be reconciled.
 
@@ -39,7 +44,7 @@ Evidence:
   D-PWRLOG-1 `Proposed`.
 - `docs/features/FEAT-0020-standard-control-loop-power-logging.md` §11 still
   prefers bounded cached sampling by default.
-- `docs/feat-0020-power-logging-implementation-plan-2026-06-18.md` §3.1 marks
+- `docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md` §3.1 marks
   the 5-field schema as decided.
 
 Impact: a future implementer has two conflicting sources of truth. The registry

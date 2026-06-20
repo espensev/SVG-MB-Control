@@ -567,9 +567,9 @@ Current contract and operator references:
 Compacted implementation records, kept separate from the current operator
 workflow:
 
-- `docs\CONTROL_SIMPLIFICATION_TARGETS.md`
-- `docs\LOGGING_IMPROVEMENT_PLAN.md`
-- `docs\SCRIPT_STACK_REVIEW.md`
+- `docs\archive\implemented-plans\CONTROL_SIMPLIFICATION_TARGETS.md`
+- `docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`
+- `docs\archive\implemented-plans\SCRIPT_STACK_REVIEW.md`
 - `docs\bench-logging-history.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and

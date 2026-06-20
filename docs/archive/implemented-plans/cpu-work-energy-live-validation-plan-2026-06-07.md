@@ -1,5 +1,11 @@
 # CPU Work/Energy Live MSR Validation Plan - 2026-06-07
 
+**Archive status:** executed and archived 2026-06-20. This file is retained as
+the method record for the one-shot live read. Current FEAT-0006 status lives in
+`docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
+`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`, and
+`docs/cpu-work-energy-live-validation-results-2026-06-07.md`.
+
 Status: **executed** procedure. This plan ran 2026-06-07 — outcome **PASS
 (energy-only)**; results in
 `docs/cpu-work-energy-live-validation-results-2026-06-07.md`. The procedure body

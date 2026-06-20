@@ -40,7 +40,8 @@ current decision record and `REQ-*` rows in `docs\TRACEABILITY.md` (governance
 
 Remaining, **all non-blocking** (backlog, not authorized work). Several were
 closed out 2026-06-18 in Phase 0/1 of
-`docs/campaign-complete-sensible-items-2026-06-18.md`; the five Implemented
+`docs/archive/implemented-plans/campaign-complete-sensible-items-2026-06-18.md`;
+the five Implemented
 write-path/watchdog specs (`FEAT-0008/0010/0011/0012/0013`) were promoted
 `Implemented → Done` on the `T`/`R` acceptance bar (`test_feature_specs` 5/5):
 
@@ -252,23 +253,33 @@ Partly completed 2026-06-09:
 
 Current state:
 
-- **Done 2026-06-20** — compacted
-  `modular-profile-hotswap-discussion-2026-06-06.md` into a short held-design
-  pointer; compacted `modular-profile-hotswap-plan-2026-06-06.md` while
-  preserving the current-law and reusable-primitive tables; compacted
-  `profile-hot-swap-allow-live-decision-2026-06-06.md` into a support pointer to
-  revised D6; reduced `discovery-control-optimization-options`,
-  `discovery-dashboard-health-polling`, `discovery-next-logging-targets`, and
+- **Done 2026-06-20** — compacted and archived
+  `docs\archive\modular-profile-hotswap-discussion-2026-06-06.md` into a short
+  held-design pointer; compacted
+  `docs\archive\modular-profile-hotswap-plan-2026-06-06.md` while preserving the
+  current-law and reusable-primitive tables; compacted
+  `docs\archive\profile-hot-swap-allow-live-decision-2026-06-06.md` into a
+  support pointer to revised D6; reduced `discovery-control-optimization-options`,
+  `discovery-dashboard-health-polling`,
+  `docs\archive\discovery-next-logging-targets.md`, and
   `discovery-gpu-response-refinement` to closed stubs.
-- **Remaining** — consolidate the five `cpu-work-energy-*` files to about two
-  maintained records (merge the live-validation plan into the results doc; fold
-  the resolved `cpu-cycle-counter-source-decision` into
-  `cpu-work-energy-acquisition-decision`), preserving the live forward-gates
-  (quarantine-exit Evaluation, remaining cycle path, open 400 W ceiling).
+- **Done 2026-06-20** — moved completed implementation plans and the executed
+  FEAT-0006 live-validation procedure into `docs\archive\implemented-plans\`:
+  the completed campaign plan, FEAT-0019 sidecar hot-path plan, FEAT-0020
+  critical-evaluation/implementation plans, and the FEAT-0006 live MSR
+  validation plan. Also moved the applied testing/hot-path simplification review
+  and the older closed simplification/logging/script-stack target records there.
+- **Remaining** — finish the CPU work/energy consolidation by folding the
+  resolved `cpu-cycle-counter-source-decision` into
+  `cpu-work-energy-acquisition-decision`, and then decide whether the older
+  feasibility/results pair should stay as separate evidence records. Preserve
+  the live forward-gates: quarantine-exit Evaluation, remaining cycle path, and
+  the open 400 W ceiling.
 - **Keep as-is** (load-bearing or open work): `adaptive-cadence-design`
   (CONTROL_LOOP), `discovery-polling-logging-state` + `discovery-steady-response-control`
   (MEASUREMENT_GATE), `discovery-control-math-performance`
-  (CONTROL_SIMPLIFICATION_TARGETS), `discovery-recovery-gap-audit-2026-06-04`
+  (`docs\archive\implemented-plans\CONTROL_SIMPLIFICATION_TARGETS.md`),
+  `discovery-recovery-gap-audit-2026-06-04`
   (open remediations 1 & 2), `testing-harness-evaluation-2026-06-06` (open §5
   coverage gaps), and `discovery-gpu-temp-envelope` (sole record of the RTX 5090
   zero-hotspot envelope constraint — lift that fact into `CONTROL_PIPELINE_MATH.md`
@@ -287,12 +298,9 @@ Content-drift items from the same assessment were fixed 2026-06-09:
   repo-config GPU retune.
 
 ### Optional housekeeping — low priority, defer
-- Archiving closed implementation records (`docs\CONTROL_SIMPLIFICATION_TARGETS.md`,
-  `docs\LOGGING_IMPROVEMENT_PLAN.md`, `docs\SCRIPT_STACK_REVIEW.md`) into a
-  `docs\archive\` directory: these are already listed in `README.md` as compacted
-  records kept separate from the operator workflow, and moving them churns
-  `README.md` + `AGENTS.md` cross-references. Skip unless the flat layout causes
-  friction.
+- Archiving closed implementation records (`CONTROL_SIMPLIFICATION_TARGETS`,
+  `LOGGING_IMPROVEMENT_PLAN`, `SCRIPT_STACK_REVIEW`): done 2026-06-20 under
+  `docs\archive\implemented-plans\` after the flat layout became noisy.
 - Splitting the 17 flat Python tests in `tests\` into mode subdirectories: the
   C++ lane is already isolated under `tests\cpp\`. A split risks the shared
   `tests\helpers.py` imports and the `python -m unittest discover tests` pattern;
@@ -316,5 +324,6 @@ The earlier list contained seven items. Verified against the repo:
   `AGENTS.md` rule (Feature Intake Gate, Change Checklist).
 - **Enforce strict includes** — already captured as an optional, decision-gated
   item in `docs\STRUCTURE_AND_STABILITY.md` (see above).
-- **Archive closed plans** / **organize Python tests** — optional housekeeping,
-  deferred (see above).
+- **Archive closed plans** — substantially done 2026-06-20; keep only
+  load-bearing/open plans at the root (see above).
+- **Organize Python tests** — optional housekeeping, deferred (see above).

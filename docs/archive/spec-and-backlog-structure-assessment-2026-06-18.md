@@ -76,7 +76,7 @@ single surface gives a crisp priority + decisions-owed view.
 | `docs/PATH_NOTES.md` "Ideas / backlog" | Unscheduled ideas | One of several idea homes. |
 | `docs/discovery-loop-targets-value-ranked-2026-06-14.md` | 40 ranked discovery candidates | Dated snapshot; discovery-scoped, not feature-scoped. |
 | held-Draft specs (FEAT-0009, 0014) | Each spec's open decisions | The decisions owed were not visible in aggregate (see §4). |
-| `docs/STRUCTURE_AND_STABILITY.md` §Migration Order ("Remaining polish"); `CONTROL_SIMPLIFICATION_TARGETS.md`; `LOGGING_IMPROVEMENT_PLAN.md`; `SCRIPT_STACK_REVIEW.md` | Topic backlogs | By-design per-topic. |
+| `docs/STRUCTURE_AND_STABILITY.md` §Migration Order ("Remaining polish"); `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md`; `docs/archive/implemented-plans/LOGGING_IMPROVEMENT_PLAN.md`; `docs/archive/implemented-plans/SCRIPT_STACK_REVIEW.md` | Topic backlogs | By-design per-topic. |
 | 8× `docs/*-plan-*.md` | Multi-gate forward roadmaps | By-design per-topic. |
 | GitHub issue #4 + draft PR #9 | Disk-growth retention | At this snapshot, issue/PR were the only surfaces. Later on 2026-06-18 this moved into `docs/features/FEAT-0015-*`, `FEAT-0016-*`, and traceability. |
 

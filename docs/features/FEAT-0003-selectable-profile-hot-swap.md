@@ -220,7 +220,8 @@ Proposed behavior (not yet implemented):
   `src/runtime/runtime_lifecycle.cpp:17,22`): names the target profile or carries
   an inline profile body. Absence = no change. Modeled on the breaker-reset request
   file. Whether to introduce a `runtime/requests/` subdir instead of the flat root
-  is left open in `docs/modular-profile-hotswap-plan-2026-06-06.md` §7-4; no
+  is left open in `docs/archive/modular-profile-hotswap-plan-2026-06-06.md`
+  §7-4; no
   `runtime/requests/` directory exists today.
 - **New status + CSV fields:** active `controller` kind per channel; for PID, the
   current error and per-term contributions for evidence. Law-specific fields are

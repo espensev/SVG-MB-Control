@@ -10,7 +10,7 @@ disjoint files plus 4 adversarial verification lenses over the complete diff
 (0 blockers), then gated by `Test-LocalCI.ps1 -KeepBuildDir` (CTest 12/12,
 hermetic Python lane 133 tests). Prior completed passes were read first and are not re-proposed:
 `docs/testing-harness-evaluation-2026-06-06.md` (all 7 recommendations applied),
-`docs/SCRIPT_STACK_REVIEW.md`, `docs/CONTROL_SIMPLIFICATION_TARGETS.md`,
+`docs/archive/implemented-plans/SCRIPT_STACK_REVIEW.md`, `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md`,
 `docs/archive/build-optimization-results.md`.
 
 **Overall assessment:** no critical findings. The 250 ms loop is healthy

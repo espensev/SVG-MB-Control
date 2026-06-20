@@ -1,7 +1,7 @@
 # CPU Work/Energy Live MSR Validation Results - 2026-06-07
 
 Status: **results** of the one-shot, read-only live MSR validation defined by
-`docs/cpu-work-energy-live-validation-plan-2026-06-07.md` (the FEAT-0006
+`docs/archive/implemented-plans/cpu-work-energy-live-validation-plan-2026-06-07.md` (the FEAT-0006
 pre-implementation gate). Run once on the target part, read-only, with the
 controller in monitor-only mode (not driving fans). **Outcome: PASS
 (energy-only).**
@@ -26,7 +26,7 @@ separately).
 > is kept verbatim as the record of what was (mis-)tested.
 
 **Companion to:**
-`docs/cpu-work-energy-live-validation-plan-2026-06-07.md`,
+`docs/archive/implemented-plans/cpu-work-energy-live-validation-plan-2026-06-07.md`,
 `docs/features/FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
 `docs/cpu-work-energy-acquisition-decision-2026-06-07.md`,
 `docs/cpu-work-energy-acquisition-verification-2026-06-04.md`.

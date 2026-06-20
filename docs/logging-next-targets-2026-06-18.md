@@ -6,8 +6,8 @@
 **Decision ids:** D-PWRLOG-1 follow-through, D-GPUCTX-1 current, D-LOGHEALTH-1 current
 **Companion docs:** `docs/as-is-logging-opportunities-2026-06-18.md`,
 `docs/power-logging-flip-plan-2026-06-18.md`,
-`docs/feat-0020-critical-evaluation-2026-06-18.md`,
-`docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`,
+`docs/archive/implemented-plans/feat-0020-critical-evaluation-2026-06-18.md`,
+`docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`,
 `docs/features/FEAT-0020-standard-control-loop-power-logging.md`,
 `docs/features/FEAT-0021-standard-control-loop-gpu-workload-context-logging.md`,
 `docs/features/FEAT-0022-runtime-logging-failure-visibility.md`,
@@ -39,7 +39,7 @@ FEAT-0020 stayed narrow and is now implemented:
 
 Closed gates:
 
-- The critical review in `docs/feat-0020-critical-evaluation-2026-06-18.md`
+- The critical review in `docs/archive/implemented-plans/feat-0020-critical-evaluation-2026-06-18.md`
   has been reconciled into FEAT-0020 v0.2 and D-PWRLOG-1.
 - D-PWRLOG-1 in `docs/power-logging-flip-plan-2026-06-18.md` is Current.
 - The GPU power cadence/field-set decision is closed for v1: per-tick read,

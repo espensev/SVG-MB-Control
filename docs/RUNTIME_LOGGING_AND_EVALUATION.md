@@ -10,7 +10,7 @@ profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
 `deadband_pct<=0.25` in the shipped configs.
 
 The completed implementation sequencing is summarized in
-`docs\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
+`docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
 
 **Finding (closed 2026-06-09) - active package header drift (2026-06-07):** on
 2026-06-07 the live packaged runtime was a stale `2026-05-28T12:15:11Z` build

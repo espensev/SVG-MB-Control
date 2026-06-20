@@ -20,7 +20,7 @@ those rather
 than restating them; the §5 registry stays authoritative for per-feature status
 and `git log` for what shipped. Keep it current when a feature's status or the
 decision queue changes. A fuller standing review is
-`docs/spec-and-backlog-structure-assessment-2026-06-18.md`.
+`docs/archive/spec-and-backlog-structure-assessment-2026-06-18.md`.
 
 **Recently implemented:**
 

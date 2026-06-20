@@ -1,5 +1,10 @@
 # FEAT-0019 Sidecar persistence off the actuation hot path — Implementation Plan
 
+**Archive status:** implemented and archived 2026-06-20. This file is retained
+for audit history only; do not execute it as a current plan. Current status lives
+in `docs/features/FEAT-0019-sidecar-persist-off-hot-path.md`,
+`docs/TRACEABILITY.md`, and `docs/features/README.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move the synchronous `pending_writes.json` persist off the actuation hot

@@ -4,7 +4,7 @@
 **Status:** Results record (live-flip M-evidence for FEAT-0020 / REQ-PWRLOG-04)
 **Companion:** `docs/features/FEAT-0020-standard-control-loop-power-logging.md`,
 `docs/power-logging-flip-plan-2026-06-18.md` (D-PWRLOG-1),
-`docs/feat-0020-power-logging-implementation-plan-2026-06-18.md`
+`docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`
 
 This records the live-runtime measurement (`M`) evidence captured when the
 FEAT-0020 standard power-logging profile was deployed and enabled on the live

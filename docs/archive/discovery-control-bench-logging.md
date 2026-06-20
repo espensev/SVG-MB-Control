@@ -4,7 +4,7 @@
 **Date:** 2026-05-16
 **Status:** complete; superseded by later evidence-log and analyzer work
 **Recommended next:** use `docs\RUNTIME_LOGGING_AND_EVALUATION.md` and
-`docs\LOGGING_IMPROVEMENT_PLAN.md` for current workflow. The read-only
+`docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md` for current workflow. The read-only
 `evidence-log` plane, richer GPU/SIO/fan fields, decision records, and event
 classification are implemented.
 
