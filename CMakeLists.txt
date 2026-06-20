@@ -352,6 +352,8 @@ if(BUILD_TESTING)
         tests/cpp/machine_profile_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_machine_identity_tests
         tests/cpp/machine_identity_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_runtime_lifecycle_tests
+        tests/cpp/runtime_lifecycle_tests.cpp)
 
     # rapl_energy.h is header-only and dependency-free, so this test does not
     # link svg_mb_control_core (keeps it fast and isolated like the math it covers).

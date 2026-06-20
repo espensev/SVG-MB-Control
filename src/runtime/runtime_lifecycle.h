@@ -13,6 +13,15 @@ struct RuntimeBreakerResetRequest {
     std::string parse_error;
 };
 
+// FEAT-0023: take-once operator request to switch the active profile, consumed
+// by the supervisor (not the tick runner) because the switch is delivered by
+// restarting the worker. Modeled on the breaker-reset request.
+struct RuntimeProfileSwitchRequest {
+    std::string profile_name;
+    std::string requested_at;
+    std::string parse_error;
+};
+
 std::filesystem::path RuntimeStopRequestPath(
     const std::filesystem::path& runtime_home);
 
@@ -33,6 +42,23 @@ std::optional<RuntimeBreakerResetRequest> TakeRuntimeBreakerResetRequest(
 void ClearRuntimeStopRequest(const std::filesystem::path& runtime_home);
 
 void ClearRuntimeBreakerResetRequest(
+    const std::filesystem::path& runtime_home);
+
+std::filesystem::path RuntimeProfileSwitchRequestPath(
+    const std::filesystem::path& runtime_home);
+
+// Writes a take-once profile-switch request naming the target profile. Returns
+// false (and writes nothing) when profile_name is empty.
+bool RequestRuntimeProfileSwitch(const std::filesystem::path& runtime_home,
+                                 const std::string& profile_name);
+
+// Reads, validates, and clears the profile-switch request in one call. Returns
+// std::nullopt when no request file exists. A present-but-malformed request
+// returns a value whose parse_error is non-empty.
+std::optional<RuntimeProfileSwitchRequest> TakeRuntimeProfileSwitchRequest(
+    const std::filesystem::path& runtime_home);
+
+void ClearRuntimeProfileSwitchRequest(
     const std::filesystem::path& runtime_home);
 
 }  // namespace svg_mb_control
