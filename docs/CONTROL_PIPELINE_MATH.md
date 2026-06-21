@@ -18,6 +18,16 @@ This document is normative for the **computation**, not for the lifecycle
 `CONTROL_LOOP.md`. Section anchors call out the source line that implements
 each equation so this can be diffed against future changes.
 
+**Law scope (FEAT-0003).** This reference describes the **curve/overlay control
+law** (`CurveOverlayController`, the default and only law for an unchanged
+config), whose computation is `EvaluateChannel`. The per-channel
+`IChannelController` seam can also select a **PID law** (`PidController`); its
+identity — error, P/I/D terms, derivative-on-measurement sign, anti-windup,
+feed-forward, and the shared output conditioning — lives in the sibling reference
+`docs/CONTROL_PID_MATH.md`. Both laws share the primary-temperature selection
+(`SelectPrimaryCurveInput`), the `[min_duty, 100]` clamp, and the
+`RateLimitSetpoint` safety slew cap documented here.
+
 Keep this file in lock-step with source, shipped config, and runtime traces.
 Any change to curve lookup, smoothing, boost composition, low-band behavior,
 cadence scoring, CSV/status control fields, or channel response attribution

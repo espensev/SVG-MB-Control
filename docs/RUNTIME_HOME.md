@@ -185,6 +185,14 @@ Each controlled-channel entry includes:
 - `consecutive_write_failures`
 - `consecutive_sidecar_persist_failures`
 - `baseline_captured`
+- `controller_kind` (FEAT-0003: `"curve_overlay"` or `"pid"`, the per-channel
+  control law)
+- `pid_error_c`, `pid_p_term`, `pid_i_term`, `pid_d_term`,
+  `pid_setpoint_raw_pct` (FEAT-0003 PID evidence; JSON `null` for a curve channel,
+  numeric for a PID channel). The control-loop CSV carries the same fields as
+  `channel<N>_controller_kind` and `channel<N>_pid_*` (blank cell for a curve
+  channel); both are additive and bind by column name, so the control-loop status
+  schema version is unchanged.
 
 A nonzero `consecutive_sidecar_persist_failures` degrades the runtime health
 state (it counts toward `DegradedChannelCount`). It records consecutive failures

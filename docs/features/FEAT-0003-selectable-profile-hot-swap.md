@@ -1,7 +1,7 @@
 # FEAT-0003: Restart-selected control-law profile seam
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.3   **Updated:** 2026-06-21
+**Status:** Implemented   **Version:** 0.4   **Updated:** 2026-06-21
 **Namespace:** `REQ-PROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/CONTROL_LOOP.md`,
 `docs/CONTROL_PIPELINE_MATH.md`, `docs/WRITE_ORCHESTRATION.md`,
@@ -153,14 +153,21 @@ Proposed behavior (not yet implemented).
   bound; curve EMA smoothing and decay-latch behavior stay curve-law-specific.
 - **Measurement-gate path for PID.** PID is shadow/dry-run by default: it
   computes and logs a setpoint but does not write for that channel. A live PID
-  write requires explicit per-channel `pid.allow_live: true` and is rejected at
-  config load unless both the characterization evidence exists (a shadow-log
-  comparison against the curve baseline is accepted) and the channel sets a
-  positive non-NaN slew cap. A live PID channel still uses the shared safety
-  floor.
+  write requires explicit per-channel `pid.allow_live: true`; an `allow_live`
+  that lacks either the characterization evidence (a shadow-log comparison
+  against the curve baseline is accepted) or a positive non-NaN slew cap is
+  **downgraded to shadow/dry-run at controller construction** — the channel runs
+  shadow rather than failing the worker, so one mis-evidenced channel cannot stop
+  the rest. Malformed PID config (missing `target_c`, invalid gains, fixed
+  feed-forward without `fixed_feedforward_pct`, `integral_min >= integral_max`)
+  still fails config load. A live PID channel uses the shared safety floor, and
+  the slew cap is enforced per tick by the shared `RateLimitSetpoint`.
 - **Observability.** Runtime status and the standard control-loop CSV record the
   controller kind per channel. Law-specific fields are kind-aware or nullable so
-  curve-only values are not published as meaningful PID values.
+  curve-only values are not published as meaningful PID values. An unknown or
+  misspelled `controller` key is ignored and the channel runs the default curve
+  law (fail-safe: a typo never yields an unguarded live PID), consistent with the
+  loader's permissive unknown-key handling elsewhere.
 
 ## 6. Requirements  *(promotion gate 4)*
 
@@ -172,7 +179,7 @@ Proposed behavior (not yet implemented).
 | REQ-PROFILE-04 | A control-law change must be restart-selected through FEAT-0023 profile resolution: the worker loads the selected law at startup, and a different law requires the FEAT-0023 supervisor restart switch. This feature must not add an in-process tick-boundary law-swap request or partial live state swap. |
 | REQ-PROFILE-05 | Controller dynamic state must be owned by the controller and scoped to one worker lifetime. Worker startup/restart must initialize fresh controller state; no curve smoothing/boost state or PID integral/derivative state may carry across a FEAT-0023 profile switch. |
 | REQ-PROFILE-06 | Shared output conditioning (clamp to `[min_duty_pct, 100]`, sensor-safe mode, deadband, write cooldown, control-hold, circuit breaker, baseline capture/restore, write gate, and safety slew cap) must apply identically regardless of controller kind. |
-| REQ-PROFILE-07 | Switching a writing channel to a control-law kind not in the characterized baseline crosses `docs/MEASUREMENT_GATE.md`. PID must be available first in a non-writing shadow/dry-run path that computes and logs but does not write. A live PID write must require the explicit per-channel `pid.allow_live` opt-in and must be rejected at config load unless both characterization evidence exists and the channel sets a positive non-NaN slew cap. |
+| REQ-PROFILE-07 | Switching a writing channel to a control-law kind not in the characterized baseline crosses `docs/MEASUREMENT_GATE.md`. PID must be available first in a non-writing shadow/dry-run path that computes and logs but does not write. A live PID write must require the explicit per-channel `pid.allow_live` opt-in; an `allow_live` that lacks either the characterization evidence or a positive non-NaN slew cap must be downgraded to shadow/dry-run at controller construction (the channel runs shadow, it does not fail the worker), and the slew cap must be enforced per tick. Malformed PID config fails config load. |
 | REQ-PROFILE-08 | The active control-law kind per channel must be recorded in runtime status and CSV as additive fields. Law-specific reporting fields must be kind-aware or nullable; curve-only values such as `feedforward_pct` / `last_raw_demand_pct` must not be published as if they were meaningful for PID channels. |
 | REQ-PROFILE-09 | FEAT-0003 must not add channel-set switching semantics. Channel add/remove/reorder validation remains owned by the resolved machine profile and FEAT-0023; this seam assumes a valid channel set and only selects the law and parameters for each channel loaded in that worker. |
 | REQ-PROFILE-10 | Introducing and maintaining the controllers must keep the control-identity docs current: `docs/CONTROL_PIPELINE_MATH.md` scoped to the curve/overlay law, and a sibling identity reference for the PID law before implementation handoff. |
@@ -245,8 +252,9 @@ Verify legend:
 - **Measurement gate:** the default `curve_overlay` law must reproduce the
   shipped behavior and does not move the baseline. A writing PID channel is new
   live control behavior and crosses `docs/MEASUREMENT_GATE.md`; PID starts in
-  shadow/dry-run and `pid.allow_live` is rejected unless characterization
-  evidence and a positive non-NaN slew cap are present.
+  shadow/dry-run and `pid.allow_live` is downgraded to shadow at controller
+  construction unless characterization evidence and a positive non-NaN slew cap
+  are present.
 - **Depends on:** FEAT-0023 for profile catalog, startup profile resolution, and
   restart-based profile switching. FEAT-0003 should be implemented only after
   FEAT-0023's default-profile and switch behavior are validated.
@@ -275,17 +283,31 @@ Verify legend:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-PROFILE-01 | | | |
-| REQ-PROFILE-02 | | | |
-| REQ-PROFILE-03 | | | |
-| REQ-PROFILE-04 | | | |
-| REQ-PROFILE-05 | | | |
-| REQ-PROFILE-06 | | | |
-| REQ-PROFILE-07 | | | |
-| REQ-PROFILE-08 | | | |
-| REQ-PROFILE-09 | | | |
-| REQ-PROFILE-10 | | | |
+| REQ-PROFILE-01 | pass | `IChannelController` seam; single call site `tick_runner.cpp` `controllers[i]->Evaluate`; `CurveOverlayController` forwards to `EvaluateChannel`. Forward-equivalence test (`channel_controller_tests`) + 31/31 `test_control_loop.py` through the new dispatch unchanged. Commit `2fec980`. | 2026-06-21 |
+| REQ-PROFILE-02 | pass | One `PidController` covers P/PI/PD/PID by gain selection. `pid_controller_tests`: pure-P, integral accumulation, derivative sign, derivative-on-measurement no-kick, anti-windup freeze, integral clamp. Commit `9f4b79d`. | 2026-06-21 |
+| REQ-PROFILE-03 | pass | `controller` discriminator + nested `pid` parsed in `LoadChannelConfig`; absent key defaults to `curve_overlay`; malformed pid + unknown controller/feedforward throw at load. `control_loop_config_tests` (10 cases). Commit `31a5e6d`. | 2026-06-21 |
+| REQ-PROFILE-04 | pass (R) | Restart-selected: the law is built once in `CreateChannelController` at worker construction; the tick runner consumes no FEAT-0003 request and has no tick-boundary law-swap path. FEAT-0023 owns the supervised restart switch (`test_profile_switch.py`). | 2026-06-21 |
+| REQ-PROFILE-05 | partial | Functional pass: `PidController` owns its `PidState`; all controller state is created with the worker and discarded on exit, and a FEAT-0023 switch restarts into fresh instances (`Reset()` + ctor). Architectural decouple of the curve law's state out of `ChannelState` is a **deliberate deferred partial** under the restart-selected scope (decision D2 2026-06-21 note); no behavioral consequence. | 2026-06-21 |
+| REQ-PROFILE-06 | pass | Shared output conditioning is law-agnostic: PID reuses the hoisted `SelectPrimaryCurveInput` + `RateLimitSetpoint`, applies the same `[min_duty,100]` clamp, shares the `channel_write.cpp` write path (deadband/cooldown/baseline/breaker), and reuses sensor-safe mode (`pid_controller_tests` safe-mode case). Commit `9f4b79d`. | 2026-06-21 |
+| REQ-PROFILE-07 | pass (T,R); M deferred | Shadow/dry-run default + decision-D6 gate. `pid_controller_tests` `PidLiveAuthorized` cases (allow_live/slew/artifact); `test_control_loop.py` pid-shadow e2e: `total_writes=0` after 25+ ticks at 75 °C, `pid_shadow` startup event. Write-path `write_suppressed` early-return before any actuation. **Live PID write on hardware (M) deferred** behind the evidenced `allow_live` opt-in, like FEAT-0023's live M. Commits `9f4b79d`, `490f7f0`. | 2026-06-21 |
+| REQ-PROFILE-08 | pass | Additive `controller_kind` + `pid_error_c/p/i/d_term/setpoint_raw_pct` in CSV (table-driven, append-only, bind-by-name) and JSON status (kind-aware: `null` for curve). `controller_kind` set from `IChannelController::Kind()` (single source of truth). pid-shadow e2e asserts `controller_kind=pid`, blanked `feedforward_pct`. Commit `490f7f0`. | 2026-06-21 |
+| REQ-PROFILE-09 | pass (R) | `CreateChannelController` only selects the law for an already-resolved channel; FEAT-0003 adds no channel add/remove/reorder. Channel-set validation stays in FEAT-0023. | 2026-06-21 |
+| REQ-PROFILE-10 | pass (R) | `docs/CONTROL_PIPELINE_MATH.md` scoped to the curve/overlay law with a law-scope note; new sibling `docs/CONTROL_PID_MATH.md` carries the PID identity (signed terms, anti-windup, gate). | 2026-06-21 |
 
-**Spec vs. implementation deltas:** <record anything built differently from this
-spec, and why. If behavior changed, update section 5/6, refresh the cited
-contract docs per `AGENTS.md` Change Checklist, and bump **Updated**.>
+**Spec vs. implementation deltas:**
+
+- **REQ-PROFILE-05 — full state decouple deferred (deliberate).** The curve law is
+  forward-wrapped (`CurveOverlayController::Evaluate` → `EvaluateChannel`), so its
+  dynamic state stays on `ChannelState` rather than moving into the controller.
+  REQ-PROFILE-05 is met functionally (worker-lifetime scope, fresh state per
+  restart); the architectural decouple is a recorded partial (decision doc D2
+  note, 2026-06-21). No behavioral consequence under the restart-selected scope.
+- **Derivative sign.** Implemented as `+Kd·d(temp)/dt` (positive), correct for this
+  feature's `error = temp − target_c` convention; the decision doc's textbook
+  `−Kd·d(temp)/dt` (for `error = setpoint − measurement`) is reconciled in the D3b
+  note and `docs/CONTROL_PID_MATH.md`.
+- **allow_live = downgrade, not throw.** An unevidenced `pid.allow_live: true` is
+  downgraded to shadow at controller construction (per D6's "stays in
+  shadow/dry-run"), not a config-load failure; only malformed pid config throws.
+  Config load gained a `controller`/`pid` parse + malformed-pid validation
+  (section 5/7 unchanged in intent).

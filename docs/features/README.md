@@ -88,16 +88,19 @@ The two latency held-Drafts also owe gate decisions and live in
 lanes/target-ceiling decision plus a response-evaluation Pass-3, and **FEAT-0018**
 owes the floor characterization pass (it crosses `docs/MEASUREMENT_GATE.md`).
 
-**Authorized, not yet started — `Accepted` 2026-06-21:** **FEAT-0003** —
+**`Implemented` 2026-06-21 (live PID write deferred):** **FEAT-0003** —
 restart-selected control-law profile seam (PID / P / PI / PD plus the current
-curve law). Implementation is authorized but has not started (no controller code
-in `src/`; spec §14 verification log is empty). Promoted
-Draft→Accepted now that FEAT-0023 (the catalog/restart switch it sequences after)
-is Implemented + validated. Build scope: the `IChannelController` seam +
-`CurveOverlayController` (output-identical) + `PidController` (shadow/dry-run by
-default) + per-channel config dispatch + the measurement-gate preconditions; the
-live PID write on hardware is deferred behind `pid.allow_live` + characterization
-evidence + a positive non-NaN slew cap.
+curve law). Built across slices F3-1..F3-5: the `IChannelController` seam +
+`CurveOverlayController` (output-identical, forward-wrap) + `PidController`
+(shadow/dry-run by default) + per-channel `controller`/`pid` config dispatch +
+the decision-D6 measurement-gate gate (downgrade-to-shadow) + kind-aware CSV/
+status reporting. Hardened per a 5-lens adversarial review (slew-cap bypass,
+NaN-integral guard, kind-aware status nulls). Spec §14 + `TRACEABILITY.md` filled;
+PID identity in `docs/CONTROL_PID_MATH.md`. The **live PID write on hardware**
+(REQ-PROFILE-07 M) is deferred behind `pid.allow_live` + a characterization
+artifact + a positive non-NaN slew cap, like FEAT-0023's live M. REQ-PROFILE-05
+is a deliberate functional-pass partial (curve state stays on `ChannelState`
+under the restart-selected scope).
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
@@ -216,7 +219,7 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 |---|---|---|---|
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
-| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Accepted (2026-06-21; implementation-authorized, not yet started — seam/curve-overlay/PID-shadow/dispatch/gate-preconditions; live PID write deferred) |
+| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Implemented (2026-06-21; seam + curve-overlay + PID shadow/dry-run + config dispatch + D6 gate + kind-aware reporting; REQ-PROFILE-05 partial; live PID write M deferred) |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |

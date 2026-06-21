@@ -65,6 +65,15 @@ Optional channel overrides:
 - `curve_shape`: `linear` or `smootherstep`
 - `rise_rate_pct_per_min`
 - `fall_rate_pct_per_min`
+- `controller`: optional control-law selector (FEAT-0003), `curve_overlay`
+  (default) or `pid`. Restart-selected and fixed for the worker lifetime; an
+  absent key keeps the curve law, so existing configs are unchanged.
+- `pid`: PID parameters, consulted only when `controller` is `pid` — `target_c`,
+  `kp`/`ki`/`kd`, `feedforward` (`curve`|`fixed`) with `fixed_feedforward_pct`,
+  optional `integral_min`/`integral_max`, `allow_live` (default `false`), and
+  `characterization_artifact`. PID is shadow/dry-run (computes + logs, does not
+  write) unless `allow_live` is set with a positive slew cap and an existing
+  characterization artifact (decision D6). See `docs/CONTROL_PID_MATH.md`.
 - `cpu_override_curve`: optional CPU/Tctl curve evaluated separately from
   `temp_blend`; the loop commands the higher duty from `curve` and
   `cpu_override_curve`

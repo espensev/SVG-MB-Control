@@ -115,6 +115,23 @@ curve state. Cost: the larger first change must reproduce today's
 output-equivalence test over representative inputs is the gate that this move did
 not alter the curve law.
 
+**Scope override (2026-06-21, implementation): full decouple deferred; REQ-05 met
+functionally by worker-lifetime scope.** The restart-selected scope (D-MPROFILE-6)
+makes the in-one-pass decouple optional, not required. As built, the curve law is
+forward-wrapped — `CurveOverlayController::Evaluate` forwards to the unchanged
+`EvaluateChannel`, so the curve law's dynamic state (`boosts[]`,
+`smoothed_demand_pct`, `low_band_*`) **stays on `ChannelState`** rather than moving
+into `CurveOverlayController`. `PidController` does own its integral/derivative
+state (`PidState`), so the new law has no slot in `ChannelState`. REQ-PROFILE-05
+is therefore satisfied **functionally** — every controller's dynamic state is
+created with the worker and discarded on worker exit, and a FEAT-0023 profile
+switch restarts the worker into fresh instances, so no PID or curve state carries
+across a switch — while the **architectural** decouple of curve state out of
+`ChannelState` is a recorded deferred partial (no behavioral consequence under the
+restart-selected scope; revisit only if an in-process same-law re-init is ever
+needed). This trades the larger, riskier first change for the output-identical
+forward-wrap that REQ-PROFILE-01 already guards.
+
 ## D3 — PID structure
 
 PID covers P, PI, PD, and PID with one class by gain selection: a zero gain
@@ -136,6 +153,19 @@ Sub-decision D3a is selected below; D3b and D3c carry recorded leans:
   derivative-on-measurement (`−Kd·d(temp)/dt`). Derivative-on-measurement avoids
   a setpoint-change "derivative kick" when `target_c` is swapped live, which this
   feature can do. Lean: **derivative-on-measurement.**
+
+  **Sign reconciliation (2026-06-21, implementation).** The `−Kd·d(temp)/dt`
+  written above is the textbook form for the convention `error = setpoint −
+  measurement`. This feature uses the opposite, cooling-native convention
+  `error = temp − target_c` (a hotter-than-target channel must drive *more*
+  duty), under which the same derivative-on-measurement term is **`+Kd·d(temp)/dt`
+  with `Kd ≥ 0`**: a rising temperature *raises* duty (anticipatory cooling) and
+  a live `target_c` change still produces no derivative kick. The implemented
+  `PidStep` (`src/control/pid_controller.cpp`) uses the positive sign, pinned by a
+  behavioral test (`tests/cpp/pid_controller_tests.cpp`
+  `TestDerivativeSignRaisesDutyOnRisingTemp`). The negative sign would invert the
+  derivative and fight the proportional term during a thermal spike. The PID
+  identity reference `docs/CONTROL_PID_MATH.md` carries the full signed form.
 - **D3c — integral anti-windup.** Clamp the integral accumulator to
   `[integral_min, integral_max]` and stop integrating while the output is
   saturated at `min_duty_pct` or `100`. Lean: **clamp + conditional integration
@@ -189,9 +219,19 @@ write only when **both** hold: (a) the channel has the characterization evidence
 `docs/MEASUREMENT_GATE.md` requires — a shadow-log comparison of the PID trajectory
 against the curve baseline for that channel is accepted as that evidence; and
 (b) the channel sets a non-NaN, positive slew cap (`max_setpoint_step_pct` and/or
-the rise/fall rate fields). Both are enforced as a config-load precondition: with
-either missing, `allow_live: true` is rejected at load and the channel stays in
-shadow/dry-run.
+the rise/fall rate fields). With either missing, `allow_live: true` does not
+authorize a live write and the channel stays in shadow/dry-run.
+
+**Enforcement point (2026-06-21, implementation).** The gate is evaluated at
+**controller construction** (`PidLiveAuthorized`, `src/control/pid_controller.cpp`),
+not as a config-load throw: an unevidenced `allow_live` is **downgraded** to
+shadow/dry-run so one mis-evidenced channel cannot stop the whole worker, and the
+worker emits `control_loop.pid_shadow` (with the reason) / `control_loop.profile_applied`
+at startup. Only *malformed* PID config (missing `target_c`, invalid gains, fixed
+feed-forward without `fixed_feedforward_pct`, `integral_min >= integral_max`) fails
+config load (`ValidateChannelConfig`). The slew cap is itself enforced per tick by
+the shared `RateLimitSetpoint`, which honors `max_setpoint_step_pct` independently
+of the rise/fall rates so a step-cap-only live PID is still bounded.
 
 A live `allow_live` crossing must still emit a `control_loop.profile_applied` event
 naming the channel and the law, so the baseline move is recorded as well as
