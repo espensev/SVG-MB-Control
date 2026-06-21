@@ -49,13 +49,16 @@ a feature's status or the decision queue changes. A fuller standing review is
 
 **Recently implemented (continued):**
 
-- **FEAT-0023** (`Implemented` 2026-06-21, slices 1-7; commits
-  `0952e3d`/`1195d84`/`9a78a11`) — machine profiles + restart-based profile
-  switch. Startup resolution (`--profile`/`SVG_MB_PROFILE`/machine-id/default,
-  `config/profiles/<name>.json`) + the live switch (`--set-profile`; supervisor
-  validates, gracefully cycles the worker accepting the BIOS-auto gap, no-backoff
-  respawn, auto-revert). Named partials in §14: machine-base/overlay composition,
-  control-loop CSV active-profile column, revert-integration + live M.
+- **FEAT-0023** (`Implemented` 2026-06-21; commits
+  `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`) — machine profiles
+  + restart-based profile switch. Startup resolution
+  (`--profile`/`SVG_MB_PROFILE`/machine-id/default, `config/profiles/<name>.json`)
+  + the live switch (`--set-profile`; supervisor validates, gracefully cycles the
+  worker accepting the BIOS-auto gap, no-backoff respawn, auto-revert) +
+  machine-base/overlay composition (`ComposeConfigRoot`; ships
+  `config/overlays/release.behavior.json` + `config/profiles/snd-desk-composed.json`,
+  proven to reproduce `control.release.json`) + active-profile CSV/status fields +
+  a revert integration test. Only the on-hardware live M (REQ-10) is deferred.
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
@@ -223,4 +226,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M pending) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
-| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay catalog + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap) | `REQ-MPROFILE-*` | Implemented (2026-06-21; core feature, slices 1-7; composition/CSV-column/revert-integration/live-M partial-or-pending) |
+| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; on-hardware live M deferred) |
