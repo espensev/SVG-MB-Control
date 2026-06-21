@@ -275,7 +275,15 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
   capture must show the sweeper does not degrade the shipped 250 ms profile —
   `loop_work_duration_ms` / `loop_achieved_interval_ms` p99/max and the overrun
   count unchanged, measured at matched GPU-idle and under all-core load (the
-  FEAT-0020 gate-6 analog for the new thread).
+  FEAT-0020 gate-6 analog for the new thread). Tooling:
+  `scripts/score_loop_timing_gate.py` scores this gate — it compares
+  `loop_work_duration_ms` baseline-vs-candidate, bucketed by GPU load to control
+  the documented environmental-spike confound, with **p99-of-bulk** as the
+  discriminator (max / overrun count are context, so a single environmental
+  stall never fails the gate). The verdict is provisional until the tolerance is
+  calibrated against the off-vs-off variance of two cycles-OFF captures (measured
+  ~0.03 ms p99-bulk drift on 2026-06-21 idle-bucket captures — see the script's
+  header).
 - **Depends on:** FEAT-0002 (whole-system busy time is the time-normalization
   context); the PawnIO transport (`src/hardware/amd_reader.cpp`) and its
   availability signal (FEAT-0004, recommended operational context, not a build
