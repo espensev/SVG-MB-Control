@@ -5,8 +5,8 @@
 > off-control-thread sweep) is now implemented and merged — PR #25 (off-thread
 > sweeper + analyze schema v13) and PR #26 (the section-12 loop-timing gate
 > harness `scripts/score_loop_timing_gate.py`). What remains of Step A is the
-> on-hardware capture itself (deploy, enable cycles, run the gate); Step B (the
-> Vcore SVI probe) is unchanged.
+> on-hardware capture itself (deploy, enable cycles, confirm the all-core columns,
+> run the off-thread sweeper gate); Step B (the Vcore SVI probe) is unchanged.
 
 Two enabling steps for the CPU config fingerprint in
 `docs/idle-cpu-temp-trend-and-enrichment-2026-06-20.md` ("CPU-side telemetry"):
@@ -61,29 +61,33 @@ is required for a one-shot capture.
 - `cpu_aperf_delta` / `cpu_mperf_delta` populate on the ~1 s cadence windows
   (intervening 250 ms ticks mirror the last window; the analyzer de-dups on
   `cpu_cycles_sample_id`).
+- `cpu_aperf_delta_allcore` / `cpu_mperf_delta_allcore` populate from the
+  off-thread sweeper, with `cpu_cycles_contributing_cores` showing the package
+  roll-up contribution count.
 - `cpu_pkg_energy_delta_uj` populates (energy on too).
 
-### Hot-path gate (cycles adds a per-tick cost energy did not)
+### Hot-path gate (all-core sweeper still needs M-evidence)
 
 Energy logging passed gate-6 (per-tick NVML/RAPL read did not move the 250 ms
-baseline). Cycles is different: `SampleCpuCycles` pins the control thread to
-logical CPU 0 for the paired MSR reads once per ~1 s window. That affinity pin is
-on the control thread, so before trusting a cycles-on session — and **before** any
-consideration of leaving cycles on persistently — confirm it does not move the
-loop budget:
+baseline). The merged all-core cycle path moved APERF/MPERF sampling to a
+dedicated off-control-thread sweeper, so the old core-0 control-thread pin is no
+longer the promoted shape. Before trusting an enabled-live all-core cycles session
+or considering persistent cycles-on, confirm the sweeper does not move the loop
+budget:
 
 - Compare `loop_work_duration_ms` p50/p99/max and `loop_overrun` count between the
   disabled baseline segment (the script captures one first) and the cycles-on
-  segment, at matched GPU-idle state.
-- Pass = no rise in overruns and no material p99/max shift attributable to the
-  ~1 s cycle window. If it does move the baseline, the all-core/off-control-thread
-  redesign (below) is required before cycles is usable beyond a one-shot capture.
+  segment, at matched GPU-idle state. Use `scripts/score_loop_timing_gate.py` for
+  the section-12 gate.
+- Pass = no rise in overruns and no material p99-of-bulk shift attributable to
+  the all-core sweeper; max spikes remain context, not the primary discriminator.
 
 ### First-look analysis (does the data show the -25?)
 
 - Effective frequency: native report `svg-mb-control analyze report --p0-mhz 4300`
-  (the v10 cycles block: cycle-weighted sum(dAPERF)/sum(dMPERF) x P0, per-window
-  p50/p90/max). Package watts + theta per band: `scripts/analyze_cpu_temp_power.py`.
+  (schema v13 uses the all-core package block when `cpu_*_allcore` columns are
+  present; the legacy v10 per-core block remains a fallback). Package watts +
+  theta per band: `scripts/analyze_cpu_temp_power.py`.
 - First look = eff-MHz and package watts within this one session's idle vs load
   bands; sanity vs the pre-change sessions 1-3 (idle ratio ~1.23, load ~1.19).
 - The actual undervolt signal is **eff-MHz binned by (system_cpu_busy_pct, package
@@ -119,23 +123,22 @@ Ran `Capture-EnergySession.ps1 -IdleSeconds 120 -LoadSeconds 360 -CooldownSecond
 
 ### Scope caveat + follow-on
 
-The cycle read pins **core 0 only**, so the ratio is one core's V/F point, not the
-package, on an asymmetric dual-CCD part (core 0 likely enumerates onto the cooler
-V-cache CCD1). For detecting the -25 a single-core eff-MHz-at-watts step is still
-usable; a true **package** eff-MHz and an uncontaminated cycles/Joule need a new
-all-core aggregation (sum dAPERF/dMPERF across one logical core per physical),
-ideally on a dedicated off-control-thread sweep so affinity hopping never touches
-the 250 ms loop. That is a separate build item, not part of this capture.
+This run predates the merged all-core package roll-up and does not complete the
+current Step A. The historical cycle read pins **core 0 only**, so that ratio is
+one core's V/F point, not the package, on an asymmetric dual-CCD part (core 0
+likely enumerates onto the cooler V-cache CCD1). The remaining Step A capture
+should use the merged off-thread sweeper, confirm the package columns, and clear
+the section-12 gate before any promotion decision.
 
 ### Persistent cycles-on (future, optional)
 
 `scripts/Set-EnergyLoggingProfile.ps1` is the steady-state profile flip and
 currently forces `SVG_MB_CONTROL_CPU_CYCLES_MODE='disabled'` in both directions.
 Leaving cycles on continuously (so the fingerprint runs without a manual capture)
-would add a `-WithCycles` switch there **and** requires the hot-path gate above to
-pass on a sustained run plus a recorded decision (mirroring D-PWRLOG-1 for energy).
-Not needed for the one-shot capture; do it only if continuous fingerprinting is
-wanted.
+would add a `-WithCycles` switch there **and** requires the off-thread sweeper
+gate above to pass on a sustained run plus a recorded decision (mirroring
+D-PWRLOG-1 for energy). Not needed for the one-shot capture; do it only if
+continuous fingerprinting is wanted.
 
 ## B. Vcore SVI discovery probe (#3 — written, compiles)
 

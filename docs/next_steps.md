@@ -359,8 +359,8 @@ Current state:
   resolved `cpu-cycle-counter-source-decision` into
   `cpu-work-energy-acquisition-decision`, and then decide whether the older
   feasibility/results pair should stay as separate evidence records. Preserve
-  the live forward-gates: quarantine-exit Evaluation, remaining cycle path, and
-  the open 400 W ceiling.
+  the live forward-gates: quarantine-exit Evaluation, off-thread sweeper
+  M-evidence/promotion, and the open 400 W ceiling.
 - **Keep as-is** (load-bearing or open work): `adaptive-cadence-design`
   (CONTROL_LOOP), `discovery-polling-logging-state` + `discovery-steady-response-control`
   (MEASUREMENT_GATE), `discovery-control-math-performance`
@@ -401,7 +401,8 @@ The earlier list contained seven items. Verified against the repo:
   `Test-LocalCI.ps1` already invokes `Build-Release.ps1 -NoStopProcesses
   -NoPublish` and is documented as running without stopping a live controller.
 - **Promote FEAT-0006 Draft → Accepted** — stale. FEAT-0006 is already
-  `Accepted` (v0.4, 2026-06-07). The real work is the downstream items above.
+  `Accepted` (v0.7, 2026-06-21). The real work is the evidence/promotion items
+  above.
 - **Validate cadence via `Test-LocalCI.ps1` against fresh runtime CSV** — wrong
   tool. The intent is correct (see "Require fresh runtime evidence" above), but
   `Test-LocalCI.ps1` produces no runtime CSV; use the analyze workflow / the
