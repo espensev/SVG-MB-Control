@@ -98,11 +98,15 @@ curve law). Built across slices F3-1..F3-5: the `IChannelController` seam +
 the decision-D6 measurement-gate gate (downgrade-to-shadow) + kind-aware CSV/
 status reporting. Hardened per a 5-lens adversarial review (slew-cap bypass,
 NaN-integral guard, kind-aware status nulls). Spec §14 + `TRACEABILITY.md` filled;
-PID identity in `docs/CONTROL_PID_MATH.md`. The **live PID write on hardware**
-(REQ-PROFILE-07 M) is deferred behind `pid.allow_live` + a characterization
-artifact + a positive non-NaN slew cap, like FEAT-0023's live M. REQ-PROFILE-05
-is a deliberate functional-pass partial (curve state stays on `ChannelState`
-under the restart-selected scope).
+PID identity in `docs/CONTROL_PID_MATH.md`. The first shadow-replay
+characterization artifact is
+`docs/pid-shadow-characterization-2026-06-21.md`; it rejects all-channel live PID
+and leaves only a channel-0-only experiment as a possible future operator-gated
+pass. The **live PID write on hardware** (REQ-PROFILE-07 M) remains deferred
+behind `pid.allow_live` + a persisted characterization artifact + a positive
+non-NaN slew cap, like FEAT-0023's live M. REQ-PROFILE-05 is a deliberate
+functional-pass partial (curve state stays on `ChannelState` under the
+restart-selected scope).
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —

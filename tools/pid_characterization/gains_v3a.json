@@ -1,0 +1,3 @@
+{
+  "0": {"target_c": 72, "kp": 0.3, "ki": 0.01, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200}
+}

@@ -415,6 +415,12 @@ Tune that model from data first:
 - Keep off-floor rise behavior intact unless a measured run proves it is too
   abrupt or too noisy.
 
+PID status, 2026-06-21: FEAT-0003's seam and shadow/dry-run PID are implemented,
+but the first real-archive replay (`docs/pid-shadow-characterization-2026-06-21.md`)
+rejects all-channel live PID. A future live PID pass, if explicitly authorized,
+should be channel-0-only first and must keep the existing `pid.allow_live` +
+characterization-artifact + positive-slew-cap gate.
+
 `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` records the rationale, hardware basis,
 and re-validation procedure for the adopted low-load airflow policy in
 `config\control.release.json`, including the dynamic low/medium intake curves.
