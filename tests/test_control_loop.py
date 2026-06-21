@@ -176,6 +176,11 @@ class ControlLoopTests(WindowsExeTestCase):
                 self.assertEqual(channel_status["controller_kind"], "pid")
                 self.assertEqual(channel_status["last_response_source"], "pid")
                 self.assertIsNotNone(channel_status["pid_error_c"])
+                # REQ-PROFILE-08: curve-only telemetry is null for a PID channel,
+                # not published as a meaningful 0.0.
+                self.assertIsNone(channel_status["last_raw_demand_pct"])
+                self.assertIsNone(channel_status["last_smoothed_demand_pct"])
+                self.assertIsNone(channel_status["last_thermal_pressure_boost_pct"])
                 # Shadow/dry-run (REQ-PROFILE-07): the PID computed a setpoint, but
                 # the channel never actuated -- no writes despite 25+ ticks at 75C.
                 self.assertEqual(channel_status["total_writes"], 0)

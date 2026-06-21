@@ -70,11 +70,13 @@ PrimaryCurveInput SelectPrimaryCurveInput(const TempInputs& inputs,
                                           const ChannelControlConfig& config);
 PrimaryCurveInput SelectLegacyMaxInput(const TempInputs& inputs, bool guarded);
 
-// Safety slew clamp on a freshly computed setpoint: bounds the per-tick change
-// by the rise/fall rate (percent per minute, scaled by elapsed) and the absolute
-// max_setpoint_step_pct. A NaN last_pct (no prior write) or a NaN/<=0 rate means
-// no limit. Shared by both laws (decision D4: a mis-tuned PID must not be able to
-// step the duty arbitrarily fast).
+// Safety slew clamp on a freshly computed setpoint: bounds the per-tick change by
+// two INDEPENDENT limits -- the rise/fall rate (percent per minute, scaled by
+// elapsed) and the absolute max_setpoint_step_pct -- and the tighter one wins. A
+// NaN last_pct (no prior write) means no limit; otherwise the step cap still
+// applies even when the directional rate is NaN/<=0 (and vice versa). Only when
+// neither bound is set is the move unlimited. Shared by both laws (decision D4: a
+// mis-tuned PID must not be able to step the duty arbitrarily fast).
 double RateLimitSetpoint(double desired_pct, double last_pct,
                          std::uint64_t elapsed_ms,
                          double rise_rate_pct_per_min,

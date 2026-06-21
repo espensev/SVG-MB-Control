@@ -88,13 +88,23 @@ void ReportStatusPublishResult(const std::filesystem::path& runtime_home,
 }
 
 nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
+    // FEAT-0003 (REQ-PROFILE-08): curve-only telemetry (feedforward / smoothing,
+    // the boost overlays, and low-band) is not meaningful for a PID channel -- the
+    // PID law never updates those ChannelState fields, so they sit at 0.0/NaN.
+    // Publish them as JSON null for a PID channel so a curve-only quantity is never
+    // reported as if it were a real value (the CSV already blanks them).
+    const bool is_pid = channel.controller_kind == "pid";
+    const auto curve_only = [is_pid](nlohmann::json value) -> nlohmann::json {
+        return is_pid ? nlohmann::json(nullptr) : std::move(value);
+    };
     nlohmann::json status = {
         {"channel", channel.config.channel},
         {"total_writes", channel.total_writes},
         {"last_setpoint_pct", JsonNumberOrZero(channel.last_setpoint_pct)},
-        {"last_raw_demand_pct", JsonNumberOrZero(channel.last_raw_demand_pct)},
+        {"last_raw_demand_pct",
+         curve_only(JsonNumberOrZero(channel.last_raw_demand_pct))},
         {"last_smoothed_demand_pct",
-         JsonNumberOrZero(channel.smoothed_demand_pct)},
+         curve_only(JsonNumberOrZero(channel.smoothed_demand_pct))},
     };
     // Per-stage boost overlays. Keys built from kBoostStageSpecs so the
     // "last_<name>_boost_pct" contract stays driven by the table rather
@@ -112,18 +122,22 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
             return keys;
         }();
     for (std::size_t i = 0; i < kBoostStageCount; ++i) {
-        status[kBoostKeys[i]] = channel.boosts[i].boost_pct;
+        status[kBoostKeys[i]] = curve_only(channel.boosts[i].boost_pct);
     }
-    status["last_low_band_stage_boost_pct"] = channel.low_band_stage_boost_pct;
+    status["last_low_band_stage_boost_pct"] =
+        curve_only(channel.low_band_stage_boost_pct);
     status["last_low_band_effective_boost_pct"] =
-        channel.low_band_effective_boost_pct;
-    status["last_low_band_debt"] = channel.low_band_debt_snapshot;
-    status["last_low_band_signal"] = channel.low_band_signal_snapshot;
-    status["last_low_band_cpu_scale"] = channel.low_band_cpu_scale_snapshot;
-    status["last_low_band_gpu_scale"] = channel.low_band_gpu_scale_snapshot;
-    status["low_band_stage_active"] = channel.low_band_stage_active;
-    status["low_band_eligible_ms"] = channel.low_band_eligible_ms;
-    status["low_band_activation_count"] = channel.low_band_activation_count;
+        curve_only(channel.low_band_effective_boost_pct);
+    status["last_low_band_debt"] = curve_only(channel.low_band_debt_snapshot);
+    status["last_low_band_signal"] = curve_only(channel.low_band_signal_snapshot);
+    status["last_low_band_cpu_scale"] =
+        curve_only(channel.low_band_cpu_scale_snapshot);
+    status["last_low_band_gpu_scale"] =
+        curve_only(channel.low_band_gpu_scale_snapshot);
+    status["low_band_stage_active"] = curve_only(channel.low_band_stage_active);
+    status["low_band_eligible_ms"] = curve_only(channel.low_band_eligible_ms);
+    status["low_band_activation_count"] =
+        curve_only(channel.low_band_activation_count);
     status["last_response_source"] = channel.last_response_source;
     status["last_primary_temp_source"] = channel.last_primary_temp_source;
     status["last_write_reason"] = channel.last_write_reason;

@@ -140,6 +140,44 @@ void TestIntegralClampBound() {
     ExpectNear(s4.i_term, 15.0, 1e-12, "integral stays clamped at 15");
 }
 
+// The D6 live gate accepts a step cap alone (no rise/fall rates) as a sufficient
+// slew bound, so RateLimitSetpoint MUST honor max_setpoint_step_pct even when the
+// directional rate is NaN -- otherwise a live step-cap-only PID has no per-tick
+// limit (D4/D6 bypass). The rate-present behavior must be unchanged.
+void TestRateLimit_StepCapAppliesEvenWithoutRates() {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    ExpectNear(RateLimitSetpoint(90.0, 30.0, 1000u, nan, nan, 5.0), 35.0, 1e-12,
+               "step cap clamps the rise when rates are NaN");
+    ExpectNear(RateLimitSetpoint(0.0, 30.0, 1000u, nan, nan, 5.0), 25.0, 1e-12,
+               "step cap clamps the fall when rates are NaN");
+    ExpectNear(RateLimitSetpoint(90.0, 30.0, 1000u, nan, nan, nan), 90.0, 1e-12,
+               "no rate and no step cap -> no limit (unchanged)");
+    ExpectNear(RateLimitSetpoint(90.0, nan, 1000u, nan, nan, 5.0), 90.0, 1e-12,
+               "first write (last NaN) is unlimited (unchanged)");
+    ExpectNear(RateLimitSetpoint(90.0, 30.0, 60000u, 30.0, 30.0, 5.0), 35.0,
+               1e-12, "rate+step both present -> min applies (unchanged)");
+    ExpectNear(RateLimitSetpoint(90.0, 30.0, 60000u, 6.0, 6.0, nan), 36.0, 1e-12,
+               "rate-only limit unchanged when no step cap");
+}
+
+// A NaN measurement (sensor glitch with the source still flagged available) must
+// not permanently poison the persistent integral accumulator.
+void TestPidStep_NaNMeasurementDoesNotPoisonIntegral() {
+    PidState state;
+    const PidGains gains{1.0, 1.0, 1.0};
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    PidStep(gains, 0.0, 60.0, 50.0, 1.0, 0.0, 100.0, nan, nan, state);
+    PidStep(gains, 0.0, 60.0, 50.0, 1.0, 0.0, 100.0, nan, nan, state);
+    ExpectTrue(std::isfinite(state.integral), "healthy integral established");
+    PidStep(gains, 0.0, nan, 50.0, 1.0, 0.0, 100.0, nan, nan, state);
+    ExpectTrue(std::isfinite(state.integral),
+               "NaN measurement does not corrupt the integral");
+    const PidTerms good =
+        PidStep(gains, 0.0, 60.0, 50.0, 1.0, 0.0, 100.0, nan, nan, state);
+    ExpectTrue(std::isfinite(good.raw_setpoint_pct),
+               "PID recovers to a finite output after a NaN measurement");
+}
+
 // --- PidLiveAuthorized: the decision-D6 gate -------------------------------
 
 ChannelControlConfig BasicPidConfig() {
@@ -272,10 +310,61 @@ void TestController_SensorUnavailableSafeMode() {
                 "safe-mode response_source");
 }
 
+void TestController_LiveStepCapLimitsLargeJump() {
+    // A live step-cap-only PID (no rise/fall rates) must still be slew-limited per
+    // tick (D4/D6): a large PID jump from the last issued duty is clamped to
+    // max_setpoint_step_pct.
+    std::error_code ec;
+    const auto tmp = std::filesystem::temp_directory_path(ec) /
+                     (std::string("svg_mb_pid_live_") + UniqueTempSuffix() +
+                      ".csv");
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << "shadow-log evidence";
+    }
+    ControlLoopConfig loop;
+    ChannelControlConfig cfg = BasicPidConfig();
+    cfg.temp_blend = TempBlend::CpuOnly;
+    cfg.curve = {{30.0, 20.0}, {70.0, 100.0}};
+    cfg.min_duty_pct = 0.0;
+    cfg.pid.kp = 10.0;  // large gain -> large unclamped jump
+    cfg.pid.feedforward = PidFeedforward::Fixed;
+    cfg.pid.fixed_feedforward_pct = 30.0;
+    cfg.pid.allow_live = true;
+    cfg.pid.characterization_artifact = tmp.string();
+    cfg.max_setpoint_step_pct = 5.0;  // step cap only; rise/fall rates left NaN
+
+    PidController controller(cfg);
+    const bool live = controller.live();
+
+    ChannelState channel;
+    channel.config = cfg;
+    channel.last_issued_pct = 30.0;  // a prior write, so the slew cap engages
+
+    RuntimeSnapshot snap;
+    RuntimeSnapshotIndex index;
+    index.Rebuild(snap);
+    TempInputs in;
+    in.cpu_c = 80.0;  // error +15, kp 10 -> +150 over bias 30 -> clamps to 100
+    in.cpu_available = true;
+    in.cpu_label = "cpu";
+    const ChannelEvaluation eval = controller.Evaluate(
+        channel, loop, in, index, std::chrono::steady_clock::now());
+    std::filesystem::remove(tmp, ec);
+
+    ExpectTrue(live, "step-cap + artifact authorizes a live PID");
+    ExpectTrue(!eval.write_suppressed, "a live PID does not suppress the write");
+    ExpectNear(eval.setpoint_pct, 35.0, 1e-9,
+               "the per-tick jump from 30 is clamped to the 5pct step cap");
+}
+
 }  // namespace
 
 int main() {
     TestPureProportional();
+    TestRateLimit_StepCapAppliesEvenWithoutRates();
+    TestPidStep_NaNMeasurementDoesNotPoisonIntegral();
+    TestController_LiveStepCapLimitsLargeJump();
     TestDerivativeSignRaisesDutyOnRisingTemp();
     TestDerivativeOnMeasurementNoKickOnTargetChange();
     TestIntegralAccumulates();

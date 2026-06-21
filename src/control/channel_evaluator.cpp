@@ -347,17 +347,29 @@ double RateLimitSetpoint(double desired_pct,
         return desired_pct;
     }
 
+    // The directional rate and the absolute per-tick step cap are two
+    // INDEPENDENT bounds; the tighter one wins. The step cap must apply even when
+    // the rate is NaN/<=0 -- otherwise a channel configured with only
+    // max_setpoint_step_pct (rates left at their NaN default) has no per-tick
+    // limit, which silently bypasses the FEAT-0003 D6 live-PID slew gate (a
+    // step-cap-only config authorizes a live PID). Only "neither bound set" means
+    // no limit. The rate-present path is unchanged: max_allowed starts at the
+    // rate budget and is then min()'d with the step cap, exactly as before.
     const double rate = delta > 0.0
         ? rise_rate_pct_per_min
         : fall_rate_pct_per_min;
-    if (std::isnan(rate) || rate <= 0.0) {
+    const bool has_rate = !std::isnan(rate) && rate > 0.0;
+    const bool has_step =
+        !std::isnan(max_setpoint_step_pct) && max_setpoint_step_pct > 0.0;
+    if (!has_rate && !has_step) {
         return desired_pct;
     }
 
-    const double allowed =
-        rate * (static_cast<double>(elapsed_ms) / 60000.0);
-    double max_allowed = allowed;
-    if (!std::isnan(max_setpoint_step_pct) && max_setpoint_step_pct > 0.0) {
+    double max_allowed = std::numeric_limits<double>::infinity();
+    if (has_rate) {
+        max_allowed = rate * (static_cast<double>(elapsed_ms) / 60000.0);
+    }
+    if (has_step) {
         max_allowed = (std::min)(max_allowed, max_setpoint_step_pct);
     }
 

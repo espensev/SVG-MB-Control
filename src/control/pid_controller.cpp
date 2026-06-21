@@ -26,6 +26,16 @@ PidTerms PidStep(const PidGains& gains, double bias_pct,
                  double output_min_pct, double output_max_pct,
                  double integral_min, double integral_max, PidState& state) {
     PidTerms terms;
+    if (!std::isfinite(observed_temp_c) || !std::isfinite(target_c)) {
+        // A non-finite measurement (sensor glitch) or target must not poison the
+        // persistent integral: NaN propagates through error*dt and survives every
+        // clamp/saturation comparison (all false for NaN), permanently corrupting
+        // the accumulator. Freeze the integral + derivative memory and return a
+        // non-finite raw setpoint so the caller's clamp/safe handling takes over.
+        state.has_prev = false;
+        terms.raw_setpoint_pct = std::numeric_limits<double>::quiet_NaN();
+        return terms;
+    }
     const double error = observed_temp_c - target_c;
     terms.error_c = error;
     terms.p_term = gains.kp * error;
