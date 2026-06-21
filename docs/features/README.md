@@ -83,11 +83,14 @@ a feature's status or the decision queue changes. A fuller standing review is
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
 
-**Sequenced Draft, ready to build:** **FEAT-0003** — restart-selected
-control-law profile seam (PID / P / PI / PD plus the current curve law). All 7
-promotion gates are filled for the restart-selected shape. FEAT-0023 shipped +
-validated 2026-06-21 (the catalog/restart switch FEAT-0003 sequences after), so
-FEAT-0003 is the next build target whenever the control-law seam is wanted.
+**In progress — `Accepted` 2026-06-21:** **FEAT-0003** — restart-selected
+control-law profile seam (PID / P / PI / PD plus the current curve law). Promoted
+Draft→Accepted now that FEAT-0023 (the catalog/restart switch it sequences after)
+is Implemented + validated. Build scope: the `IChannelController` seam +
+`CurveOverlayController` (output-identical) + `PidController` (shadow/dry-run by
+default) + per-channel config dispatch + the measurement-gate preconditions; the
+live PID write on hardware is deferred behind `pid.allow_live` + characterization
+evidence + a positive non-NaN slew cap.
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
@@ -206,7 +209,7 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 |---|---|---|---|
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
-| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Draft (complete restart-selected design; sequenced after FEAT-0023) |
+| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Accepted (2026-06-21; implementation in progress — seam/curve-overlay/PID-shadow/dispatch/gate-preconditions; live PID write deferred) |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |

@@ -1,7 +1,7 @@
 # FEAT-0003: Restart-selected control-law profile seam
 
 **Project:** svg-mb-control
-**Status:** Draft   **Version:** 0.2   **Updated:** 2026-06-20
+**Status:** Accepted   **Version:** 0.3   **Updated:** 2026-06-21
 **Namespace:** `REQ-PROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/CONTROL_LOOP.md`,
 `docs/CONTROL_PIPELINE_MATH.md`, `docs/WRITE_ORCHESTRATION.md`,
@@ -14,11 +14,17 @@ profile can select at worker startup. The active law is fixed for the worker
 lifetime and changes only through the FEAT-0023 restart-based profile switch, not
 through an in-process tick-boundary swap.
 
-> **Draft scope (2026-06-20).** This spec is a complete design-capture Draft for
-> the restart-selected control-law seam. It is sequenced after FEAT-0023: build
-> the profile catalog and restart switch first, then use this seam to let a
-> profile choose `curve_overlay` or a PID-family law per channel. It is not yet
-> `Accepted` and does not authorize implementation by itself.
+> **Accepted / implementation-authorized (2026-06-21).** FEAT-0023 (the profile
+> catalog + restart switch) is Implemented and validated, clearing the sole
+> sequencing gate that kept this spec Draft; all seven promotion gates were
+> already met. This seam lets a resolved profile choose `curve_overlay` or a
+> PID-family law per channel at worker startup. **Build scope:** the seam +
+> `CurveOverlayController` (output-identical) + `PidController` (shadow/dry-run by
+> default) + config dispatch + the measurement-gate preconditions are buildable
+> now; a **live PID write on hardware** still requires the §5 / REQ-PROFILE-07
+> opt-in (`pid.allow_live` + characterization evidence + a positive non-NaN slew
+> cap) and explicit live-runtime authorization, so it is deferred like
+> FEAT-0023's live M.
 >
 > The 2026-06-03 decision record remains the source for the seam shape, PID
 > structure, controller-owned dynamic state, shared output conditioning, and the
@@ -258,9 +264,11 @@ Verify legend:
 - [x] 6. Confirmed it does not violate Live Runtime Safety or Repo Boundary and does not silently move the Measurement Gate baseline (sections 4 and 12).
 - [x] 7. Doctrine check: claims grounded with file:line; proposed behavior labeled proposed; no undefined or unqualified vague terms.
 
-> All seven promotion gates are met: this is a complete restart-selected Draft,
-> comparable in maturity to FEAT-0023 before promotion. It stays `Draft` because
-> it is sequenced after FEAT-0023 and is not implementation-authorized yet.
+> All seven promotion gates are met. **Promoted Draft -> Accepted 2026-06-21**:
+> FEAT-0023 is Implemented + validated, clearing the sequencing gate, and the
+> maintainer authorized execution. Implementation is in progress; see section 14
+> for per-REQ results. The live PID write on hardware (REQ-PROFILE-07 M) remains
+> behind the evidenced `pid.allow_live` opt-in.
 
 ## 14. Verification log  *(fill in after the feature is built - "check against the spec later")*
 
