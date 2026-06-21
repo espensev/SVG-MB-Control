@@ -34,41 +34,6 @@ std::uint32_t EffectiveControlHoldMs(const ControlLoopConfig& loop,
         : loop.control_hold_ms;
 }
 
-double RateLimitSetpoint(double desired_pct,
-                         double last_pct,
-                         std::uint64_t elapsed_ms,
-                         double rise_rate_pct_per_min,
-                         double fall_rate_pct_per_min,
-                         double max_setpoint_step_pct) {
-    if (std::isnan(last_pct)) {
-        return desired_pct;
-    }
-
-    const double delta = desired_pct - last_pct;
-    if (std::abs(delta) <= 0.0001) {
-        return desired_pct;
-    }
-
-    const double rate = delta > 0.0
-        ? rise_rate_pct_per_min
-        : fall_rate_pct_per_min;
-    if (std::isnan(rate) || rate <= 0.0) {
-        return desired_pct;
-    }
-
-    const double allowed =
-        rate * (static_cast<double>(elapsed_ms) / 60000.0);
-    double max_allowed = allowed;
-    if (!std::isnan(max_setpoint_step_pct) && max_setpoint_step_pct > 0.0) {
-        max_allowed = (std::min)(max_allowed, max_setpoint_step_pct);
-    }
-
-    if (std::abs(delta) <= max_allowed) {
-        return desired_pct;
-    }
-    return last_pct + (delta > 0.0 ? max_allowed : -max_allowed);
-}
-
 double ApplyDemandSmoothing(double raw_desired_pct,
                             double last_smoothed_pct,
                             std::uint64_t elapsed_ms,
@@ -153,31 +118,6 @@ std::string AddResponseModifier(std::string source,
     return source;
 }
 
-struct PrimaryCurveInput {
-    bool available = false;
-    double temp_c = std::numeric_limits<double>::quiet_NaN();
-    std::string source = "unavailable";
-};
-
-PrimaryCurveInput SelectLegacyMaxInput(const TempInputs& inputs,
-                                       bool guarded) {
-    PrimaryCurveInput out;
-    if (!inputs.cpu_available && !inputs.gpu_available) {
-        return out;
-    }
-    if (inputs.cpu_available &&
-        (!inputs.gpu_available || inputs.cpu_c >= inputs.gpu_c)) {
-        out.available = true;
-        out.temp_c = inputs.cpu_c;
-        out.source = guarded ? "cpu_guard" : "cpu";
-        return out;
-    }
-    out.available = true;
-    out.temp_c = inputs.gpu_c;
-    out.source = guarded ? "gpu_guard" : "gpu";
-    return out;
-}
-
 // Per-evaluation scratch state threaded through the EvaluateChannel
 // helpers. References capture the call inputs; the four in-progress
 // fields carry partial results between helpers. Pure scratch — does not
@@ -194,47 +134,6 @@ struct EvaluationScratch {
     std::string response_source = "unavailable";
     std::string primary_temp_source = "unavailable";
 };
-
-PrimaryCurveInput SelectPrimaryCurveInput(
-    const TempInputs& inputs,
-    const ChannelControlConfig& config) {
-    PrimaryCurveInput out;
-    switch (config.temp_blend) {
-        case TempBlend::CpuOnly:
-            if (inputs.cpu_available) {
-                out.available = true;
-                out.temp_c = inputs.cpu_c;
-                out.source = "cpu";
-            }
-            return out;
-        case TempBlend::GpuOnly:
-            if (inputs.gpu_available) {
-                out.available = true;
-                out.temp_c = inputs.gpu_c;
-                out.source = "gpu";
-            }
-            return out;
-        case TempBlend::MaxCpuGpu:
-            return SelectLegacyMaxInput(inputs, false);
-        case TempBlend::MaxCpuGpuSourceAware:
-            if (!std::isnan(config.source_aware_cpu_hot_guard_c) &&
-                inputs.cpu_available &&
-                inputs.cpu_c >= config.source_aware_cpu_hot_guard_c) {
-                return SelectLegacyMaxInput(inputs, true);
-            }
-            if (inputs.gpu_available) {
-                out.available = true;
-                out.temp_c = inputs.gpu_c;
-                out.source = "gpu";
-            } else if (inputs.cpu_available) {
-                out.available = true;
-                out.temp_c = inputs.cpu_c;
-                out.source = "cpu_fallback";
-            }
-            return out;
-    }
-    return out;
-}
 
 // Step 1 of EvaluateChannel: pick the primary curve input, drive the
 // sensor failure/recovery transitions, and seed raw_desired_setpoint
@@ -428,6 +327,105 @@ void DetectAuthorityReassert(EvaluationScratch& s) {
 }
 
 }  // namespace
+
+// Hoisted from the anonymous namespace to external linkage (FEAT-0003) so the
+// PID law in pid_controller.cpp reuses the identical slew clamp and primary-
+// temperature selection. Behaviour is unchanged; the existing curve tests and
+// tests/test_control_loop.py guard the move.
+double RateLimitSetpoint(double desired_pct,
+                         double last_pct,
+                         std::uint64_t elapsed_ms,
+                         double rise_rate_pct_per_min,
+                         double fall_rate_pct_per_min,
+                         double max_setpoint_step_pct) {
+    if (std::isnan(last_pct)) {
+        return desired_pct;
+    }
+
+    const double delta = desired_pct - last_pct;
+    if (std::abs(delta) <= 0.0001) {
+        return desired_pct;
+    }
+
+    const double rate = delta > 0.0
+        ? rise_rate_pct_per_min
+        : fall_rate_pct_per_min;
+    if (std::isnan(rate) || rate <= 0.0) {
+        return desired_pct;
+    }
+
+    const double allowed =
+        rate * (static_cast<double>(elapsed_ms) / 60000.0);
+    double max_allowed = allowed;
+    if (!std::isnan(max_setpoint_step_pct) && max_setpoint_step_pct > 0.0) {
+        max_allowed = (std::min)(max_allowed, max_setpoint_step_pct);
+    }
+
+    if (std::abs(delta) <= max_allowed) {
+        return desired_pct;
+    }
+    return last_pct + (delta > 0.0 ? max_allowed : -max_allowed);
+}
+
+PrimaryCurveInput SelectLegacyMaxInput(const TempInputs& inputs,
+                                       bool guarded) {
+    PrimaryCurveInput out;
+    if (!inputs.cpu_available && !inputs.gpu_available) {
+        return out;
+    }
+    if (inputs.cpu_available &&
+        (!inputs.gpu_available || inputs.cpu_c >= inputs.gpu_c)) {
+        out.available = true;
+        out.temp_c = inputs.cpu_c;
+        out.source = guarded ? "cpu_guard" : "cpu";
+        return out;
+    }
+    out.available = true;
+    out.temp_c = inputs.gpu_c;
+    out.source = guarded ? "gpu_guard" : "gpu";
+    return out;
+}
+
+PrimaryCurveInput SelectPrimaryCurveInput(
+    const TempInputs& inputs,
+    const ChannelControlConfig& config) {
+    PrimaryCurveInput out;
+    switch (config.temp_blend) {
+        case TempBlend::CpuOnly:
+            if (inputs.cpu_available) {
+                out.available = true;
+                out.temp_c = inputs.cpu_c;
+                out.source = "cpu";
+            }
+            return out;
+        case TempBlend::GpuOnly:
+            if (inputs.gpu_available) {
+                out.available = true;
+                out.temp_c = inputs.gpu_c;
+                out.source = "gpu";
+            }
+            return out;
+        case TempBlend::MaxCpuGpu:
+            return SelectLegacyMaxInput(inputs, false);
+        case TempBlend::MaxCpuGpuSourceAware:
+            if (!std::isnan(config.source_aware_cpu_hot_guard_c) &&
+                inputs.cpu_available &&
+                inputs.cpu_c >= config.source_aware_cpu_hot_guard_c) {
+                return SelectLegacyMaxInput(inputs, true);
+            }
+            if (inputs.gpu_available) {
+                out.available = true;
+                out.temp_c = inputs.gpu_c;
+                out.source = "gpu";
+            } else if (inputs.cpu_available) {
+                out.available = true;
+                out.temp_c = inputs.cpu_c;
+                out.source = "cpu_fallback";
+            }
+            return out;
+    }
+    return out;
+}
 
 // GPU control envelope = max(core, memjn, hotspot-if>0). The analyzer copies
 // (src/analyze/analyze_csv.cpp GpuEnvelopeC, the analyze_db.cpp SQL backfill,

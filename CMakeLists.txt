@@ -139,6 +139,7 @@ add_library(svg_mb_control_core STATIC
     src/control/control_config.cpp
     src/control/control_config_print.cpp
     src/control/machine_profile.cpp
+    src/control/pid_controller.cpp
     src/control/profile_composition.cpp
     src/control/profile_switch_decision.cpp
     src/control/control_loop.cpp
@@ -383,6 +384,8 @@ if(BUILD_TESTING)
         tests/cpp/channel_write_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_channel_controller_tests
         tests/cpp/channel_controller_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_pid_controller_tests
+        tests/cpp/pid_controller_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_force_terminate_tests
         tests/cpp/worker_force_terminate_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests

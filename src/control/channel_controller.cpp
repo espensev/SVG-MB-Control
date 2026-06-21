@@ -1,5 +1,7 @@
 #include "channel_controller.h"
 
+#include "pid_controller.h"
+
 namespace svg_mb_control {
 
 ChannelEvaluation CurveOverlayController::Evaluate(
@@ -17,9 +19,13 @@ std::string_view CurveOverlayController::Kind() const { return "curve_overlay"; 
 
 std::unique_ptr<IChannelController> CreateChannelController(
     const ChannelControlConfig& config) {
-    // Slice F3-1: every channel uses the curve-overlay law. Slice F3-2 will
-    // dispatch on the controller discriminator parsed from config.
-    (void)config;
+    // FEAT-0003 (REQ-PROFILE-03): dispatch on the resolved controller kind. An
+    // absent `controller` key parsed to CurveOverlay, so existing configs keep
+    // today's curve law. A PidController is built shadow/dry-run unless its
+    // pid.allow_live evidence + slew-cap preconditions hold (decision D6).
+    if (config.controller_kind == ControllerKind::Pid) {
+        return std::make_unique<PidController>(config);
+    }
     return std::make_unique<CurveOverlayController>();
 }
 

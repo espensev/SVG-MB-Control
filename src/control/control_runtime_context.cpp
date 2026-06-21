@@ -2,6 +2,7 @@
 
 #include "channel_controller.h"
 
+#include <string>
 #include <utility>
 
 namespace svg_mb_control {
@@ -25,6 +26,11 @@ ControlRuntimeContext::ControlRuntimeContext(
         state.config = channel_config;
         channels.push_back(std::move(state));
         controllers.push_back(CreateChannelController(channel_config));
+        // Attribute the channel to the law that will drive it (REQ-PROFILE-08).
+        // Set once here from the controller's own Kind(), the single source of
+        // truth, so reporting cannot drift from the dispatched law.
+        channels.back().controller_kind =
+            std::string(controllers.back()->Kind());
     }
 }
 

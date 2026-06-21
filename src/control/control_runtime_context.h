@@ -78,6 +78,18 @@ struct ChannelState {
     std::string last_primary_temp_source = "unavailable";
     std::string last_response_source = "unavailable";
     std::string last_write_reason = "none";
+
+    // FEAT-0003: control-law attribution + PID evidence for reporting. The
+    // controller_kind is set once at construction from the channel's
+    // IChannelController::Kind(). The pid_* fields are written each tick only by
+    // PidController; they stay NaN for the curve law so the CSV/status reporting
+    // blanks them for curve channels (REQ-PROFILE-08).
+    std::string controller_kind = "curve_overlay";
+    double pid_error_c = std::numeric_limits<double>::quiet_NaN();
+    double pid_p_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_i_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_d_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_setpoint_raw_pct = std::numeric_limits<double>::quiet_NaN();
     std::chrono::steady_clock::time_point last_evaluation_time =
         std::chrono::steady_clock::time_point{};
 
