@@ -1,5 +1,13 @@
 # Plan: post-change cycles capture + Vcore SVI probe (2026-06-21)
 
+> **Status update 2026-06-21:** the all-core gap this plan names below (a true
+> **package** eff-MHz needs an all-core aggregation on a dedicated
+> off-control-thread sweep) is now implemented and merged — PR #25 (off-thread
+> sweeper + analyze schema v13) and PR #26 (the section-12 loop-timing gate
+> harness `scripts/score_loop_timing_gate.py`). What remains of Step A is the
+> on-hardware capture itself (deploy, enable cycles, run the gate); Step B (the
+> Vcore SVI probe) is unchanged.
+
 Two enabling steps for the CPU config fingerprint in
 `docs/idle-cpu-temp-trend-and-enrichment-2026-06-20.md` ("CPU-side telemetry"):
 

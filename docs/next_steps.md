@@ -111,8 +111,9 @@ exists in the control-loop CSV
 - **FEAT-0020** (`REQ-PWRLOG-*`) — **Implemented v0.4, live flip executed and
   validated** (`T`/`B`/`R`/`M`, gate 6 closed). CPU package power (enabled FEAT-0006
   RAPL) and a 5-field GPU board-power slice now log on the live standard control
-  loop; analyzer introduced both at schema v11; current schema v12 also carries
-  FEAT-0021 context. The per-tick NVML read was shown not
+  loop; analyzer introduced both at schema v11; the current schema is v13 — v12
+  carries FEAT-0021 context and v13 the FEAT-0006 all-core cycle columns. The
+  per-tick NVML read was shown not
   to move the 250 ms baseline (clean under GPU load; idle-only spikes are pre-existing
   and environmental). Live state: the `SVG-MB Energy Safety Revert` task is **disabled**
   and `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled` (the D-PWRLOG-1 steady state);
@@ -261,9 +262,12 @@ also run `scripts\analyze_cpu_temp_power.py` so CPU temperature is compared
 against actual heat input, not busy percent alone.
 
 ### FEAT-0006 (CPU work/energy) downstream work
-The spec is already `Accepted` (`docs\features\FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
-v0.4, 2026-06-07); the open work is implementation/evidence, not promotion.
-Governed by FEAT-0006 and the `REQ-CPUEFF-*` rows in `docs\TRACEABILITY.md`.
+The spec is `Accepted` (`docs\features\FEAT-0006-cpu-work-energy-efficiency-evidence.md`,
+v0.7, 2026-06-21). The package-energy and cycle slices are landed, the all-core
+package effective-frequency rollup is merged (PR #25, analyze schema v13), and the
+section-12 loop-timing gate harness is merged (PR #26); the open work is now
+evidence/promotion, not new code. Governed by FEAT-0006 and the `REQ-CPUEFF-*`
+rows in `docs\TRACEABILITY.md`.
 
 - Analyzer average-watts report derived from `cpu_pkg_energy_delta_uj` /
   `cpu_power_window_ms` over distinct `cpu_power_sample_id` (average power is not
@@ -279,14 +283,19 @@ Governed by FEAT-0006 and the `REQ-CPUEFF-*` rows in `docs\TRACEABILITY.md`.
   below is unchanged).
 - The `quarantine` → `validated` Evaluation gate for `cpu_pkg_energy_acquisition`
   (this is never set automatically).
-- Cycle-counter / work-numerator: **resolved — no new module**
-  (`docs\cpu-cycle-counter-source-decision-2026-06-07.md`). The 2026-06-07 live
-  validation reported APERF/MPERF `#GP`, but that was a probe-index error: the
-  shipped bin allow-lists the AMD read-only aliases `0xC00000E7`/`0xC00000E8`, so
-  the work numerator (ΔAPERF) and effective frequency are reachable with the
-  current bin (corrected 2026-06-09). Remaining: a corrected per-core-pinned live
-  read (`tools\cpu_cycle_counter_probe.cpp`) then the cycle path
-  (`docs\cpu-work-energy-live-validation-results-2026-06-07.md`).
+- Cycle / effective-frequency path: **landed.** The per-core APERF/MPERF logger
+  + analyzer effective-frequency derivation (analyze schema v10) landed
+  2026-06-09/10, and the all-core **package** rollup via a dedicated off-thread
+  sweeper merged 2026-06-21 (PR #25, analyze schema v13); the consumers
+  (`scripts\score_energy_session.py` criterion-4 and
+  `scripts\cpu_config_fingerprint.py`) prefer the package columns with a per-core
+  fallback. The work numerator (ΔAPERF) and effective frequency are reachable with
+  the shipped bin (the 2026-06-07 `#GP` was a probe-index error, corrected
+  2026-06-09). Remaining: the operator M-evidence **capture** — deploy, enable
+  `SVG_MB_CONTROL_CPU_CYCLES_MODE=enabled` under load, then run
+  `scripts\score_loop_timing_gate.py` (cycles-on vs an OFF baseline) to clear the
+  section-12 loop-timing gate, followed by the `quarantine → validated` marker
+  decision.
 
 ### FEAT-0008 (watchdog hung-worker recovery) post-v1 only
 
