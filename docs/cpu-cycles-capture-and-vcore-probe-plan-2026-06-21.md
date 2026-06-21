@@ -83,6 +83,32 @@ loop budget:
   MHz). Computing that cross-regime step is the `cpu_config_fingerprint.py` module
   (separate, larger item in the enrichment doc); this capture produces its input.
 
+### Empirical result (2026-06-21, ran elevated)
+
+Ran `Capture-EnergySession.ps1 -IdleSeconds 120 -LoadSeconds 360 -CooldownSeconds 120`
+(all-core saturate load). Results:
+
+- **Cycles logging works post-(-25 CO)**: `session.csv` has `cpu_aperf_delta`/
+  `cpu_mperf_delta` populated (588/592 rows), `cpu_cycles_acquisition=quarantine`.
+- **The undervolt is visible**: effective-frequency ratio (dAPERF/dMPERF) at load
+  = **1.267 (~5447 MHz at P0=4300)**, versus the pre-CO sessions 1-3 at ~1.19
+  (~5117 MHz). Higher delivered-clock-per-base at load is the expected signature
+  of a -25 all-core Curve Optimizer + retuned PBO. (Core-0-pinned, so this is a
+  single-core read, not the package; directionally clear, not yet package-exact.)
+- **Hot-path gate PASS (provisional)**: 0 loop overruns with cycles on; session
+  `loop_work_duration_ms` p99 = 52.95 ms vs the disabled baseline p99 = 54.59 ms;
+  the per-~1 s core-0 cycle-pin ticks max 69.2 ms — far under the 250 ms tick and
+  far under the baseline's pre-existing 2810 ms environmental spike (0 overruns
+  there too). Sample is small (592 rows) and not idle-matched, so this is a
+  provisional pass; a longer idle-matched cycles-on sample would firm it up.
+- **Fingerprint consumes it**: `cpu_config_fingerprint.py --csv session.csv` now
+  emits `eff_mhz_per_w_by_band = {run: 43.8}` (was null before the capture).
+- **Steady state restored**: the capture's revert left the live state at the
+  intended FEAT-0020 steady state — energy `enabled` (live marker `quarantine`),
+  cycles `disabled` (the un-gated core-0 pin is not running steady-state), Safety
+  Revert task `Disabled`. (The "marker did not return to disabled" warning is
+  benign: energy is meant to stay on; only cycles needed reverting, and it did.)
+
 ### Scope caveat + follow-on
 
 The cycle read pins **core 0 only**, so the ratio is one core's V/F point, not the
@@ -155,6 +181,27 @@ a CSV column + ingest, and it becomes an `idle_vcore_mv` fingerprint dimension. 
 SVI candidate addresses/decode are SVI2-era and **unverified** for SVI3 — the
 probe exists precisely because they may be wrong; never promote on plausibility.
 
+### Empirical result (2026-06-21, ran elevated)
+
+The probe ran elevated against the live shipped `AMDFamily17.bin`. Transport is
+healthy (Tctl `0x00059800` and per-CCD `0x00059B08` decode to correct Celsius).
+But voltage is **not reachable this way**:
+
+- The SVI2-era window `0x0005A000..0x0005A024` reads **all `0x00000000`** at idle
+  and under load.
+- A wider sweep `0x00059000..0x0005A800` returns only sentinels (`0xFFFFFFFF`
+  unmapped / `0x00000000`) **except inside the THM thermal block** (`0x59800`
+  Tctl, `0x598xx` per-core thermal, `0x59Bxx` per-CCD) — i.e. the bin services the
+  thermal SMN registers and returns sentinels elsewhere. No register decodes to a
+  plausible, load-tracking core voltage.
+
+Conclusion: **direct-SMN Vcore is unavailable with the shipped bin** (verdict
+moves from `probe_gated` to **needs_new_module**). A live Vcore would require the
+SMU PM-table mailbox protocol (write-command / poll / read a version-tagged DRAM
+struct) via a new/modified PawnIO module, or a different telemetry source —
+consistent with zenpower5 not yet exposing Zen5 voltage. Not pursued further; the
+effective-frequency path (capture A) remains the reachable settings fingerprint.
+
 ### Out of scope
 
 Per-core VID and the PPT/TDC/EDC power limits are **not** reachable by this cheap
@@ -214,11 +261,13 @@ control change, or touches retention.
 
 ## Status
 
-- #3 probe: written and compiles (`cpu-vcore-probe.exe`). Awaiting an elevated run
-  + HWiNFO64 comparison to find/confirm the SVI3 address (or conclude it is not a
-  direct SMN read).
-- #2 capture: runbook ready on existing tooling; awaiting an operator-run capture
-  (elevated, at idle) + the hot-path gate check.
+- #3 probe: **ran elevated (2026-06-21)** -> direct-SMN Vcore NOT reachable with
+  the shipped bin (SVI2 window all-zero; bin services only the thermal block).
+  Verdict needs_new_module (SMU PM-table mailbox). See "Empirical result" in B.
+- #2 capture: **ran elevated (2026-06-21)** -> cycles logging works post-CO,
+  eff-freq ratio 1.267 vs pre-CO ~1.19 (the -25 is visible), hot-path gate PASS
+  (0 overruns), fingerprint `eff_mhz_per_w` now populates, steady state restored.
+  See "Empirical result" in A.
 - Fingerprint module: `scripts/cpu_config_fingerprint.py` skeleton written + runs
   (9 regimes over 67 runs; step detector fires on config-pure dims). Aligned to the
   NVG + SVG merge conventions (section D). Capture/probe fill its null dims.
