@@ -33,6 +33,13 @@ def _supervisor_restart_count(runtime_home: Path) -> int | None:
     )
 
 
+def _active_profile(runtime_home: Path) -> str | None:
+    path = runtime_home / "control_supervisor.json"
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("active_profile_name")
+
+
 def _event_types(runtime_home: Path) -> list[str]:
     return [e.get("event_type") for e in _read_runtime_events(runtime_home)]
 
@@ -126,6 +133,13 @@ class ProfileSwitchTests(WindowsExeTestCase):
             self.assertEqual(
                 _supervisor_restart_count(runtime_home), restart_before,
                 "the switch bumped worker_restart_count",
+            )
+            # REQ-MPROFILE-09: the active profile is recorded in runtime status.
+            self.assertTrue(
+                _wait_for(lambda: _active_profile(runtime_home) == "alt",
+                          timeout_s=10.0),
+                "control_supervisor.json active_profile_name did not flip to the "
+                "switched profile",
             )
 
     def test_two_consecutive_switches(self) -> None:

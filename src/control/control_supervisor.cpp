@@ -557,7 +557,9 @@ int RunSupervisorWorkerLoop(
     // with; last_known_good_config_path is the auto-revert target.
     ProfileSwitchState switch_state;
     switch_state.active_config_path = config_source_path;
+    switch_state.active_profile_name = config_source_path.stem().string();
     switch_state.last_known_good_config_path = config_source_path;
+    switch_state.last_known_good_profile_name = switch_state.active_profile_name;
 
     // How long to wait for a worker to honor a cycle signal before escalating to
     // force-terminate (restore is skipped -> fans latch; the accepted degraded
@@ -602,6 +604,7 @@ int RunSupervisorWorkerLoop(
             stderr_path);
         supervisor_state.last_worker_pid = worker.pid;
         supervisor_state.worker_restart_count = restart_count;
+        supervisor_state.active_profile_name = switch_state.active_profile_name;
         supervisor_state.last_worker_started_time =
             FormatLocalIso8601(std::chrono::system_clock::now());
         WriteSupervisorState(runtime_home, supervisor_state);

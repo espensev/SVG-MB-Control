@@ -1,7 +1,7 @@
 # FEAT-0023: Machine profiles and restart-based profile switch
 
 **Project:** svg-mb-control
-**Status:** Accepted (implementation-authorized)   **Version:** 0.2   **Updated:** 2026-06-20
+**Status:** Implemented (core feature; composition + CSV column + revert-integration + live M deferred/pending)   **Version:** 0.3   **Updated:** 2026-06-21
 **Namespace:** `REQ-MPROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -290,26 +290,35 @@ Verify legend:
 - [x] 6. Confirmed it does not violate Live Runtime Safety or Repo Boundary and does not silently move the Measurement Gate baseline (the default profile reproduces the shipped baseline; live switching needs explicit authorization) (§4, §12).
 - [x] 7. Doctrine check: claims grounded with file:line; proposed behavior labeled proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined or unqualified vague terms.
 
-> All seven promotion gates are met. As of 2026-06-20 this spec is `Accepted` and
-> implementation-authorized. The first implementation slice remains constrained by
-> this spec: build the catalog/resolution/restart switch, preserve the default
-> profile baseline, and leave FEAT-0003's control-law/PID seam for a later phase.
+> All seven promotion gates are met. **Implemented 2026-06-21** (slices 1-7;
+> commits `0952e3d` / `1195d84` / `9a78a11`): startup profile resolution plus the
+> live restart-based switch. See §14 for per-REQ results; the machine-base/overlay
+> composition (REQ-01), the control-loop CSV active-profile column (REQ-09), and
+> the revert-wiring integration test + live M (REQ-07/10) are the named partials.
+> FEAT-0003's control-law/PID seam remains a later phase.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-MPROFILE-01 | | | |
-| REQ-MPROFILE-02 | | | |
-| REQ-MPROFILE-03 | | | |
-| REQ-MPROFILE-04 | | | |
-| REQ-MPROFILE-05 | | | |
-| REQ-MPROFILE-06 | | | |
-| REQ-MPROFILE-07 | | | |
-| REQ-MPROFILE-08 | | | |
-| REQ-MPROFILE-09 | | | |
-| REQ-MPROFILE-10 | | | |
+| REQ-MPROFILE-01 | partial | T,R (`0952e3d`). File-based catalog (`config/profiles/<name>.json`, each a full control config) via `ResolveProfileConfigPath`/`DefaultProfileCatalogDirs`; `machine_profile_tests` + `test_machine_profile.py`; no-catalog path equals the current single-`--config` load. The machine-base + behavior-overlay **composition** is deferred — a profile is currently a complete config file. | 2026-06-21 |
+| REQ-MPROFILE-02 | pass | T,R (`0952e3d`). `machine_identity.{h,cpp}` host-name + `machine_id.txt` override; precedence resolver falls back to the built-in default; `machine_identity_tests` (5), `machine_profile_tests`, `test_machine_profile.py` (env/machine paths). | 2026-06-21 |
+| REQ-MPROFILE-03 | pass | T,R (`0952e3d`). Precedence `--config` > `--profile` > `SVG_MB_PROFILE` > machine-id > default; `--show-config` reports name/source; `machine_profile_tests` + `test_machine_profile.py`. | 2026-06-21 |
+| REQ-MPROFILE-04 | pass | T,R (`1195d84`/`9a78a11`). Take-once `profile.switch.request.json` consumed by the supervisor (not the tick runner); `runtime_lifecycle_tests` + `test_profile_switch.py`. | 2026-06-21 |
+| REQ-MPROFILE-05 | pass | T,R (`9a78a11`). `DecideSwitchRequest` rejects malformed/empty/unknown/invalid candidates; the supervisor validates (`LoadControlConfig`+`LoadControlLoopConfig`) before signaling; `profile_switch_decision_tests` + `test_profile_switch.py` rejection (worker untouched, request cleared, `profile_rejected` event). | 2026-06-21 |
+| REQ-MPROFILE-06 | pass | T,R (`9a78a11`). Supervisor cycles without crash backoff; `test_profile_switch.py` happy-path asserts a new worker PID, `profile_applied` event, no `worker_restart_scheduled`, unchanged `worker_restart_count`. | 2026-06-21 |
+| REQ-MPROFILE-07 | partial | T,R (`9a78a11`). `DecideAfterStartupOutcome` last-known-good promotion + revert is unit-tested (`profile_switch_decision_tests`) and wired in the supervisor (revert before the supervisor-killing guard; `!have_seen_good_worker`). The revert **wiring** for a parse-valid / bind-invalid candidate has no sim hook, so its integration/live coverage is pending. | 2026-06-21 |
+| REQ-MPROFILE-08 | pass | T,R (`9a78a11`). The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing graceful restore runs (fans → captured BIOS baseline); no no-restore latch path or fan watchdog added; `test_profile_switch.py` cycles the worker; review vs decision D-MPROFILE-2. | 2026-06-21 |
+| REQ-MPROFILE-09 | partial | T,R (`9a78a11`). Switch events (`supervisor.profile_applied`/`profile_rejected`/`profile_reverted`) emitted; active profile name in `control_supervisor.json` runtime status (`test_profile_switch.py` asserts the flip). The additive control-loop **CSV field** is deferred (the active config is identifiable via the CSV archive `config_path`/sha256 prologue). | 2026-06-21 |
+| REQ-MPROFILE-10 | partial | R. The resolved default reproduces the launch config and a switch does not change cadence/cooldown/channel set for a given config; full `Test-LocalCI` green. Live **M** evidence on a deployed default profile is pending. | 2026-06-21 |
 
-**Spec vs. implementation deltas:** <record anything built differently from this
-spec, and why. If behavior changed, update §5/§6, refresh the cited contract docs
-per `AGENTS.md` §Change Checklist, and bump **Updated**.>
+**Spec vs. implementation deltas:** The catalog landed as **file-based profiles**
+(`config/profiles/<name>.json`, each a complete control config) rather than the
+machine-base + behavior-overlay composition described in §5 (REQ-MPROFILE-01); the
+composition is deferred and does not block the feature. The live switch added a
+worker-scoped `profile.cycle.request.json` presence signal (distinct from the
+global stop) consumed by both `control_loop` and `read_loop`, plus a supervisor
+bounded-wait + force-terminate fallback for a wedged worker (advisor review) and
+exit-code discrimination so a coincident crash is not mistaken for a cycle. The
+control-loop CSV active-profile column (REQ-MPROFILE-09) and the revert-wiring
+integration test + live M (REQ-MPROFILE-07/10) are the named remaining items.

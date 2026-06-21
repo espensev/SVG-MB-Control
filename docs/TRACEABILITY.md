@@ -73,7 +73,7 @@ Result values:
 | `FEAT-0020` Standard control-loop power logging | Implemented | Implemented 2026-06-18 (D-PWRLOG-1 Current; full Test-LocalCI green — CTest + 169 hermetic). CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp, summarized by the analyzer (v11) as mean/percentile (not an energy integral). `T`/`B`/`R`/`M` verified; the live flip executed under explicit live-runtime authorization and gate 6 is closed. Current comparison evidence is `docs/feat-0020-live-flip-validation-results-2026-06-18.md` plus `docs/power-temp-comparison-snapshot-2026-06-18.md`. Archived implementation plan: `docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
 | `FEAT-0021` Standard control-loop GPU workload context logging | Implemented (T/R; live M pending) | D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Current. Implemented 2026-06-20 as an additive cached 1000 ms GPU context slice beside FEAT-0020 GPU power; analyzer schema v12 ingests/reports context optionally. Live 250 ms cadence evidence remains the REQ-GPUCTX-04 deployment check. |
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
-| `FEAT-0023` Machine profiles and restart-based profile switch | Accepted (implementation-authorized) | Buildable now; all 7 promotion gates met and decision `docs/multiprofile-restart-switch-decision-2026-06-20.md` is Current. Restart-based switching accepts the BIOS-auto gap; the control-law/PID seam stays FEAT-0003, sequenced after. |
+| `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (core; partials named) | Implemented 2026-06-21 (slices 1-7; commits `0952e3d`/`1195d84`/`9a78a11`): startup profile resolution + the live restart-based switch (accepts the BIOS-auto gap). Named partials: machine-base/overlay composition (REQ-01), control-loop CSV active-profile column (REQ-09), revert-integration + live M (REQ-07/10). The control-law/PID seam stays FEAT-0003, sequenced after. |
 
 ## 3. Requirement map
 
@@ -354,23 +354,22 @@ Results mirror the owning spec's §14 verification log.
 
 ### FEAT-0023 - Machine profiles and restart-based profile switch
 
-Accepted and implementation-authorized 2026-06-20 (all 7 promotion gates met;
-decision `docs/multiprofile-restart-switch-decision-2026-06-20.md` Current).
-Requirements remain `pending` until implementation and verification. The
-control-law/PID seam stays FEAT-0003, restart-selected and sequenced after.
+Implemented 2026-06-21 (slices 1-7; commits `0952e3d` / `1195d84` / `9a78a11`).
+Results mirror the owning spec's §14 verification log. The control-law/PID seam
+stays FEAT-0003, restart-selected and sequenced after.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-MPROFILE-01` | T, R | Composition test: resolved default profile == today's `control.release.json` `ControlLoopConfig`; the no-catalog path equals the current single-`--config` load. | pending |
-| `REQ-MPROFILE-02` | T, R | Resolution tests: machine identity resolves a profile; unreadable/unknown identity falls back to the built-in default; identity does not run when `--config`/profile is given. | pending |
-| `REQ-MPROFILE-03` | T, R | Precedence tests `--config` > `--profile`/`SVG_MB_PROFILE` > identity > default; `--show-config` reports the resolved name, source, and path. | pending |
-| `REQ-MPROFILE-04` | T, R | The supervisor consumes a take-once `profile.switch.request.json` naming a target profile; absence means no change; shape reviewed vs `runtime_lifecycle.cpp` breaker-reset. | pending |
-| `REQ-MPROFILE-05` | T, R | Validate-before-activate: an invalid candidate is rejected, the running worker is untouched, a rejection event is emitted, and the request is cleared. | pending |
-| `REQ-MPROFILE-06` | T, R | Graceful worker cycle: a valid switch gracefully stops the worker (restore runs to BIOS auto), escalates to force-terminate only on stop timeout, and respawns without crash backoff and without incrementing `restart_count`. | pending |
-| `REQ-MPROFILE-07` | T, R | Auto-revert: a post-switch startup failure reverts to last-known-good and respawns; `restart_count` resets on a surviving worker; the supervisor survives an operator-switch failure. | pending |
-| `REQ-MPROFILE-08` | T, R | The switch uses the existing graceful restore and adds no no-restore latch path or fan-safety watchdog (review vs `control_loop.cpp` restore + decision D-MPROFILE-2). | pending |
-| `REQ-MPROFILE-09` | T, R | Status/CSV active-profile field + applied/rejected/reverted events; review confirms they are observational and not read by setpoint/write/breaker/restore/cadence/channel policy. | pending |
-| `REQ-MPROFILE-10` | T, R, M | The default profile reproduces the shipped `ControlLoopConfig`; review confirms cadence/cooldown/channel set/identity unchanged; runtime evidence on a deployed default profile. | pending |
+| `REQ-MPROFILE-01` | T, R | File-based catalog (`config/profiles/<name>.json`) via `ResolveProfileConfigPath`/`DefaultProfileCatalogDirs`; `machine_profile_tests` + `test_machine_profile.py`; no-catalog path unchanged. The machine-base/overlay composition is deferred. | partial |
+| `REQ-MPROFILE-02` | T, R | `machine_identity` host-name + `machine_id.txt` override; precedence falls back to the built-in default; `machine_identity_tests`, `machine_profile_tests`, `test_machine_profile.py`. | pass |
+| `REQ-MPROFILE-03` | T, R | Precedence `--config` > `--profile`/`SVG_MB_PROFILE` > identity > default; `--show-config` reports name/source; `machine_profile_tests` + `test_machine_profile.py`. | pass |
+| `REQ-MPROFILE-04` | T, R | The supervisor consumes a take-once `profile.switch.request.json`; `runtime_lifecycle_tests` + `test_profile_switch.py`. | pass |
+| `REQ-MPROFILE-05` | T, R | Validate-before-activate rejects invalid candidates, worker untouched, request cleared, `profile_rejected` event; `profile_switch_decision_tests` + `test_profile_switch.py`. | pass |
+| `REQ-MPROFILE-06` | T, R | Graceful cycle without crash backoff; `test_profile_switch.py` asserts a new PID, `profile_applied`, no `worker_restart_scheduled`, unchanged `restart_count`. | pass |
+| `REQ-MPROFILE-07` | T, R | `DecideAfterStartupOutcome` revert + last-known-good unit-tested + wired (revert before the supervisor-killing guard); a bind-invalid candidate has no sim hook, so integration/live coverage is pending. | partial |
+| `REQ-MPROFILE-08` | T, R | The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing restore runs; no latch/watchdog added; `test_profile_switch.py` + review vs D-MPROFILE-2. | pass |
+| `REQ-MPROFILE-09` | T, R | Switch events emitted + active profile in `control_supervisor.json` (`test_profile_switch.py` asserts the flip); the control-loop CSV active-profile column is deferred. | partial |
+| `REQ-MPROFILE-10` | T, R, M | The default reproduces the launch config and a switch does not change cadence/channels; full Test-LocalCI green; live M on a deployed default profile pending. | partial |
 
 ### FEAT-0007 — Reserved (parked)
 

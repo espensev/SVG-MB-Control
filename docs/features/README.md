@@ -47,12 +47,18 @@ a feature's status or the decision queue changes. A fuller standing review is
   D-WRITEHOT-1 is Current; identity-gated persistence and flush-side reset
   behavior are covered by C++ tests and traceability rows.
 
+**Recently implemented (continued):**
+
+- **FEAT-0023** (`Implemented` 2026-06-21, slices 1-7; commits
+  `0952e3d`/`1195d84`/`9a78a11`) — machine profiles + restart-based profile
+  switch. Startup resolution (`--profile`/`SVG_MB_PROFILE`/machine-id/default,
+  `config/profiles/<name>.json`) + the live switch (`--set-profile`; supervisor
+  validates, gracefully cycles the worker accepting the BIOS-auto gap, no-backoff
+  respawn, auto-revert). Named partials in §14: machine-base/overlay composition,
+  control-loop CSV active-profile column, revert-integration + live M.
+
 **Active — `Accepted`, buildable when implementation is authorized:**
 
-- **FEAT-0023** (`Accepted`, implementation-authorized) — machine profiles +
-  restart-based profile switch (machine-base/overlay catalog, identity
-  resolution, supervisor switch-by-restart that accepts the BIOS-auto gap). Build
-  this before FEAT-0003.
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
   follow-through, not package-energy capture: the `quarantine → validated`
   marker decision (manual), the corrected per-core cycle/effective-frequency
@@ -74,11 +80,11 @@ a feature's status or the decision queue changes. A fuller standing review is
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
 
-**Sequenced Draft, ready after FEAT-0023:** **FEAT-0003** — restart-selected
+**Sequenced Draft, ready to build:** **FEAT-0003** — restart-selected
 control-law profile seam (PID / P / PI / PD plus the current curve law). All 7
-promotion gates are now filled for the restart-selected shape, but it remains a
-`Draft`: implement FEAT-0023 first, validate the catalog/restart switch, then
-promote FEAT-0003 when that seam is the next build target.
+promotion gates are filled for the restart-selected shape. FEAT-0023 shipped +
+validated 2026-06-21 (the catalog/restart switch FEAT-0003 sequences after), so
+FEAT-0003 is the next build target whenever the control-law seam is wanted.
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
@@ -217,4 +223,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M pending) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
-| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay catalog + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap) | `REQ-MPROFILE-*` | Accepted (implementation-authorized 2026-06-20) |
+| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay catalog + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap) | `REQ-MPROFILE-*` | Implemented (2026-06-21; core feature, slices 1-7; composition/CSV-column/revert-integration/live-M partial-or-pending) |

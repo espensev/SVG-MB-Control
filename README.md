@@ -143,7 +143,19 @@ cd .\release
 .\svg-mb-control.exe --restart
 .\svg-mb-control.exe --reset-breakers
 .\svg-mb-control.exe --reset-breakers --reset-breaker-channel 4
+.\svg-mb-control.exe --set-profile quiet
 ```
+
+FEAT-0023 profile selection: the controller resolves its profile at startup by
+precedence `--config` > `--profile <name>` / `SVG_MB_PROFILE` > machine identity
+(`GetComputerNameW` plus an optional `runtime\machine_id.txt`) > the built-in
+default, where a named profile is `config\profiles\<name>.json`. `--set-profile
+<name>` switches the active profile on a running controller: the supervisor
+validates the candidate and gracefully cycles the worker into it (fans revert to
+BIOS SmartFan auto during the brief restart gap), with auto-revert to the
+last-known-good profile if the new profile fails to start. The active profile is
+recorded in `runtime\control_supervisor.json` and in
+`supervisor.profile_applied` / `_rejected` / `_reverted` events.
 
 `--show-config` prints an operator-facing summary of the loaded config:
 source path, profile source/name when selected, schema version, default mode,

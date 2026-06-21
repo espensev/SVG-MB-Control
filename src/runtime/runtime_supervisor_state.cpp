@@ -25,6 +25,7 @@ nlohmann::json SupervisorStateToJson(const SupervisorState& state) {
         state.has_last_worker_exit_code
             ? nlohmann::json(state.last_worker_exit_code)
             : nlohmann::json(nullptr);
+    payload["active_profile_name"] = state.active_profile_name;
     return payload;
 }
 
@@ -58,6 +59,7 @@ std::optional<SupervisorState> ReadSupervisorState(
         state.has_last_worker_exit_code = true;
         state.last_worker_exit_code = exit_code->get<std::int64_t>();
     }
+    state.active_profile_name = JsonStringOr(*payload, "active_profile_name");
     return state;
 }
 

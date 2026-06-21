@@ -26,6 +26,7 @@ struct SupervisorState {
     std::string last_worker_exit_time;      // local ISO8601, empty until first exit
     bool has_last_worker_exit_code = false;
     std::int64_t last_worker_exit_code = 0;
+    std::string active_profile_name;  // FEAT-0023: active profile the worker runs
 };
 
 std::filesystem::path RuntimeSupervisorStatePath(
