@@ -40,6 +40,14 @@ def _active_profile(runtime_home: Path) -> str | None:
     return json.loads(path.read_text(encoding="utf-8")).get("active_profile_name")
 
 
+def _worker_profile(runtime_home: Path) -> tuple[str | None, str | None]:
+    """(active_profile_name, active_profile_source) from the worker status."""
+    status = _read_runtime_status(runtime_home)
+    if not status:
+        return (None, None)
+    return (status.get("active_profile_name"), status.get("active_profile_source"))
+
+
 def _event_types(runtime_home: Path) -> list[str]:
     return [e.get("event_type") for e in _read_runtime_events(runtime_home)]
 
@@ -140,6 +148,22 @@ class ProfileSwitchTests(WindowsExeTestCase):
                           timeout_s=10.0),
                 "control_supervisor.json active_profile_name did not flip to the "
                 "switched profile",
+            )
+            # REQ-MPROFILE-09: name AND resolution source land in the WORKER
+            # runtime status (control_runtime.json), not only the supervisor
+            # state. The switched worker runs --config .../profiles/alt.json, so
+            # its profile name is the config stem and the source is the worker's
+            # own resolution (explicit config path).
+            self.assertTrue(
+                _wait_for(
+                    lambda: _worker_profile(runtime_home)[0] == "alt",
+                    timeout_s=10.0),
+                "control_runtime.json active_profile_name did not record the "
+                "switched profile",
+            )
+            self.assertEqual(
+                _worker_profile(runtime_home)[1], "explicit_config",
+                "control_runtime.json active_profile_source not recorded",
             )
 
     def test_two_consecutive_switches(self) -> None:

@@ -219,7 +219,9 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::string& log_csv_path,
                             const std::string& log_manifest_path,
                             const std::string& event_log_path,
-                            const std::string& last_successful_restore_iso) {
+                            const std::string& last_successful_restore_iso,
+                            const std::string& active_profile_name,
+                            const std::string& active_profile_source) {
     // control_runtime.json is dual-schema: control-loop and read-loop both
     // write the same path with different field sets and different
     // schema_version numbers. The mode field is the discriminator at the
@@ -255,6 +257,9 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
     payload["log_manifest_path"] = log_manifest_path;
     payload["event_log_path"] = event_log_path;
     payload["last_successful_restore_time"] = last_successful_restore_iso;
+    // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
+    payload["active_profile_name"] = active_profile_name;
+    payload["active_profile_source"] = active_profile_source;
 
     payload["controlled_channels"] = nlohmann::json::array();
     for (const auto& channel : channels) {
@@ -290,6 +295,9 @@ bool WriteReadLoopStatus(const std::filesystem::path& runtime_home,
     payload["log_csv_path"] = status.log_csv_path;
     payload["log_manifest_path"] = status.log_manifest_path;
     payload["event_log_path"] = status.event_log_path;
+    // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
+    payload["active_profile_name"] = status.active_profile_name;
+    payload["active_profile_source"] = status.active_profile_source;
     std::string write_error;
     const bool success = TryWriteJsonFileAtomic(
         RuntimeStatusPath(runtime_home), payload, 2, &write_error);

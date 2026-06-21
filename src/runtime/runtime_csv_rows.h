@@ -147,6 +147,10 @@ std::string BuildControlLoopCsvRow(
     const RuntimeSnapshotIndex& snapshot_index,
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
-    const std::vector<RuntimeControlChannelLogState>& channels);
+    const std::vector<RuntimeControlChannelLogState>& channels,
+    // FEAT-0023 (REQ-MPROFILE-09): additive, observational active-profile
+    // identity. Recorded for offline attribution only; never read by control.
+    const std::string& active_profile_name = {},
+    const std::string& active_profile_source = {});
 
 }  // namespace svg_mb_control

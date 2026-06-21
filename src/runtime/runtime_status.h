@@ -75,8 +75,12 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::string& log_csv_path,
                             const std::string& log_manifest_path,
                             const std::string& event_log_path,
-                            const std::string& last_successful_restore_iso =
-                                {});
+                            const std::string& last_successful_restore_iso = {},
+                            // FEAT-0023 (REQ-MPROFILE-09): additive,
+                            // observational active-profile identity in the
+                            // worker runtime status (name + resolution source).
+                            const std::string& active_profile_name = {},
+                            const std::string& active_profile_source = {});
 
 // Writes the read-loop schema (v1). Moved here from a file-local helper
 // inside read_loop.cpp.

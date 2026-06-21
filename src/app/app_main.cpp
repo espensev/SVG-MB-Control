@@ -148,6 +148,16 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 config->profile_resolution_source = std::string(
                     svg_mb_control::ProfileResolutionSourceLabel(
                         profile_resolution.source));
+                // FEAT-0023 (REQ-MPROFILE-09): under supervision a worker is
+                // launched with --config <path> (the resolved profile's config),
+                // so profile_name is empty here; fall back to the config stem so
+                // the worker status/CSV carry a meaningful name. After a switch
+                // the config path is config/profiles/<name>.json, so the stem is
+                // the switched profile name.
+                if (config->profile_name.empty()) {
+                    config->profile_name =
+                        absolute_config_path.stem().string();
+                }
             }
         }
 

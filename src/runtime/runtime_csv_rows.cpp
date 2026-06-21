@@ -644,6 +644,9 @@ std::string BuildControlLoopCsvHeader() {
         AppendEntityColumns(header, "channel", channel,
                             kChannelPostBoostColumns);
     }
+    // FEAT-0023 (REQ-MPROFILE-09): additive active-profile identity, control-loop
+    // only (not in BuildCommonCsvHeader, so read-loop/evidence-log are unchanged).
+    header << ",active_profile_name,active_profile_source";
     return header.str();
 }
 
@@ -652,7 +655,9 @@ std::string BuildControlLoopCsvRow(
     const RuntimeSnapshotIndex& snapshot_index,
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
-    const std::vector<RuntimeControlChannelLogState>& channels) {
+    const std::vector<RuntimeControlChannelLogState>& channels,
+    const std::string& active_profile_name,
+    const std::string& active_profile_source) {
     std::ostringstream csv;
     BuildCommonCsvPrefix(csv, snapshot, snapshot_index, "control-loop");
     AppendCsvField(csv, tick_count);
@@ -741,6 +746,9 @@ std::string BuildControlLoopCsvRow(
         }
         AppendEntityFields(csv, present, state, kChannelPostBoostColumns);
     }
+    // FEAT-0023 (REQ-MPROFILE-09): additive active-profile identity columns.
+    AppendCsvFieldString(csv, active_profile_name);
+    AppendCsvFieldString(csv, active_profile_source);
     return csv.str();
 }
 

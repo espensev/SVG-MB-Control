@@ -27,6 +27,9 @@ class ReadLoop {
         std::string log_csv_path;
         std::string log_manifest_path;
         std::string event_log_path;
+        // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
+        std::string active_profile_name;
+        std::string active_profile_source;
     };
 
     ReadLoop(ControlConfig config, std::filesystem::path runtime_home);

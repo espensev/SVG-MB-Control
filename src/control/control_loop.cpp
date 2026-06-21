@@ -137,7 +137,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         detail.str(), state.tick_count,
                         FormatLocalIso8601(std::chrono::system_clock::now()),
                         state.last_timing, context.channels, state.log_csv_path,
-                        state.log_manifest_path, event_log_path);
+                        state.log_manifest_path, event_log_path,
+                        state.last_successful_restore_iso,
+                        context.base.profile_name,
+                        context.base.profile_resolution_source);
     }
     AppendControlLoopEvent(
         context.runtime_home,
@@ -198,7 +201,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     state.last_timing, context.channels, state.log_csv_path,
                     state.log_manifest_path, event_log_path,
-                    state.last_successful_restore_iso);
+                    state.last_successful_restore_iso,
+                    context.base.profile_name,
+                    context.base.profile_resolution_source);
     AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{

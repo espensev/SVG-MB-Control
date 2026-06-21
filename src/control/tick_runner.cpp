@@ -495,7 +495,9 @@ bool RunControlTick(ControlRuntimeContext& context,
                 state.runtime_snapshot_index,
                 state.tick_count,
                 state.last_timing,
-                state.channel_log_states));
+                state.channel_log_states,
+                context.base.profile_name,
+                context.base.profile_resolution_source));
         if (!row_written && !state.csv_write_failure_active) {
             AppendCsvWriteFailureEvent(context,
                                        csv_logger,
@@ -556,7 +558,9 @@ bool RunControlTick(ControlRuntimeContext& context,
             state.log_csv_path,
             state.log_manifest_path,
             event_log_path,
-            state.last_successful_restore_iso);
+            state.last_successful_restore_iso,
+            context.base.profile_name,
+            context.base.profile_resolution_source);
         state.force_status_write = !status_written;
     }
 

@@ -274,6 +274,9 @@ int ReadLoop::RunUntilStopped() {
     status.status = "running";
     status.status_detail = "starting";
     status.snapshot_source = "direct-runtime-snapshot";
+    // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
+    status.active_profile_name = impl_->config.profile_name;
+    status.active_profile_source = impl_->config.profile_resolution_source;
     status.event_log_path =
         ResolveRuntimeEventLogPath(impl_->runtime_home).string();
     ConfigureRuntimeEventLogRetention(

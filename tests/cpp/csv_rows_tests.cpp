@@ -266,7 +266,8 @@ void TestControlLoopAligned() {
     RuntimeSnapshotIndex snapshot_index;
     snapshot_index.Rebuild(snapshot);
     const std::string row =
-        BuildControlLoopCsvRow(snapshot, snapshot_index, 7u, timing, channels);
+        BuildControlLoopCsvRow(snapshot, snapshot_index, 7u, timing, channels,
+                               "quiet", "machine_identity");
     ExpectAligned(header, row, "control-loop");
     const std::vector<std::string> header_fields = SplitFields(header);
     const std::vector<std::string> row_fields = SplitFields(row);
@@ -317,6 +318,14 @@ void TestControlLoopAligned() {
                 "control-loop row");
     ExpectField(header_fields, row_fields, "gpu_power_acquisition", "nvml",
                 "control-loop row");
+    // FEAT-0023 (REQ-MPROFILE-09): additive active-profile columns, control-loop
+    // only (not read-loop / evidence-log). Names + values + placement.
+    ExpectContains(header, "active_profile_name", "control-loop header");
+    ExpectContains(header, "active_profile_source", "control-loop header");
+    ExpectField(header_fields, row_fields, "active_profile_name", "quiet",
+                "control-loop row");
+    ExpectField(header_fields, row_fields, "active_profile_source",
+                "machine_identity", "control-loop row");
     // FEAT-0021 GPU workload-context columns.
     ExpectContains(header, "gpu_context_sample_id", "control-loop header");
     ExpectContains(header, "gpu_context_time_ms", "control-loop header");
