@@ -82,6 +82,23 @@ itself did not fail. (A first-write-with-failed-persist crash leaves no entry fo
 that channel; the in-window command is a cooling command and the next worker
 re-establishes control — an accepted residual.)
 
+## Control-loop profile switch restore (FEAT-0023)
+
+A FEAT-0023 profile switch stops the worker through the **existing** graceful
+shutdown-restore path, not a new teardown. When the supervisor signals a cycle,
+the control loop exits cleanly on the `RuntimeProfileCycleRequested` predicate
+(not the fatal restore-timeout break), so the same shutdown restore runs:
+`RestoreSavedState` returns each active channel to its captured BIOS baseline
+(`baseline_duty_raw`/`baseline_mode_raw`, Runtime Flow step 9) and emits
+`control_loop.shutdown_restore_applied`. During the worker exit-to-respawn gap
+(an observed ~1-2 s) the fans therefore sit at that captured BIOS baseline
+rather than a held override. Force-terminate
+(`supervisor.profile_switch_force_terminated`) fires only after the worker
+misses the cycle deadline — the wedged-worker fallback, not the normal switch
+path. FEAT-0023 added no no-restore duty-latch and no separate fan-safety
+watchdog; the captured-baseline restore above is the sole fan-revert mechanism
+for a switch.
+
 ## Logging
 
 `write-once` and startup reconciliation append durable events to

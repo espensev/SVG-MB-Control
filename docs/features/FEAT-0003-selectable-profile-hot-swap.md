@@ -266,9 +266,10 @@ Verify legend:
 
 > All seven promotion gates are met. **Promoted Draft -> Accepted 2026-06-21**:
 > FEAT-0023 is Implemented + validated, clearing the sequencing gate, and the
-> maintainer authorized execution. Implementation is in progress; see section 14
-> for per-REQ results. The live PID write on hardware (REQ-PROFILE-07 M) remains
-> behind the evidenced `pid.allow_live` opt-in.
+> maintainer authorized execution. Implementation is authorized but has not yet
+> started; section 14 is filled in after the feature is built. The live PID write
+> on hardware (REQ-PROFILE-07 M) remains behind the evidenced `pid.allow_live`
+> opt-in.
 
 ## 14. Verification log  *(fill in after the feature is built - "check against the spec later")*
 

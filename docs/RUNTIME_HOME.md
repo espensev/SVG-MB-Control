@@ -22,6 +22,13 @@ Control owns these files:
   FEAT-0012 — additive, absence reads as "no corruption seen")
 - `stop.request.json`
 - `circuit_breaker_reset.request.json`
+- `profile.switch.request.json` (a take-once profile-switch request; like
+  `stop.request.json` and `circuit_breaker_reset.request.json` it is an
+  operator-written request file that the supervisor reads once and deletes —
+  FEAT-0023, additive, absence reads as "no switch requested")
+- `profile.cycle.request.json` (a supervisor-written, worker-consumed
+  profile-cycle signal; the control-loop worker breaks its loop when this file
+  is present — FEAT-0023, additive, absence reads as "no cycle signaled")
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
 - `logs\svg_mb_control_manifest.json`
@@ -35,6 +42,17 @@ Control owns these files:
 The JSON files remain the authoritative live state and recovery plane. The log
 files add history and operator traceability; they do not replace the JSON
 contract.
+
+Control also reads one optional operator-supplied input here that it never
+writes, so it is not part of the Control-owned set above:
+
+- `machine_id.txt` is an optional machine-identity override read once at startup
+  (FEAT-0023). When the file is present, Control uses its trimmed contents
+  verbatim as the machine id; when it is absent or empty, Control falls back to
+  the host name from `GetComputerNameW` (trimmed and lower-cased), and a host
+  name the profile catalog does not match falls through to the built-in default
+  config. `ResolveMachineId` reads this file from the resolved runtime home;
+  Control only reads it and never creates or rewrites it.
 
 ## current_state.json
 
@@ -82,6 +100,8 @@ Each fan entry can include:
 - `log_csv_path`
 - `log_manifest_path`
 - `event_log_path`
+- `active_profile_name`
+- `active_profile_source`
 
 `process_id` is the active worker PID. `svg-mb-control --status` uses it to
 distinguish an active loop from a stale status file. `restart_count` and
@@ -112,12 +132,21 @@ distinguish an active loop from a stale status file. `restart_count` and
 - `log_manifest_path`
 - `event_log_path`
 - `last_successful_restore_time`
+- `active_profile_name`
+- `active_profile_source`
 - `controlled_channels`
 
 `last_successful_restore_time` is the local ISO 8601 time of the most recent
 successful baseline restore in the current worker process. It is an empty string
 until the worker completes a restore. The field is added to the existing schema
 version `4`; consumers must tolerate its absence in older status files.
+
+`active_profile_name` and `active_profile_source` report the active profile
+identity the worker is running (FEAT-0023, REQ-MPROFILE-09); they are
+observational and are not a control input. `active_profile_name` is the resolved
+profile name and `active_profile_source` is how that profile was selected. Both
+fields are added to the existing schema version `4`; consumers must tolerate
+their absence in older status files.
 
 Timing fields describe the most recently completed control-loop tick. The first
 tick has no previous tick-start sample, so `loop_achieved_interval_ms` and
@@ -192,6 +221,11 @@ Fields:
 - `last_worker_restart_time`
 - `last_worker_exit_time`
 - `last_worker_exit_code`
+- `active_profile_name`
+
+`active_profile_name` is the active profile the worker runs (FEAT-0023); it is
+added to the existing schema version `1`, so consumers must tolerate its absence
+in older supervisor-state files.
 
 `last_worker_restart_time` and `last_worker_exit_time` are empty strings until
 the first worker restart and first worker exit. `last_worker_exit_code` is
@@ -348,6 +382,42 @@ Fields:
 - `reason`
 - `channel`, optional; absent or `null` means all controlled channels
 
+## profile.switch.request.json
+
+Created by `RequestRuntimeProfileSwitch` (the `svg-mb-control` profile-switch
+request path) and consumed by the supervisor (`control-loop` /
+`read-loop` under `--run-supervisor`). The supervisor reads the request once
+through `TakeRuntimeProfileSwitchRequest`, removes the file after reading it,
+and validates the named target profile before activating it: only a candidate
+that resolves to a config path and loads triggers a switch. A request that
+resolves to no profile, or whose `profile` field is missing or empty, is
+rejected without tearing down the running worker. This is a take-once request,
+so a stale switch request cannot re-trigger a switch on a later tick.
+
+Fields:
+
+- `schema_version`
+- `requested_at`
+- `reason`
+- `profile` (the target profile name to switch to)
+
+## profile.cycle.request.json
+
+Written by the supervisor through `RequestRuntimeProfileCycle` once a switch
+request validates, and consumed by the `control-loop` worker. The worker's
+control loop runs while `RuntimeProfileCycleRequested` is `false`; when the
+supervisor writes this file the worker breaks its loop, runs its normal
+shutdown restore back to the captured baseline, and exits cleanly so the
+supervisor can respawn from the new profile. The supervisor removes the file
+through `ClearRuntimeProfileCycleRequest` when it commits, reverts, or drops the
+switch.
+
+Fields:
+
+- `schema_version`
+- `requested_at`
+- `reason`
+
 ## logs\
 
 `read-loop` and `control-loop` can publish historical CSV telemetry and a
@@ -452,6 +522,9 @@ plus:
   `gpu_util_gpu_pct`, `gpu_util_mem_pct`, `gpu_pstate`,
   `gpu_clock_graphics_mhz`, `gpu_clock_memory_mhz`, `gpu_vram_used_mb`, and
   `gpu_vram_total_mb`
+- active-profile identity fields (additive, FEAT-0023, control-loop CSV only,
+  not ingested by the analyzer): `active_profile_name` and
+  `active_profile_source`
 - per-channel observed temperature, setpoint, feedforward demand, correction,
   thermal-pressure boost, primary temperature source, write count,
   active-write flag, and baseline flag
@@ -559,6 +632,19 @@ or `supervisor.force_terminate_failed`, each recording the affected PID and the
 reason in its `detail` string; `supervisor.worker_force_terminated` additionally
 records the timed-out graceful-stop result. These are additive event types on
 the same schema; no field or schema-version change.
+
+Profile-switch lifecycle events (FEAT-0023) are also additive event types on the
+same schema. When the supervisor validates an operator switch request and writes
+the cycle signal, it appends `supervisor.profile_switch_signaled`; a request
+that fails validation appends `supervisor.profile_rejected`. After the worker
+cycles, the supervisor appends `supervisor.profile_applied` when it commits the
+new profile, or `supervisor.profile_reverted` when a freshly-switched worker
+fails its own startup window and the supervisor reverts to the last-known-good
+profile (REQ-MPROFILE-07). If the worker does not honor the cycle signal before
+the switch-cycle deadline, the supervisor force-terminates it and appends
+`supervisor.profile_switch_force_terminated`, recording the reason in its
+`detail` string. These are additive event types on the same schema; no field or
+schema-version change.
 
 ## Ownership Rules
 

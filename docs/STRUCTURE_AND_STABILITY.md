@@ -74,6 +74,9 @@ A core library gives three stability benefits:
 - bounded hung-worker force-terminate escalation
   (`worker_force_terminate.cpp`),
 - config loading, validation, and CLI formatting (`control_loop_config.cpp`, `control_config.cpp`, `control_config_print.cpp`),
+- active config-path selection by precedence (`machine_profile.{h,cpp}`: `ResolveProfileSelection`, explicit `--config` > `--profile` > `SVG_MB_PROFILE` > machine id > default),
+- machine-base + behavior-overlay composition (`profile_composition.{h,cpp}`: `ComposeConfigRoot`),
+- supervisor switch-request and post-startup-outcome decisions (`profile_switch_decision.{h,cpp}`: `DecideSwitchRequest`, `DecideAfterStartupOutcome`),
 - mutable runtime state and shared context (`control_runtime_context.cpp`),
 - calibration sequence parsing and execution (`calibration.cpp`).
 
@@ -86,6 +89,9 @@ A core library gives three stability benefits:
 - pending-write sidecars,
 - run summary/manifest plumbing,
 - runtime write authorization policy (`runtime_write_policy.{h,cpp}`),
+- runtime request-file lifecycle (`runtime_lifecycle.{h,cpp}`: take-once stop,
+  breaker-reset, and profile-switch requests plus the supervisor→worker
+  profile-cycle signal),
 - read-loop and write-once mode entry points
   (`read_loop.cpp`, `write_orchestrator.cpp`).
 
@@ -110,6 +116,8 @@ A core library gives three stability benefits:
 - shared streaming SHA-256 helper (`file_hash.{h,cpp}`,
   `Sha256FileHex`) consumed by the analyze report and the CSV archive,
 - read-only feasibility probe (`service_probe.{h,cpp}`),
+- machine-id resolution from host name and optional override file
+  (`machine_identity.{h,cpp}`: `ResolveMachineId`),
 - task runner binary (`task_runner.cpp`).
 
 `policy/`
@@ -190,8 +198,9 @@ Completed:
     helper plus one-line calls. The two header-only tests
     (`svg_mb_control_rapl_energy_tests`, `svg_mb_control_cpu_cycles_tests`)
     stay hand-rolled because they must not link `svg_mb_control_core`. The
-    current build graph has thirteen CTest targets, verified by
-    `Test-LocalCI` (CTest 13/13).
+    current build graph registers twenty core-linked CTest targets through that
+    helper plus the two hand-rolled header-only tests, all verified by
+    `Test-LocalCI`.
 
 Remaining polish:
 

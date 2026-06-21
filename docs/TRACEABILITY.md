@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.5   **Updated:** 2026-06-20
+**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-21
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -106,16 +106,16 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-PROFILE-01` | T, R | Curve-overlay output-equivalence test vs current `EvaluateChannel`; review single call site. | not buildable |
-| `REQ-PROFILE-02` | T | One `PidController` covers P, PI, PD, and PID by gain selection. | not buildable |
-| `REQ-PROFILE-03` | T, R | Config-load tests for absent `controller` and per-law validation after FEAT-0023 profile resolution. | not buildable |
-| `REQ-PROFILE-04` | T, R | FEAT-0023 integration test: profile switch restarts the worker into the new law; review no FEAT-0003 runtime request or tick-boundary swap path exists. | not buildable |
-| `REQ-PROFILE-05` | T | Startup/restart tests assert controller dynamic state is fresh and no PID/curve state carries across a FEAT-0023 profile switch. | not buildable |
-| `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, write gates, and safety slew cap behave identically by controller kind. | not buildable |
-| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a positive non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded opt-in. | not buildable |
-| `REQ-PROFILE-08` | T, R | CSV/status tests assert per-channel controller-kind field and kind-aware/nullable law-specific reporting fields; analyzer tests if ingested. | not buildable |
-| `REQ-PROFILE-09` | R | Review confirms FEAT-0003 adds no channel-set switching semantics and delegates profile/channel-set validation to FEAT-0023. | not buildable |
-| `REQ-PROFILE-10` | R | Review control-identity docs for curve-overlay scope and PID identity reference. | not buildable |
+| `REQ-PROFILE-01` | T, R | Curve-overlay output-equivalence test vs current `EvaluateChannel`; review single call site. | pending |
+| `REQ-PROFILE-02` | T | One `PidController` covers P, PI, PD, and PID by gain selection. | pending |
+| `REQ-PROFILE-03` | T, R | Config-load tests for absent `controller` and per-law validation after FEAT-0023 profile resolution. | pending |
+| `REQ-PROFILE-04` | T, R | FEAT-0023 integration test: profile switch restarts the worker into the new law; review no FEAT-0003 runtime request or tick-boundary swap path exists. | pending |
+| `REQ-PROFILE-05` | T | Startup/restart tests assert controller dynamic state is fresh and no PID/curve state carries across a FEAT-0023 profile switch. | pending |
+| `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, write gates, and safety slew cap behave identically by controller kind. | pending |
+| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a positive non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded opt-in. The live PID write on hardware (M) stays deferred behind the evidenced opt-in. | pending |
+| `REQ-PROFILE-08` | T, R | CSV/status tests assert per-channel controller-kind field and kind-aware/nullable law-specific reporting fields; analyzer tests if ingested. | pending |
+| `REQ-PROFILE-09` | R | Review confirms FEAT-0003 adds no channel-set switching semantics and delegates profile/channel-set validation to FEAT-0023. | pending |
+| `REQ-PROFILE-10` | R | Review control-identity docs for curve-overlay scope and PID identity reference. | pending |
 
 ### FEAT-0004 - Hardware-access dependency health signal
 

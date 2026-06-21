@@ -68,12 +68,36 @@ the same responsibility; otherwise they are listed separately.
   and status emission (no JSON write — that lives in `runtime_status`).
 - `src/control/control_supervisor.{h,cpp}` — Supervised long-running
   mode: spawns/restarts the worker process, owns
-  `RunSupervisorWorkerLoop`, tracks restart counts.
+  `RunSupervisorWorkerLoop`, tracks restart counts. FEAT-0023: while the
+  worker runs it consumes the operator-written `profile.switch.request.json`
+  (`TakeRuntimeProfileSwitchRequest`), validates the candidate before it
+  signals a restart (only a request that resolves in the catalog and loads
+  triggers `RequestRuntimeProfileCycle`), and auto-reverts to the
+  last-known-good profile when a freshly-switched worker fails startup
+  (`DecideAfterStartupOutcome`).
 - `src/control/low_band_evidence.{h,cpp}` — Serializes the per-tick
   low-band evidence record (signal, debt, stage activation, CPU scale)
   to the event log.
 - `src/control/low_band_integrator.{h,cpp}` — Advances the global
   low-band signal and debt, and per-channel staged boost, each tick.
+- `src/control/machine_profile.{h,cpp}` — FEAT-0023 profile selection:
+  pure `ResolveProfileSelection` precedence (explicit `--config` >
+  `--profile` flag > `SVG_MB_PROFILE` env > machine id > default), plus
+  catalog resolution (`ResolveProfileConfigPath` /
+  `DefaultProfileCatalogDirs`) that maps a profile name to its
+  `config/profiles/<name>.json` path.
+- `src/control/profile_composition.{h,cpp}` — FEAT-0023 (REQ-MPROFILE-01)
+  `ComposeConfigRoot`: composes a `compose`-descriptor config into one
+  control-config JSON by injecting the machine-base
+  (`machine_cooling_policy.v1`) per-channel `release_min_duty_pct` into the
+  behavior-overlay channels; a config with no `compose` key is returned
+  unchanged.
+- `src/control/profile_switch_decision.{h,cpp}` — FEAT-0023 pure
+  switch-decision seam: `DecideSwitchRequest` (REQ-MPROFILE-05; reject or
+  activate a taken switch request after catalog and load/validate checks)
+  and `DecideAfterStartupOutcome` (REQ-MPROFILE-07; keep on worker
+  survival, revert to last-known-good on a startup failure), kept free of
+  process spawn/signal so they are unit-testable.
 - `src/control/tick_runner.{h,cpp}` — `ControlLoopRunState` and
   `RunControlTick`: per-tick sampling, channel evaluation, write
   attempts, artifact publication, and wait — the steady-state body.
@@ -180,6 +204,11 @@ the same responsibility; otherwise they are listed separately.
   reading env vars with a fallback.
 - `src/platform/file_hash.{h,cpp}` — Shared streaming SHA-256 helper for
   runtime and analyzer artifact identity.
+- `src/platform/machine_identity.{h,cpp}` — FEAT-0023 machine-identity
+  resolution (`ResolveMachineId` / pure `ResolveMachineIdFrom`): a
+  non-empty trimmed `machine_id.txt` override wins, otherwise the host name
+  (`GetComputerNameW`) is trimmed and lower-cased, used to auto-select a
+  catalog profile when no `--config` / `--profile` is given.
 - `src/platform/runtime_singleton.{h,cpp}` — Cross-process named
   mutex that enforces single-controller-per-runtime-home.
 - `src/platform/runtime_util.{h,cpp}` — `ProcessIsActive` and
@@ -363,6 +392,15 @@ the same responsibility; otherwise they are listed separately.
 - `config/machines/snd-desk.cooling.policy.json` — Machine-specific
   fan topology, pressure-balance strategy, and cooling-policy data
   behind the shipped profile.
+- `config/overlays/release.behavior.json` — FEAT-0023 behavior overlay:
+  the tunable `control_loop` curves / boosts / cadence with each
+  channel's `min_duty_pct` removed (the physical floor comes from the
+  machine base at composition time).
+- `config/profiles/snd-desk-composed.json` — FEAT-0023 composition
+  descriptor: a `compose` block (`machine_base`
+  `../machines/snd-desk.cooling.policy.json` + `behavior_overlay`
+  `../overlays/release.behavior.json`) that `ComposeConfigRoot` merges,
+  selectable with `--profile snd-desk-composed`.
 
 ## Tools
 

@@ -15,11 +15,12 @@ control profile (machine-base + behavior-overlay) at startup, and let an operato
 switch the active profile on a running controller by restarting the worker into a
 different profile (a supervised restart, not an in-process swap).
 
-> **Accepted / implementation-authorized (2026-06-20).** All seven promotion
-> gates are met, the decision record is Current, and the maintainer/user call in
-> this docs pass authorizes implementation. Build FEAT-0023 before FEAT-0003; live
-> runtime switching still requires explicit live-runtime authorization when tested
-> on hardware.
+> **Implemented 2026-06-21** (authorized 2026-06-20 ahead of FEAT-0003). All
+> seven promotion gates are met and the decision record is Current. FEAT-0023
+> shipped first; the control-law/PID seam (FEAT-0003) is sequenced after it and
+> was itself promoted to Accepted 2026-06-21. Live runtime switching still
+> requires explicit live-runtime authorization when tested on hardware (the
+> on-hardware live M, REQ-MPROFILE-10, stays deferred).
 
 ## 1. Summary
 

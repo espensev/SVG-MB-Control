@@ -1,7 +1,7 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.5   **Updated:** 2026-06-20
+**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-21
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/MEASUREMENT_GATE.md`
@@ -83,8 +83,15 @@ a feature's status or the decision queue changes. A fuller standing review is
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
 
-**In progress — `Accepted` 2026-06-21:** **FEAT-0003** — restart-selected
-control-law profile seam (PID / P / PI / PD plus the current curve law). Promoted
+The two latency held-Drafts also owe gate decisions and live in
+`docs/next_steps.md` (latency-reduction section): **FEAT-0017** owes the
+lanes/target-ceiling decision plus a response-evaluation Pass-3, and **FEAT-0018**
+owes the floor characterization pass (it crosses `docs/MEASUREMENT_GATE.md`).
+
+**Authorized, not yet started — `Accepted` 2026-06-21:** **FEAT-0003** —
+restart-selected control-law profile seam (PID / P / PI / PD plus the current
+curve law). Implementation is authorized but has not started (no controller code
+in `src/`; spec §14 verification log is empty). Promoted
 Draft→Accepted now that FEAT-0023 (the catalog/restart switch it sequences after)
 is Implemented + validated. Build scope: the `IChannelController` seam +
 `CurveOverlayController` (output-identical) + `PidController` (shadow/dry-run by
@@ -209,7 +216,7 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 |---|---|---|---|
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
-| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Accepted (2026-06-21; implementation in progress — seam/curve-overlay/PID-shadow/dispatch/gate-preconditions; live PID write deferred) |
+| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Accepted (2026-06-21; implementation-authorized, not yet started — seam/curve-overlay/PID-shadow/dispatch/gate-preconditions; live PID write deferred) |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |

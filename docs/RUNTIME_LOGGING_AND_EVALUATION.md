@@ -254,6 +254,18 @@ logging replacement.
   schema v12 summarizes context only when present and treats older archives as
   unavailable. Context is logging-only and never a response source, write gate,
   breaker input, or fan-duty input.
+- The FEAT-0023 layer (REQ-MPROFILE-09) appends two **active-profile identity**
+  string columns to the standard control-loop CSV: `active_profile_name` (the
+  resolved profile name driving this run) and `active_profile_source` (how that
+  profile was selected — one of `explicit_config`, `profile_flag`, `profile_env`,
+  `machine_identity`, or `default`). Both are written verbatim as the last two
+  fields of every control-loop row and are not blanked. They are appended only to
+  the control-loop CSV (outside `BuildCommonCsvHeader`), so the read-loop and
+  foreground `evidence-log` CSVs are unchanged. These are additive evidence
+  columns only: they are **not** ingested by `analyze` (no analyzer schema bump),
+  and they are never a response source, write gate, breaker input, or fan-duty
+  input. The same `active_profile_name`/`active_profile_source` identity is also
+  mirrored into the worker `control_runtime.json` status payload.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in

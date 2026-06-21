@@ -822,8 +822,8 @@ changes enough that these checks are incomplete.
 | §5   | `channel_evaluator.cpp:ApplyDemandSmoothing` |
 | §6.1–6.2 | `boost_stage.cpp:UpdateBoostStage` (BelowStart specs in `kBoostStageSpecs`: ThermalPressure, MidbandPressure, GpuAirflow) |
 | §6.3 | `boost_stage.cpp:UpdateBoostStage` (ExplicitRelease spec: CpuLowSoak) |
-| §7   | `low_band_integrator.cpp:UpdateLowBandState`, `cadence_score.cpp:SmoothScale` |
-| §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `cadence_score.cpp:MoveTowardRateLimited` |
+| §7   | `low_band_integrator.cpp:UpdateLowBandState`, `control_math.cpp:SmoothScale` |
+| §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `control_math.cpp:MoveTowardRateLimited` |
 | §8.2–8.3 | `channel_evaluator.cpp:EvaluateChannel` (final composition) |
 | §9   | `channel_write.cpp:TryApplyChannelSetpoint`, `channel_evaluator.cpp:FanNeedsAuthorityReassert`, `WriteCooldownForAuthorityReassert` |
 | §10  | `cadence_score.cpp:ComputeCadence`, `control_scheduler.cpp:WaitForNextControlTick`, `tick_runner.cpp` (CSV `loop_slip_ms` derivation) |

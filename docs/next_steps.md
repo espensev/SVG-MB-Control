@@ -5,7 +5,12 @@
 Reviewed and rewritten 2026-06-09; FEAT-0008 status refreshed 2026-06-16; the
 write-path safety review (FEAT-0010–0014) was **closed 2026-06-17** (see below).
 FEAT-0020 shipped and the runtime disk-growth retention specs (FEAT-0015/0016)
-were promoted 2026-06-18.
+were promoted 2026-06-18. FEAT-0021 (GPU workload context) and FEAT-0022 (runtime
+logging failure visibility) shipped 2026-06-20; FEAT-0023 (machine profiles +
+restart switch) shipped 2026-06-21 (T/R; live M deferred) and FEAT-0003
+(control-law / PID seam) was promoted to `Accepted` the same day (authorized, not
+yet started). The authoritative per-feature status is `docs/features/README.md`
+§5 and its "## Current priority" block; this file is topical background.
 These are review notes and a backlog, not work
 authorization: per `AGENTS.md` (Feature Intake Gate), product-code work for a new
 capability, schema/status/log field, CLI surface, or shipped-config behavior must
@@ -140,8 +145,12 @@ feature spec authorizes new runtime fields):
 - Add APERF/MPERF effective-frequency context to controlled runs when explicitly
   enabled, then specify the cycles-per-joule join before treating it as an
   efficiency score.
-- Add per-CCD / CPU-hotspot temperature context if a first-party source is
-  available.
+- Add a CPU-hotspot temperature context source if a first-party one becomes
+  available. The per-CCD Tdie half shipped 2026-06-21 (`b418aff`): the
+  `amd_sensor_summary` per-CCD Tdie reads now flow through `scripts/control_csv.py`
+  (`parse_ccd_temps`) into `scripts/analyze_cpu_temp_power.py` per-window
+  `ccd1`/`ccd2`/`ccd_delta` context; no separate first-party CPU-hotspot sensor
+  beyond those per-CCD reads exists yet.
 - Add workload label, CPU-setting label, and external score capture for
   controlled CPU runs.
 - Track PPT/TDC/EDC, throttle reason, and Vcore/VID only after a reviewed
@@ -168,6 +177,49 @@ feature spec authorizes new runtime fields):
   count disagreement: running sessions warn, closed runs are suspect evidence.
   Keep CSV byte-cap retention separate unless later evidence ties it directly to
   evidence loss.
+
+### Machine profiles (FEAT-0023) — contract-doc updates — DONE 2026-06-21
+
+FEAT-0023's Change-Checklist documentation, which shipped in code but not in the
+contract docs, was completed 2026-06-21 (source-grounded names taken from
+`runtime_csv_rows.cpp` / `runtime_status.cpp` / `runtime_supervisor_state.cpp` /
+`runtime_lifecycle.cpp` / `control_supervisor.cpp`, not spec placeholders):
+
+- `docs/RUNTIME_HOME.md` — `profile.switch.request.json` + `profile.cycle.request.json`
+  in the Files inventory with dedicated subsections; the optional read-only
+  `machine_id.txt` input (framed as a non-Control-owned input); `active_profile_name`
+  / `active_profile_source` in the read-loop and control-loop (v4) status field lists
+  and `active_profile_name` in `control_supervisor.json` (each with an additive-absence
+  note); the two active-profile control-loop CSV columns; the five
+  `supervisor.profile_*` events.
+- `docs/CONTROL_LOOP.md` — new "Profile Switch (FEAT-0023)" section (validate-before-
+  activate, the `profile.cycle.request.json` signal, graceful-restore restart,
+  no-backoff respawn, `kSwitchCycleTimeout` force-terminate fallback, auto-revert).
+- `docs/WRITE_ORCHESTRATION.md` — the switch reuses the existing graceful
+  shutdown-restore (fans → captured BIOS baseline during the ~1–2 s gap); the
+  restore is skipped only on a missed cycle deadline (force-terminate).
+- `docs/RUNTIME_LOGGING_AND_EVALUATION.md` — the two active-profile CSV columns
+  (control-loop CSV only, not analyzer-ingested).
+- `docs/CODE_MAP.md` + `docs/STRUCTURE_AND_STABILITY.md` — the four new modules
+  (`machine_profile`, `profile_composition`, `profile_switch_decision`,
+  `machine_identity`), `runtime_lifecycle` request-file lifecycle, the extended
+  `control_supervisor` entry, and the `config/overlays` / `config/profiles` artifacts.
+
+The on-hardware live M (`REQ-MPROFILE-10`) remains the only open FEAT-0023 item.
+
+### `--set-profile` CLI mutual-exclusion guard (FEAT-0023 follow-up)
+
+`--set-profile <name>` (FEAT-0023; parsed at `app_args.cpp:157`) has no
+mutual-exclusion guard and is dispatched in `app_main.cpp` (~`:255`) after the
+read-only runtime commands (`--show-config`, `--service-probe`, `--health`,
+`--status`), each of which returns first. So `svg-mb-control --set-profile X
+--status` (or `--health` / `--show-config` / `--service-probe`) silently runs the
+read-only command and never writes `profile.switch.request.json`, with no error —
+unlike the sibling `--reset-breakers`, which is guarded at `app_main.cpp:185-192`
+("cannot be combined with another runtime command"). An empty `--set-profile` name
+is already rejected (`runtime_lifecycle.cpp:123-125`). This is a CLI-robustness
+gap, not a safety issue; a fix changes CLI behavior and must go through the Feature
+Intake Gate (`AGENTS.md`). Record-only for now.
 
 ### Runtime disk growth (FEAT-0015 / FEAT-0016) — implemented 2026-06-18
 

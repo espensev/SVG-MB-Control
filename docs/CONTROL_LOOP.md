@@ -285,6 +285,46 @@ visible but not restarted, and `failed` is left for operator review.
 Passing `--mode control-loop --config <path>` keeps the loop attached to the
 current terminal and does not add supervisor restart behavior.
 
+## Profile Switch (FEAT-0023)
+
+The supervisor can switch the worker to a different machine profile at runtime
+through a restart, so the control loop never reloads config in place.
+
+- An operator requests a switch by writing `profile.switch.request.json` in the
+  runtime home. The supervisor consumes it take-once while the worker runs.
+- Before tearing down the healthy worker, the supervisor parse-validates the
+  candidate profile: it resolves the named profile through the profile catalog
+  and loads it (and `LoadControlLoopConfig` in control-loop mode), with no
+  hardware bind. A candidate that fails to resolve or load is rejected and the
+  running worker is left untouched; the supervisor logs
+  `supervisor.profile_rejected` (FEAT-0023).
+- On a valid candidate, the supervisor signals the worker by writing
+  `profile.cycle.request.json` and logs `supervisor.profile_switch_signaled`.
+  The worker loop (`control-loop` and the `read-loop` status path) checks for
+  this signal each iteration and exits the loop cleanly. In `control-loop` this
+  runs the existing shutdown restore, so controlled channels return to their
+  captured baseline before respawn; the `read-loop` path writes no fans, so it
+  exits with nothing to restore.
+- When the worker exits cleanly, the supervisor repoints to the new profile,
+  logs `supervisor.profile_applied`, and respawns from it. The respawn is not
+  delayed by crash backoff: it continues without incrementing the worker
+  restart counter, unlike the ordinary crash-restart path.
+- If the worker does not honor the cycle signal within `kSwitchCycleTimeout`
+  (`10 s`), the supervisor force-terminates it and logs
+  `supervisor.profile_switch_force_terminated`. The shutdown restore is skipped
+  in that case, so fans latch at their last commanded duty until the respawned
+  worker recaptures its baseline.
+- If a freshly switched worker then fails its own startup window, the supervisor
+  auto-reverts to the last-known-good profile (the profile that last survived
+  its startup window) and respawns from it, logging
+  `supervisor.profile_reverted`, instead of ending the supervisor.
+
+The active profile identity is recorded as `active_profile_name` and
+`active_profile_source` in `control_runtime.json` and as the matching
+`active_profile_name`,`active_profile_source` columns in the control-loop CSV.
+These fields are observational: they are not read by setpoint, cadence, or
+channel-policy logic, and they are not ingested by the analyzer.
+
 ## Policy Behavior
 
 `runtime_policy_path` is resolved locally inside Control.
