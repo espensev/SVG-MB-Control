@@ -92,6 +92,15 @@ void MergeAmdTelemetry(RuntimeSnapshot& snapshot,
     snapshot.cpu_cycles_window_ms = amd_snapshot.cpu_cycles_window_ms;
     snapshot.cpu_aperf_delta = amd_snapshot.cpu_aperf_delta;
     snapshot.cpu_mperf_delta = amd_snapshot.cpu_mperf_delta;
+    // FEAT-0006 all-core package roll-up (off-thread sweeper), independent of the
+    // per-core fields above and of temperature availability.
+    snapshot.cpu_cycles_allcore_sample_id =
+        amd_snapshot.cpu_cycles_allcore_sample_id;
+    snapshot.cpu_cycles_window_ms_allcore =
+        amd_snapshot.cpu_cycles_window_ms_allcore;
+    snapshot.cpu_aperf_delta_allcore = amd_snapshot.cpu_aperf_delta_allcore;
+    snapshot.cpu_mperf_delta_allcore = amd_snapshot.cpu_mperf_delta_allcore;
+    snapshot.cpu_cycles_allcore_cores = amd_snapshot.cpu_cycles_allcore_cores;
     if (!amd_snapshot.available || amd_snapshot.samples.empty()) {
         return;
     }

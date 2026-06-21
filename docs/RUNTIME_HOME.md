@@ -513,6 +513,15 @@ plus:
   `cpu_cycles_window_ms`, `cpu_aperf_delta`, `cpu_mperf_delta`, and
   `cpu_cycles_acquisition` (APERF/MPERF read per-core; the analyzer derives
   effective frequency, not logged)
+- CPU all-core cycle fields (additive, FEAT-0006, read-only, gated by the same
+  `SVG_MB_CONTROL_CPU_CYCLES_MODE`): `cpu_aperf_delta_allcore`,
+  `cpu_mperf_delta_allcore`, `cpu_cycles_window_ms_allcore`,
+  `cpu_cycles_allcore_sample_id`, and `cpu_cycles_allcore_cores`. These carry the
+  package effective frequency (Σ-dAPERF / Σ-dMPERF over all logical processors)
+  produced by an off-thread sweeper on its own sample-id cadence (independent of
+  `cpu_cycles_sample_id`); `cpu_cycles_allcore_cores` is the count of cores that
+  contributed a fresh window. Blank (NaN/empty) on baseline / all-blanked /
+  package-implausible. Provenance reuses `cpu_cycles_acquisition`.
 - GPU board-power fields (additive, FEAT-0020, read-only, control-loop CSV
   only): `gpu_power_sample_id`, `gpu_power_time_ms`, `gpu_power_mw`,
   `gpu_power_source`, and `gpu_power_acquisition`

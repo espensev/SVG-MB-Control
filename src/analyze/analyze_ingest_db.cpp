@@ -176,11 +176,14 @@ void InsertTickRows(Database& db,
         "gpu_context_sample_age_ms, gpu_context_acquisition,"
         "gpu_util_gpu_pct, gpu_util_mem_pct, gpu_pstate,"
         "gpu_clock_graphics_mhz, gpu_clock_memory_mhz,"
-        "gpu_vram_used_mb, gpu_vram_total_mb"
+        "gpu_vram_used_mb, gpu_vram_total_mb,"
+        "cpu_aperf_delta_allcore, cpu_mperf_delta_allcore,"
+        "cpu_cycles_window_ms_allcore, cpu_cycles_allcore_sample_id,"
+        "cpu_cycles_allcore_cores"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,"
         "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,"
         "?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,"
-        "?49,?50,?51,?52,?53,?54,?55,?56,?57)");
+        "?49,?50,?51,?52,?53,?54,?55,?56,?57,?58,?59,?60,?61,?62)");
 
     Statement fan = db.Prepare(
         "INSERT INTO tick_fan_samples("
@@ -249,6 +252,11 @@ void InsertTickRows(Database& db,
         tick.BindOptionalInt(55, row.gpu_clock_memory_mhz);
         tick.BindOptionalInt(56, row.gpu_vram_used_mb);
         tick.BindOptionalInt(57, row.gpu_vram_total_mb);
+        tick.BindOptionalDouble(58, row.cpu_aperf_delta_allcore);
+        tick.BindOptionalDouble(59, row.cpu_mperf_delta_allcore);
+        tick.BindOptionalDouble(60, row.cpu_cycles_window_ms_allcore);
+        tick.BindOptionalInt(61, row.cpu_cycles_allcore_sample_id);
+        tick.BindOptionalInt(62, row.cpu_cycles_allcore_cores);
         tick.Step();
         tick.Reset();
 

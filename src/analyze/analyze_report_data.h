@@ -149,6 +149,12 @@ struct CpuCyclesSummary {
     std::optional<double> ratio_max;
     std::optional<double> p0_mhz;
     std::optional<double> effective_mhz;
+    // FEAT-0006 all-core rollup only: the max/min contributing-core count over
+    // the package sweep windows, so a partial (<32-core) sweep is auditable and
+    // the Sigma-dAPERF work numerator is not misread as a full-package figure.
+    // Left nullopt for the per-core (core-0) summary, which has no core count.
+    std::optional<std::int64_t> contributing_cores_max;
+    std::optional<std::int64_t> contributing_cores_min;
     std::map<std::string, int> acquisition_counts;
 };
 
@@ -228,6 +234,7 @@ struct ReportData {
     TimingResourceStats timing_resources;
     PackagePowerSummary package_power;
     CpuCyclesSummary cpu_cycles;
+    CpuCyclesSummary cpu_cycles_allcore;
     GpuPowerSummary gpu_power;
     GpuContextSummary gpu_context;
     int authority_reasserted = 0;

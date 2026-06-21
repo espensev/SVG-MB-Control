@@ -95,6 +95,11 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     gpu_clock_memory_mhz INTEGER,
     gpu_vram_used_mb INTEGER,
     gpu_vram_total_mb INTEGER,
+    cpu_aperf_delta_allcore REAL,
+    cpu_mperf_delta_allcore REAL,
+    cpu_cycles_window_ms_allcore REAL,
+    cpu_cycles_allcore_sample_id INTEGER,
+    cpu_cycles_allcore_cores INTEGER,
     PRIMARY KEY (run_id, tick_count)
 );
 
@@ -753,6 +758,41 @@ void MigrateSchema(Database& db) {
                 "INTEGER");
         }
         SetSchemaVersion(db, 12);
+    }
+    if (version <= 12) {
+        // FEAT-0006 all-core effective-frequency columns (off-thread package
+        // sweep): additive nullable Sigma-dAPERF / Sigma-dMPERF over all
+        // logical processors on their OWN sample-id cadence (independent of the
+        // per-core cpu_cycles_sample_id), the per-sweep window, and the
+        // contributing-core count. Old archives lack them; ingest binds NULL
+        // and the report's second cycle query degrades to "unavailable" (no
+        // false zero). Idempotent via ColumnExists.
+        if (!ColumnExists(db, "tick_samples", "cpu_aperf_delta_allcore")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_aperf_delta_allcore "
+                "REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_mperf_delta_allcore")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_mperf_delta_allcore "
+                "REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_window_ms_allcore")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "cpu_cycles_window_ms_allcore REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_allcore_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "cpu_cycles_allcore_sample_id INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_allcore_cores")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_cycles_allcore_cores "
+                "INTEGER");
+        }
+        SetSchemaVersion(db, 13);
     }
 }
 

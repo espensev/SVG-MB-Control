@@ -430,6 +430,26 @@ void EmitJsonReport(const ReportOptions& options,
           {"max", OptToJson(cc.ratio_max)}}},
         {"acquisition_counts", cc.acquisition_counts},
     };
+    // FEAT-0006 all-core effective frequency: the off-thread package sweep
+    // (Sigma-dAPERF / Sigma-dMPERF over all logical processors), reported beside
+    // the per-core core-0 block above with the contributing-core count.
+    const auto& ca = data.cpu_cycles_allcore;
+    doc["cpu_cycles_allcore"] = {
+        {"window_count", ca.window_count},
+        {"aperf_mperf_ratio", OptToJson(ca.aperf_mperf_ratio)},
+        {"effective_mhz", OptToJson(ca.effective_mhz)},
+        {"p0_mhz", OptToJson(ca.p0_mhz)},
+        {"total_aperf_cycles", ca.total_aperf_cycles},
+        {"total_mperf_cycles", ca.total_mperf_cycles},
+        {"total_window_s", ca.total_window_s},
+        {"ratio",
+         {{"p50", OptToJson(ca.ratio_p50)},
+          {"p90", OptToJson(ca.ratio_p90)},
+          {"max", OptToJson(ca.ratio_max)}}},
+        {"contributing_cores_max", OptIntToJson(ca.contributing_cores_max)},
+        {"contributing_cores_min", OptIntToJson(ca.contributing_cores_min)},
+        {"acquisition_counts", ca.acquisition_counts},
+    };
     const auto& gp = data.gpu_power;
     doc["gpu_power"] = {
         {"sample_count", gp.sample_count},
@@ -610,6 +630,29 @@ void EmitTextReport(const ReportOptions& options,
        << " ratio_p90=" << OptToText(cc.ratio_p90)
        << " ratio_max=" << OptToText(cc.ratio_max)
        << " acquisition=" << CountsToText(cc.acquisition_counts) << '\n';
+    const auto& ca = data.cpu_cycles_allcore;
+    os << "cpu_cycles_allcore: windows=" << ca.window_count
+       << " aperf_mperf_ratio=" << OptToText(ca.aperf_mperf_ratio)
+       << " effective_mhz=" << OptToText(ca.effective_mhz)
+       << " p0_mhz=" << OptToText(ca.p0_mhz)
+       << " total_aperf_cycles="
+       << OptToText(std::optional<double>(ca.total_aperf_cycles))
+       << " total_mperf_cycles="
+       << OptToText(std::optional<double>(ca.total_mperf_cycles))
+       << " total_window_s="
+       << OptToText(std::optional<double>(ca.total_window_s))
+       << " ratio_p50=" << OptToText(ca.ratio_p50)
+       << " ratio_p90=" << OptToText(ca.ratio_p90)
+       << " ratio_max=" << OptToText(ca.ratio_max)
+       << " cores_max="
+       << (ca.contributing_cores_max
+               ? std::to_string(*ca.contributing_cores_max)
+               : std::string("n/a"))
+       << " cores_min="
+       << (ca.contributing_cores_min
+               ? std::to_string(*ca.contributing_cores_min)
+               : std::string("n/a"))
+       << " acquisition=" << CountsToText(ca.acquisition_counts) << '\n';
     const auto& gp = data.gpu_power;
     os << "gpu_power: samples=" << gp.sample_count
        << " avg_mw=" << OptToText(gp.avg_mw)

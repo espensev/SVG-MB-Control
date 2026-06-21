@@ -90,6 +90,15 @@ struct ParsedTickRow {
     std::optional<double> cpu_aperf_delta;
     std::optional<double> cpu_mperf_delta;
     std::optional<std::string> cpu_cycles_acquisition;
+    // FEAT-0006 all-core effective-frequency evidence (nullable; blank in old
+    // archives, on the worker's baseline sweep, and on guard-blanked sweeps).
+    // The off-thread package sweep carries its OWN sample id / window, separate
+    // from the per-core cpu_cycles_* columns above.
+    std::optional<double> cpu_aperf_delta_allcore;
+    std::optional<double> cpu_mperf_delta_allcore;
+    std::optional<double> cpu_cycles_window_ms_allcore;
+    std::optional<std::int64_t> cpu_cycles_allcore_sample_id;
+    std::optional<std::int64_t> cpu_cycles_allcore_cores;
     // FEAT-0020 read-only GPU board-power evidence (nullable; blank in old
     // archives and when there is no live nonzero NVML read). gpu_power_mw is
     // instantaneous board milliwatts (not an energy counter), summarized as

@@ -227,6 +227,20 @@ logging replacement.
   energy and cycle windows carry separate sample ids and no join rule is
   specified yet (see `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
   `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
+- The FEAT-0006 **all-core** layer (same `SVG_MB_CONTROL_CPU_CYCLES_MODE` gate,
+  off by default) adds the package effective frequency: `cpu_aperf_delta_allcore`
+  / `cpu_mperf_delta_allcore` (Σ-dAPERF / Σ-dMPERF over all logical processors)
+  over `cpu_cycles_window_ms_allcore`, keyed by `cpu_cycles_allcore_sample_id`,
+  with `cpu_cycles_allcore_cores` recording how many cores contributed a fresh
+  window. These are produced by a dedicated OFF-THREAD sweeper (its own PawnIO
+  handle and affinity; the 32-way affinity sweep never runs on the 250 ms control
+  thread), so the all-core window has its OWN sample-id cadence — it must NOT be
+  joined to the per-core `cpu_cycles_sample_id`. `analyze report` derives the
+  package ratio / effective frequency (a `cpu_cycles_allcore` block with the
+  contributing-core max/min) from a separate `GROUP BY cpu_cycles_allcore_sample_id`
+  query (analyze schema v13; pre-v13 archives degrade that block to
+  `unavailable`). The per-core block is retained unchanged. Effective frequency
+  is analyzer evidence only — not a control input.
 - The FEAT-0020 layer adds **read-only GPU board power** to the same standard
   control-loop CSV: `gpu_power_mw` (instantaneous NVML board milliwatts), keyed by
   `gpu_power_sample_id` and stamped with `gpu_power_time_ms` (the GPU power read

@@ -85,6 +85,8 @@ GpuResponseSummary SummariseGpuResponse(
 PackagePowerSummary SummarisePackagePower(Database& db, std::int64_t run_id);
 CpuCyclesSummary SummariseCpuCycles(Database& db, std::int64_t run_id,
                                     std::optional<double> p0_mhz);
+CpuCyclesSummary SummariseCpuCyclesAllcore(Database& db, std::int64_t run_id,
+                                           std::optional<double> p0_mhz);
 GpuPowerSummary SummariseGpuPower(Database& db, std::int64_t run_id);
 GpuContextSummary SummariseGpuContext(Database& db, std::int64_t run_id);
 
