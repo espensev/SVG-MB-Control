@@ -285,6 +285,30 @@ void ValidateChannelConfig(const ChannelControlConfig& ch,
 
     ValidateCurve(ch.curve, prefix + " curve");
     ValidateCurve(ch.cpu_override_curve, prefix + " cpu_override_curve", true);
+
+    // FEAT-0003: malformed PID config fails the load. The pid.allow_live live/
+    // shadow gate is NOT enforced here -- per decision D6 an unevidenced
+    // allow_live is downgraded to shadow at controller construction, not a load
+    // failure, so the rest of the channels still start.
+    if (ch.controller_kind == ControllerKind::Pid) {
+        if (std::isnan(ch.pid.target_c)) {
+            throw std::runtime_error(
+                prefix + " pid.target_c is required when controller is pid");
+        }
+        ValidatePositive(ch.pid.kp, prefix + " pid.kp");
+        ValidatePositive(ch.pid.ki, prefix + " pid.ki");
+        ValidatePositive(ch.pid.kd, prefix + " pid.kd");
+        if (ch.pid.feedforward == PidFeedforward::Fixed) {
+            ValidatePercentage(ch.pid.fixed_feedforward_pct,
+                               prefix + " pid.fixed_feedforward_pct");
+        }
+        if (!std::isnan(ch.pid.integral_min) &&
+            !std::isnan(ch.pid.integral_max) &&
+            ch.pid.integral_min >= ch.pid.integral_max) {
+            throw std::runtime_error(
+                prefix + " pid.integral_min must be < pid.integral_max");
+        }
+    }
 }
 
 void ValidateLowBandConfig(const LowBandControlConfig& cfg) {
@@ -401,6 +425,33 @@ void LoadLowBandConfig(const nlohmann::json& loop_json,
                        low.evidence_write_interval_ms);
 }
 
+// Optional pid sub-object parser (FEAT-0003). No-op when the channel JSON has
+// no pid key or the value is not an object; fields fall back to the
+// PidChannelConfig defaults the caller pre-populates. ParsePidFeedforward
+// throws on an unknown feedforward string so a typo fails config load loudly.
+void LoadPidConfig(const nlohmann::json& ch_json, PidChannelConfig& pid) {
+    if (!ch_json.contains("pid") || !ch_json["pid"].is_object()) {
+        return;
+    }
+    const auto& pid_json = ch_json["pid"];
+    ReadOptionalDouble(pid_json, "target_c", pid.target_c);
+    pid.kp = pid_json.value("kp", pid.kp);
+    pid.ki = pid_json.value("ki", pid.ki);
+    pid.kd = pid_json.value("kd", pid.kd);
+    if (pid_json.contains("feedforward")) {
+        pid.feedforward =
+            ParsePidFeedforward(pid_json["feedforward"].get<std::string>());
+    }
+    ReadOptionalDouble(pid_json, "fixed_feedforward_pct",
+                       pid.fixed_feedforward_pct);
+    ReadOptionalDouble(pid_json, "integral_min", pid.integral_min);
+    ReadOptionalDouble(pid_json, "integral_max", pid.integral_max);
+    pid.allow_live = pid_json.value("allow_live", pid.allow_live);
+    pid.characterization_artifact =
+        pid_json.value("characterization_artifact",
+                       pid.characterization_artifact);
+}
+
 // Builds one ChannelControlConfig from its JSON object. Assumes the caller
 // has already verified the "channel" field is present; the curve fields
 // use LoadCurveFromJson, and each boost overlay is parsed by
@@ -464,6 +515,14 @@ ChannelControlConfig LoadChannelConfig(const nlohmann::json& ch_json) {
         channel.temp_blend = ParseTempBlend(
             ch_json["temp_blend"].get<std::string>());
     }
+
+    // Control-law discriminator (FEAT-0003). ParseControllerKind throws on an
+    // unknown string; an absent key keeps the curve_overlay default.
+    if (ch_json.contains("controller")) {
+        channel.controller_kind = ParseControllerKind(
+            ch_json["controller"].get<std::string>());
+    }
+    LoadPidConfig(ch_json, channel.pid);
 
     LoadCurveFromJson(ch_json, "curve", channel.curve);
     LoadCurveFromJson(ch_json, "cpu_override_curve",

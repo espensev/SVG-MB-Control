@@ -16,9 +16,33 @@
 
 namespace svg_mb_control {
 
+// Per-channel PID law parameters (FEAT-0003 REQ-PROFILE-02/03). Only consulted
+// when ChannelControlConfig::controller_kind == Pid. error = observed_temp_c -
+// target_c (cooling convention: a hotter-than-target channel drives more duty),
+// so all gains are non-negative. P/PI/PD/PID are one law selected by which gains
+// are non-zero. `allow_live` is the operator opt-in to a live PID write; it is
+// downgraded to shadow/dry-run at controller construction unless a positive slew
+// cap and an existing `characterization_artifact` are both present (decision D6).
+struct PidChannelConfig {
+    double target_c = std::numeric_limits<double>::quiet_NaN();
+    double kp = 0.0;
+    double ki = 0.0;
+    double kd = 0.0;
+    PidFeedforward feedforward = PidFeedforward::Curve;
+    double fixed_feedforward_pct = std::numeric_limits<double>::quiet_NaN();
+    // Optional hard clamp on the integral accumulator (anti-windup). NaN = no
+    // explicit clamp; conditional integration still bounds windup at saturation.
+    double integral_min = std::numeric_limits<double>::quiet_NaN();
+    double integral_max = std::numeric_limits<double>::quiet_NaN();
+    bool allow_live = false;
+    std::string characterization_artifact;
+};
+
 struct ChannelControlConfig {
     std::uint32_t channel = 0u;
     TempBlend temp_blend = TempBlend::CpuOnly;
+    ControllerKind controller_kind = ControllerKind::CurveOverlay;
+    PidChannelConfig pid;
     double source_aware_cpu_hot_guard_c =
         std::numeric_limits<double>::quiet_NaN();
     double min_duty_pct = 0.0;
