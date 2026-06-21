@@ -62,13 +62,15 @@ a feature's status or the decision queue changes. A fuller standing review is
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
-- **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. Remaining is
-  follow-through, not package-energy capture: the `quarantine → validated`
-  marker decision (manual), the corrected per-core cycle/effective-frequency
-  evidence, and the deferred CPU-setting label. The enabled live RAPL path is
-  now covered by the FEAT-0020 flip and the power/temperature comparison
-  snapshot. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006 downstream
-  work).
+- **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. The
+  package-energy + cycle slices are landed; the all-core **package**
+  effective-frequency rollup (off-thread sweeper, analyze schema v13) and its
+  section-12 loop-timing gate harness merged 2026-06-21 (PRs #25/#26). Remaining
+  is evidence/promotion, not new code: the operator M-evidence capture for the
+  off-thread sweeper (run `scripts/score_loop_timing_gate.py`), the
+  `quarantine → validated` marker decision (manual), and the deferred
+  CPU-setting label. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006
+  downstream work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
 - **FEAT-0004** (`Accepted`) — hardware-access dependency health signal. Decision
@@ -219,7 +221,7 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Accepted (2026-06-21; implementation-authorized, not yet started — seam/curve-overlay/PID-shadow/dispatch/gate-preconditions; live PID write deferred) |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
-| [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger landed 2026-06-09 default-off; analyzer effective-frequency derivation landed 2026-06-10, analyze schema v10; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion remains manual) |
+| [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger + analyzer effective-frequency derivation landed 2026-06-09/10; all-core package rollup via off-thread sweeper + section-12 loop-timing gate harness merged 2026-06-21, analyze schema v13; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion + off-thread-sweeper live M-evidence remain) |
 | FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |
 | [FEAT-0008](FEAT-0008-watchdog-hung-worker-recovery.md) | Watchdog hung-worker recovery (force-kill escalation) | `REQ-WATCHDOG-*` | Done (v1 complete: force-terminate escalation + `--restart` wiring landed; C++ unit + Python suspend-based integration tests pass; live deterministic suspend recovery evidence passed; post-v1 options remain in FEAT-0008 §11) |
 | [FEAT-0009](FEAT-0009-controller-priority-elevation.md) | Controller scheduling-priority elevation (worker priority raise + recovery co-elevation) | `REQ-PRIORITY-*` | Draft (held — pending the FEAT-0009 §12 A/B contention experiment) |

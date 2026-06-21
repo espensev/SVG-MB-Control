@@ -352,6 +352,11 @@ the same responsibility; otherwise they are listed separately.
   (`ccd1_tdie_c`/`ccd2_tdie_c`/`ccd_delta_c`, parsed from `amd_sensor_summary`
   via `control_csv.parse_ccd_temps`), and reads radiator/context channel
   membership from the machine cooling policy.
+- `scripts/score_loop_timing_gate.py` — read-only FEAT-0006 section-12 gate
+  scorer: compares `loop_work_duration_ms` baseline-vs-candidate (GPU-bucketed,
+  p99-of-bulk discriminator; max/overruns as context) to check the all-core
+  off-thread sweeper does not move the 250 ms control-loop profile before any
+  enabled-live promotion.
 - `scripts/cpu_config_fingerprint.py` — read-only analyzer (skeleton) that builds
   a per-run config-pure fingerprint (idle package-power floor, per-busy-band
   watts, effective MHz/W, CCD balance) and segments runs into auto-labeled
