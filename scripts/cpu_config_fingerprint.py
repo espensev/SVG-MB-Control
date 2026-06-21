@@ -135,6 +135,25 @@ def _parse_ccd_balance(summaries: list[str]) -> float | None:
     return _median(deltas) if deltas else None
 
 
+def _select_cycle_columns(header, rows):
+    """Prefer the all-core package cycle columns + their own sample id when the
+    run carries them, else fall back to the per-core (core-0) columns so captures
+    predating the all-core rollup still fingerprint. Returns
+    (sample_ids, aperf, mperf) with aperf/mperf as float-or-None lists and the
+    sample ids matching the chosen deltas -- the window de-dup keys on them, and
+    the all-core sweeper runs on its OWN cadence so its deltas must pair with
+    cpu_cycles_allcore_sample_id, never the per-core id. Parallels
+    score_energy_session.select_cycle_deltas (which does not need the ids)."""
+    a_all = [to_float(v) for v in column(header, rows, "cpu_aperf_delta_allcore")]
+    m_all = [to_float(v) for v in column(header, rows, "cpu_mperf_delta_allcore")]
+    if any(v is not None for v in a_all) and any(v is not None for v in m_all):
+        return (column(header, rows, "cpu_cycles_allcore_sample_id"),
+                a_all, m_all)
+    return (column(header, rows, "cpu_cycles_sample_id"),
+            [to_float(v) for v in column(header, rows, "cpu_aperf_delta")],
+            [to_float(v) for v in column(header, rows, "cpu_mperf_delta")])
+
+
 def _eff_mhz_by_window(sample_ids, aperf, mperf, p0_mhz):
     """Cycle-weighted effective MHz over DISTINCT cycle windows (mirrors the v10
     analyzer block). Returns one effective-MHz value per distinct sample id, or
@@ -161,9 +180,10 @@ def compute_run_fingerprint(path: Path, *, p0_mhz: float,
         column(header, rows, "cpu_pkg_energy_delta_uj"),
         column(header, rows, "cpu_power_window_ms"),
     )
-    aperf = [to_float(v) for v in column(header, rows, "cpu_aperf_delta")]
-    mperf = [to_float(v) for v in column(header, rows, "cpu_mperf_delta")]
-    cyc_ids = column(header, rows, "cpu_cycles_sample_id")
+    # Prefer the all-core package eff-freq when the run carries it (a true
+    # package V/F point is a better config fingerprint than the core-0 ratio);
+    # fall back to the per-core columns for captures predating the all-core rollup.
+    cyc_ids, aperf, mperf = _select_cycle_columns(header, rows)
     summaries = column(header, rows, "amd_sensor_summary")
     # TODO(probe): once the SVI probe promotes a column, read it here, e.g.
     #   vcore = [to_float(v) for v in column(header, rows, "cpu_voltage_core_mv")]
