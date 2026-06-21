@@ -13,9 +13,31 @@ from __future__ import annotations
 
 import csv
 import math
+import re
 from pathlib import Path
 
 WALL_CLOCK_FMT = "%Y-%m-%dT%H:%M:%S"
+
+# Per-CCD Tdie entries inside the amd_sensor_summary text column, e.g.
+# "Tctl/Tdie=59.000 | CCD1 (Tdie)=39.500 | CCD2 (Tdie)=48.500". One source of
+# truth so analyze_cpu_temp_power.py and cpu_config_fingerprint.py share it.
+_CCD_TDIE_RE = re.compile(r"CCD(\d+) \(Tdie\)=([0-9.]+)")
+
+
+def parse_ccd_temps(summary: str) -> dict[int, float]:
+    """Map CCD index -> Tdie Celsius parsed from an amd_sensor_summary string.
+
+    Returns an empty dict for an empty string or one with no CCD fields (e.g.
+    a single-die part or a pre-decode row), never raising."""
+    if not summary:
+        return {}
+    out: dict[int, float] = {}
+    for match in _CCD_TDIE_RE.finditer(summary):
+        try:
+            out[int(match.group(1))] = float(match.group(2))
+        except ValueError:
+            continue
+    return out
 
 
 def parse_control_csv(path: Path) -> tuple[dict[str, str], list[str], list[list[str]]]:

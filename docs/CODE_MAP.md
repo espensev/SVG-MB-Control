@@ -319,8 +319,21 @@ the same responsibility; otherwise they are listed separately.
   records a per-setting comparison ledger.
 - `scripts/analyze_cpu_temp_power.py` — read-only evaluator that bins distinct
   FEAT-0006 CPU package-energy windows by package watts, reports apparent
-  `theta C/W`, separates GPU-confounded windows, and reads radiator/context
-  channel membership from the machine cooling policy.
+  `theta C/W`, separates GPU-confounded windows, surfaces per-CCD Tdie
+  (`ccd1_tdie_c`/`ccd2_tdie_c`/`ccd_delta_c`, parsed from `amd_sensor_summary`
+  via `control_csv.parse_ccd_temps`), and reads radiator/context channel
+  membership from the machine cooling policy.
+- `scripts/cpu_config_fingerprint.py` — read-only analyzer (skeleton) that builds
+  a per-run config-pure fingerprint (idle package-power floor, per-busy-band
+  watts, effective MHz/W, CCD balance) and segments runs into auto-labeled
+  regimes (median/MAD step detection over exact `git_hash`/`config_sha256` cuts)
+  to detect BIOS/Curve-Optimizer/PBO changes from telemetry without operator
+  annotation. Emits `svg_mb_control.cpu_fingerprint.v1`.
+- `scripts/control_csv.py` — shared read-only helper (one source of truth):
+  splits a `svg_mb_control.log.v1` CSV into (meta, header, rows), reads columns
+  by name, and parses per-CCD Tdie (`parse_ccd_temps`). Consumed by
+  `analyze_power_lead.py`, `score_energy_session.py`, `analyze_cpu_temp_power.py`,
+  and `cpu_config_fingerprint.py`.
 - `scripts/Install-CpuTempBaselineTask.ps1` — registers/removes a scheduled
   task that runs `Compare-CpuTemps.ps1` on a cadence for a long-term baseline.
 

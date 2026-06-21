@@ -275,6 +275,38 @@ if(SVG_MB_CONTROL_BUILD_CYCLE_PROBE AND WIN32)
         OUTPUT_NAME "cpu-cycle-counter-probe")
 endif()
 
+# Throwaway one-shot read-only probe: discover whether live CPU core/SoC voltage
+# (SVI telemetry) is reachable on Zen5 / Family 1Ah (9950X3D) via the shipped bin's
+# `ioctl_read_smn` path (the same arbitrary-SMN-address transport already used for
+# Tctl/per-CCD Tdie). The MSR allow-list does not apply to SMN, so this needs no
+# new module -- only the unknown SVI3 plane address/decode, which the probe sweeps
+# and a human validates vs HWiNFO64. OFF by default: not built by Test-LocalCI /
+# Build-Release / CTest, never shipped in release\, not part of the control loop.
+# Reuses only the bin-load API (pawnio_binary) + env_util + the pure decode header
+# (amd_decode.h); does not link svg_mb_control_core. Build with
+#   cmake -DSVG_MB_CONTROL_BUILD_VCORE_PROBE=ON ... && cmake --build ... \
+#         --target cpu_vcore_probe
+option(SVG_MB_CONTROL_BUILD_VCORE_PROBE
+    "Build the throwaway read-only CPU Vcore/SVI SMN discovery probe (Zen5 fingerprint)" OFF)
+if(SVG_MB_CONTROL_BUILD_VCORE_PROBE AND WIN32)
+    add_executable(cpu_vcore_probe
+        tools/cpu_vcore_probe.cpp
+        src/hardware/pawnio_binary.cpp
+        src/platform/env_util.cpp
+    )
+    target_include_directories(cpu_vcore_probe PRIVATE
+        ${SVG_MB_CONTROL_INCLUDE_DIRS})
+    target_compile_features(cpu_vcore_probe PRIVATE cxx_std_20)
+    target_compile_definitions(cpu_vcore_probe PRIVATE
+        ${SVG_MB_CONTROL_COMMON_DEFINITIONS})
+    if(MSVC)
+        target_compile_options(cpu_vcore_probe PRIVATE /W4 /permissive-)
+    endif()
+    target_link_libraries(cpu_vcore_probe PRIVATE bcrypt)
+    set_target_properties(cpu_vcore_probe PROPERTIES
+        OUTPUT_NAME "cpu-vcore-probe")
+endif()
+
 # Throwaway synthetic CPU load generator for the FEAT-0006 CPU-energy
 # quarantine-exit capture: drives a controlled all-core load so a session has a
 # clean idle->load->cooldown step. OFF by default: not built by Test-LocalCI /

@@ -22,7 +22,8 @@ from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from analyze_power_lead import derive_watts  # noqa: E402
-from control_csv import column, parse_control_csv, to_float  # noqa: E402
+from control_csv import (  # noqa: E402
+    column, parse_ccd_temps, parse_control_csv, to_float)
 
 RADIATOR_CHANNELS = (1, 4, 5)
 CONTEXT_CHANNELS = (0, 2, 3)
@@ -67,6 +68,9 @@ class Window:
     cpu_tctl_c_avg: float
     cpu_tctl_c_max: float
     cpu_max_c_avg: float | None
+    ccd1_tdie_c_avg: float | None
+    ccd2_tdie_c_avg: float | None
+    ccd_delta_c_avg: float | None
     system_cpu_busy_pct_avg: float | None
     gpu_memjn_c_avg: float | None
     gpu_power_w_avg: float | None
@@ -309,6 +313,12 @@ def load_windows(path: Path, *, ambient_c: float | None,
     cpu_max = _numeric_column(header, rows, "cpu_max_c")
     busy = _numeric_column(header, rows, "system_cpu_busy_pct")
     gpu_mem = _numeric_column(header, rows, "gpu_memjn_c")
+    # Per-CCD Tdie from the amd_sensor_summary text (no schema change; the values
+    # are already logged every tick). CCD1 = V-cache die, CCD2 = frequency die on
+    # the 9950X3D; absent on single-die parts / pre-decode rows -> None.
+    _ccd = [parse_ccd_temps(s) for s in column(header, rows, "amd_sensor_summary")]
+    ccd1 = [t.get(1) for t in _ccd]
+    ccd2 = [t.get(2) for t in _ccd]
     gpu_power_w = [
         None if v is None else v / 1000.0
         for v in _numeric_column(header, rows, "gpu_power_mw")
@@ -350,6 +360,11 @@ def load_windows(path: Path, *, ambient_c: float | None,
         gpu_w_avg = _mean(gpu_power_w[i] for i in idxs)
         gpu_w_max = _max(gpu_power_w[i] for i in idxs)
         gpu_mem_avg = _mean(gpu_mem[i] for i in idxs)
+        ccd1_avg = _mean(ccd1[i] for i in idxs)
+        ccd2_avg = _mean(ccd2[i] for i in idxs)
+        ccd_deltas = [ccd2[i] - ccd1[i] for i in idxs
+                      if ccd1[i] is not None and ccd2[i] is not None]
+        ccd_delta_avg = _mean(ccd_deltas) if ccd_deltas else None
         temp_rise = None if ambient_c is None else cpu_t_avg - ambient_c
         theta = None
         if temp_rise is not None and cpu_w > 0.0:
@@ -374,6 +389,9 @@ def load_windows(path: Path, *, ambient_c: float | None,
             cpu_tctl_c_avg=cpu_t_avg,
             cpu_tctl_c_max=cpu_t_max,
             cpu_max_c_avg=_mean(cpu_max[i] for i in idxs),
+            ccd1_tdie_c_avg=ccd1_avg,
+            ccd2_tdie_c_avg=ccd2_avg,
+            ccd_delta_c_avg=ccd_delta_avg,
             system_cpu_busy_pct_avg=_mean(busy[i] for i in idxs),
             gpu_memjn_c_avg=gpu_mem_avg,
             gpu_power_w_avg=gpu_w_avg,
@@ -440,6 +458,9 @@ def _summarize_windows(windows: list[Window]) -> dict:
         "cpu_package_w": _stats(w.cpu_package_w for w in windows),
         "cpu_tctl_c_avg": _stats(w.cpu_tctl_c_avg for w in windows),
         "cpu_tctl_c_max": _stats(w.cpu_tctl_c_max for w in windows),
+        "ccd1_tdie_c": _stats(w.ccd1_tdie_c_avg for w in windows),
+        "ccd2_tdie_c": _stats(w.ccd2_tdie_c_avg for w in windows),
+        "ccd_delta_c": _stats(w.ccd_delta_c_avg for w in windows),
         "temp_rise_c": _stats(w.temp_rise_c for w in windows),
         "theta_c_per_w": _stats(w.theta_c_per_w for w in windows),
         "system_cpu_busy_pct_avg": _stats(w.system_cpu_busy_pct_avg for w in windows),
@@ -542,8 +563,8 @@ def render_markdown(result: dict) -> str:
         "",
         "Values are p50/p90/max. `theta` is `(CPU Tctl avg - ambient C) / CPU package W`; use it as an apparent, run-local C/W score, not an absolute cooler spec.",
         "",
-        "| Band | Range | settled/all | unconfounded | CPU W | Tctl avg C | Tctl max C | theta C/W | busy % | GPU W | rad setpoint % | rad RPM |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Band | Range | settled/all | unconfounded | CPU W | Tctl avg C | Tctl max C | CCD2-CCD1 C | theta C/W | busy % | GPU W | rad setpoint % | rad RPM |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ])
     for name, band in result["bands"].items():
         gate = band["gate"]
@@ -553,6 +574,7 @@ def render_markdown(result: dict) -> str:
             f"| {name} | {band['range']} | {gate['settled']}/{gate['in_band']} | "
             f"{clean['windows']} | {_cell(all_s, 'cpu_package_w')} | "
             f"{_cell(all_s, 'cpu_tctl_c_avg')} | {_cell(all_s, 'cpu_tctl_c_max')} | "
+            f"{_cell(all_s, 'ccd_delta_c')} | "
             f"{_cell(all_s, 'theta_c_per_w', 3)} | "
             f"{_cell(all_s, 'system_cpu_busy_pct_avg', 1)} | "
             f"{_cell(all_s, 'gpu_power_w_avg', 1)} | "
@@ -574,6 +596,7 @@ def render_markdown(result: dict) -> str:
 WINDOW_FIELDS = [
     "sample_id", "first_wall_clock", "last_wall_clock", "rows", "acquisition",
     "cpu_package_w", "cpu_tctl_c_avg", "cpu_tctl_c_max", "cpu_max_c_avg",
+    "ccd1_tdie_c_avg", "ccd2_tdie_c_avg", "ccd_delta_c_avg",
     "temp_rise_c", "theta_c_per_w", "system_cpu_busy_pct_avg",
     "gpu_memjn_c_avg", "gpu_power_w_avg", "gpu_power_w_max",
     "gpu_confounded", "radiator_setpoint_avg_pct", "radiator_rpm_avg",

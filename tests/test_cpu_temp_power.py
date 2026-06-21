@@ -19,6 +19,9 @@ assert _SPEC.loader is not None
 sys.modules[_SPEC.name] = ctp
 _SPEC.loader.exec_module(ctp)
 
+# Loading ctp inserts scripts/ onto sys.path, so the shared helper imports here.
+import control_csv as cc  # noqa: E402
+
 _BASE = datetime(2026, 6, 20, 12, 0, 0)
 
 
@@ -41,7 +44,7 @@ def _make_csv(path: Path, rows: int = 35) -> Path:
         "wall_clock", "cpu_tctl_c", "cpu_max_c", "system_cpu_busy_pct",
         "cpu_power_sample_id", "cpu_power_window_ms",
         "cpu_pkg_energy_delta_uj", "cpu_pkg_energy_acquisition",
-        "gpu_memjn_c", "gpu_power_mw",
+        "gpu_memjn_c", "gpu_power_mw", "amd_sensor_summary",
     ]
     for channel in (0, 1, 2, 3, 4, 5):
         header.extend([
@@ -56,6 +59,9 @@ def _make_csv(path: Path, rows: int = 35) -> Path:
         row: list[object] = [
             _wall(i), tctl, tctl + 0.5, busy, i + 1, 1000, delta_uj,
             "quarantine", gpu_mem, gpu_mw,
+            # CCD2 (freq die) runs 10 C hotter than CCD1 (V-cache die).
+            f"Tctl/Tdie={tctl:.3f} | CCD1 (Tdie)={tctl - 12:.3f}"
+            f" | CCD2 (Tdie)={tctl - 2:.3f}",
         ]
         for channel in (0, 1, 2, 3, 4, 5):
             if channel in (1, 4, 5):
@@ -71,6 +77,16 @@ def _make_csv(path: Path, rows: int = 35) -> Path:
         writer.writerow(header)
         writer.writerows(rows_out)
     return path
+
+
+class ParseCcdTempsTests(unittest.TestCase):
+    def test_parses_per_ccd_tdie_from_summary(self) -> None:
+        summary = "Tctl/Tdie=59.000 | CCD1 (Tdie)=39.500 | CCD2 (Tdie)=48.500"
+        self.assertEqual(cc.parse_ccd_temps(summary), {1: 39.5, 2: 48.5})
+
+    def test_returns_empty_when_no_ccd_fields(self) -> None:
+        self.assertEqual(cc.parse_ccd_temps(""), {})
+        self.assertEqual(cc.parse_ccd_temps("Tctl/Tdie=50.000"), {})
 
 
 class CpuTempPowerTests(unittest.TestCase):
@@ -112,6 +128,31 @@ class CpuTempPowerTests(unittest.TestCase):
         markdown = ctp.render_markdown(result)
         self.assertIn("CPU temperature by package power", markdown)
         self.assertIn("theta C/W", markdown)
+
+    def test_per_ccd_tdie_surfaces_in_summary_and_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            path = _make_csv(Path(td) / "control.csv")
+            result = ctp.analyze(
+                path,
+                ambient_c=21.0,
+                bands=ctp.parse_power_bands("idle:0:60,mid:60:120,high:120:"),
+                dwell_s=3.0,
+                max_gap_s=2.0,
+                gpu_power_confound_w=300.0,
+                gpu_mem_confound_c=60.0,
+            )
+            windows = result.pop("_windows")
+
+        overall = result["overall"]
+        self.assertIn("ccd_delta_c", overall)
+        # CCD2 is fixed 10 C above CCD1 in the fixture.
+        self.assertAlmostEqual(overall["ccd_delta_c"]["p50"], 10.0, places=1)
+        self.assertIsNotNone(windows[0].ccd1_tdie_c_avg)
+        self.assertIsNotNone(windows[0].ccd2_tdie_c_avg)
+        self.assertGreater(windows[0].ccd2_tdie_c_avg, windows[0].ccd1_tdie_c_avg)
+
+        markdown = ctp.render_markdown(result)
+        self.assertIn("CCD", markdown)
 
     def test_missing_power_columns_reports_warning(self) -> None:
         with tempfile.TemporaryDirectory() as td:

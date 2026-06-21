@@ -316,16 +316,19 @@ is **not** allow-listed — it already serves the Tctl and per-CCD Tdie reads).
 
 | Signal | Reachable | Effort | Hot-path cost | What it adds |
 |---|---|---|---|---|
-| **Per-CCD Tdie columns** (CCD1 V-cache vs CCD2 freq die) | **now** — already in `amd_sensor_summary` text for all 2.11M rows | S | none (offline parse) | the per-die picture; CCD-delta as a regime signal |
+| **Per-CCD Tdie columns** (CCD1 V-cache vs CCD2 freq die) | **DONE (2026-06-21)** — implemented in `analyze_cpu_temp_power.py` via `control_csv.parse_ccd_temps`; was already in `amd_sensor_summary` text for all 2.11M rows | S | none (offline parse) | the per-die picture; CCD-delta as a regime signal |
 | **Effective frequency** (APERF/MPERF) | **built but off** (`CPU_CYCLES_MODE=disabled`) | M | low per-tick | MHz-per-watt, the most direct CO/PBO fingerprint |
 | **Live Vcore / VSoC** (SVI telemetry) | **probe-gated** — transport exists, Zen5 SVI3 address/decode unknown | M | low per-tick | the most direct undervolt fingerprint |
 | Per-core V, PPT/TDC/EDC limits | needs new module (SMU mailbox PM-table) | L | — | the PBO envelope; out of near-term scope |
 
-**Per-CCD Tdie (do now, zero new logging).** The per-CCD values are decoded every
-tick (`amd_reader.cpp` reads `ccd_base + index*4`; `ccd_base` is a static CPUID
-lookup, Family 1Ah model 0x44 -> `0x00059B08`, already shipped) and serialized
-into the `amd_sensor_summary` text. Parsing `CCD1 (Tdie)=` / `CCD2 (Tdie)=` into
-columns is a backfillable analyzer change with no schema bump and no probe. The
+**Per-CCD Tdie (DONE 2026-06-21, zero new logging).** Implemented: the shared
+`control_csv.parse_ccd_temps` parser feeds per-CCD columns and a `CCD2-CCD1 C`
+band column in `analyze_cpu_temp_power.py` (and the `cpu_config_fingerprint.py`
+`ccd_balance_c` dimension). The per-CCD values are decoded every tick
+(`amd_reader.cpp` reads `ccd_base + index*4`; `ccd_base` is a static CPUID lookup,
+Family 1Ah model 0x44 -> `0x00059B08`, already shipped) and serialized into the
+`amd_sensor_summary` text. Parsing `CCD1 (Tdie)=` / `CCD2 (Tdie)=` into columns is
+a backfillable analyzer change with no schema bump and no probe. The
 per-die picture over 06-11..06-18 (this is new — `Tctl` blends/maxes the dies and
 hides it):
 

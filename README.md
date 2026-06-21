@@ -427,7 +427,15 @@ python .\scripts\analyze_cpu_temp_power.py `
 Use `Compare-CpuTemps.ps1` for continuity with the long busy-band baseline. Use
 `analyze_cpu_temp_power.py` when CPU package-energy fields are present, so CPU
 temperature is compared against actual package watts with GPU-confound and
-policy-marked radiator-response context.
+policy-marked radiator-response context. It also reports per-CCD Tdie (the
+`CCD2-CCD1 C` balance between the frequency and V-cache dies), parsed from the
+existing `amd_sensor_summary` column with no schema change.
+
+To detect BIOS/Curve-Optimizer/PBO changes from telemetry alone (no operator
+annotation), `scripts\cpu_config_fingerprint.py` segments runs into auto-labeled
+config regimes from config-pure dimensions; effective-MHz/W and Vcore dimensions
+fill in after a `CPU_CYCLES_MODE=enabled` capture and the SVI probe
+(`docs\cpu-cycles-capture-and-vcore-probe-plan-2026-06-21.md`).
 
 Local eval dashboard:
 

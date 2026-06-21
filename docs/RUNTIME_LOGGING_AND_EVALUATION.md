@@ -133,7 +133,21 @@ logging replacement.
   mirrored FEAT-0006 package-energy rows by `cpu_power_sample_id`, derives
   package watts, applies a same-power-band dwell gate, and carries GPU power /
   GPU memory plus policy-marked radiator response context so temperature
-  comparisons are not ranked by raw Tctl alone.
+  comparisons are not ranked by raw Tctl alone. It also surfaces per-CCD Tdie
+  (`ccd1_tdie_c`/`ccd2_tdie_c` and the `CCD2-CCD1 C` balance) parsed from the
+  existing `amd_sensor_summary` text column via `control_csv.parse_ccd_temps`, so
+  the frequency die (CCD2) versus V-cache die (CCD1) split is visible without a
+  schema change.
+- `scripts\cpu_config_fingerprint.py` (skeleton) builds a per-run config-pure
+  fingerprint (idle package-power floor, per-busy-band watts, effective MHz/W,
+  CCD balance) and segments runs into auto-labeled regimes via median/MAD step
+  detection layered on exact `git_hash`/`config_sha256` cuts, to detect
+  BIOS/Curve-Optimizer/PBO changes from telemetry without operator annotation.
+  Cooling-output scalars (`theta`, Tctl-at-watt) are reported but never drive
+  segmentation. Effective MHz/W needs a `CPU_CYCLES_MODE=enabled` capture and
+  Vcore needs the SVI probe (docs/cpu-cycles-capture-and-vcore-probe-plan-2026-06-21.md);
+  those dimensions degrade to null until then. Output schema
+  `svg_mb_control.cpu_fingerprint.v1`.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live
