@@ -7,6 +7,7 @@
 
 #include "control_config.h"
 #include "json_io.h"
+#include "profile_composition.h"
 
 #include <nlohmann/json.hpp>
 
@@ -506,7 +507,10 @@ void ValidateControlLoopConfig(const ControlLoopConfig& cfg,
 
 ControlLoopConfig LoadControlLoopConfig(
     const std::filesystem::path& config_path) {
-    const nlohmann::json root = ReadJsonFile(config_path, "control config");
+    // FEAT-0023 (REQ-MPROFILE-01): resolve a composition descriptor
+    // (machine-base + behavior-overlay) to its merged control config, or the
+    // file's own JSON unchanged when it is not a descriptor.
+    const nlohmann::json root = ComposeConfigRoot(config_path).root;
 
     if (!root.contains("control_loop")) {
         throw std::runtime_error(

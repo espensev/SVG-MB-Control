@@ -1,6 +1,7 @@
 #include "control_config.h"
 
 #include "json_io.h"
+#include "profile_composition.h"
 
 #include "windows_lean.h"
 
@@ -124,7 +125,13 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
                                  absolute_path.string());
     }
 
-    const nlohmann::json root = ReadJsonFile(absolute_path, "control config");
+    // FEAT-0023 (REQ-MPROFILE-01): a config file may be a composition descriptor
+    // (machine-base + behavior-overlay); ComposeConfigRoot returns the file's own
+    // JSON unchanged when it is not. relative_base resolves snapshot/runtime_home/
+    // runtime_policy paths (= absolute_path for a plain config).
+    const ComposedConfig composed = ComposeConfigRoot(absolute_path);
+    const nlohmann::json& root = composed.root;
+    const std::filesystem::path& relative_base = composed.base_path;
     ControlConfig config;
     config.source_path = absolute_path;
 
@@ -178,17 +185,17 @@ ControlConfig LoadControlConfig(const std::filesystem::path& path) {
     if (const auto snapshot_path = root.find("snapshot_path");
         snapshot_path != root.end()) {
         config.snapshot_path = ResolveConfigRelativePath(
-            absolute_path, snapshot_path->get<std::string>());
+            relative_base, snapshot_path->get<std::string>());
     }
     if (const auto runtime_home = root.find("runtime_home_path");
         runtime_home != root.end()) {
         config.runtime_home_path = ResolveConfigRelativePath(
-            absolute_path, runtime_home->get<std::string>());
+            relative_base, runtime_home->get<std::string>());
     }
     if (const auto policy = root.find("runtime_policy_path");
         policy != root.end()) {
         config.runtime_policy_path = ResolveConfigRelativePath(
-            absolute_path, policy->get<std::string>());
+            relative_base, policy->get<std::string>());
     }
 
     if (const auto write_channel = root.find("write_channel");

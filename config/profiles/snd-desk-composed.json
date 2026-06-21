@@ -1,0 +1,7 @@
+{
+  "_comment": "FEAT-0023 (REQ-MPROFILE-01) composition example: the snd-desk machine base + the release behavior overlay compose to exactly config/control.release.json. Selectable with --profile snd-desk-composed. Named so it does NOT auto-resolve by machine identity (host snd-desk) yet; wiring identity to it (rename to snd-desk.json) plus deploying the catalog via Build-Release is the live-M-gated follow-up.",
+  "compose": {
+    "machine_base": "../machines/snd-desk.cooling.policy.json",
+    "behavior_overlay": "../overlays/release.behavior.json"
+  }
+}
