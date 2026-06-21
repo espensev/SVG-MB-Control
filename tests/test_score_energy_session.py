@@ -68,5 +68,40 @@ class EffectiveFreqVerdictTests(unittest.TestCase):
         self.assertEqual(v, "PASS")
 
 
+class SelectCycleDeltasTests(unittest.TestCase):
+    """Criterion-4 cycle source selection: prefer the all-core package columns
+    when the run carries real data, fall back to the per-core (core-0) columns
+    otherwise so captures that predate the all-core columns still score."""
+
+    def test_prefers_allcore_when_present(self) -> None:
+        header = ["cpu_aperf_delta", "cpu_mperf_delta",
+                  "cpu_aperf_delta_allcore", "cpu_mperf_delta_allcore"]
+        rows = [["100", "80", "3200", "2000"],
+                ["100", "80", "3200", "2000"]]
+        aperf, mperf, src = ses.select_cycle_deltas(header, rows)
+        self.assertEqual(src, "allcore")
+        self.assertEqual(aperf, ["3200", "3200"])
+        self.assertEqual(mperf, ["2000", "2000"])
+
+    def test_falls_back_to_core0_when_allcore_absent(self) -> None:
+        # Old capture: the all-core columns do not exist in the header.
+        header = ["cpu_aperf_delta", "cpu_mperf_delta"]
+        rows = [["100", "80"], ["100", "80"]]
+        aperf, mperf, src = ses.select_cycle_deltas(header, rows)
+        self.assertEqual(src, "core0")
+        self.assertEqual(aperf, ["100", "100"])
+        self.assertEqual(mperf, ["80", "80"])
+
+    def test_falls_back_when_allcore_present_but_all_blank(self) -> None:
+        # The sweeper ran but every sweep was baseline/blanked -> all-core empty.
+        # Core-0 still has data, so use it (never report 'allcore' with no data).
+        header = ["cpu_aperf_delta", "cpu_mperf_delta",
+                  "cpu_aperf_delta_allcore", "cpu_mperf_delta_allcore"]
+        rows = [["100", "80", "", ""], ["100", "80", "", ""]]
+        aperf, mperf, src = ses.select_cycle_deltas(header, rows)
+        self.assertEqual(src, "core0")
+        self.assertEqual(aperf, ["100", "100"])
+
+
 if __name__ == "__main__":
     unittest.main()
