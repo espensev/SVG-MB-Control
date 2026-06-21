@@ -1,6 +1,7 @@
 #pragma once
 
 #include "control_loop.h"
+#include "hardware_access_status.h"
 
 #include <array>
 #include <chrono>
@@ -149,6 +150,7 @@ struct ControlRuntimeContext {
     ControlLoopConfig loop;
     std::filesystem::path runtime_home;
     RuntimeWritePolicy runtime_policy;
+    HardwareAccessStatus hardware_access;
     std::vector<ChannelState> channels;
     // FEAT-0003: one control-law controller per entry in `channels`, built in the
     // same constructor loop so the two vectors stay the same size and order. The

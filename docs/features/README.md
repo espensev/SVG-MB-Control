@@ -46,6 +46,12 @@ a feature's status or the decision queue changes. A fuller standing review is
 - **FEAT-0019** (`Implemented`) — sidecar persistence off the actuation hot path.
   D-WRITEHOT-1 is Current; identity-gated persistence and flush-side reset
   behavior are covered by C++ tests and traceability rows.
+- **FEAT-0004** (`Implemented`, T/R verified; live M pending) —
+  hardware-access dependency health signal for PawnIO availability. Runtime
+  status/health now exposes additive tri-state `hwaccess_*` fields for AMD/SMN
+  read-path and Super I/O write-path initialization outcomes, and startup emits
+  `control_loop.hwaccess_*` / `read_loop.hwaccess_*` transition events. Exit
+  codes and driver-management behavior are unchanged.
 
 **Recently implemented (continued):**
 
@@ -73,8 +79,6 @@ a feature's status or the decision queue changes. A fuller standing review is
   downstream work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
-- **FEAT-0004** (`Accepted`) — hardware-access dependency health signal. Decision
-  record is current; build when authorized.
 - **FEAT-0005** (`Accepted`) — write actuation confirmation, Phase-1 RPM-based
   detection/evidence. Decision record is current; build when authorized.
 
@@ -226,7 +230,7 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
 | [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Implemented (2026-06-21; seam + curve-overlay + PID shadow/dry-run + config dispatch + D6 gate + kind-aware reporting; REQ-PROFILE-05 partial; live PID write M deferred) |
-| [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Accepted |
+| [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Implemented (2026-06-21; additive `hwaccess_*` status/health fields + startup transition events; exit codes unchanged; live M pending) |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger + analyzer effective-frequency derivation landed 2026-06-09/10; all-core package rollup via off-thread sweeper + section-12 loop-timing gate harness merged 2026-06-21, analyze schema v13; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion + off-thread-sweeper live M-evidence remain) |
 | FEAT-0007 | RAM temperature telemetry (per-DIMM, via existing Super I/O read) | `REQ-RAMTEMP-*` | Reserved (body parked in `_parked/`) |

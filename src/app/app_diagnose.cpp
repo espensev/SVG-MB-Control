@@ -5,6 +5,7 @@
 #include "direct_runtime_snapshot.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
+#include "hardware_access_status.h"
 #include "runtime_snapshot.h"
 #include "runtime_write_policy.h"
 
@@ -26,6 +27,11 @@ std::string SampleDirectSnapshotJson(const ControlConfig* config) {
 
 int RunDiagnoseAmd() {
     AmdReader reader;
+    const HardwareAccessState read_state =
+        reader.available() ? HardwareAccessState::kAvailable
+                           : HardwareAccessState::kUnavailable;
+    std::cout << "hardware_access.read_state: "
+              << HardwareAccessStateName(read_state) << '\n';
     std::cout << "amd_reader.available: "
               << (reader.available() ? "true" : "false") << '\n';
     std::cout << "amd_reader.init_warning: \""

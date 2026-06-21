@@ -20,12 +20,53 @@
 #include <chrono>
 #include <exception>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace svg_mb_control {
+
+namespace {
+
+void ReportHardwareAccessTransition(
+    const std::filesystem::path& runtime_home,
+    const HardwareAccessStatus& previous,
+    const HardwareAccessStatus& current) {
+    const HardwareAccessTransition transition =
+        ClassifyHardwareAccessTransition(previous, current);
+    if (transition == HardwareAccessTransition::kNone) {
+        return;
+    }
+    AppendControlLoopEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .event_type = transition == HardwareAccessTransition::kRestored
+                ? "control_loop.hwaccess_restored"
+                : "control_loop.hwaccess_unavailable",
+            .detail = FormatHardwareAccessDetail(current),
+            .success = transition == HardwareAccessTransition::kRestored,
+        });
+}
+
+void SetReadHardwareAccess(HardwareAccessStatus* status,
+                           const AmdReader& reader) {
+    if (status == nullptr) {
+        return;
+    }
+    status->read_state = reader.available()
+        ? HardwareAccessState::kAvailable
+        : HardwareAccessState::kUnavailable;
+    status->read_detail = reader.init_warning();
+    if (status->read_detail.empty()) {
+        status->read_detail = reader.available()
+            ? "AMD/SMN reader initialized"
+            : "AMD/SMN reader unavailable";
+    }
+}
+
+}  // namespace
 
 // Configuration parsing/validation (LoadControlLoopConfig and its validators)
 // lives in control_loop_config.cpp. Per-tick sampling/decision/write work
@@ -84,6 +125,12 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             .control_write_cooldown_ms = context.loop.write_cooldown_ms,
         });
 
+    const std::optional<RuntimeStatusSnapshot> previous_status =
+        ReadRuntimeStatus(context.runtime_home);
+    const HardwareAccessStatus previous_hardware_access =
+        previous_status.has_value() ? previous_status->hardware_access
+                                    : HardwareAccessStatus{};
+
     ControlLoopRunState state;
     state.last_timing.loop_intended_interval_ms = context.loop.poll_tick_ms;
     if (csv_logger.Open("control-loop", BuildControlLoopCsvHeader())) {
@@ -93,11 +140,18 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
 
     AmdReader amd_reader;
     GpuReader gpu_reader;
+    SetReadHardwareAccess(&context.hardware_access, amd_reader);
 
     std::unique_ptr<FanWriter> fan_writer;
     try {
         fan_writer = CreateFanWriter(context.runtime_policy);
     } catch (const std::exception& error) {
+        context.hardware_access.write_state =
+            HardwareAccessState::kUnavailable;
+        context.hardware_access.write_detail = error.what();
+        ReportHardwareAccessTransition(context.runtime_home,
+                                       previous_hardware_access,
+                                       context.hardware_access);
         AppendControlLoopEvent(
             context.runtime_home,
             RuntimeLogEvent{
@@ -110,9 +164,18 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         std::string("direct writer init failed: ") + error.what(),
                         0u, FormatLocalIso8601(std::chrono::system_clock::now()),
                         state.last_timing, context.channels, state.log_csv_path,
-                        state.log_manifest_path, event_log_path);
+                        state.log_manifest_path, event_log_path,
+                        {},
+                        {},
+                        {},
+                        context.hardware_access);
         return 1;
     }
+    context.hardware_access.write_state = HardwareAccessState::kAvailable;
+    context.hardware_access.write_detail = fan_writer->BackendLabel();
+    ReportHardwareAccessTransition(context.runtime_home,
+                                   previous_hardware_access,
+                                   context.hardware_access);
 
     TimerResolutionScope timer_resolution(1u);
 
@@ -141,7 +204,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                         state.log_manifest_path, event_log_path,
                         state.last_successful_restore_iso,
                         context.base.profile_name,
-                        context.base.profile_resolution_source);
+                        context.base.profile_resolution_source,
+                        context.hardware_access);
     }
     AppendControlLoopEvent(
         context.runtime_home,
@@ -225,7 +289,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     state.log_manifest_path, event_log_path,
                     state.last_successful_restore_iso,
                     context.base.profile_name,
-                    context.base.profile_resolution_source);
+                    context.base.profile_resolution_source,
+                    context.hardware_access);
     AppendControlLoopEvent(
         context.runtime_home,
         RuntimeLogEvent{
@@ -325,7 +390,10 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
                     FormatLocalIso8601(std::chrono::system_clock::now()),
                     state.last_timing, context.channels, state.log_csv_path,
                     state.log_manifest_path, event_log_path,
-                    state.last_successful_restore_iso);
+                    state.last_successful_restore_iso,
+                    context.base.profile_name,
+                    context.base.profile_resolution_source,
+                    context.hardware_access);
     if (context.loop.low_band.enabled) {
         WriteLowBandEvidenceFile(context, state.tick_count);
     }

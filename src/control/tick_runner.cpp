@@ -565,7 +565,8 @@ bool RunControlTick(ControlRuntimeContext& context,
             event_log_path,
             state.last_successful_restore_iso,
             context.base.profile_name,
-            context.base.profile_resolution_source);
+            context.base.profile_resolution_source,
+            context.hardware_access);
         state.force_status_write = !status_written;
     }
 

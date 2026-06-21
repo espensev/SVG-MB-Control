@@ -1,10 +1,13 @@
 #include "runtime_status.h"
 
 #include "runtime_event_log.h"
+#include "runtime_health.h"
+#include "runtime_util.h"
 #include "test_helpers.h"
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -61,6 +64,30 @@ bool WriteMinimalControlStatus(const std::filesystem::path& runtime_home) {
         svg_mb_control::ResolveRuntimeEventLogPath(runtime_home).string());
 }
 
+bool WriteControlStatusWithHardwareAccess(
+    const std::filesystem::path& runtime_home,
+    const svg_mb_control::HardwareAccessStatus& hardware_access) {
+    svg_mb_control::RuntimeControlLoopTimingState timing;
+    std::vector<svg_mb_control::ChannelState> channels;
+    return svg_mb_control::WriteControlLoopStatus(
+        runtime_home,
+        "control-loop",
+        "running",
+        "test status",
+        1u,
+        svg_mb_control::FormatLocalIso8601(
+            std::chrono::system_clock::now()),
+        timing,
+        channels,
+        "",
+        "",
+        svg_mb_control::ResolveRuntimeEventLogPath(runtime_home).string(),
+        "",
+        "",
+        "",
+        hardware_access);
+}
+
 void TestStatusPublishFailureIsStickyAndRecovers() {
     const auto runtime_home = MakeTempRuntimeHome("control_status");
     const auto status_path = svg_mb_control::RuntimeStatusPath(runtime_home);
@@ -95,9 +122,126 @@ void TestStatusPublishFailureIsStickyAndRecovers() {
     std::filesystem::remove_all(runtime_home);
 }
 
+void TestHardwareAccessStatusRoundTrip() {
+    const auto runtime_home = MakeTempRuntimeHome("hwaccess_roundtrip");
+    svg_mb_control::HardwareAccessStatus hardware_access;
+    hardware_access.read_state =
+        svg_mb_control::HardwareAccessState::kAvailable;
+    hardware_access.read_detail = "AMD/SMN reader initialized";
+    hardware_access.write_state =
+        svg_mb_control::HardwareAccessState::kUnavailable;
+    hardware_access.write_detail = "svg_mb_sio init failed: PawnIO absent";
+
+    ExpectTrue(WriteControlStatusWithHardwareAccess(runtime_home,
+                                                    hardware_access),
+               "control status with hardware access writes");
+
+    const nlohmann::json payload = [&] {
+        std::ifstream stream(svg_mb_control::RuntimeStatusPath(runtime_home),
+                             std::ios::binary);
+        return nlohmann::json::parse(stream);
+    }();
+    ExpectEqual(payload.value("hwaccess_state", ""), "unavailable",
+                "status JSON exposes overall unavailable hardware access");
+    ExpectEqual(payload.value("hwaccess_read_state", ""), "available",
+                "status JSON exposes read-path availability");
+    ExpectEqual(payload.value("hwaccess_write_state", ""), "unavailable",
+                "status JSON exposes write-path unavailability");
+    ExpectEqual(payload.value("hwaccess_write_detail", ""),
+                "svg_mb_sio init failed: PawnIO absent",
+                "status JSON preserves write-path detail");
+
+    const auto snapshot = svg_mb_control::ReadRuntimeStatus(runtime_home);
+    ExpectTrue(snapshot.has_value(), "typed status reads status JSON");
+    ExpectEqual(
+        svg_mb_control::HardwareAccessStateName(
+            svg_mb_control::HardwareAccessOverallState(
+                snapshot->hardware_access)),
+        "unavailable",
+        "typed status preserves overall hardware access state");
+    ExpectEqual(
+        svg_mb_control::HardwareAccessStateName(
+            snapshot->hardware_access.read_state),
+        "available",
+        "typed status preserves read-path hardware access state");
+    ExpectEqual(
+        svg_mb_control::HardwareAccessStateName(
+            snapshot->hardware_access.write_state),
+        "unavailable",
+        "typed status preserves write-path hardware access state");
+
+    const svg_mb_control::RuntimeHealthResult health =
+        svg_mb_control::EvaluateRuntimeHealth(runtime_home, 60000u);
+    const nlohmann::json health_json =
+        svg_mb_control::RuntimeHealthToJson(health);
+    ExpectEqual(health_json.value("hwaccess_state", ""), "unavailable",
+                "health JSON exposes hardware access state");
+    ExpectEqual(health_json.value("hwaccess_write_detail", ""),
+                "svg_mb_sio init failed: PawnIO absent",
+                "health JSON preserves write-path detail");
+    ExpectTrue(svg_mb_control::RuntimeHealthExitCode(health.state) == 0,
+               "hardware access reporting does not change health exit code");
+    std::filesystem::remove_all(runtime_home);
+}
+
+void TestDefaultHardwareAccessIsUnknown() {
+    const auto runtime_home = MakeTempRuntimeHome("hwaccess_unknown");
+
+    ExpectTrue(WriteMinimalControlStatus(runtime_home),
+               "control status with default hardware access writes");
+
+    const nlohmann::json payload = [&] {
+        std::ifstream stream(svg_mb_control::RuntimeStatusPath(runtime_home),
+                             std::ios::binary);
+        return nlohmann::json::parse(stream);
+    }();
+    ExpectEqual(payload.value("hwaccess_state", ""), "unknown",
+                "default hardware access overall is unknown");
+    ExpectEqual(payload.value("hwaccess_read_state", ""), "unknown",
+                "default read-path hardware access is unknown");
+    ExpectEqual(payload.value("hwaccess_write_state", ""), "unknown",
+                "default write-path hardware access is unknown");
+    ExpectEqual(
+        svg_mb_control::HardwareAccessStateName(
+            svg_mb_control::HardwareAccessOverallState(
+                svg_mb_control::HardwareAccessStatus{})),
+        "unknown",
+        "absence of a successful open is never reported as available");
+
+    std::filesystem::remove_all(runtime_home);
+}
+
+void TestHardwareAccessTransitionClassification() {
+    svg_mb_control::HardwareAccessStatus unknown;
+    svg_mb_control::HardwareAccessStatus unavailable;
+    unavailable.read_state =
+        svg_mb_control::HardwareAccessState::kUnavailable;
+    unavailable.write_state =
+        svg_mb_control::HardwareAccessState::kUnknown;
+    svg_mb_control::HardwareAccessStatus available;
+    available.read_state = svg_mb_control::HardwareAccessState::kAvailable;
+    available.write_state = svg_mb_control::HardwareAccessState::kAvailable;
+
+    ExpectTrue(svg_mb_control::ClassifyHardwareAccessTransition(
+                   unknown, unavailable) ==
+                   svg_mb_control::HardwareAccessTransition::kUnavailable,
+               "unknown to unavailable emits unavailable transition");
+    ExpectTrue(svg_mb_control::ClassifyHardwareAccessTransition(
+                   unavailable, available) ==
+                   svg_mb_control::HardwareAccessTransition::kRestored,
+               "unavailable to available emits restored transition");
+    ExpectTrue(svg_mb_control::ClassifyHardwareAccessTransition(
+                   unknown, available) ==
+                   svg_mb_control::HardwareAccessTransition::kNone,
+               "unknown to available does not emit restored transition");
+}
+
 }  // namespace
 
 int main() {
     TestStatusPublishFailureIsStickyAndRecovers();
+    TestHardwareAccessStatusRoundTrip();
+    TestDefaultHardwareAccessIsUnknown();
+    TestHardwareAccessTransitionClassification();
     return g_failures == 0 ? 0 : 1;
 }

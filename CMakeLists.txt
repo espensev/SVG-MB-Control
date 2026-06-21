@@ -171,6 +171,7 @@ add_library(svg_mb_control_core STATIC
     src/runtime/evidence_log.cpp
     src/runtime/evidence_signatures.cpp
     src/runtime/gpu_evidence_csv.cpp
+    src/runtime/hardware_access_status.cpp
     src/runtime/json_io.cpp
     src/runtime/pending_writes.cpp
     src/runtime/read_loop.cpp

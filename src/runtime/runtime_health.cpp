@@ -142,6 +142,7 @@ void AssessHealthState(RuntimeHealthResult& result,
     result.status = snapshot->status.empty() ? "(unknown)" : snapshot->status;
     result.status_detail = snapshot->status_detail;
     result.last_update = snapshot->last_update_iso;
+    result.hardware_access = snapshot->hardware_access;
     result.process_id = snapshot->process_id;
     result.process_active = IsProcessActive(result.process_id);
     result.degraded_channel_count = snapshot->DegradedChannelCount();
@@ -320,6 +321,15 @@ nlohmann::json RuntimeHealthToJson(const RuntimeHealthResult& result) {
     payload["mode"] = result.mode;
     payload["status"] = result.status;
     payload["status_detail"] = result.status_detail;
+    payload["hwaccess_state"] =
+        HardwareAccessStateName(
+            HardwareAccessOverallState(result.hardware_access));
+    payload["hwaccess_read_state"] =
+        HardwareAccessStateName(result.hardware_access.read_state);
+    payload["hwaccess_write_state"] =
+        HardwareAccessStateName(result.hardware_access.write_state);
+    payload["hwaccess_read_detail"] = result.hardware_access.read_detail;
+    payload["hwaccess_write_detail"] = result.hardware_access.write_detail;
     payload["process_id"] = result.process_id;
     payload["process_active"] = result.process_active;
     payload["last_update"] = result.last_update;
@@ -391,6 +401,22 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
         if (!result.status.empty()) {
             std::cout << "  status: " << result.status << '\n';
         }
+        std::cout << "  hwaccess: "
+                  << HardwareAccessStateName(
+                         HardwareAccessOverallState(result.hardware_access))
+                  << " (read="
+                  << HardwareAccessStateName(result.hardware_access.read_state)
+                  << ", write="
+                  << HardwareAccessStateName(result.hardware_access.write_state)
+                  << ")\n";
+        if (!result.hardware_access.read_detail.empty()) {
+            std::cout << "  hwaccess_read_detail: "
+                      << result.hardware_access.read_detail << '\n';
+        }
+        if (!result.hardware_access.write_detail.empty()) {
+            std::cout << "  hwaccess_write_detail: "
+                      << result.hardware_access.write_detail << '\n';
+        }
         if (!result.last_update.empty()) {
             std::cout << "  last_update: " << result.last_update << '\n';
         }
@@ -455,6 +481,22 @@ int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
               << "  status: " << state << '\n';
     if (!snapshot->status_detail.empty()) {
         std::cout << "  detail: " << snapshot->status_detail << '\n';
+    }
+    std::cout << "  hwaccess: "
+              << HardwareAccessStateName(
+                     HardwareAccessOverallState(snapshot->hardware_access))
+              << " (read="
+              << HardwareAccessStateName(snapshot->hardware_access.read_state)
+              << ", write="
+              << HardwareAccessStateName(snapshot->hardware_access.write_state)
+              << ")\n";
+    if (!snapshot->hardware_access.read_detail.empty()) {
+        std::cout << "  hwaccess_read_detail: "
+                  << snapshot->hardware_access.read_detail << '\n';
+    }
+    if (!snapshot->hardware_access.write_detail.empty()) {
+        std::cout << "  hwaccess_write_detail: "
+                  << snapshot->hardware_access.write_detail << '\n';
     }
     if (snapshot->process_id != 0u) {
         std::cout << "  pid: " << snapshot->process_id

@@ -21,6 +21,7 @@
 #include <condition_variable>
 #include <ctime>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -47,6 +48,47 @@ std::uint32_t ResolveStalenessThresholdMs(const ControlConfig& config) {
     }
     const std::uint32_t poll = config.poll_ms > 0u ? config.poll_ms : 1000u;
     return poll * 3u;
+}
+
+void ReportHardwareAccessTransition(
+    const std::filesystem::path& runtime_home,
+    const std::string& log_csv_path,
+    const std::string& event_log_path,
+    const HardwareAccessStatus& previous,
+    const HardwareAccessStatus& current) {
+    const HardwareAccessTransition transition =
+        ClassifyHardwareAccessTransition(previous, current);
+    if (transition == HardwareAccessTransition::kNone) {
+        return;
+    }
+    AppendRuntimeEvent(
+        runtime_home,
+        RuntimeLogEvent{
+            .mode = "read-loop",
+            .event_type = transition == HardwareAccessTransition::kRestored
+                ? "read_loop.hwaccess_restored"
+                : "read_loop.hwaccess_unavailable",
+            .detail = FormatHardwareAccessDetail(current),
+            .success = transition == HardwareAccessTransition::kRestored,
+            .log_csv_path = log_csv_path,
+            .event_log_path = event_log_path,
+        });
+}
+
+void SetReadHardwareAccess(HardwareAccessStatus* status,
+                           const AmdReader& reader) {
+    if (status == nullptr) {
+        return;
+    }
+    status->read_state = reader.available()
+        ? HardwareAccessState::kAvailable
+        : HardwareAccessState::kUnavailable;
+    status->read_detail = reader.init_warning();
+    if (status->read_detail.empty()) {
+        status->read_detail = reader.available()
+            ? "AMD/SMN reader initialized"
+            : "AMD/SMN reader unavailable";
+    }
 }
 
 // Outcome of one read-loop poll publish step: which sinks the freshly sampled
@@ -293,6 +335,12 @@ int ReadLoop::RunUntilStopped() {
         WriteReadLoopStatus(impl_->runtime_home, status);
     };
 
+    const std::optional<RuntimeStatusSnapshot> previous_status =
+        ReadRuntimeStatus(impl_->runtime_home);
+    const HardwareAccessStatus previous_hardware_access =
+        previous_status.has_value() ? previous_status->hardware_access
+                                    : HardwareAccessStatus{};
+
     RuntimeCsvLogger csv_logger(
         impl_->runtime_home,
         impl_->config.log_rotate_hours,
@@ -311,12 +359,23 @@ int ReadLoop::RunUntilStopped() {
 
     publish_status("running", "initializing direct readers");
 
+    AmdReader amd_reader;
+    SetReadHardwareAccess(&status.hardware_access, amd_reader);
+
     const RuntimeWritePolicy runtime_policy =
         ResolveRuntimeWritePolicy(&impl_->config);
     std::unique_ptr<FanWriter> fan_writer;
     try {
         fan_writer = CreateFanWriter(runtime_policy);
     } catch (const std::exception& error) {
+        status.hardware_access.write_state =
+            HardwareAccessState::kUnavailable;
+        status.hardware_access.write_detail = error.what();
+        ReportHardwareAccessTransition(impl_->runtime_home,
+                                       status.log_csv_path,
+                                       status.event_log_path,
+                                       previous_hardware_access,
+                                       status.hardware_access);
         AppendRuntimeEvent(
             impl_->runtime_home,
             RuntimeLogEvent{
@@ -333,6 +392,14 @@ int ReadLoop::RunUntilStopped() {
                            error.what());
         return 1;
     }
+    status.hardware_access.write_state = HardwareAccessState::kAvailable;
+    status.hardware_access.write_detail = fan_writer->BackendLabel();
+    ReportHardwareAccessTransition(impl_->runtime_home,
+                                   status.log_csv_path,
+                                   status.event_log_path,
+                                   previous_hardware_access,
+                                   status.hardware_access);
+    publish_status("running", "direct readers active");
 
     std::ostringstream start_detail;
     start_detail << "read-loop started"
@@ -359,7 +426,6 @@ int ReadLoop::RunUntilStopped() {
                 !impl_->config.snapshot_path.empty(),
         });
 
-    AmdReader amd_reader;
     GpuReader gpu_reader;
     auto last_success_time = std::chrono::steady_clock::now();
 

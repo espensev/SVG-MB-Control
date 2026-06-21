@@ -169,9 +169,12 @@ a structured JSON document for tooling. `--profile <name>` loads
 
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,
-mode, status detail, runtime home, and log paths. `--health --json` returns a
+mode, status detail, runtime home, log paths, and PawnIO hardware-access state
+for the AMD/SMN read path and Super I/O write path. `--health --json` returns a
 machine-readable health state: `healthy`, `degraded`, `stale`, `stopped`, or
-`failed`. `--reset-breakers` writes a live control-loop request to clear open
+`failed`, plus the same additive hardware-access state. The hardware-access
+fields are observational and do not change health exit-code mapping.
+`--reset-breakers` writes a live control-loop request to clear open
 per-channel write-failure breakers without restarting; omit
 `--reset-breaker-channel` to reset all channels.
 

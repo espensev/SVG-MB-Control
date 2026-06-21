@@ -182,7 +182,8 @@ evaluated in Horner form in the curve lookup path.
 - `runtime\logs\svg_mb_control_events.jsonl`
 
 `control_runtime.json` includes loop-level counters, timing-quality fields, the
-active worker `process_id`, active log paths, and per-channel totals plus last
+active worker `process_id`, active log paths, additive `hwaccess_*` fields for
+PawnIO-backed read/write initialization state, and per-channel totals plus last
 observed values. The status JSON is rate-limited, so it is a live status view
 rather than the per-tick data source. The control-loop CSV carries the same
 timing fields per row:
@@ -193,6 +194,13 @@ fails, the snapshot retry timer is not advanced, so the next tick retries the
 publish instead of waiting for the normal snapshot interval. Both failure classes
 emit sticky `runtime_logging.status_publish_*` or
 `runtime_logging.snapshot_publish_*` events.
+
+Hardware-access availability is observational: `hwaccess_read_state` records
+the AMD/SMN read path and `hwaccess_write_state` records the Super I/O fan
+backend. Startup emits `control_loop.hwaccess_unavailable` when either path is
+unavailable and `control_loop.hwaccess_restored` when a previously unavailable
+status is followed by a fully available startup. Exit-code mapping and PawnIO
+driver management are unchanged.
 
 - `loop_started_wall_clock`
 - `loop_finished_wall_clock`
@@ -274,10 +282,11 @@ start.
 
 Operator commands use the same runtime-home resolution as the active config:
 
-- `--status` reads `control_runtime.json` and checks `process_id`.
+- `--status` reads `control_runtime.json`, checks `process_id`, and prints the
+  additive hardware-access state.
 - `--status --json` or `--health --json` emits the machine-readable health
   contract with exit codes `0=healthy`, `1=degraded`, `2=stale/stopped`, and
-  `3=failed`.
+  `3=failed`, plus the additive `hwaccess_*` fields.
 - `--stop` writes `stop.request.json`; the worker exits through the normal
   restore/shutdown path.
 - `--restart` performs the same cooperative stop and only launches a new

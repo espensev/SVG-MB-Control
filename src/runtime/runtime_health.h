@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hardware_access_status.h"
+
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -30,6 +32,7 @@ struct RuntimeHealthResult {
     std::string status;
     std::string status_detail;
     std::string last_update;
+    HardwareAccessStatus hardware_access;
     std::int64_t last_update_age_ms = -1;
     std::uint32_t stale_after_ms = 10000u;
     bool stop_request_present = false;

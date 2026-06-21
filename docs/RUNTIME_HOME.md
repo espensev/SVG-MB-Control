@@ -100,6 +100,11 @@ Each fan entry can include:
 - `log_csv_path`
 - `log_manifest_path`
 - `event_log_path`
+- `hwaccess_state`
+- `hwaccess_read_state`
+- `hwaccess_write_state`
+- `hwaccess_read_detail`
+- `hwaccess_write_detail`
 - `active_profile_name`
 - `active_profile_source`
 
@@ -132,6 +137,11 @@ distinguish an active loop from a stale status file. `restart_count` and
 - `log_manifest_path`
 - `event_log_path`
 - `last_successful_restore_time`
+- `hwaccess_state`
+- `hwaccess_read_state`
+- `hwaccess_write_state`
+- `hwaccess_read_detail`
+- `hwaccess_write_detail`
 - `active_profile_name`
 - `active_profile_source`
 - `controlled_channels`
@@ -140,6 +150,15 @@ distinguish an active loop from a stale status file. `restart_count` and
 successful baseline restore in the current worker process. It is an empty string
 until the worker completes a restore. The field is added to the existing schema
 version `4`; consumers must tolerate its absence in older status files.
+
+`hwaccess_state`, `hwaccess_read_state`, and `hwaccess_write_state` are
+FEAT-0004's additive PawnIO hardware-access signal. Values are `available`,
+`unavailable`, or `unknown`; `unknown` means no successful open has proved that
+path available. The read path is the AMD/SMN reader, the write path is the
+Super I/O fan backend. `hwaccess_read_detail` and `hwaccess_write_detail`
+preserve the initialization warning or backend detail for operator review.
+These fields do not change the existing `status` values or health exit-code
+mapping, and consumers must tolerate their absence in older status files.
 
 `active_profile_name` and `active_profile_source` report the active profile
 identity the worker is running (FEAT-0023, REQ-MPROFILE-09); they are
@@ -305,7 +324,9 @@ payload merges the supervisor sidecar fields (`supervisor_state_present`,
 `supervisor_pid`, `supervisor_active`, `worker_restart_count`,
 `last_worker_pid`, `last_worker_started_time`, `last_worker_restart_time`,
 `last_worker_exit_time`, `last_worker_exit_code`) and the worker's
-`last_successful_restore_time`. It also reports `logging_health_file`,
+`last_successful_restore_time`. It also reports `hwaccess_state`,
+`hwaccess_read_state`, `hwaccess_write_state`, `hwaccess_read_detail`,
+`hwaccess_write_detail`, `logging_health_file`,
 `logging_health_present`, `event_log_failure_active`,
 `event_log_failure_state`, `event_log_failure_count`,
 `event_log_failure_path`, `event_log_failure_first_time`,
@@ -662,6 +683,15 @@ the switch-cycle deadline, the supervisor force-terminates it and appends
 `supervisor.profile_switch_force_terminated`, recording the reason in its
 `detail` string. These are additive event types on the same schema; no field or
 schema-version change.
+
+Hardware-access events (FEAT-0004) are additive rows on the same event schema.
+`control_loop.hwaccess_unavailable` / `read_loop.hwaccess_unavailable` are
+emitted when a worker observes a transition into PawnIO-backed read or write
+unavailability at startup. `control_loop.hwaccess_restored` /
+`read_loop.hwaccess_restored` are emitted when a prior unavailable status is
+followed by a fully available read+write startup. The `detail` string records
+the overall state plus separate read/write state and detail. These events are
+observational only: the app does not load, start, or restart the PawnIO driver.
 
 ## Ownership Rules
 

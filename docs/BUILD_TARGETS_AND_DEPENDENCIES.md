@@ -153,6 +153,13 @@ Super I/O fan path loads independently of the AMD path. Live hardware access
 requires administrator privileges (`RunLevel=Highest` on the scheduled tasks,
 `Install-SVG-MB-ControlCommon.ps1`).
 
+Runtime status and health output expose FEAT-0004's additive hardware-access
+state as `hwaccess_state`, `hwaccess_read_state`, and
+`hwaccess_write_state`, with separate detail strings for the AMD/SMN read path
+and Super I/O write path. The signal is observational only: this repo still
+does not install, start, restart, or repair PawnIO, and health exit-code
+mapping is unchanged.
+
 PawnIO loads bytecode modules and executes named functions in them (load IOCTL
 `0xA084`, execute IOCTL `0xA104`) rather than the app issuing register or port
 access directly. The app loads two modules:

@@ -217,6 +217,14 @@ std::optional<RuntimeStatusSnapshot> ReadRuntimeStatus(
         JsonStringOr(*payload, "last_successful_restore_time");
     snapshot.log_csv_path = JsonStringOr(*payload, "log_csv_path");
     snapshot.event_log_path = JsonStringOr(*payload, "event_log_path");
+    snapshot.hardware_access.read_state = ParseHardwareAccessState(
+        JsonStringOr(*payload, "hwaccess_read_state"));
+    snapshot.hardware_access.write_state = ParseHardwareAccessState(
+        JsonStringOr(*payload, "hwaccess_write_state"));
+    snapshot.hardware_access.read_detail =
+        JsonStringOr(*payload, "hwaccess_read_detail");
+    snapshot.hardware_access.write_detail =
+        JsonStringOr(*payload, "hwaccess_write_detail");
     snapshot.stale = JsonBoolOr(*payload, "stale");
 
     if (const auto channels = payload->find("controlled_channels");
@@ -255,7 +263,8 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::string& event_log_path,
                             const std::string& last_successful_restore_iso,
                             const std::string& active_profile_name,
-                            const std::string& active_profile_source) {
+                            const std::string& active_profile_source,
+                            const HardwareAccessStatus& hardware_access) {
     // control_runtime.json is dual-schema: control-loop and read-loop both
     // write the same path with different field sets and different
     // schema_version numbers. The mode field is the discriminator at the
@@ -291,6 +300,17 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
     payload["log_manifest_path"] = log_manifest_path;
     payload["event_log_path"] = event_log_path;
     payload["last_successful_restore_time"] = last_successful_restore_iso;
+    // FEAT-0004 (REQ-HWHEALTH-01..03/06): additive tri-state PawnIO-backed
+    // read/write availability. Unknown stays explicit so absence of a
+    // successful open is never reported as healthy.
+    payload["hwaccess_state"] =
+        HardwareAccessStateName(HardwareAccessOverallState(hardware_access));
+    payload["hwaccess_read_state"] =
+        HardwareAccessStateName(hardware_access.read_state);
+    payload["hwaccess_write_state"] =
+        HardwareAccessStateName(hardware_access.write_state);
+    payload["hwaccess_read_detail"] = hardware_access.read_detail;
+    payload["hwaccess_write_detail"] = hardware_access.write_detail;
     // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
     payload["active_profile_name"] = active_profile_name;
     payload["active_profile_source"] = active_profile_source;
@@ -329,6 +349,15 @@ bool WriteReadLoopStatus(const std::filesystem::path& runtime_home,
     payload["log_csv_path"] = status.log_csv_path;
     payload["log_manifest_path"] = status.log_manifest_path;
     payload["event_log_path"] = status.event_log_path;
+    payload["hwaccess_state"] =
+        HardwareAccessStateName(
+            HardwareAccessOverallState(status.hardware_access));
+    payload["hwaccess_read_state"] =
+        HardwareAccessStateName(status.hardware_access.read_state);
+    payload["hwaccess_write_state"] =
+        HardwareAccessStateName(status.hardware_access.write_state);
+    payload["hwaccess_read_detail"] = status.hardware_access.read_detail;
+    payload["hwaccess_write_detail"] = status.hardware_access.write_detail;
     // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
     payload["active_profile_name"] = status.active_profile_name;
     payload["active_profile_source"] = status.active_profile_source;
