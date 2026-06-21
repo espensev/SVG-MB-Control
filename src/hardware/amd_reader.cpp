@@ -11,17 +11,22 @@
 #include "rapl_energy.h"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace svg_mb_control {
 
@@ -38,6 +43,19 @@ enum class Status {
 
 constexpr std::uint32_t kTctlTdieAddress = 0x00059800u;
 constexpr std::uint32_t kMaxCcds = 8u;
+
+// FEAT-0006 all-core sweeper: restore a thread's original affinity on every exit
+// path (including a mid-sweep early return). A 32-iteration pin loop must never
+// leave its thread pinned to one core; this RAII guard guarantees the restore.
+struct AffinityRestore {
+    HANDLE thread = nullptr;
+    DWORD_PTR mask = 0u;
+    ~AffinityRestore() {
+        if (mask != 0u) {
+            SetThreadAffinityMask(thread, mask);
+        }
+    }
+};
 
 // FEAT-0006 read-only RAPL package-energy implausibility-guard constants
 // (docs/cpu-work-energy-acquisition-decision-2026-06-07.md). The MSR indices and
@@ -408,7 +426,27 @@ struct AmdReader::Impl {
     double last_cycle_aperf_delta = std::numeric_limits<double>::quiet_NaN();
     double last_cycle_mperf_delta = std::numeric_limits<double>::quiet_NaN();
 
+    // FEAT-0006 all-core off-thread sweeper state (REQ-CPUEFF-01/-03 package
+    // roll-up). The control thread NEVER reads these MSRs: this dedicated worker
+    // owns its OWN PawnIo handle and affinity, sweeps every logical processor on
+    // its own ~1 s cadence, and publishes one finalized package window the
+    // control thread copies O(1) under allcore_pub_mu. See AllCoreSweepLoop.
+    std::thread allcore_worker;
+    std::atomic<bool> allcore_stop{false};
+    std::condition_variable allcore_stop_cv;
+    std::mutex allcore_stop_mu;
+    std::mutex allcore_pub_mu;
+    std::uint64_t allcore_sample_id = 0u;
+    struct AllCorePublished {
+        std::uint64_t sample_id = 0u;
+        double window_ms = std::numeric_limits<double>::quiet_NaN();
+        double aperf_delta = std::numeric_limits<double>::quiet_NaN();
+        double mperf_delta = std::numeric_limits<double>::quiet_NaN();
+        int cores = 0;
+    } allcore_pub;
+
     ~Impl() {
+        StopAllCoreWorker();
         Close();
     }
 
@@ -545,6 +583,11 @@ struct AmdReader::Impl {
                 }
             }
         }
+        // FEAT-0006: launch the off-thread all-core sweeper (no-op unless cycles
+        // are enabled and the bin hash matched). It owns its own PawnIo handle,
+        // so it is independent of the handle opened above; the control loop only
+        // copies its published window.
+        StartAllCoreWorker();
         if (warning_text != nullptr) {
             // Preserve warn_only hash-mismatch text so AmdReader::init_warning
             // surfaces it even when the load itself succeeded.
@@ -733,6 +776,213 @@ struct AmdReader::Impl {
         snap->cpu_aperf_delta = last_cycle_aperf_delta;
         snap->cpu_mperf_delta = last_cycle_mperf_delta;
     }
+
+    // FEAT-0006: copy the latest published all-core package window into the
+    // snapshot. O(1), runs on the control thread, takes only allcore_pub_mu --
+    // never an MSR read or an affinity pin. Independent of SampleCpuCycles'
+    // core-0 path/state, so it is called separately from Sample(). When the
+    // sweeper is not running (cycles disabled, or open/load failed) the
+    // published defaults (id 0, NaN deltas) flow through as blank columns.
+    void CopyAllCorePublished(AmdSnapshot* snap) {
+        if (snap == nullptr) {
+            return;
+        }
+        std::lock_guard<std::mutex> lk(allcore_pub_mu);
+        snap->cpu_cycles_allcore_sample_id = allcore_pub.sample_id;
+        snap->cpu_cycles_window_ms_allcore = allcore_pub.window_ms;
+        snap->cpu_aperf_delta_allcore = allcore_pub.aperf_delta;
+        snap->cpu_mperf_delta_allcore = allcore_pub.mperf_delta;
+        snap->cpu_cycles_allcore_cores = allcore_pub.cores;
+    }
+
+    // Start the off-thread all-core sweeper. Only when cycles are enabled and the
+    // bin hash matched; the worker opens its OWN PawnIo handle, so it does not
+    // depend on the control thread's handle. Idempotent.
+    void StartAllCoreWorker() {
+        if (!cycles_enabled || bin_hash_mismatch) {
+            return;
+        }
+        if (allcore_worker.joinable()) {
+            return;
+        }
+        allcore_stop.store(false);
+        allcore_worker = std::thread([this] { AllCoreSweepLoop(); });
+    }
+
+    // Signal stop and join. Uses a condition_variable so the join does not block
+    // a full cadence -- the worker wakes immediately rather than sleeping out the
+    // remaining ~1 s. Safe to call when no worker was started.
+    void StopAllCoreWorker() {
+        {
+            std::lock_guard<std::mutex> lk(allcore_stop_mu);
+            allcore_stop.store(true);
+        }
+        allcore_stop_cv.notify_all();
+        if (allcore_worker.joinable()) {
+            allcore_worker.join();
+        }
+    }
+
+    // The off-thread all-core sweep loop. Reads every logical processor's
+    // APERF/MPERF under a verified affinity pin, rolls them up with the pure
+    // cycles::AggregatePackageCycles, and publishes the package window. All 32x
+    // affinity migrations happen on THIS thread, never the 250 ms control loop.
+    void AllCoreSweepLoop() {
+        // Best-effort evidence telemetry must NEVER crash the daemon: this is
+        // the only background thread, so an exception escaping it would
+        // std::terminate the whole process (control loop + watchdog writes).
+        // Barrier the entire body; a transient setup throw (e.g. a filesystem
+        // error resolving the bin, or bad_alloc) just yields no all-core data.
+        try {
+        // Own PawnIo handle: a second open of the device is permitted (it is
+        // opened FILE_SHARE_READ|WRITE), giving OS-level handle independence so
+        // this sweep never serializes behind the control thread's energy read.
+        const std::filesystem::path pawnio_bin =
+            ResolvePawnIoBinaryPath(kPawnIoSpecAmdFamily17V1);
+        if (pawnio_bin.empty()) {
+            return;  // no bin -> publish nothing (all-core stays unavailable)
+        }
+        const HANDLE worker_handle = CreateFileA(
+            kPawnIoDevicePath, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0,
+            nullptr);
+        if (worker_handle == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        // RAII-close the worker handle on every exit (return or throw).
+        struct HandleCloser {
+            HANDLE h;
+            ~HandleCloser() {
+                if (h != nullptr && h != INVALID_HANDLE_VALUE) {
+                    CloseHandle(h);
+                }
+            }
+        } handle_closer{worker_handle};
+        std::string load_warning;
+        bool load_hash_mismatch = false;
+        const PawnIoStatus load_status =
+            LoadPawnIoBinary(worker_handle, kPawnIoSpecAmdFamily17V1, pawnio_bin,
+                             &load_warning, &load_hash_mismatch);
+        if (load_status != PawnIoStatus::ok || load_hash_mismatch) {
+            return;
+        }
+
+        const HANDLE thr = GetCurrentThread();
+        // Capture this worker thread's original affinity once; restore on every
+        // exit path via RAII so a mid-sweep failure never leaves it pinned.
+        // SetThreadAffinityMask returns 0 on failure (and leaves affinity
+        // unchanged), so a 0 capture means "do not sweep this session" -- else a
+        // later per-core pin would have no value to restore to.
+        const DWORD_PTR orig_mask =
+            SetThreadAffinityMask(thr, static_cast<DWORD_PTR>(1));
+        if (orig_mask == 0u) {
+            return;
+        }
+        AffinityRestore restore{thr, orig_mask};
+
+        // Sweep the current processor group only: a single DWORD_PTR mask
+        // addresses up to 64 logical processors in the calling thread's group,
+        // which covers this 32-LP part. (>64-LP machines need
+        // SetThreadGroupAffinity + GetCurrentProcessorNumberEx -- out of scope.)
+        DWORD lp_count = GetActiveProcessorCount(0);
+        if (lp_count == 0u) {
+            lp_count = 1u;
+        }
+        if (lp_count > 64u) {
+            lp_count = 64u;
+        }
+        const std::size_t n = static_cast<std::size_t>(lp_count);
+
+        std::vector<std::uint8_t> have_prev(n, 0u);
+        std::vector<std::uint64_t> prev_aperf(n, 0u);
+        std::vector<std::uint64_t> prev_mperf(n, 0u);
+        std::vector<cycles::CycleWindowResult> per_core(n);
+        auto prev_t = std::chrono::steady_clock::now();
+
+        for (;;) {
+            {
+                std::unique_lock<std::mutex> lk(allcore_stop_mu);
+                allcore_stop_cv.wait_for(
+                    lk,
+                    std::chrono::milliseconds(
+                        static_cast<long long>(kCycleCadenceMs)),
+                    [this] { return allcore_stop.load(); });
+            }
+            if (allcore_stop.load()) {
+                break;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            const double window_ms =
+                std::chrono::duration<double, std::milli>(now - prev_t).count();
+            prev_t = now;
+
+            for (std::size_t cpu = 0; cpu < n; ++cpu) {
+                SetThreadAffinityMask(thr, static_cast<DWORD_PTR>(1) << cpu);
+                bool pinned = false;
+                for (int spin = 0; spin < 1000; ++spin) {
+                    if (GetCurrentProcessorNumber() ==
+                        static_cast<DWORD>(cpu)) {
+                        pinned = true;
+                        break;
+                    }
+                    SwitchToThread();
+                }
+                if (!pinned) {
+                    // Could not verify migration (target LP saturated): skip
+                    // this core from the sum and force it to re-baseline.
+                    have_prev[cpu] = 0u;
+                    per_core[cpu] = cycles::CycleWindowResult{};
+                    per_core[cpu].baseline = false;
+                    per_core[cpu].blanked = true;
+                    continue;
+                }
+                std::uint64_t cur_m = 0u;
+                std::uint64_t cur_a = 0u;
+                const Status sm = ReadAllowlistedCycleMsr(
+                    worker_handle, cycles::kMsrMperfRo, &cur_m);
+                const Status sa = ReadAllowlistedCycleMsr(
+                    worker_handle, cycles::kMsrAperfRo, &cur_a);
+                if (sm != Status::ok || sa != Status::ok) {
+                    have_prev[cpu] = 0u;
+                    per_core[cpu] = cycles::CycleWindowResult{};
+                    per_core[cpu].baseline = false;
+                    per_core[cpu].blanked = true;
+                    continue;
+                }
+                bool hp = have_prev[cpu] != 0u;
+                std::uint64_t scratch_id = 0u;  // package owns its own id below
+                per_core[cpu] = cycles::AdvanceCycleWindow(
+                    &hp, &prev_aperf[cpu], &prev_mperf[cpu], &scratch_id, cur_a,
+                    cur_m, window_ms, kCycleDtCapMs, kCycleRatioCap);
+                have_prev[cpu] = hp ? 1u : 0u;
+            }
+            // Return to the original affinity before the next cadence sleep.
+            SetThreadAffinityMask(thr, orig_mask);
+
+            const cycles::PackageCycleResult pkg =
+                cycles::AggregatePackageCycles(per_core.data(), n, window_ms,
+                                               kCycleDtCapMs, kCycleRatioCap);
+            ++allcore_sample_id;  // the window happened -> id advances
+            const bool no_delta = pkg.baseline || pkg.blanked;
+            {
+                std::lock_guard<std::mutex> lk(allcore_pub_mu);
+                allcore_pub.sample_id = allcore_sample_id;
+                allcore_pub.window_ms = pkg.window_ms;
+                allcore_pub.cores = no_delta ? 0 : pkg.contributing_cores;
+                allcore_pub.aperf_delta =
+                    no_delta ? std::numeric_limits<double>::quiet_NaN()
+                             : static_cast<double>(pkg.sum_d_aperf);
+                allcore_pub.mperf_delta =
+                    no_delta ? std::numeric_limits<double>::quiet_NaN()
+                             : static_cast<double>(pkg.sum_d_mperf);
+            }
+        }
+        } catch (...) {
+            // Best-effort: an exception must never propagate out of the worker
+            // thread (that would std::terminate the daemon). handle_closer and
+            // restore release the handle / affinity as the stack unwinds.
+        }
+    }
 };
 
 AmdReader::AmdReader() : impl_(std::make_unique<Impl>()) {
@@ -795,6 +1045,12 @@ const AmdSnapshot& AmdReader::Sample() {
     snapshot.cpu_cycles_window_ms = std::numeric_limits<double>::quiet_NaN();
     snapshot.cpu_aperf_delta = std::numeric_limits<double>::quiet_NaN();
     snapshot.cpu_mperf_delta = std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_cycles_allcore_sample_id = 0u;
+    snapshot.cpu_cycles_window_ms_allcore =
+        std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_aperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_mperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    snapshot.cpu_cycles_allcore_cores = 0;
     if (impl_ == nullptr) {
         snapshot.last_warning = "not initialized";
         return snapshot;
@@ -840,6 +1096,9 @@ const AmdSnapshot& AmdReader::Sample() {
     // not drop the energy fields, and vice versa.
     impl_->SamplePackageEnergy(&snapshot);
     impl_->SampleCpuCycles(&snapshot);
+    // FEAT-0006: O(1) copy of the off-thread sweeper's latest package window
+    // (independent of the core-0 cycle path above; never reads MSRs here).
+    impl_->CopyAllCorePublished(&snapshot);
 
     // Acquire the system-wide PCI mutex once for the whole Tctl + CCD
     // sequence rather than per SMN read. This drops a steady-state control

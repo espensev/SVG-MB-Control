@@ -98,6 +98,18 @@ struct RuntimeSnapshot {
     double cpu_cycles_window_ms = std::numeric_limits<double>::quiet_NaN();
     double cpu_aperf_delta = std::numeric_limits<double>::quiet_NaN();
     double cpu_mperf_delta = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0006 all-core effective frequency (off-thread package sweep), copied
+    // from AmdSnapshot. Sigma-dAPERF / Sigma-dMPERF over all logical processors
+    // on the worker's OWN sample-id cadence, plus the per-sweep window and the
+    // count of contributing cores. Deltas blank (NaN) on baseline / all-blanked
+    // / package-implausible. Provenance reuses cpu_cycles_acquisition above.
+    std::uint64_t cpu_cycles_allcore_sample_id = 0u;
+    double cpu_cycles_window_ms_allcore =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_aperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    double cpu_mperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    int cpu_cycles_allcore_cores = 0;
 };
 
 // Per-snapshot lookup cache for hot paths that need to query the same sampled

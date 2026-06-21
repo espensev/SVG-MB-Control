@@ -591,6 +591,84 @@ CpuCyclesSummary SummariseCpuCycles(Database& db, std::int64_t run_id,
     return ComputeCpuCycles(windows, std::move(acquisition_counts), p0_mhz);
 }
 
+// FEAT-0006 all-core effective frequency: the off-thread package sweep,
+// mirroring SummariseCpuCycles but keyed on the worker's OWN
+// cpu_cycles_allcore_sample_id (independent cadence -> must NOT share the
+// per-core cpu_cycles_sample_id, or MAX() would merge two package windows under
+// one core-0 id). Collapses the mirrored per-tick all-core rows to one window
+// per allcore sample id, keeps only windows with non-null package deltas (the
+// log-time guard blanks the rest -> no false zero), reuses the pure
+// ComputeCpuCycles (ratio = Sigma-dAPERF / Sigma-dMPERF, eff = ratio x P0), and
+// adds the max/min contributing-core count so a partial sweep is auditable. The
+// query references the v13 allcore columns, so a pre-v13 DB throws "no such
+// column"; the single try/catch degrades that to an unavailable summary rather
+// than failing the report, and the SEPARATE query keeps the per-core block
+// intact on captures that have no all-core data.
+CpuCyclesSummary SummariseCpuCyclesAllcore(Database& db, std::int64_t run_id,
+                                           std::optional<double> p0_mhz) {
+    std::map<std::string, int> acquisition_counts;
+    std::vector<CycleEvidenceWindow> windows;
+    std::vector<std::int64_t> per_window_cores;
+    try {
+        Statement acq = db.Prepare(
+            "SELECT COALESCE(NULLIF(cpu_cycles_acquisition, ''), "
+            "'unavailable'), COUNT(*) FROM tick_samples WHERE run_id = ?1 "
+            "GROUP BY 1 ORDER BY 1");
+        acq.BindInt(1, run_id);
+        while (acq.Step()) {
+            acquisition_counts[acq.ColumnText(0)] =
+                static_cast<int>(acq.ColumnInt(1));
+        }
+        Statement win = db.Prepare(
+            "SELECT MAX(cpu_cycles_window_ms_allcore), "
+            "MAX(cpu_aperf_delta_allcore), MAX(cpu_mperf_delta_allcore), "
+            "MAX(cpu_cycles_allcore_cores) "
+            "FROM tick_samples WHERE run_id = ?1 "
+            "AND cpu_cycles_allcore_sample_id IS NOT NULL "
+            "AND cpu_cycles_allcore_sample_id > 0 "
+            "AND cpu_cycles_window_ms_allcore IS NOT NULL "
+            "AND cpu_aperf_delta_allcore IS NOT NULL "
+            "AND cpu_mperf_delta_allcore IS NOT NULL "
+            "GROUP BY cpu_cycles_allcore_sample_id");
+        win.BindInt(1, run_id);
+        while (win.Step()) {
+            if (win.ColumnIsNull(0) || win.ColumnIsNull(1) ||
+                win.ColumnIsNull(2)) {
+                continue;
+            }
+            CycleEvidenceWindow w;
+            w.window_ms = win.ColumnDouble(0);
+            w.d_aperf = win.ColumnDouble(1);
+            w.d_mperf = win.ColumnDouble(2);
+            windows.push_back(w);
+            if (!win.ColumnIsNull(3)) {
+                per_window_cores.push_back(win.ColumnInt(3));
+            }
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Error: all-core cpu-cycles query failed: " << ex.what()
+                  << '\n';
+        return ComputeCpuCycles({}, {}, p0_mhz);
+    }
+    CpuCyclesSummary out =
+        ComputeCpuCycles(windows, std::move(acquisition_counts), p0_mhz);
+    if (!per_window_cores.empty()) {
+        std::int64_t cmax = per_window_cores.front();
+        std::int64_t cmin = per_window_cores.front();
+        for (const std::int64_t c : per_window_cores) {
+            if (c > cmax) {
+                cmax = c;
+            }
+            if (c < cmin) {
+                cmin = c;
+            }
+        }
+        out.contributing_cores_max = cmax;
+        out.contributing_cores_min = cmin;
+    }
+    return out;
+}
+
 // FEAT-0020 (REQ-PWRLOG-02/-05) derived GPU board power. Mirrors the de-dup
 // structure of SummarisePackagePower but with INSTANTANEOUS-sample math:
 // collapse to one row per gpu_power_sample_id (GROUP BY - a no-op under the

@@ -119,6 +119,21 @@ CYCLE_FIELDS = [
 ]
 CYCLE_HEADER = ",".join(CYCLE_FIELDS)
 
+# FEAT-0006 all-core effective-frequency columns (schema v13), trailing the
+# per-core cycle columns. These carry the off-thread package sweep
+# (Sigma-dAPERF / Sigma-dMPERF over all logical processors) on its OWN
+# sample-id cadence (does not share cpu_cycles_sample_id), plus the per-sweep
+# window and the contributing-core count. The base CSV_FIELDS schema omits them
+# so old archive fixtures keep exercising the nullable/degrade path.
+ALLCORE_FIELDS = [
+    "cpu_aperf_delta_allcore",
+    "cpu_mperf_delta_allcore",
+    "cpu_cycles_window_ms_allcore",
+    "cpu_cycles_allcore_sample_id",
+    "cpu_cycles_allcore_cores",
+]
+ALLCORE_HEADER = ",".join(ALLCORE_FIELDS)
+
 # FEAT-0020 read-only GPU board-power columns (schema v11), trailing the CPU
 # energy/cycle columns in the power-logging fixture. The base CSV_FIELDS schema
 # deliberately omits them so old archive fixtures keep testing the nullable path.
@@ -628,7 +643,7 @@ class AnalyzeIngestTests(WindowsExeTestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "12")
+            self.assertEqual(schema[0], "13")
 
             run = _query_one(
                 db_path,
@@ -1179,6 +1194,25 @@ _CYCLE_WINDOWS = [
     ("4", "1000.000", "", "", "quarantine"),
 ]
 
+# (aperf_delta_allcore, mperf_delta_allcore, window_ms_allcore,
+# allcore_sample_id, allcore_cores) per tick. The off-thread package sweep has
+# its OWN cadence/sample-id, so tick 1 is its baseline (no id), each id repeats
+# across 2 ticks (de-dup on cpu_cycles_allcore_sample_id, independent of the
+# core-0 id), and tick 8 is a guard-blanked sweep (id present, deltas/cores
+# blank). The 3 valid package windows all carry ratio 1.5 (distinct from the
+# core-0 1.34375): Sigma-aperf 126e6 / Sigma-mperf 84e6 = 1.5; cores 32/32/30
+# so contributing_cores max=32, min=30 makes a partial sweep auditable.
+_ALLCORE_WINDOWS = [
+    ("", "", "", "", ""),
+    ("48000000", "32000000", "1000.000", "1", "32"),
+    ("48000000", "32000000", "1000.000", "1", "32"),
+    ("48000000", "32000000", "1000.000", "2", "32"),
+    ("48000000", "32000000", "1000.000", "2", "32"),
+    ("30000000", "20000000", "2000.000", "3", "30"),
+    ("30000000", "20000000", "2000.000", "3", "30"),
+    ("", "", "1000.000", "4", ""),
+]
+
 # (sample_id, time_ms, mw, source, acquisition) per tick. sample ids repeat to
 # prove the report de-duplicates mirrored/cached rows. Tick 1 is unavailable, and
 # tick 8 has a sample id but blank mw; neither may become a false zero.
@@ -1215,12 +1249,13 @@ def _write_energy_csv(path: Path, session_start: str) -> None:
         "# mode=control-loop",
         f"# session_start={session_start}",
         CSV_HEADER + "," + ENERGY_HEADER + "," + CYCLE_HEADER + ","
-        + GPU_POWER_HEADER + "," + GPU_CONTEXT_HEADER,
+        + ALLCORE_HEADER + "," + GPU_POWER_HEADER + "," + GPU_CONTEXT_HEADER,
     ]
-    for i, (energy, cycles, gpu_power, gpu_context) in enumerate(
+    for i, (energy, cycles, allcore, gpu_power, gpu_context) in enumerate(
         zip(
             _ENERGY_WINDOWS,
             _CYCLE_WINDOWS,
+            _ALLCORE_WINDOWS,
             _GPU_POWER_SAMPLES,
             _GPU_CONTEXT_SAMPLES,
         )
@@ -1240,6 +1275,7 @@ def _write_energy_csv(path: Path, session_start: str) -> None:
         )
         lines.append(
             base + "," + ",".join(energy) + "," + ",".join(cycles)
+            + "," + ",".join(allcore)
             + "," + ",".join(gpu_power)
             + "," + ",".join(gpu_context)
         )
@@ -1625,6 +1661,65 @@ class AnalyzeReportTests(WindowsExeTestCase):
                 text,
             )
 
+    def test_report_derives_allcore_cycle_ratio_and_cores(self) -> None:
+        # FEAT-0006 all-core rollup: the off-thread package sweep is reported as
+        # a SECOND cpu_cycles_allcore block, de-duplicated on its OWN
+        # cpu_cycles_allcore_sample_id (independent of the core-0 cpu_cycles
+        # block), with the contributing-core count exposed so a partial sweep is
+        # auditable. Package ratio 1.5 is deliberately distinct from the core-0
+        # 1.34375 to prove the two streams do not merge.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            ac = obj["cpu_cycles_allcore"]
+            # 3 distinct package windows (ids 1,2,3); the baseline (tick 1, no
+            # id) and the guard-blanked sweep (id 4, tick 8) are excluded -> 3
+            # de-duplicated windows, not 8 tick rows.
+            self.assertEqual(ac["window_count"], 3)
+            self.assertEqual(ac["total_aperf_cycles"], 126000000.0)
+            self.assertEqual(ac["total_mperf_cycles"], 84000000.0)
+            self.assertEqual(ac["total_window_s"], 4.0)
+            # Package ratio 126e6 / 84e6 = 1.5, distinct from core-0 1.34375.
+            self.assertEqual(ac["aperf_mperf_ratio"], 1.5)
+            # The core-0 block is still derived independently and unchanged.
+            self.assertEqual(obj["cpu_cycles"]["aperf_mperf_ratio"], 1.34375)
+            # Contributing cores: full sweeps 32, the partial window 30.
+            self.assertEqual(ac["contributing_cores_max"], 32)
+            self.assertEqual(ac["contributing_cores_min"], 30)
+            # No operator P0 -> no effective MHz, never a guessed base.
+            self.assertIsNone(ac["effective_mhz"])
+            self.assertIsNone(ac["p0_mhz"])
+
+            with_p0 = _run_report(
+                runtime_home, db_path,
+                "--idle-seconds", "1", "--p0-mhz", "4000", "--json",
+            )
+            self.assertEqual(with_p0.returncode, 0, msg=with_p0.stderr)
+            ac = json.loads(with_p0.stdout)["cpu_cycles_allcore"]
+            self.assertEqual(ac["p0_mhz"], 4000.0)
+            # effective = package ratio 1.5 x 4000 MHz.
+            self.assertEqual(ac["effective_mhz"], 6000.0)
+
+            text = _run_report(
+                runtime_home, db_path,
+                "--idle-seconds", "1", "--p0-mhz", "4000",
+            ).stdout
+            self.assertIn(
+                "cpu_cycles_allcore: windows=3 aperf_mperf_ratio=1.500 "
+                "effective_mhz=6000.000 p0_mhz=4000.000",
+                text,
+            )
+            self.assertIn("cores_max=32", text)
+            self.assertIn("cores_min=30", text)
+
     def test_report_degrades_when_cycle_columns_missing(self) -> None:
         # A v9-shaped DB read by the current binary: the cycle query references
         # columns that do not exist and throws "no such column". The single try/catch
@@ -1663,6 +1758,48 @@ class AnalyzeReportTests(WindowsExeTestCase):
             # unaffected by the missing cycle columns.
             self.assertEqual(obj["package_power"]["avg_watts"], 15.0)
 
+    def test_report_degrades_when_allcore_columns_missing(self) -> None:
+        # A pre-v13 DB read by the current binary: the all-core columns do not
+        # exist, so SummariseCpuCyclesAllcore's query throws "no such column".
+        # Its OWN try/catch must degrade only the all-core block to
+        # "unavailable" (no false zero) while the per-core cpu_cycles block --
+        # which uses a SEPARATE query with no all-core filter -- still derives.
+        # This is the filter-coupling regression guard: the two cycle streams
+        # must not share a WHERE clause.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                for col in ALLCORE_FIELDS:
+                    conn.execute(
+                        f"ALTER TABLE tick_samples DROP COLUMN {col}"
+                    )
+                conn.execute(
+                    "UPDATE schema_meta SET value='12' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            # All-core block degrades to unavailable -- never a false zero.
+            self.assertEqual(obj["cpu_cycles_allcore"]["window_count"], 0)
+            self.assertIsNone(obj["cpu_cycles_allcore"]["aperf_mperf_ratio"])
+            self.assertIsNone(
+                obj["cpu_cycles_allcore"]["contributing_cores_max"]
+            )
+            self.assertIsNone(
+                obj["cpu_cycles_allcore"]["contributing_cores_min"]
+            )
+            # The per-core block is UNAFFECTED: separate query, no shared filter.
+            self.assertEqual(obj["cpu_cycles"]["window_count"], 3)
+            self.assertEqual(obj["cpu_cycles"]["aperf_mperf_ratio"], 1.34375)
+
     def test_ingest_migrates_v9_db_to_current_schema(self) -> None:
         # A pre-existing v9 DB picked up by this binary: ingest bootstraps
         # (BootstrapSchema -> MigrateSchema) before its strict version check,
@@ -1692,9 +1829,10 @@ class AnalyzeReportTests(WindowsExeTestCase):
                     "SELECT value FROM schema_meta WHERE key='schema_version'"
                 ).fetchone()[0]
             # The migration ladder runs to the current head: v9->v10 adds the
-            # cycle columns, v10->v11 adds FEAT-0020 GPU power, and v11->v12
-            # adds FEAT-0021 GPU workload context.
-            self.assertEqual(version, "12")
+            # cycle columns, v10->v11 adds FEAT-0020 GPU power, v11->v12 adds
+            # FEAT-0021 GPU workload context, and v12->v13 adds the FEAT-0006
+            # all-core effective-frequency columns.
+            self.assertEqual(version, "13")
 
             result = _run_report(
                 runtime_home, db_path, "--idle-seconds", "1", "--json"

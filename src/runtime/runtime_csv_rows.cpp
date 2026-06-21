@@ -611,6 +611,11 @@ std::string BuildControlLoopCsvHeader() {
            << ",cpu_aperf_delta"
            << ",cpu_mperf_delta"
            << ",cpu_cycles_acquisition"
+           << ",cpu_aperf_delta_allcore"
+           << ",cpu_mperf_delta_allcore"
+           << ",cpu_cycles_window_ms_allcore"
+           << ",cpu_cycles_allcore_sample_id"
+           << ",cpu_cycles_allcore_cores"
            << ",gpu_power_sample_id"
            << ",gpu_power_time_ms"
            << ",gpu_power_mw"
@@ -697,6 +702,17 @@ std::string BuildControlLoopCsvRow(
     AppendCsvFieldDouble(csv, snapshot.cpu_aperf_delta);
     AppendCsvFieldDouble(csv, snapshot.cpu_mperf_delta);
     AppendCsvFieldString(csv, snapshot.cpu_cycles_acquisition);
+    // FEAT-0006 all-core package roll-up (off-thread sweeper). sample_id blank
+    // when 0; window/deltas blank (NaN) on baseline / all-blanked /
+    // package-implausible; cores blank when 0 (no contributing window). Order
+    // matches the header block above.
+    AppendCsvFieldDouble(csv, snapshot.cpu_aperf_delta_allcore);
+    AppendCsvFieldDouble(csv, snapshot.cpu_mperf_delta_allcore);
+    AppendCsvFieldDouble(csv, snapshot.cpu_cycles_window_ms_allcore);
+    AppendCsvFieldIf(csv, snapshot.cpu_cycles_allcore_sample_id != 0u,
+                     snapshot.cpu_cycles_allcore_sample_id);
+    AppendCsvFieldIf(csv, snapshot.cpu_cycles_allcore_cores > 0,
+                     snapshot.cpu_cycles_allcore_cores);
     // FEAT-0020 read-only GPU board power (from snapshot.gpu, logging-only;
     // never a control input). sample_id blank when 0 (no sample yet / not
     // advanced on a skipped or failed read); time_ms/mw blank (NaN) when there

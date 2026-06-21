@@ -312,6 +312,16 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         GetField(fields, header, "cpu_mperf_delta"));
     row.cpu_cycles_acquisition = AsText(
         GetField(fields, header, "cpu_cycles_acquisition"));
+    row.cpu_aperf_delta_allcore = AsDouble(
+        GetField(fields, header, "cpu_aperf_delta_allcore"));
+    row.cpu_mperf_delta_allcore = AsDouble(
+        GetField(fields, header, "cpu_mperf_delta_allcore"));
+    row.cpu_cycles_window_ms_allcore = AsDouble(
+        GetField(fields, header, "cpu_cycles_window_ms_allcore"));
+    row.cpu_cycles_allcore_sample_id = AsInt(
+        GetField(fields, header, "cpu_cycles_allcore_sample_id"));
+    row.cpu_cycles_allcore_cores = AsInt(
+        GetField(fields, header, "cpu_cycles_allcore_cores"));
     row.gpu_power_sample_id = AsInt(
         GetField(fields, header, "gpu_power_sample_id"));
     row.gpu_power_time_ms = AsDouble(

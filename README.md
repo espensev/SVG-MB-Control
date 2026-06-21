@@ -306,7 +306,7 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `12`). The schema
+- The DB schema is bootstrapped on first use (schema version `13`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
@@ -325,7 +325,15 @@ Behavior:
   evidence (FEAT-0006) from which `analyze report` derives the cycle-weighted
   APERF/MPERF ratio over distinct sample-id windows — and effective frequency
   (ratio × P0) only when `--p0-mhz <mhz>` supplies the base frequency, since
-  no logged field records P0. The nullable `tick_samples.gpu_power_sample_id` /
+  no logged field records P0. The nullable (schema v13)
+  `tick_samples.cpu_aperf_delta_allcore` / `cpu_mperf_delta_allcore` /
+  `cpu_cycles_window_ms_allcore` / `cpu_cycles_allcore_sample_id` /
+  `cpu_cycles_allcore_cores` columns carry the all-core package effective
+  frequency from an off-thread sweep (FEAT-0006) — `analyze report` derives the
+  same ratio / effective frequency over distinct `cpu_cycles_allcore_sample_id`
+  windows (a `cpu_cycles_allcore` block, with the contributing-core count),
+  separate from the per-core block above. The nullable
+  `tick_samples.gpu_power_sample_id` /
   `gpu_power_time_ms` / `gpu_power_mw` / `gpu_power_source` /
   `gpu_power_acquisition` columns carry the read-only GPU board-power evidence
   (FEAT-0020) from which `analyze report` derives mean / p50 / p90 / max over

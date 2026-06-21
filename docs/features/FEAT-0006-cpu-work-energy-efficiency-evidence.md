@@ -11,8 +11,10 @@
 > Accepted rather than Implemented/Done, but the v1 read-only telemetry slices
 > have been authorized and landed behind default-off gates: the
 > RAPL package-energy logger (2026-06-07), analyzer time-weighted average-power
-> derivation (2026-06-09), APERF/MPERF cycle logger (2026-06-09), and analyzer
-> effective-frequency derivation (schema v10, 2026-06-10). Status stays
+> derivation (2026-06-09), APERF/MPERF cycle logger (2026-06-09), analyzer
+> effective-frequency derivation (schema v10, 2026-06-10), and the all-core
+> package effective-frequency roll-up via an off-thread sweeper (analyze schema
+> v13, 2026-06-21). Status stays
 > **Accepted** (not `Implemented`): the enabled integration path now has 3
 > independent live sessions passing the energy quarantine-exit criteria (§14),
 > but the marker promotion remains a manual maintainer decision, the
@@ -22,7 +24,7 @@
 > §14).
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-14
+**Status:** Accepted   **Version:** 0.7   **Updated:** 2026-06-21
 **Namespace:** `REQ-CPUEFF-*`
 **Companion to:** `AGENTS.md`, `docs/RUNTIME_HOME.md`,
 `docs/RUNTIME_LOGGING_AND_EVALUATION.md`, `docs/READ_LOOP.md`,
@@ -120,7 +122,7 @@ first-party source is designed and reviewed." This feature is that design.
 | No fan write / start / stop / breaker reset outside an explicit live task | `AGENTS.md` §Live Runtime Safety | This is read-only telemetry. It must not write fan duty, start/stop, or reset breakers. |
 | Hardware access is read-only and bounded | `AGENTS.md` §Live Runtime Safety, §Repo Boundary | New reads are **counter reads only** (PMC/MSR/SMN read). The controller must not write CPU control MSRs or SMU control mailboxes. The set of readable registers must be enumerated and reviewed before implementation (§9). |
 | Runtime sidecar / status / manifest schema stays backward-compatible | `docs/RUNTIME_HOME.md` | New CSV/status fields are additive and nullable/blank when unavailable; existing archives remain valid. |
-| Shipped cadence / channel set is the measured baseline | `docs/MEASUREMENT_GATE.md` | Read-only evidence; does not change cadence, channels, or input strategy. Does not cross the gate. |
+| Shipped cadence / channel set is the measured baseline | `docs/MEASUREMENT_GATE.md` | Read-only evidence; does not change cadence, channels, or input strategy. Does not cross the gate. The 2026-06-21 all-core roll-up runs a dedicated **off-thread** sweeper (its own thread + PawnIO handle) so its affinity hops + MSR reads never touch the 250 ms control thread; a pre-promotion measurement must confirm the sweeper does not move the 250 ms baseline (see §12). |
 | Control-computation identity stays unchanged | `docs/CONTROL_PIPELINE_MATH.md` | Records evidence only; no curve, blend, cadence, boost, or write-gate change. |
 
 ## 5. The need — target measurement set
@@ -203,6 +205,17 @@ blank/null and emits no false zero, per FEAT-0002's logging rule.
 - Schema/version impact: update `docs/RUNTIME_HOME.md` and
   `docs/RUNTIME_LOGGING_AND_EVALUATION.md` at implementation. Existing archives
   must parse with the new fields missing.
+- All-core roll-up (2026-06-21, default-off): five additive control-loop CSV
+  columns carry the package effective frequency from an off-thread sweeper —
+  `cpu_aperf_delta_allcore`, `cpu_mperf_delta_allcore`,
+  `cpu_cycles_window_ms_allcore`, `cpu_cycles_allcore_sample_id`, and
+  `cpu_cycles_allcore_cores` (the count of logical processors that contributed a
+  fresh window, so a partial sweep is auditable). They carry the worker's own
+  sample-id cadence, separate from the per-core `cpu_cycles_sample_id`. Analyze
+  schema advances v12 → v13 (additive nullable columns; pre-v13 archives ingest
+  them as NULL and the report degrades the all-core block to `unavailable`). The
+  per-core `cpu_aperf_delta`/`cpu_mperf_delta` columns are retained unchanged for
+  continuity. Provenance reuses `cpu_cycles_acquisition`.
 
 ## 8. CLI / config / operator surface deltas
 
@@ -254,6 +267,15 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 
 - **Measurement gate:** does not change fan channels, cadence, write timing, or
   control math. Read-only evidence.
+- **Off-thread sweeper obligation (2026-06-21):** the all-core roll-up runs a
+  dedicated background thread (its own PawnIO handle; affinity restored via RAII;
+  stopped and joined before the reader closes) off the 250 ms control thread.
+  Landing the default-off code does not cross the gate, but before any
+  *enabled-live* all-core evidence is promoted out of `quarantine` an M-evidence
+  capture must show the sweeper does not degrade the shipped 250 ms profile —
+  `loop_work_duration_ms` / `loop_achieved_interval_ms` p99/max and the overrun
+  count unchanged, measured at matched GPU-idle and under all-core load (the
+  FEAT-0020 gate-6 analog for the new thread).
 - **Depends on:** FEAT-0002 (whole-system busy time is the time-normalization
   context); the PawnIO transport (`src/hardware/amd_reader.cpp`) and its
   availability signal (FEAT-0004, recommended operational context, not a build
@@ -348,6 +370,33 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 > additionally requires reconciling the §14 and `docs/TRACEABILITY.md`
 > REQ-CPUEFF result cells to byte-identical text (then enforced by
 > `test_traceability_results_match_implemented_verification_logs`).
+
+> **All-core effective-frequency roll-up landed 2026-06-21 (default-off; analyze
+> schema v13).** The package metric is produced by a dedicated OFF-THREAD sweeper
+> in `amd_reader.cpp`, never the 250 ms control thread: a 32-way affinity sweep on
+> the control thread has an unbounded migration tail under load, so the sweeper
+> owns its own PawnIO handle (a second device open is permitted —
+> `FILE_SHARE_READ|WRITE`), reads every logical processor's APERF/MPERF under a
+> verified affinity pin (`SetThreadAffinityMask` + a `GetCurrentProcessorNumber`
+> spin-verify; a core that cannot be verified or read is skipped from the sum and
+> re-baselines), restores its affinity via RAII, and publishes one package window
+> the control thread copies O(1) under a mutex. The roll-up is the pure,
+> unit-tested `cycles::AggregatePackageCycles` (Σ-dAPERF / Σ-dMPERF over
+> contributing cores, with a baseline / all-blanked / package-implausible blank
+> policy mirroring the per-core guard — no false zero). The analyzer reuses
+> `ComputeCpuCycles` over a SECOND `GROUP BY cpu_cycles_allcore_sample_id` query,
+> kept separate from the per-core query so a pre-v13 archive degrades the all-core
+> block to `unavailable` without regressing the per-core block; it reports the
+> package ratio / effective MHz (only with `--p0-mhz`) and the contributing-core
+> max/min. Verified on the debug build: 5 new `AggregatePackageCycles` unit
+> tests, `csv_rows` tests, the `test_analyze_ingest` all-core e2e + pre-v13
+> degrade fixtures, the cadence-variable control-loop ingest test, full CTest
+> (22/22) and the full hermetic Python suite (196/196). The sweeper starts only
+> on real hardware with `SVG_MB_CONTROL_CPU_CYCLES_MODE=enabled`; sim/test mode
+> never starts it, so no test exercises the thread. Effective frequency is
+> analyzer evidence only — it is **not** a control input (the Gate-2
+> power-feedforward result is NO-GO). Enabling the cycle path live still requires
+> the measurement gate of §12; this change only lands the default-off code.
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
