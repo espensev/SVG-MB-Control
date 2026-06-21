@@ -179,7 +179,8 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
     }
 
     while (!stop_flag.load() &&
-           !RuntimeStopRequested(context.runtime_home)) {
+           !RuntimeStopRequested(context.runtime_home) &&
+           !RuntimeProfileCycleRequested(context.runtime_home)) {
         if (!RunControlTick(context, stop_flag, amd_reader, gpu_reader,
                             *fan_writer, csv_logger, pending_store,
                             timer_resolution, processor_count,
@@ -187,6 +188,9 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             break;  // fatal restore-timeout; abort event already emitted
         }
     }
+    // FEAT-0023: a profile-cycle signal exits the loop cleanly (not via the
+    // fatal break above), so the shutdown restore below runs and returns fans to
+    // the captured BIOS baseline before the supervisor respawns the new profile.
 
     // Shutdown: restore controlled channels back to their captured baseline.
     WriteControlLoopStatus(context.runtime_home, "control-loop", "shutdown",

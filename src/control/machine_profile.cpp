@@ -1,10 +1,28 @@
 #include "machine_profile.h"
 
+#include "windows_lean.h"
+
+#include <array>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
 
 namespace svg_mb_control {
+
+namespace {
+
+std::filesystem::path CurrentExecutableDirectory() {
+    std::array<wchar_t, MAX_PATH> buffer{};
+    const DWORD length = GetModuleFileNameW(
+        nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) {
+        return {};
+    }
+    return std::filesystem::path(buffer.data(), buffer.data() + length)
+        .parent_path();
+}
+
+}  // namespace
 
 std::string_view ProfileResolutionSourceLabel(ProfileResolutionSource source) {
     switch (source) {
@@ -87,6 +105,30 @@ std::filesystem::path ResolveProfileConfigPath(
         }
     }
     return {};
+}
+
+std::vector<std::filesystem::path> DefaultProfileCatalogDirs() {
+    const std::filesystem::path current_exe_dir = CurrentExecutableDirectory();
+    const std::filesystem::path exe_parent =
+        current_exe_dir.empty() ? std::filesystem::path{}
+                                : current_exe_dir.parent_path();
+    const std::filesystem::path exe_grandparent =
+        exe_parent.empty() ? std::filesystem::path{}
+                           : exe_parent.parent_path();
+
+    std::vector<std::filesystem::path> dirs;
+    auto add_root = [&](const std::filesystem::path& root) {
+        if (root.empty()) {
+            return;
+        }
+        dirs.push_back(root / "profiles");
+        dirs.push_back(root / "config" / "profiles");
+    };
+    add_root(current_exe_dir);
+    add_root(exe_parent);
+    add_root(exe_grandparent);
+    add_root(std::filesystem::current_path());
+    return dirs;
 }
 
 }  // namespace svg_mb_control

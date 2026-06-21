@@ -164,4 +164,31 @@ void ClearRuntimeProfileSwitchRequest(
     std::filesystem::remove(RuntimeProfileSwitchRequestPath(runtime_home), ec);
 }
 
+std::filesystem::path RuntimeProfileCycleRequestPath(
+    const std::filesystem::path& runtime_home) {
+    return runtime_home / "profile.cycle.request.json";
+}
+
+bool RequestRuntimeProfileCycle(const std::filesystem::path& runtime_home) {
+    nlohmann::json payload = MakeSchemaObject(1u);
+    payload["requested_at"] =
+        FormatLocalIso8601(std::chrono::system_clock::now());
+    payload["reason"] = "profile-switch-cycle";
+    return TryWriteJsonFileAtomic(
+        RuntimeProfileCycleRequestPath(runtime_home), payload);
+}
+
+bool RuntimeProfileCycleRequested(const std::filesystem::path& runtime_home) {
+    std::error_code ec;
+    return std::filesystem::exists(
+               RuntimeProfileCycleRequestPath(runtime_home), ec) &&
+           !ec;
+}
+
+void ClearRuntimeProfileCycleRequest(
+    const std::filesystem::path& runtime_home) {
+    std::error_code ec;
+    std::filesystem::remove(RuntimeProfileCycleRequestPath(runtime_home), ec);
+}
+
 }  // namespace svg_mb_control

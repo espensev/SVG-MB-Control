@@ -65,4 +65,10 @@ std::filesystem::path ResolveProfileConfigPath(
     const std::vector<std::filesystem::path>& profile_dirs,
     const std::string& profile_name);
 
+// Returns the directories searched in order for a named profile config:
+// <root>/profiles and <root>/config/profiles under the exe-relative and cwd
+// roots. Used by startup resolution (app) and by live-switch candidate
+// validation (supervisor), so it lives in this shared translation unit.
+std::vector<std::filesystem::path> DefaultProfileCatalogDirs();
+
 }  // namespace svg_mb_control

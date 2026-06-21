@@ -367,7 +367,11 @@ int ReadLoop::RunUntilStopped() {
     bool snapshot_publish_failure_active = false;
 
     while (!impl_->stop_requested.load() &&
-           !RuntimeStopRequested(impl_->runtime_home)) {
+           !RuntimeStopRequested(impl_->runtime_home) &&
+           !RuntimeProfileCycleRequested(impl_->runtime_home)) {
+        // FEAT-0023: a profile-cycle signal exits the read loop so the
+        // supervisor can respawn the worker on the new profile. The read loop
+        // writes no fans, so there is nothing to restore.
         try {
             SampleDirectRuntimeSnapshot(amd_reader, gpu_reader, *fan_writer,
                                         runtime_policy, runtime_snapshot);

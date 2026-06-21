@@ -66,41 +66,9 @@ std::string GetEnvironmentAsciiString(std::wstring_view name) {
     return out;
 }
 
-std::filesystem::path CurrentExecutableDirectoryForProfiles() {
-    std::array<wchar_t, MAX_PATH> buffer{};
-    const DWORD length = GetModuleFileNameW(
-        nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (length == 0 || length >= buffer.size()) {
-        return {};
-    }
-    return std::filesystem::path(buffer.data(), buffer.data() + length)
-        .parent_path();
-}
-
-std::vector<std::filesystem::path> DefaultProfileCatalogDirs() {
-    const std::filesystem::path current_exe_dir =
-        CurrentExecutableDirectoryForProfiles();
-    const std::filesystem::path exe_parent =
-        current_exe_dir.empty() ? std::filesystem::path{}
-                                : current_exe_dir.parent_path();
-    const std::filesystem::path exe_grandparent =
-        exe_parent.empty() ? std::filesystem::path{}
-                           : exe_parent.parent_path();
-
-    std::vector<std::filesystem::path> dirs;
-    auto add_root = [&](const std::filesystem::path& root) {
-        if (root.empty()) {
-            return;
-        }
-        dirs.push_back(root / "profiles");
-        dirs.push_back(root / "config" / "profiles");
-    };
-    add_root(current_exe_dir);
-    add_root(exe_parent);
-    add_root(exe_grandparent);
-    add_root(std::filesystem::current_path());
-    return dirs;
-}
+// Profile catalog directory resolution now lives in machine_profile.{h,cpp}
+// (svg_mb_control::DefaultProfileCatalogDirs) so the supervisor can also use it
+// for live-switch candidate validation.
 
 }  // namespace
 
@@ -268,6 +236,22 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             std::cout << '\n'
                       << "  request: "
                       << svg_mb_control::RuntimeBreakerResetRequestPath(
+                             command_runtime_home)
+                             .string()
+                      << '\n';
+            return 0;
+        }
+
+        if (options.set_profile_requested) {
+            if (!svg_mb_control::RequestRuntimeProfileSwitch(
+                    command_runtime_home, options.set_profile_name)) {
+                std::cerr << "Error: failed to write profile-switch request.\n";
+                return 1;
+            }
+            std::cout << "svg-mb-control: profile switch requested\n"
+                      << "  profile: " << options.set_profile_name << '\n'
+                      << "  request: "
+                      << svg_mb_control::RuntimeProfileSwitchRequestPath(
                              command_runtime_home)
                              .string()
                       << '\n';

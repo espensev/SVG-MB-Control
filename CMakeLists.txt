@@ -138,6 +138,7 @@ add_library(svg_mb_control_core STATIC
     src/control/control_config.cpp
     src/control/control_config_print.cpp
     src/control/machine_profile.cpp
+    src/control/profile_switch_decision.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
     src/control/control_math.cpp
@@ -354,6 +355,8 @@ if(BUILD_TESTING)
         tests/cpp/machine_identity_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_runtime_lifecycle_tests
         tests/cpp/runtime_lifecycle_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_profile_switch_decision_tests
+        tests/cpp/profile_switch_decision_tests.cpp)
 
     # rapl_energy.h is header-only and dependency-free, so this test does not
     # link svg_mb_control_core (keeps it fast and isolated like the math it covers).

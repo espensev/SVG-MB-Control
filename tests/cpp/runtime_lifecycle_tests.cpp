@@ -15,7 +15,10 @@
 
 namespace {
 
+using svg_mb_control::ClearRuntimeProfileCycleRequest;
+using svg_mb_control::RequestRuntimeProfileCycle;
 using svg_mb_control::RequestRuntimeProfileSwitch;
+using svg_mb_control::RuntimeProfileCycleRequested;
 using svg_mb_control::RuntimeProfileSwitchRequestPath;
 using svg_mb_control::TakeRuntimeProfileSwitchRequest;
 
@@ -110,6 +113,19 @@ void TestMalformedRequestSetsParseError() {
     }
 }
 
+void TestCyclePresenceFlag() {
+    TempHome home;
+    ExpectFalse(RuntimeProfileCycleRequested(home.path()),
+                "no cycle request initially");
+    ExpectTrue(RequestRuntimeProfileCycle(home.path()),
+               "request writes the cycle flag file");
+    ExpectTrue(RuntimeProfileCycleRequested(home.path()),
+               "cycle is requested after a request");
+    ClearRuntimeProfileCycleRequest(home.path());
+    ExpectFalse(RuntimeProfileCycleRequested(home.path()),
+                "cycle is cleared after a clear");
+}
+
 }  // namespace
 
 int main() {
@@ -118,6 +134,7 @@ int main() {
     TestTakeOnce();
     TestEmptyProfileNameRefused();
     TestMalformedRequestSetsParseError();
+    TestCyclePresenceFlag();
     if (g_failures == 0) {
         std::cout << "runtime_lifecycle_tests: all passed\n";
     }

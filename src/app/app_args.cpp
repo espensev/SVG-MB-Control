@@ -100,7 +100,7 @@ std::uint32_t ParseWriteHoldMs(const wchar_t* value) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--start|--status|--health|--service-probe|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>] [--profile <name>]\n"
+        << "  svg-mb-control [--start|--status|--health|--service-probe|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>] [--profile <name>] [--set-profile <name>]\n"
         << "                 [--reset-breaker-channel <n>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate|evidence-log>] [--config <path>] "
            << "[--profile <name>] [--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
@@ -154,6 +154,10 @@ CliOptions ParseCliOptions(int argc, wchar_t** argv) {
         } else if (arg == L"--profile") {
             options.profile_name =
                 ParseAsciiStringArg(require_value(), "--profile");
+        } else if (arg == L"--set-profile") {
+            options.set_profile_name =
+                ParseAsciiStringArg(require_value(), "--set-profile");
+            options.set_profile_requested = true;
         } else if (arg == L"--run-foreground") {
             options.foreground_launch = true;
         } else if (arg == L"--run-supervisor") {

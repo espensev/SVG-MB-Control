@@ -61,4 +61,19 @@ std::optional<RuntimeProfileSwitchRequest> TakeRuntimeProfileSwitchRequest(
 void ClearRuntimeProfileSwitchRequest(
     const std::filesystem::path& runtime_home);
 
+// FEAT-0023 worker-scoped cycle signal: a presence flag (like the stop request,
+// and distinct from it) the SUPERVISOR writes to make the running worker break
+// its control loop and run its graceful shutdown restore (fans -> BIOS auto) for
+// a profile switch. The supervisor is the sole writer and clearer; the worker
+// only tests it in its loop condition, alongside RuntimeStopRequested.
+std::filesystem::path RuntimeProfileCycleRequestPath(
+    const std::filesystem::path& runtime_home);
+
+bool RequestRuntimeProfileCycle(const std::filesystem::path& runtime_home);
+
+bool RuntimeProfileCycleRequested(const std::filesystem::path& runtime_home);
+
+void ClearRuntimeProfileCycleRequest(
+    const std::filesystem::path& runtime_home);
+
 }  // namespace svg_mb_control
