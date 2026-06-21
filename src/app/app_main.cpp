@@ -379,6 +379,27 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             }
         }
 
+        // FEAT-0023 (REQ-MPROFILE-07): sim-only worker-startup fault injection
+        // for the supervisor auto-revert path. Double-gated — the env names a
+        // config stem to fail AND this worker's own --config stem must match —
+        // so a switched-in candidate (config/profiles/<stem>.json) fails its
+        // own startup while the baseline worker (a different stem) survives.
+        // Never set in production; fires here, before reconcile and before any
+        // PID publish, so the non-zero exit lands inside the supervisor's
+        // ~1500 ms startup window and arms last-known-good revert.
+        if ((options.run_mode == RunMode::kControlLoop ||
+             options.run_mode == RunMode::kReadLoop) &&
+            config.has_value()) {
+            const std::string fail_stem = GetEnvironmentAsciiString(
+                L"SVG_MB_CONTROL_SIM_FAIL_STARTUP_CONFIG_STEM");
+            if (!fail_stem.empty() &&
+                config->source_path.stem().string() == fail_stem) {
+                std::cerr << "svg-mb-control: sim fail-startup for config stem '"
+                          << fail_stem << "'\n";
+                return 3;
+            }
+        }
+
         const int reconcile_result = svg_mb_control::ReconcilePendingWrites(
             reconcile_runtime_home,
             svg_mb_control::ResolveRuntimeWritePolicy(

@@ -186,3 +186,47 @@ class ProfileSwitchTests(WindowsExeTestCase):
                 pid2 and pid2 != pid1,
                 "second switch did not cycle (stale cycle signal?)",
             )
+
+    def test_failed_switch_reverts_to_last_known_good(self) -> None:
+        # REQ-MPROFILE-07: a candidate that parse-validates at the supervisor
+        # but fails the worker's own startup must auto-revert to the last
+        # profile that produced a surviving worker, and the supervisor must
+        # self-heal (respawn the baseline) rather than die. The bad candidate
+        # is forced to fail startup by a double-gated sim hook: the env names
+        # the config stem to fail and only the worker launched with that
+        # --config stem (config/profiles/bad.json) exits; the baseline worker
+        # (stem "control") is untouched.
+        with StagedControlApp(default_mode="read-loop", poll_ms=100) as app:
+            runtime_home = app.runtime_home
+            _write_profile(app.root, runtime_home, "bad", poll_ms=150)
+            env = _sim_direct_env()
+            env["SVG_MB_CONTROL_SIM_FAIL_STARTUP_CONFIG_STEM"] = "bad"
+            self.assertEqual(app.start(env=env).returncode, 0)
+
+            pid0 = _wait_for(lambda: _worker_pid(runtime_home), timeout_s=12.0)
+            self.assertTrue(pid0, "worker did not publish a PID")
+            baseline_profile = _wait_for(
+                lambda: _active_profile(runtime_home), timeout_s=12.0)
+            self.assertTrue(baseline_profile, "no baseline active profile")
+
+            _seed_switch_request(runtime_home, "bad")
+
+            reverted = _wait_for(
+                lambda: "supervisor.profile_reverted" in _event_types(runtime_home),
+                timeout_s=30.0,
+            )
+            self.assertTrue(reverted, "no supervisor.profile_reverted event")
+
+            # Self-heal: a worker runs again, and the active profile is the
+            # baseline (last-known-good), never left stuck on the bad candidate.
+            self.assertTrue(
+                _wait_for(
+                    lambda: _active_profile(runtime_home) == baseline_profile,
+                    timeout_s=20.0),
+                "did not revert the active profile to last-known-good",
+            )
+            self.assertTrue(
+                _wait_for(lambda: _worker_pid(runtime_home) is not None,
+                          timeout_s=20.0),
+                "supervisor did not respawn a worker after the failed switch",
+            )
