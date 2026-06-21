@@ -35,6 +35,16 @@ void BuildChannelLogStates(
         state.total_writes = channel.total_writes;
         state.write_active = channel.write_active;
         state.baseline_captured = channel.baseline_captured;
+        // FEAT-0003 (REQ-PROFILE-08): control-law attribution + PID evidence.
+        // feedforward_pct above already blanks for PID channels because the PID
+        // law leaves last_raw_demand_pct NaN; the pid_* fields are NaN for the
+        // curve law for the same reason.
+        state.controller_kind = channel.controller_kind;
+        state.pid_error_c = channel.pid_error_c;
+        state.pid_p_term = channel.pid_p_term;
+        state.pid_i_term = channel.pid_i_term;
+        state.pid_d_term = channel.pid_d_term;
+        state.pid_setpoint_raw_pct = channel.pid_setpoint_raw_pct;
     }
 }
 

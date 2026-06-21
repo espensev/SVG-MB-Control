@@ -200,4 +200,14 @@ void PidController::Reset() { state_ = PidState{}; }
 
 std::string_view PidController::Kind() const { return kPidKind; }
 
+ControllerStartupInfo PidController::StartupInfo() const {
+    ControllerStartupInfo info;
+    info.is_pid = true;
+    info.live = live_;
+    info.detail =
+        live_ ? std::string("law=pid live (allow_live evidenced + slew cap)")
+              : shadow_reason_;
+    return info;
+}
+
 }  // namespace svg_mb_control

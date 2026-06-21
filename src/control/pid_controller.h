@@ -74,6 +74,7 @@ class PidController final : public IChannelController {
         std::chrono::steady_clock::time_point now) override;
     void Reset() override;
     std::string_view Kind() const override;
+    ControllerStartupInfo StartupInfo() const override;
 
     bool live() const { return live_; }
     const std::string& shadow_reason() const { return shadow_reason_; }

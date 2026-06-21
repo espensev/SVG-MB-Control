@@ -320,7 +320,7 @@ constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 2>
          }},
     }};
 
-constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 13>
+constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 19>
     kChannelPostBoostColumns{{
         {"_low_band_stage_boost_pct",
          [](std::ostringstream& csv, bool present,
@@ -392,6 +392,38 @@ constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 13>
                  !std::isnan(state.feedforward_pct);
              AppendCsvFieldDoubleIf(csv, correction_present,
                                     state.setpoint_pct - state.feedforward_pct);
+         }},
+        // FEAT-0003 (REQ-PROFILE-08): append-only control-law attribution + PID
+        // evidence. Blank cell for the curve law (empty kind / NaN pid_*).
+        {"_controller_kind",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldStringIf(csv, present, state.controller_kind);
+         }},
+        {"_pid_error_c",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_error_c);
+         }},
+        {"_pid_p_term",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_p_term);
+         }},
+        {"_pid_i_term",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_i_term);
+         }},
+        {"_pid_d_term",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_d_term);
+         }},
+        {"_pid_setpoint_raw_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_setpoint_raw_pct);
          }},
     }};
 

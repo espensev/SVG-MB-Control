@@ -130,6 +130,78 @@ class ControlLoopTests(WindowsExeTestCase):
                 self.assertEqual(write_event["severity"], "info")
                 self.assertEqual(write_event["error_code"], "none")
 
+    def test_control_loop_pid_shadow_computes_but_does_not_write(self) -> None:
+        # FEAT-0003 (REQ-PROFILE-07/08): a PID channel with no pid.allow_live runs
+        # shadow/dry-run -- it computes + logs a setpoint and is attributed to the
+        # pid law, but never actuates the fan (no writes) and records the shadow
+        # law at startup.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
+                control_hold_ms=800,
+                min_duty_pct=40.0,
+                extra_channel_fields={
+                    "controller": "pid",
+                    "pid": {
+                        "target_c": 60.0,
+                        "kp": 2.0,
+                        "feedforward": "fixed",
+                        "fixed_feedforward_pct": 30.0,
+                    },
+                },
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0),
+            ):
+                observed = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get(
+                        "loop_tick_count", 0
+                    )
+                    >= 25,
+                    timeout_s=8.0,
+                )
+                self.assertTrue(observed)
+                status = _read_runtime_status(runtime_home)
+                self.assertIsNotNone(status)
+                channel_status = status["controlled_channels"][0]
+                # Attribution + kind-aware PID evidence (REQ-PROFILE-08).
+                self.assertEqual(channel_status["controller_kind"], "pid")
+                self.assertEqual(channel_status["last_response_source"], "pid")
+                self.assertIsNotNone(channel_status["pid_error_c"])
+                # Shadow/dry-run (REQ-PROFILE-07): the PID computed a setpoint, but
+                # the channel never actuated -- no writes despite 25+ ticks at 75C.
+                self.assertEqual(channel_status["total_writes"], 0)
+                # The worker recorded the shadow law at startup.
+                shadow_event = next(
+                    (
+                        item
+                        for item in _read_runtime_events(runtime_home)
+                        if item.get("event_type") == "control_loop.pid_shadow"
+                    ),
+                    None,
+                )
+                self.assertIsNotNone(shadow_event)
+                self.assertIn("allow_live", shadow_event.get("detail", ""))
+                # CSV carries the additive kind-aware columns; the curve-only
+                # feedforward column blanks for a PID channel.
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows, msg="pid-shadow CSV rows missing")
+                latest_row = rows[-1]
+                self.assertEqual(latest_row["channel0_controller_kind"], "pid")
+                self.assertNotEqual(latest_row["channel0_pid_error_c"], "")
+                self.assertEqual(latest_row["channel0_feedforward_pct"], "")
+
     def test_control_loop_limits_first_write_from_observed_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

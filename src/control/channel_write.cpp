@@ -269,6 +269,15 @@ void TryApplyChannelSetpoint(
     if (!evaluation.has_setpoint) {
         return;
     }
+    if (evaluation.write_suppressed) {
+        // FEAT-0003 shadow/dry-run (REQ-PROFILE-07): the law already computed and
+        // logged this setpoint -- PidController wrote the ChannelState.last_*
+        // trajectory the CSV/status reporting reads -- but this channel must NOT
+        // actuate or assert authority. Return before any fan write, sidecar
+        // upsert, circuit-breaker probe, or post-write state mutation, so no
+        // baseline-moving write or authority change can leave this function.
+        return;
+    }
 
     const double observed_temp_c = evaluation.observed_temp_c;
     const double setpoint = evaluation.setpoint_pct;

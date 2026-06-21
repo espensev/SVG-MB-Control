@@ -136,6 +136,26 @@ nlohmann::json ChannelStatusToJson(const ChannelState& channel) {
     status["consecutive_sidecar_persist_failures"] =
         channel.consecutive_sidecar_persist_failures;
     status["baseline_captured"] = channel.baseline_captured;
+    // FEAT-0003 (REQ-PROFILE-08): additive control-law attribution + kind-aware
+    // PID evidence. PID fields are JSON null for the curve law so curve-only
+    // values are never published as if they were meaningful PID numbers. Additive
+    // only -- the control_loop status schema version is unchanged (consistent
+    // with how FEAT-0023 added active_profile_*).
+    status["controller_kind"] = channel.controller_kind;
+    if (channel.controller_kind == "pid") {
+        status["pid_error_c"] = JsonNumberOrZero(channel.pid_error_c);
+        status["pid_p_term"] = JsonNumberOrZero(channel.pid_p_term);
+        status["pid_i_term"] = JsonNumberOrZero(channel.pid_i_term);
+        status["pid_d_term"] = JsonNumberOrZero(channel.pid_d_term);
+        status["pid_setpoint_raw_pct"] =
+            JsonNumberOrZero(channel.pid_setpoint_raw_pct);
+    } else {
+        status["pid_error_c"] = nullptr;
+        status["pid_p_term"] = nullptr;
+        status["pid_i_term"] = nullptr;
+        status["pid_d_term"] = nullptr;
+        status["pid_setpoint_raw_pct"] = nullptr;
+    }
     return status;
 }
 

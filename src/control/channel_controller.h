@@ -10,6 +10,18 @@
 
 namespace svg_mb_control {
 
+// One-time startup attribution for the event log (FEAT-0003 REQ-PROFILE-07).
+// is_pid is false for the curve law (nothing to announce). For a PID channel,
+// `live` records whether the decision-D6 gate authorized a live write, and
+// `detail` carries the human-readable reason (the shadow downgrade cause, or a
+// live-crossing note). The worker emits control_loop.profile_applied for a live
+// PID and control_loop.pid_shadow for a shadow one at startup.
+struct ControllerStartupInfo {
+    bool is_pid = false;
+    bool live = false;
+    std::string detail;
+};
+
 // FEAT-0003: per-channel control-law seam. Each controlled channel owns one
 // IChannelController. The curve-overlay law (today's only law) is wrapped by
 // CurveOverlayController, which forwards to EvaluateChannel; a future PID law is
@@ -40,6 +52,11 @@ class IChannelController {
     // Stable identifier of the control law, surfaced in reporting
     // (REQ-PROFILE-08).
     virtual std::string_view Kind() const = 0;
+
+    // One-time startup attribution for the event log. Defaults to "nothing to
+    // announce" so the curve law needs no override; PidController reports its
+    // live/shadow gate result (REQ-PROFILE-07).
+    virtual ControllerStartupInfo StartupInfo() const { return {}; }
 };
 
 // The curve-overlay control law: forwards to EvaluateChannel so the existing

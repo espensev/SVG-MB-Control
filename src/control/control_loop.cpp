@@ -1,6 +1,7 @@
 #include "control_loop.h"
 
 #include "amd_reader.h"
+#include "channel_controller.h"
 #include "control_runtime_context.h"
 #include "control_scheduler.h"
 #include "control_status_writer.h"
@@ -149,6 +150,27 @@ int ControlLoop::RunUntilStopped(const std::atomic<bool>& stop_flag) {
             .detail = "control-loop started",
             .success = true,
         });
+
+    // FEAT-0003 (REQ-PROFILE-07 / decision D6): record each PID channel's law at
+    // startup. A live PID write crosses the measurement gate, so it emits
+    // control_loop.profile_applied; a shadow/dry-run PID (allow_live absent, or
+    // downgraded for missing evidence or a missing slew cap) emits
+    // control_loop.pid_shadow with the reason. The curve law announces nothing.
+    for (std::size_t i = 0; i < context.controllers.size(); ++i) {
+        const ControllerStartupInfo info = context.controllers[i]->StartupInfo();
+        if (!info.is_pid) {
+            continue;
+        }
+        AppendControlLoopEvent(
+            context.runtime_home,
+            RuntimeLogEvent{
+                .event_type = info.live ? "control_loop.profile_applied"
+                                        : "control_loop.pid_shadow",
+                .detail = info.detail,
+                .channel = context.channels[i].config.channel,
+                .success = true,
+            });
+    }
 
     // In-memory pending-writes cache. Upserts still persist synchronously
     // (crash-recovery contract); removals are batched and flushed at the
