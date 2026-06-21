@@ -1,6 +1,7 @@
 #include "tick_runner.h"
 
 #include "amd_reader.h"
+#include "channel_controller.h"
 #include "channel_evaluator.h"
 #include "channel_write.h"
 #include "control_status_writer.h"
@@ -333,8 +334,12 @@ bool RunControlTick(ControlRuntimeContext& context,
         }
     }
 
-    // Per-channel decisions.
-    for (auto& channel : context.channels) {
+    // Per-channel decisions. Index-based so each channel dispatches through its
+    // own controllers[i] (FEAT-0003 control-law seam). `controllers` and
+    // `channels` are index-aligned by construction in the ControlRuntimeContext
+    // ctor, which pushes one of each per configured channel in the same loop.
+    for (std::size_t i = 0; i < context.channels.size(); ++i) {
+        ChannelState& channel = context.channels[i];
         const ChannelTimingConfig channel_timing =
             BuildChannelTimingConfig(context.loop, channel, now_steady);
 
@@ -354,7 +359,7 @@ bool RunControlTick(ControlRuntimeContext& context,
             break;
         }
 
-        const ChannelEvaluation evaluation = EvaluateChannel(
+        const ChannelEvaluation evaluation = context.controllers[i]->Evaluate(
             channel, context.loop, temp_inputs, state.runtime_snapshot_index,
             now_steady);
         AppendChannelSensorEvent(context, channel, evaluation,

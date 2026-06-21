@@ -8,11 +8,19 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 namespace svg_mb_control {
+
+// FEAT-0003: per-channel control law, owned by ControlRuntimeContext index-aligned
+// with `channels`. Forward-declared so this header stays free of
+// channel_controller.h (which includes this one); the out-of-line destructor in
+// control_runtime_context.cpp instantiates the unique_ptr deleter where the type
+// is complete.
+class IChannelController;
 
 struct ChannelState {
     ChannelControlConfig config;
@@ -121,12 +129,19 @@ struct ControlRuntimeContext {
     ControlRuntimeContext(ControlConfig base_config,
                           ControlLoopConfig loop_config,
                           std::filesystem::path runtime_home_path);
+    // Defined in the .cpp where IChannelController is complete (the controllers
+    // vector holds unique_ptr<IChannelController>, an incomplete type here).
+    ~ControlRuntimeContext();
 
     ControlConfig base;
     ControlLoopConfig loop;
     std::filesystem::path runtime_home;
     RuntimeWritePolicy runtime_policy;
     std::vector<ChannelState> channels;
+    // FEAT-0003: one control-law controller per entry in `channels`, built in the
+    // same constructor loop so the two vectors stay the same size and order. The
+    // tick loop dispatches controllers[i]->Evaluate(channels[i], ...).
+    std::vector<std::unique_ptr<IChannelController>> controllers;
     LowBandRuntimeState low_band;
     std::mutex wake_mutex;
     std::condition_variable wake_cv;

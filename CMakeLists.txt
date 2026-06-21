@@ -133,6 +133,7 @@ add_library(svg_mb_control_core STATIC
     src/control/boost_stage.cpp
     src/control/cadence_score.cpp
     src/control/calibration.cpp
+    src/control/channel_controller.cpp
     src/control/channel_evaluator.cpp
     src/control/channel_write.cpp
     src/control/control_config.cpp
@@ -380,6 +381,8 @@ if(BUILD_TESTING)
         tests/cpp/runtime_csv_archive_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_channel_write_tests
         tests/cpp/channel_write_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_channel_controller_tests
+        tests/cpp/channel_controller_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_force_terminate_tests
         tests/cpp/worker_force_terminate_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests
