@@ -65,7 +65,10 @@ a feature's status or the decision queue changes. A fuller standing review is
   machine-base/overlay composition (`ComposeConfigRoot`; ships
   `config/overlays/release.behavior.json` + `config/profiles/snd-desk-composed.json`,
   proven to reproduce `control.release.json`) + active-profile CSV/status fields +
-  a revert integration test. Only the on-hardware live M (REQ-10) is deferred.
+  a revert integration test. The 2026-06-22 Rust local UI helper
+  (`tools/profile_switch_ui`) wraps the existing status/health/`--set-profile`
+  CLI path without adding runtime semantics. Only the on-hardware live M
+  (REQ-10) is deferred.
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
@@ -95,7 +98,7 @@ The two latency held-Drafts also owe gate decisions and live in
 lanes/target-ceiling decision plus a response-evaluation Pass-3, and **FEAT-0018**
 owes the floor characterization pass (it crosses `docs/MEASUREMENT_GATE.md`).
 
-**`Implemented` 2026-06-21 (live PID write deferred):** **FEAT-0003** —
+**`Done` 2026-06-22:** **FEAT-0003** —
 restart-selected control-law profile seam (PID / P / PI / PD plus the current
 curve law). Built across slices F3-1..F3-5: the `IChannelController` seam +
 `CurveOverlayController` (output-identical, forward-wrap) + `PidController`
@@ -106,12 +109,13 @@ NaN-integral guard, kind-aware status nulls). Spec §14 + `TRACEABILITY.md` fill
 PID identity in `docs/CONTROL_PID_MATH.md`. The first shadow-replay
 characterization artifact is
 `docs/pid-shadow-characterization-2026-06-21.md`; it rejects all-channel live PID
-and leaves only a channel-0-only experiment as a possible future operator-gated
-pass. The **live PID write on hardware** (REQ-PROFILE-07 M) remains deferred
-behind `pid.allow_live` + a persisted characterization artifact + a positive
-non-NaN slew cap, like FEAT-0023's live M. REQ-PROFILE-05 is a deliberate
-functional-pass partial (curve state stays on `ChannelState` under the
-restart-selected scope).
+and leaves only a channel-0-only experiment as a possible operator-gated pass.
+That **live PID write on hardware** gate (REQ-PROFILE-07 M) passed 2026-06-22 in
+`docs/pid-live-channel0-evidence-2026-06-22.md` with `pid.allow_live`, the
+persisted characterization artifact, and the positive slew cap in place; the
+package rolled back to the shipped `curve_overlay` default afterward. REQ-PROFILE-05
+is a deliberate functional-pass partial (curve state stays on `ChannelState`
+under the restart-selected scope).
 
 **Recently shipped (context — see `git log` / `docs/next_steps.md`):** the
 write-path safety review (FEAT-0010/0011/0012/0013) closed 2026-06-17 —
@@ -230,7 +234,7 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 |---|---|---|---|
 | [FEAT-0001](FEAT-0001-hot-swap-write-policy.md) | Hot-swap runtime write policy | `REQ-WRITEPOLICY-*` | Accepted |
 | [FEAT-0002](FEAT-0002-cpu-settings-evidence-logger.md) | CPU settings evidence logger | `REQ-CPUSETTINGS-*` | Implemented (source/test load layer; label deferred) |
-| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Implemented (2026-06-21; seam + curve-overlay + PID shadow/dry-run + config dispatch + D6 gate + kind-aware reporting; REQ-PROFILE-05 partial; live PID write M deferred) |
+| [FEAT-0003](FEAT-0003-selectable-profile-hot-swap.md) | Restart-selected control-law profile seam | `REQ-PROFILE-*` | Done (2026-06-22; seam + curve-overlay + PID shadow/dry-run + config dispatch + D6 gate + kind-aware reporting; REQ-PROFILE-05 partial; channel-0 live PID M passed; default remains curve) |
 | [FEAT-0004](FEAT-0004-hardware-access-health-signal.md) | Hardware-access dependency health signal (PawnIO availability) | `REQ-HWHEALTH-*` | Done (2026-06-22; additive `hwaccess_*` status/health fields + startup transition events; live M event-log evidence captured; exit codes unchanged) |
 | [FEAT-0005](FEAT-0005-write-actuation-confirmation.md) | Write actuation confirmation (non-actuating-write detection) | `REQ-ACTCONFIRM-*` | Accepted |
 | [FEAT-0006](FEAT-0006-cpu-work-energy-efficiency-evidence.md) | CPU work & energy efficiency evidence (work-per-Joule) | `REQ-CPUEFF-*` | Accepted (energy logger + analyzer avg-power landed; cycle APERF/MPERF logger + analyzer effective-frequency derivation landed 2026-06-09/10; all-core package rollup via off-thread sweeper + section-12 loop-timing gate harness merged 2026-06-21, analyze schema v13; energy quarantine-exit evidence complete across 3 independent sessions; marker promotion + off-thread-sweeper live M-evidence remain) |
@@ -250,4 +254,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M pending) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
-| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; on-hardware live M deferred) |
+| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M deferred) |

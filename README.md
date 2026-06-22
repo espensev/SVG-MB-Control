@@ -138,12 +138,12 @@ cd .\release
 .\svg-mb-control.exe --health --json
 .\svg-mb-control.exe --show-config
 .\svg-mb-control.exe --show-config --json
-.\svg-mb-control.exe --show-config --profile quiet --json
+.\svg-mb-control.exe --show-config --profile snd-desk-composed --json
 .\svg-mb-control.exe --stop
 .\svg-mb-control.exe --restart
 .\svg-mb-control.exe --reset-breakers
 .\svg-mb-control.exe --reset-breakers --reset-breaker-channel 4
-.\svg-mb-control.exe --set-profile quiet
+.\svg-mb-control.exe --set-profile snd-desk-composed
 ```
 
 FEAT-0023 profile selection: the controller resolves its profile at startup by
@@ -157,13 +157,27 @@ last-known-good profile if the new profile fails to start. The active profile is
 recorded in `runtime\control_supervisor.json` and in
 `supervisor.profile_applied` / `_rejected` / `_reverted` events.
 
+Minimal local profile UI:
+
+```powershell
+# From the repo root. Requires a Rust toolchain in PATH.
+.\scripts\Start-ProfileSwitchUi.ps1
+```
+
+The Rust helper binds to `127.0.0.1:8766`, lists profile files from the same
+profile catalog locations, shows `--health` / `--status`, and applies a profile
+only when the operator clicks Apply. Apply uses the existing
+`svg-mb-control.exe --set-profile <name>` path; the helper does not add a new
+runtime request file or switch protocol.
+
 `--show-config` prints an operator-facing summary of the loaded config:
 source path, profile source/name when selected, schema version, default mode,
 loop cadence, write timing, health/safety thresholds, low-band global state, and
-per-channel blend, source-aware CPU guard, rate limits, smoothing, boost stages,
-and curve endpoints. It does not require the controller to be running and reads
-the same config the worker would. `--show-config --json` emits the same fields as
-a structured JSON document for tooling. `--profile <name>` loads
+per-channel controller kind, PID parameters when selected, blend, source-aware
+CPU guard, rate limits, smoothing, boost stages, and curve endpoints. It does not
+require the controller to be running and reads the same config the worker would.
+`--show-config --json` emits the same fields as a structured JSON document for
+tooling. `--profile <name>` loads
 `config\profiles\<name>.json`; an explicit `--config <path>` wins over
 `--profile`, and `SVG_MB_PROFILE=<name>` is used when no flag is given.
 

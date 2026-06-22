@@ -77,6 +77,18 @@ dependency-free.
 - `svg_mb_control_rapl_energy_tests` — `tests\cpp\rapl_energy_tests.cpp`
 - `svg_mb_control_cpu_cycles_tests` — `tests\cpp\cpu_cycles_tests.cpp`
 
+## Operator Helper Tools
+
+These tools are not CMake targets and are not part of the release package.
+
+- `tools\profile_switch_ui` (`svg-mb-profile-ui`) — a small Rust local HTTP UI
+  for profile switching. It is run manually through
+  `scripts\Start-ProfileSwitchUi.ps1`, binds to `127.0.0.1` by default, lists
+  known profile JSON files, shows `--health` / `--status`, and applies a profile
+  by invoking the shipped `svg-mb-control.exe --set-profile <name>` operator
+  path. It adds no runtime protocol and does not participate in scheduled-task
+  process lifetime.
+
 ## Runtime Processes
 
 Both processes run as Windows Scheduled Tasks under task path

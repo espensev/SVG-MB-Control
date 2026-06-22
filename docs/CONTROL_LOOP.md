@@ -343,6 +343,12 @@ The active profile identity is recorded as `active_profile_name` and
 These fields are observational: they are not read by setpoint, cadence, or
 channel-policy logic, and they are not ingested by the analyzer.
 
+The optional Rust helper at `tools\profile_switch_ui` is a local browser UI over
+this same operator surface. It reads the catalog/profile files for display and
+invokes `svg-mb-control.exe --set-profile <name>` when Apply is clicked; it does
+not add a second request format, bypass supervisor validation, or reload the
+worker in process.
+
 ## Policy Behavior
 
 `runtime_policy_path` is resolved locally inside Control.

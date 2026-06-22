@@ -1,7 +1,7 @@
 # FEAT-0023: Machine profiles and restart-based profile switch
 
 **Project:** svg-mb-control
-**Status:** Implemented (composition + active-profile CSV/status fields + revert integration test done; on-hardware live M deferred)   **Version:** 0.4   **Updated:** 2026-06-21
+**Status:** Implemented (composition + active-profile CSV/status fields + revert integration test done; on-hardware live M deferred)   **Version:** 0.5   **Updated:** 2026-06-22
 **Namespace:** `REQ-MPROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -21,6 +21,11 @@ different profile (a supervised restart, not an in-process swap).
 > was itself promoted to Accepted 2026-06-21. Live runtime switching still
 > requires explicit live-runtime authorization when tested on hardware (the
 > on-hardware live M, REQ-MPROFILE-10, stays deferred).
+>
+> **Operator-helper update 2026-06-22.** A minimal Rust local browser helper
+> (`tools/profile_switch_ui`) may wrap the existing `--status`, `--health`, and
+> `--set-profile` CLI surface. It adds no runtime protocol, no sibling-repo
+> dependency, and no in-process switch semantics.
 
 ## 1. Summary
 
@@ -96,7 +101,9 @@ running machine without editing config by hand.
   sequenced after this feature.
 - No change to the shipped 250 ms cadence, write cooldown, channel set, or
   control-computation identity for a machine's default profile.
-- No GUI; the operator surface is the runtime-home request file + CLI.
+- No integrated controller GUI or in-process runtime UI. Optional local helper
+  UI must wrap the existing CLI/request path and must not add a new profile
+  switch protocol.
 - No sibling-repo, subprocess bridge, or new external sensor dependency.
 
 ## 4. Stressed invariants  *(promotion gate 2)*
@@ -111,7 +118,7 @@ running machine without editing config by hand.
 
 ## 5. Behavior specification
 
-Proposed behavior (not yet implemented).
+Implemented behavior.
 
 - **Profile catalog & composition.** A named-profile catalog resolves each
   profile to the existing in-memory `ControlConfig`/`ControlLoopConfig` by
@@ -222,6 +229,11 @@ Proposed behavior (not yet implemented).
   an explicit opt-in action.
 - **`--show-config`** reports the resolved profile name, resolution source, and
   config path.
+- **Optional local Rust helper UI** under `tools/profile_switch_ui` can list
+  known profile files and submit a switch by invoking the existing
+  `svg-mb-control.exe --set-profile <name>` operator path. This helper is not a
+  release-package/runtime process, adds no request-file format, and must remain
+  standalone in this repo.
 - Update `README.md` (operator workflow + profile selection), `docs/CONTROL_LOOP.md`,
   `docs/WRITE_ORCHESTRATION.md` (supervisor switch path), and `docs/RUNTIME_HOME.md`
   (request file, status field, events) per `AGENTS.md` §Change Checklist.
@@ -313,6 +325,11 @@ Verify legend:
 | REQ-MPROFILE-08 | pass | T,R (`9a78a11`). The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing graceful restore runs (fans → captured BIOS baseline); no no-restore latch path or fan watchdog added; `test_profile_switch.py` cycles the worker; review vs decision D-MPROFILE-2. | 2026-06-21 |
 | REQ-MPROFILE-09 | pass | T,R (`9a78a11`/`79145e4`). Switch events emitted; active profile name in `control_supervisor.json` (supervisor state) AND name + resolution source in the worker runtime status (`control_runtime.json`, both schemas) and as additive control-loop-only CSV columns `active_profile_name`/`active_profile_source` (threaded from `ControlConfig`, never read by control). Under supervision the worker is launched with `--config`, so the name falls back to the config stem (= the switched profile name). `csv_rows_tests` locks the columns; `test_profile_switch.py` asserts the worker status records name + source on a live switch. | 2026-06-21 |
 | REQ-MPROFILE-10 | partial | T,R (`fb70be5`). T+R satisfied: `profile_composition_tests` proves the composed snd-desk profile reproduces `control.release.json` field-by-field — full `ControlLoopConfig` (cadence, cooldown, channel set, curves, boosts, low-band) AND the resolved top-level `ControlConfig` incl. runtime paths — so a composed default is a byte-identical drop-in; the no-`compose` default path is untouched. Live **M** on a deployed default profile remains the only open item (and gates wiring the host identity + catalog into Build-Release). | 2026-06-21 |
+
+2026-06-22 helper note: `tools/profile_switch_ui` is a local Rust browser UI
+that wraps the existing CLI surface. Its validation is build/unit-test plus a
+read-only HTTP/status smoke; profile switch POST remains an explicit operator
+action and was not exercised by this note.
 
 **Spec vs. implementation deltas:** The catalog supports both whole-config
 profiles (`config/profiles/<name>.json`) and the machine-base + behavior-overlay

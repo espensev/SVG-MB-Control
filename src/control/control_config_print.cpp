@@ -185,7 +185,9 @@ void PrintTextSummary(std::ostream& out, const ControlConfig& base,
     if (loop.has_value()) {
         out << "Channels (" << loop->channels.size() << "):\n";
         for (const auto& ch : loop->channels) {
-            out << "  ch" << ch.channel << "  blend=" << TempBlendToString(ch.temp_blend)
+            out << "  ch" << ch.channel
+                << "  controller=" << ControllerKindToString(ch.controller_kind)
+                << "  blend=" << TempBlendToString(ch.temp_blend)
                 << "  shape=" << CurveShapeToString(ch.curve_shape)
                 << "  min=" << FormatNumber(ch.min_duty_pct, 1) << "%";
             if (IsKnown(ch.source_aware_cpu_hot_guard_c)) {
@@ -202,6 +204,23 @@ void PrintTextSummary(std::ostream& out, const ControlConfig& base,
                 << " / fall " << FormatNumber(ch.fall_rate_pct_per_min, 1)
                 << " %/min,  step<=" << FormatNumber(ch.max_setpoint_step_pct, 2)
                 << "%\n";
+            if (ch.controller_kind == ControllerKind::Pid) {
+                out << "       pid     target "
+                    << FormatNumber(ch.pid.target_c, 1)
+                    << " C, gains kp/ki/kd "
+                    << FormatNumber(ch.pid.kp, 4) << " / "
+                    << FormatNumber(ch.pid.ki, 4) << " / "
+                    << FormatNumber(ch.pid.kd, 4)
+                    << ", feedforward "
+                    << PidFeedforwardToString(ch.pid.feedforward)
+                    << ", allow_live "
+                    << (ch.pid.allow_live ? "true" : "false");
+                if (!ch.pid.characterization_artifact.empty()) {
+                    out << ", artifact "
+                        << ch.pid.characterization_artifact;
+                }
+                out << '\n';
+            }
             out << "       smooth  alpha rise "
                 << FormatNumber(ch.demand_smoothing_rise_alpha, 4)
                 << ",  alpha fall "
@@ -325,6 +344,7 @@ nlohmann::json BuildJsonSummary(const ControlConfig& base,
     for (const auto& ch : loop->channels) {
         nlohmann::json channel_json;
         channel_json["channel"] = ch.channel;
+        channel_json["controller"] = ControllerKindToString(ch.controller_kind);
         channel_json["temp_blend"] = TempBlendToString(ch.temp_blend);
         channel_json["source_aware_cpu_hot_guard_c"] =
             OptionalDouble(ch.source_aware_cpu_hot_guard_c);
@@ -375,6 +395,24 @@ nlohmann::json BuildJsonSummary(const ControlConfig& base,
         };
         channel_json["curve"] = CurveToJson(ch.curve);
         channel_json["cpu_override_curve"] = CurveToJson(ch.cpu_override_curve);
+        if (ch.controller_kind == ControllerKind::Pid) {
+            channel_json["pid"] = {
+                {"target_c", OptionalDouble(ch.pid.target_c)},
+                {"kp", ch.pid.kp},
+                {"ki", ch.pid.ki},
+                {"kd", ch.pid.kd},
+                {"feedforward", PidFeedforwardToString(ch.pid.feedforward)},
+                {"fixed_feedforward_pct",
+                 OptionalDouble(ch.pid.fixed_feedforward_pct)},
+                {"integral_min", OptionalDouble(ch.pid.integral_min)},
+                {"integral_max", OptionalDouble(ch.pid.integral_max)},
+                {"allow_live", ch.pid.allow_live},
+                {"characterization_artifact",
+                 ch.pid.characterization_artifact},
+            };
+        } else {
+            channel_json["pid"] = nullptr;
+        }
         channels.push_back(std::move(channel_json));
     }
     loop_json["channels"] = std::move(channels);

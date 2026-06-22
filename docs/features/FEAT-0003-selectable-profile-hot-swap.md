@@ -1,7 +1,7 @@
 # FEAT-0003: Restart-selected control-law profile seam
 
 **Project:** svg-mb-control
-**Status:** Implemented   **Version:** 0.4   **Updated:** 2026-06-21
+**Status:** Done   **Version:** 0.5   **Updated:** 2026-06-22
 **Namespace:** `REQ-PROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/CONTROL_LOOP.md`,
 `docs/CONTROL_PIPELINE_MATH.md`, `docs/WRITE_ORCHESTRATION.md`,
@@ -14,17 +14,19 @@ profile can select at worker startup. The active law is fixed for the worker
 lifetime and changes only through the FEAT-0023 restart-based profile switch, not
 through an in-process tick-boundary swap.
 
-> **Accepted / implementation-authorized (2026-06-21).** FEAT-0023 (the profile
+> **Done / implementation verified (2026-06-22).** FEAT-0023 (the profile
 > catalog + restart switch) is Implemented and validated, clearing the sole
 > sequencing gate that kept this spec Draft; all seven promotion gates were
 > already met. This seam lets a resolved profile choose `curve_overlay` or a
-> PID-family law per channel at worker startup. **Build scope:** the seam +
+> PID-family law per channel at worker startup. The seam +
 > `CurveOverlayController` (output-identical) + `PidController` (shadow/dry-run by
-> default) + config dispatch + the measurement-gate preconditions are buildable
-> now; a **live PID write on hardware** still requires the §5 / REQ-PROFILE-07
-> opt-in (`pid.allow_live` + characterization evidence + a positive non-NaN slew
-> cap) and explicit live-runtime authorization, so it is deferred like
-> FEAT-0023's live M.
+> default) + config dispatch + the measurement-gate preconditions are built. The
+> REQ-PROFILE-07 live M gate is closed for the channel-0-only opt-in proven in
+> [`docs/pid-live-channel0-evidence-2026-06-22.md`](../pid-live-channel0-evidence-2026-06-22.md):
+> `pid.allow_live` + characterization evidence + a positive non-NaN slew cap
+> enabled one short live run, then the package rolled back to the shipped
+> `curve_overlay` default. The 2026-06-21 shadow characterization still rejects
+> all-channel live PID.
 >
 > The 2026-06-03 decision record remains the source for the seam shape, PID
 > structure, controller-owned dynamic state, shared output conditioning, and the
@@ -122,7 +124,7 @@ This is a named code/contract gap, not an observed runtime failure.
 
 ## 5. Behavior specification
 
-Proposed behavior (not yet implemented).
+Implemented behavior.
 
 - **Control-law seam.** A per-channel `IChannelController` exposes one
   evaluation method returning the existing `ChannelEvaluation` result, plus a
@@ -227,7 +229,7 @@ Proposed behavior (not yet implemented).
 | REQ-PROFILE-04 | T, R | FEAT-0023 integration test: a profile switch restarts the worker into the new law; no FEAT-0003 runtime request or tick-boundary swap path exists. |
 | REQ-PROFILE-05 | T | Startup/restart tests: new controller instances start with clean dynamic state; no PID integral/derivative or curve smoothing/boost state is reused across a profile switch. |
 | REQ-PROFILE-06 | T, R | Tests: sensor-safe mode, deadband, cooldown, breaker, clamp, write gate, and slew cap behave identically for controller kinds; review vs. `channel_write.*`. |
-| REQ-PROFILE-07 | T, R, M | Config-load test rejects `pid.allow_live: true` without characterization evidence and a positive non-NaN slew cap; review vs. `docs/MEASUREMENT_GATE.md` and decision D6; runtime evidence that PID is shadow/dry-run by default and live only under an evidenced opt-in. |
+| REQ-PROFILE-07 | T, R, M | Config-load test rejects `pid.allow_live: true` without characterization evidence and a positive non-NaN slew cap; review vs. `docs/MEASUREMENT_GATE.md` and decision D6; runtime evidence that PID is shadow/dry-run by default and live only under an evidenced opt-in (`docs/pid-live-channel0-evidence-2026-06-22.md`). |
 | REQ-PROFILE-08 | T, R | CSV/status header+row tests assert per-channel controller-kind fields and kind-aware/nullable law-specific reporting; analyzer tests if ingested. |
 | REQ-PROFILE-09 | R | Review confirms FEAT-0003 adds no channel-set switch path and delegates profile/channel-set validation to FEAT-0023. |
 | REQ-PROFILE-10 | R | Review: `CONTROL_PIPELINE_MATH.md` remains the curve/overlay identity reference and a PID identity reference exists. |
@@ -274,10 +276,12 @@ Verify legend:
 
 > All seven promotion gates are met. **Promoted Draft -> Accepted 2026-06-21**:
 > FEAT-0023 is Implemented + validated, clearing the sequencing gate, and the
-> maintainer authorized execution. Implementation is authorized but has not yet
-> started; section 14 is filled in after the feature is built. The live PID write
-> on hardware (REQ-PROFILE-07 M) remains behind the evidenced `pid.allow_live`
-> opt-in.
+> maintainer authorized execution. Implementation and verification are complete
+> as of 2026-06-22. The live PID write gate (REQ-PROFILE-07 M) is proven for the
+> evidenced channel-0-only opt-in in
+> [`docs/pid-live-channel0-evidence-2026-06-22.md`](../pid-live-channel0-evidence-2026-06-22.md);
+> the shipped default remains `curve_overlay`, and all-channel live PID remains
+> rejected by `docs/pid-shadow-characterization-2026-06-21.md`.
 
 ## 14. Verification log  *(fill in after the feature is built - "check against the spec later")*
 
@@ -289,7 +293,7 @@ Verify legend:
 | REQ-PROFILE-04 | pass (R) | Restart-selected: the law is built once in `CreateChannelController` at worker construction; the tick runner consumes no FEAT-0003 request and has no tick-boundary law-swap path. FEAT-0023 owns the supervised restart switch (`test_profile_switch.py`). | 2026-06-21 |
 | REQ-PROFILE-05 | partial | Functional pass: `PidController` owns its `PidState`; all controller state is created with the worker and discarded on exit, and a FEAT-0023 switch restarts into fresh instances (`Reset()` + ctor). Architectural decouple of the curve law's state out of `ChannelState` is a **deliberate deferred partial** under the restart-selected scope (decision D2 2026-06-21 note); no behavioral consequence. | 2026-06-21 |
 | REQ-PROFILE-06 | pass | Shared output conditioning is law-agnostic: PID reuses the hoisted `SelectPrimaryCurveInput` + `RateLimitSetpoint`, applies the same `[min_duty,100]` clamp, shares the `channel_write.cpp` write path (deadband/cooldown/baseline/breaker), and reuses sensor-safe mode (`pid_controller_tests` safe-mode case). Commit `9f4b79d`. | 2026-06-21 |
-| REQ-PROFILE-07 | pass (T,R); characterization recorded; M deferred | Shadow/dry-run default + decision-D6 gate. `pid_controller_tests` `PidLiveAuthorized` cases (allow_live/slew/artifact); `test_control_loop.py` pid-shadow e2e: `total_writes=0` after 25+ ticks at 75 °C, `pid_shadow` startup event. Write-path `write_suppressed` early-return before any actuation. First real-archive shadow replay: `docs/pid-shadow-characterization-2026-06-21.md` rejects all-channel live PID and leaves only a channel-0-only experiment as a possible future operator-gated pass. **Live PID write on hardware (M) deferred** behind the evidenced `allow_live` opt-in, like FEAT-0023's live M. Commits `9f4b79d`, `490f7f0`. | 2026-06-21 |
+| REQ-PROFILE-07 | pass | Shadow/dry-run default + decision-D6 gate. `pid_controller_tests` `PidLiveAuthorized` cases (allow_live/slew/artifact); `test_control_loop.py` pid-shadow e2e: `total_writes=0` after 25+ ticks at 75 °C, `pid_shadow` startup event. Write-path `write_suppressed` early-return before any actuation. First real-archive shadow replay: `docs/pid-shadow-characterization-2026-06-21.md` rejects all-channel live PID and identifies only channel 0 as a plausible gated live experiment. Channel-0 live M passed 2026-06-22 using `Kp=0.3`, `Ki=0.01`, `Kd=0.0`, target `68 C`, `allow_live=true`, the characterization artifact in the release package, and `max_setpoint_step_pct=0.6`; the 60 s hold stayed healthy with channel 0 `controller_kind=pid` and rolled back to the packaged `curve_overlay` default. Evidence: `docs/pid-live-channel0-evidence-2026-06-22.md`. Commits `9f4b79d`, `490f7f0`, package `3ce1c346bcf5`. | 2026-06-22 |
 | REQ-PROFILE-08 | pass | Additive `controller_kind` + `pid_error_c/p/i/d_term/setpoint_raw_pct` in CSV (table-driven, append-only, bind-by-name) and JSON status (kind-aware: `null` for curve). `controller_kind` set from `IChannelController::Kind()` (single source of truth). pid-shadow e2e asserts `controller_kind=pid`, blanked `feedforward_pct`. Commit `490f7f0`. | 2026-06-21 |
 | REQ-PROFILE-09 | pass (R) | `CreateChannelController` only selects the law for an already-resolved channel; FEAT-0003 adds no channel add/remove/reorder. Channel-set validation stays in FEAT-0023. | 2026-06-21 |
 | REQ-PROFILE-10 | pass (R) | `docs/CONTROL_PIPELINE_MATH.md` scoped to the curve/overlay law with a law-scope note; new sibling `docs/CONTROL_PID_MATH.md` carries the PID identity (signed terms, anti-windup, gate). | 2026-06-21 |
@@ -311,3 +315,8 @@ Verify legend:
   shadow/dry-run"), not a config-load failure; only malformed pid config throws.
   Config load gained a `controller`/`pid` parse + malformed-pid validation
   (section 5/7 unchanged in intent).
+- **Live PID M evidence scope.** The accepted M evidence is channel-0-only and
+  operator-gated. It proves the `allow_live` + characterization artifact + slew
+  cap path can write live and roll back cleanly; it does not change the shipped
+  default controller kind and does not overturn the all-channel PID rejection in
+  `docs/pid-shadow-characterization-2026-06-21.md`.

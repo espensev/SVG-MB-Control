@@ -8,11 +8,11 @@ FEAT-0020 shipped and the runtime disk-growth retention specs (FEAT-0015/0016)
 were promoted 2026-06-18. FEAT-0021 (GPU workload context) and FEAT-0022 (runtime
 logging failure visibility) shipped 2026-06-20; FEAT-0023 (machine profiles +
 restart switch) shipped 2026-06-21 (T/R; live M deferred) and FEAT-0003
-(control-law / PID seam) shipped the same day (T/R; live PID write deferred).
-The first PID shadow-replay characterization note is
-`docs/pid-shadow-characterization-2026-06-21.md`. The authoritative per-feature
-status is `docs/features/README.md` §5 and its "## Current priority" block; this
-file is topical background.
+(control-law / PID seam) is Done as of 2026-06-22. Its all-channel PID replay is
+rejected by `docs/pid-shadow-characterization-2026-06-21.md`; its channel-0 live
+gate evidence is `docs/pid-live-channel0-evidence-2026-06-22.md`. The
+authoritative per-feature status is `docs/features/README.md` §5 and its
+"## Current priority" block; this file is topical background.
 These are review notes and a backlog, not work
 authorization: per `AGENTS.md` (Feature Intake Gate), product-code work for a new
 capability, schema/status/log field, CLI surface, or shipped-config behavior must

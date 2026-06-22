@@ -20,3 +20,4 @@
 /release_rollback_*/
 /tools/pid_characterization/gains_ch0_recommended.json
 /tools/pid_characterization/run_*/
+/tools/profile_switch_ui/target/
