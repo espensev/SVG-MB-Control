@@ -40,6 +40,7 @@ struct RuntimeState {
     active_profile: Option<String>,
     active_source: Option<String>,
     status_text: String,
+    fans: Vec<runtime::FanRow>,
 }
 
 #[derive(Debug)]
@@ -96,6 +97,7 @@ fn real_main() -> Result<(), String> {
                             active_profile: None,
                             active_source: None,
                             status_text: err.to_string(),
+                            fans: Vec::new(),
                         },
                         Some(&format!("Request failed: {err}")),
                     );
@@ -373,11 +375,21 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
         )
     };
 
+    let fans = if let Some(home) = health_info.runtime_home.as_deref() {
+        let home = PathBuf::from(home);
+        let snapshot = fs::read_to_string(home.join("current_state.json")).ok();
+        let control = fs::read_to_string(home.join("control_runtime.json")).ok();
+        runtime::build_fan_rows(snapshot.as_deref(), control.as_deref())
+    } else {
+        Vec::new()
+    };
+
     RuntimeState {
         health_summary,
         active_profile,
         active_source,
         status_text,
+        fans,
     }
 }
 
@@ -603,6 +615,36 @@ fn render_page(
         }
     }
 
+    let fan_rows = if state.fans.is_empty() {
+        "<tr><td colspan=\"5\" class=\"empty\">Fan data unavailable.</td></tr>".to_string()
+    } else {
+        let mut out = String::new();
+        for fan in &state.fans {
+            let duty = match fan.duty_percent {
+                Some(v) => format!("{v:.1}%"),
+                None => "&mdash;".to_string(),
+            };
+            let rpm = match (fan.tach_valid, fan.rpm) {
+                (true, Some(v)) => v.to_string(),
+                _ => "&mdash;".to_string(),
+            };
+            let temp = match (fan.observed_temp_c, fan.temp_source.as_deref()) {
+                (Some(t), Some(src)) => format!("{t:.0} &deg;C ({})", html_escape(src)),
+                (Some(t), None) => format!("{t:.0} &deg;C"),
+                _ => "&mdash;".to_string(),
+            };
+            let controller = match fan.controller_kind.as_deref() {
+                Some(k) => html_escape(k),
+                None => "&mdash;".to_string(),
+            };
+            out.push_str(&format!(
+                "<tr><td class=\"name\">ch{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                fan.channel, duty, rpm, temp, controller
+            ));
+        }
+        out
+    };
+
     let message_html = message
         .map(|msg| format!("<section class=\"notice\">{}</section>", html_escape(msg)))
         .unwrap_or_default();
@@ -613,6 +655,7 @@ fn render_page(
          <head>\
          <meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <meta http-equiv=\"refresh\" content=\"3\">\
          <title>SVG-MB Profile Switch</title>\
          <style>{}</style>\
          </head>\
@@ -627,6 +670,12 @@ fn render_page(
          <div><span>Health</span><strong>{}</strong></div>\
          <div><span>Active profile</span><strong>{}</strong></div>\
          <div><span>Source</span><strong>{}</strong></div>\
+         </section>\
+         <section class=\"table-wrap fans\">\
+         <table>\
+         <thead><tr><th>Fan</th><th>Duty %</th><th>RPM</th><th>Temp</th><th>Controller</th></tr></thead>\
+         <tbody>{fan_rows}</tbody>\
+         </table>\
          </section>\
          <p class=\"consequence\">Switching profiles uses the existing <code>--set-profile</code> path. The supervisor restarts the worker, so fans can briefly return to firmware control during the handoff.</p>\
          <section class=\"table-wrap\">\
@@ -807,6 +856,7 @@ footer {
   header { align-items: flex-start; flex-direction: column; }
   .state-grid { grid-template-columns: 1fr; }
 }
+.fans { margin: 12px 0 16px; }
 "#
 }
 
