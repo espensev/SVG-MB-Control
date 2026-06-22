@@ -125,6 +125,7 @@ $buildSucceeded = $false
 $testsRun = -not $SkipTests
 $testsPassed = $false
 $sourceCommit = $null
+$workingTreeDirty = $false
 $version = $null
 $buildInfoPath = $null
 $zipPath = $null
@@ -278,6 +279,7 @@ try {
     $env:CMAKE_GENERATOR = 'Ninja'
     $env:VCPKG_ROOT = $vcpkgRoot
     $sourceCommit = Get-GitCommitHash -RepositoryRoot $RepoRoot
+    $workingTreeDirty = Get-GitWorkingTreeDirty -RepositoryRoot $RepoRoot
 
     Write-Host "cl.exe : $(Get-Command cl.exe | Select-Object -ExpandProperty Source)" -ForegroundColor Green
     Write-Host "cmake  : $cmakeExe" -ForegroundColor Green
@@ -286,9 +288,16 @@ try {
     Write-Host "vcpkg  : $vcpkgRoot" -ForegroundColor Green
     Write-Host "triplet: $triplet" -ForegroundColor Green
     if ($sourceCommit) {
-        Write-Host "commit : $sourceCommit" -ForegroundColor Green
+        if ($workingTreeDirty) {
+            Write-Host "commit : $sourceCommit (working tree DIRTY)" -ForegroundColor Yellow
+        } else {
+            Write-Host "commit : $sourceCommit" -ForegroundColor Green
+        }
     } else {
         Write-Host "commit : unavailable" -ForegroundColor DarkGray
+    }
+    if ($workingTreeDirty) {
+        Write-Warning "Working tree has uncommitted changes. This package is stamped sourceCommit=$sourceCommit but is NOT reproducible from that commit. build-info.json records workingTreeDirty=true and the embedded --version is suffixed -dirty. Commit before a release or live-evidence build for clean provenance."
     }
 
     Write-Host "`n[5/11] CMake configure..." -ForegroundColor Yellow
@@ -427,7 +436,8 @@ try {
             -PresetName $PresetName `
             -TestsRun $testsRun `
             -TestsPassed $testsPassed `
-            -SourceCommit $sourceCommit
+            -SourceCommit $sourceCommit `
+            -WorkingTreeDirty $workingTreeDirty
         Write-Host 'Wrote: build-info.json' -ForegroundColor Green
 
         Write-Host "`n[10/11] Creating release archive..." -ForegroundColor Yellow
@@ -490,7 +500,11 @@ $elapsed = $timer.Elapsed
 Write-Host "`n--- SUCCESS: $ProjectName v$version ---" -ForegroundColor Green
 Write-Host "Release dir : $ReleaseRoot"
 if ($sourceCommit) {
-    Write-Host "Commit      : $sourceCommit"
+    if ($workingTreeDirty) {
+        Write-Host "Commit      : $sourceCommit (working tree DIRTY — not reproducible from this commit)" -ForegroundColor Yellow
+    } else {
+        Write-Host "Commit      : $sourceCommit"
+    }
 }
 if (Test-Path -LiteralPath $ReleaseRoot) {
     Get-ChildItem -LiteralPath $ReleaseRoot -File | Format-Table Name, @{Label='Size'; Expression={'{0:N0} bytes' -f $_.Length}} -AutoSize

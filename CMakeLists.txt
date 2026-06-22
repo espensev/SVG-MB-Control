@@ -67,6 +67,18 @@ if(GIT_FOUND)
     )
     if(_git_result EQUAL 0 AND NOT _git_output STREQUAL "")
         set(SVG_MB_CONTROL_GIT_HASH "${_git_output}")
+        # Suffix -dirty when the working tree has uncommitted changes so a build
+        # from a dirty tree is not stamped as a clean commit in --version.
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" status --porcelain
+            RESULT_VARIABLE _git_status_result
+            OUTPUT_VARIABLE _git_status_output
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(_git_status_result EQUAL 0 AND NOT _git_status_output STREQUAL "")
+            set(SVG_MB_CONTROL_GIT_HASH "${SVG_MB_CONTROL_GIT_HASH}-dirty")
+        endif()
     endif()
 endif()
 
