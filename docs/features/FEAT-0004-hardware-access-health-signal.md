@@ -1,7 +1,7 @@
 # FEAT-0004: Hardware-access dependency health signal (PawnIO availability)
 
 **Project:** svg-mb-control
-**Status:** Implemented (T/R; live M pending)   **Version:** 0.3   **Updated:** 2026-06-21
+**Status:** Done   **Version:** 0.4   **Updated:** 2026-06-22
 **Namespace:** `REQ-HWHEALTH-*`
 **Companion to:** `AGENTS.md`, `docs/STRUCTURE_AND_STABILITY.md`, `docs/RUNTIME_HOME.md`, `docs/READ_LOOP.md`, `docs/BUILD_TARGETS_AND_DEPENDENCIES.md`
 **Purpose:** make PawnIO (kernel hardware-access) unavailability a distinct,
@@ -225,7 +225,7 @@ Verify legend:
 | REQ-HWHEALTH-01 | pass | `runtime_status_tests`: status JSON + typed status expose `hwaccess_state`, `hwaccess_read_state`, `hwaccess_write_state`, and details; `docs/RUNTIME_HOME.md` updated. `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed 2026-06-21. | 2026-06-21 |
 | REQ-HWHEALTH-02 | pass | `runtime_status_tests`: read and write path states round-trip independently (`read=available`, `write=unavailable`). Startup code sets read from `AmdReader` and write from `CreateFanWriter(...)` success/failure. | 2026-06-21 |
 | REQ-HWHEALTH-03 | pass | Status fields are additive on existing control-loop v4/read-loop v1 schemas; `ReadRuntimeStatus` defaults absent/unknown fields to `unknown`. `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-21 |
-| REQ-HWHEALTH-04 | pass (T); M pending | `runtime_status_tests`: transition classifier covers unknown→unavailable and unavailable→available. Startup paths append `control_loop.hwaccess_*` / `read_loop.hwaccess_*` events. No live runtime event-log capture was run in this change. | 2026-06-21 |
+| REQ-HWHEALTH-04 | pass (T, M) | `runtime_status_tests`: transition classifier covers unknown→unavailable and unavailable→available. Live M 2026-06-22: isolated `read-loop` runtime slice emitted `read_loop.hwaccess_restored` with `read=available`, `write=available`, and detail `AMD/SMN reader initialized` / `svg_mb_sio`; final status reported `hwaccess_state=available` after one successful poll. Evidence: `docs/feat-0004-live-hwaccess-event-log-evidence-2026-06-22.md`. | 2026-06-22 |
 | REQ-HWHEALTH-05 | pass | Review: implementation only reads existing `AmdReader` / `CreateFanWriter(...)` initialization outcomes and writes status/events; no driver load/start/restart or watchdog exit-code change was added. | 2026-06-21 |
 | REQ-HWHEALTH-06 | pass | `runtime_status_tests`: default/absent hardware-access fields remain `unknown`; overall state becomes `available` only when both read and write paths report `available`. | 2026-06-21 |
 
