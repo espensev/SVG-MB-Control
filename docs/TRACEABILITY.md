@@ -74,6 +74,7 @@ Result values:
 | `FEAT-0021` Standard control-loop GPU workload context logging | Implemented (T/R; live M pending) | D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Current. Implemented 2026-06-20 as an additive cached 1000 ms GPU context slice beside FEAT-0020 GPU power; analyzer schema v12 ingests/reports context optionally. Live 250 ms cadence evidence remains the REQ-GPUCTX-04 deployment check. |
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
 | `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M deferred) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. Only the on-hardware live M (REQ-10) is deferred. The control-law/PID seam stays FEAT-0003, sequenced after. |
+| `FEAT-0024` AMD GPU telemetry backend | Draft | Not buildable yet; intake spec landed 2026-06-22. D-AMDGPU-1 (`docs/amd-gpu-telemetry-decision-2026-06-22.md`) is **Proposed** — lean is AMD ADLX, read-only, vendored, dynamically loaded, behind a `GpuReader` vendor-selection seam, reusing the FEAT-0020/0021 logging slices and widening `*_source`/`*_acquisition` with an additive `adlx` value. AMD temperature ships logging-only until the §12 measurement gate (loop-timing impact + on-hardware AMD-temp validity) authorizes it as a `GpuControlEnvelopeC` control input. Owes the §9 decision promotion and §12 evidence. |
 
 ## 3. Requirement map
 
@@ -373,6 +374,26 @@ CLI path without adding runtime semantics.
 | `REQ-MPROFILE-08` | T, R | The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing restore runs; no latch/watchdog added; `test_profile_switch.py` + review vs D-MPROFILE-2. | pass |
 | `REQ-MPROFILE-09` | T, R | Switch events emitted; active profile name in `control_supervisor.json` AND name + resolution source in the worker status (`control_runtime.json`) and additive control-loop-only CSV columns `active_profile_name`/`active_profile_source` (threaded from `ControlConfig`, never read by control); `csv_rows_tests` + `test_profile_switch.py`. | pass |
 | `REQ-MPROFILE-10` | T, R, M | T+R pass: `profile_composition_tests` proves the composed snd-desk default reproduces `control.release.json` field-by-field incl. resolved runtime paths (byte-identical drop-in); the no-`compose` default path is untouched. On-hardware live M deferred (gates wiring host identity + catalog into Build-Release). | partial |
+
+### FEAT-0024 - AMD GPU telemetry backend
+
+Draft intake spec, 2026-06-22 (`docs/features/FEAT-0024-amd-gpu-telemetry.md`).
+Adds a read-only AMD (ADLX, proposed) GPU backend behind the existing `GpuReader`
+seam so the GPU control envelope (`GpuControlEnvelopeC`,
+`src/control/channel_evaluator.cpp:449`) and the FEAT-0020/0021 logging slices
+work on an AMD GPU machine. Not implemented; results are `pending`. AMD
+temperature is logging-only until the §12 measurement gate authorizes it as a
+control input. D-AMDGPU-1 (`docs/amd-gpu-telemetry-decision-2026-06-22.md`) is
+Proposed.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-AMDGPU-01` | B, R | Offline-reproducible release build with the AMD compile gate; review the vendored backend has pinned provenance + SHA-256 and loads in-process with no sibling-repo/subprocess dependency. | pending |
+| `REQ-AMDGPU-02` | T, R | `GpuReader` vendor-selection test via `SVG_MB_CONTROL_SIM_GPU_MODE` AMD mode (`available=true`, mapped temps, `gpu_name`); review NVIDIA-path output and public interface unchanged, one active backend. | pending |
+| `REQ-AMDGPU-03` | T, M, R | Test AMD temps stay out of the envelope until enabled; review `GpuControlEnvelopeC` + `CONTROL_PIPELINE_MATH.md` unchanged; live M of AMD-temp validity + 250 ms loop-timing before any control-input promotion. | pending |
+| `REQ-AMDGPU-04` | T, R | CSV header/row test for the additive `adlx` marker (single vendor marker, no false zero); analyzer ingest test that older `nvml`/`unavailable` archives still bind by header name. | pending |
+| `REQ-AMDGPU-05` | T, R | Analyzer ingest/report test that AMD power/context reuse the FEAT-0020/0021 columns, summarize only when present, degrade older archives; review no new schema version in v1. | pending |
+| `REQ-AMDGPU-06` | T, R | Test an unavailable/implausible AMD read trips the FEAT-0013 source-aware dropout/safe-mode path and never writes fan duty; review the `SVG_MB_CONTROL_SIM_GPU_MODE` AMD hook runs `Test-LocalCI` without Radeon hardware. | pending |
 
 ### FEAT-0007 — Reserved (parked)
 
