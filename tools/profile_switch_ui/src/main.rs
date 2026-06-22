@@ -620,27 +620,7 @@ fn render_page(
     } else {
         let mut out = String::new();
         for fan in &state.fans {
-            let duty = match fan.duty_percent {
-                Some(v) => format!("{v:.1}%"),
-                None => "&mdash;".to_string(),
-            };
-            let rpm = match (fan.tach_valid, fan.rpm) {
-                (true, Some(v)) => v.to_string(),
-                _ => "&mdash;".to_string(),
-            };
-            let temp = match (fan.observed_temp_c, fan.temp_source.as_deref()) {
-                (Some(t), Some(src)) => format!("{t:.0} &deg;C ({})", html_escape(src)),
-                (Some(t), None) => format!("{t:.0} &deg;C"),
-                _ => "&mdash;".to_string(),
-            };
-            let controller = match fan.controller_kind.as_deref() {
-                Some(k) => html_escape(k),
-                None => "&mdash;".to_string(),
-            };
-            out.push_str(&format!(
-                "<tr><td class=\"name\">ch{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                fan.channel, duty, rpm, temp, controller
-            ));
+            out.push_str(&render_fan_row(fan));
         }
         out
     };
@@ -699,6 +679,30 @@ fn render_page(
         html_escape(&state.status_text),
         html_escape(&cfg.repo.display().to_string()),
         html_escape(&cfg.exe.display().to_string())
+    )
+}
+
+fn render_fan_row(fan: &runtime::FanRow) -> String {
+    let duty = match fan.duty_percent {
+        Some(v) => format!("{v:.1}%"),
+        None => "&mdash;".to_string(),
+    };
+    let rpm = match (fan.tach_valid, fan.rpm) {
+        (true, Some(v)) => v.to_string(),
+        _ => "&mdash;".to_string(),
+    };
+    let temp = match (fan.observed_temp_c, fan.temp_source.as_deref()) {
+        (Some(t), Some(src)) => format!("{t:.0} &deg;C ({})", html_escape(src)),
+        (Some(t), None) => format!("{t:.0} &deg;C"),
+        _ => "&mdash;".to_string(),
+    };
+    let controller = match fan.controller_kind.as_deref() {
+        Some(k) => html_escape(k),
+        None => "&mdash;".to_string(),
+    };
+    format!(
+        "<tr><td class=\"name\">ch{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+        fan.channel, duty, rpm, temp, controller
     )
 }
 
@@ -1118,5 +1122,74 @@ mod tests {
             html_escape("<profile name=\"x\">"),
             "&lt;profile name=&quot;x&quot;&gt;"
         );
+    }
+
+    #[test]
+    fn render_fan_row_full() {
+        let row = runtime::FanRow {
+            channel: 0,
+            duty_percent: Some(15.66),
+            rpm: Some(604),
+            tach_valid: true,
+            observed_temp_c: Some(44.0),
+            temp_source: Some("gpu".to_string()),
+            controller_kind: Some("curve_overlay".to_string()),
+        };
+        let html = render_fan_row(&row);
+        assert!(html.contains("<td class=\"name\">ch0</td>"));
+        assert!(html.contains("<td>15.7%</td>")); // 1-decimal rounding
+        assert!(html.contains("<td>604</td>"));
+        assert!(html.contains("44 &deg;C (gpu)"));
+        assert!(html.contains("<td>curve_overlay</td>"));
+    }
+
+    #[test]
+    fn render_fan_row_partial_and_invalid_tach_use_dashes() {
+        let row = runtime::FanRow {
+            channel: 6,
+            duty_percent: Some(82.0),
+            rpm: Some(2777),
+            tach_valid: false, // invalid tach -> rpm dash even though rpm is Some
+            observed_temp_c: None,
+            temp_source: None,
+            controller_kind: None,
+        };
+        let html = render_fan_row(&row);
+        assert!(html.contains("<td>82.0%</td>"));
+        // rpm, temp, controller all dash
+        assert_eq!(html.matches("&mdash;").count(), 3);
+
+        // duty None also dashes
+        let row2 = runtime::FanRow {
+            channel: 1,
+            duty_percent: None,
+            rpm: None,
+            tach_valid: false,
+            observed_temp_c: Some(50.0),
+            temp_source: None,
+            controller_kind: Some("pid".to_string()),
+        };
+        let html2 = render_fan_row(&row2);
+        assert!(html2.contains("<td>&mdash;</td>")); // duty dash
+        assert!(html2.contains("50 &deg;C")); // temp without source, no parens
+        assert!(!html2.contains("&deg;C (")); // no empty (source)
+        assert!(html2.contains("<td>pid</td>"));
+    }
+
+    #[test]
+    fn render_fan_row_escapes_runtime_strings() {
+        let row = runtime::FanRow {
+            channel: 2,
+            duty_percent: None,
+            rpm: None,
+            tach_valid: false,
+            observed_temp_c: Some(50.0),
+            temp_source: Some("<b>".to_string()),
+            controller_kind: Some("a&b".to_string()),
+        };
+        let html = render_fan_row(&row);
+        assert!(html.contains("&lt;b&gt;"));
+        assert!(html.contains("a&amp;b"));
+        assert!(!html.contains("<b>")); // raw tag must not leak
     }
 }
