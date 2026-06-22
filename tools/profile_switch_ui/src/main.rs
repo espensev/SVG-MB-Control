@@ -334,7 +334,7 @@ fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 fn read_profile_comment(path: &Path) -> Option<String> {
     fs::read_to_string(path)
         .ok()
-        .and_then(|text| extract_json_string_field(&text, "_comment"))
+        .and_then(|text| runtime::parse_profile_comment(&text))
         .map(|comment| compact_whitespace(&comment))
 }
 
@@ -342,12 +342,14 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
     let health = run_control(cfg, &["--health", "--json"]);
     let status = run_control(cfg, &["--status"]);
 
+    let health_info = runtime::parse_health(&health.stdout);
     let health_summary = if health.ok {
-        let state = extract_json_string_field(&health.stdout, "state")
-            .or_else(|| extract_json_string_field(&health.stdout, "health"));
-        let worker = extract_json_string_field(&health.stdout, "worker_pid");
-        match (state, worker) {
-            (Some(state), Some(worker)) => format!("{state}; worker PID {worker}"),
+        let state = health_info
+            .health_state
+            .clone()
+            .or_else(|| health_info.status.clone());
+        match (state, health_info.process_id) {
+            (Some(state), Some(pid)) => format!("{state}; worker PID {pid}"),
             (Some(state), None) => state,
             _ => "Health command succeeded".to_string(),
         }
@@ -360,7 +362,8 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
         )
     };
 
-    let (active_profile, active_source) = read_active_profile_from_runtime(&health.stdout);
+    let (active_profile, active_source) =
+        read_active_profile_from_runtime(health_info.runtime_home.as_deref());
     let status_text = if status.ok {
         status.stdout
     } else {
@@ -378,8 +381,8 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
     }
 }
 
-fn read_active_profile_from_runtime(health_json: &str) -> (Option<String>, Option<String>) {
-    let Some(runtime_home) = extract_json_string_field(health_json, "runtime_home") else {
+fn read_active_profile_from_runtime(runtime_home: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(runtime_home) = runtime_home else {
         return (None, None);
     };
     let runtime_home = PathBuf::from(runtime_home);
@@ -392,9 +395,9 @@ fn read_active_profile_from_runtime(health_json: &str) -> (Option<String>, Optio
         let Ok(text) = fs::read_to_string(candidate) else {
             continue;
         };
-        let name = extract_json_string_field(&text, "active_profile_name")
-            .or_else(|| extract_json_string_field(&text, "requested_profile_name"));
-        let source = extract_json_string_field(&text, "active_profile_source");
+        let rt = runtime::parse_runtime(&text);
+        let name = rt.active_profile_name.or(rt.requested_profile_name);
+        let source = rt.active_profile_source;
         if name.is_some() || source.is_some() {
             return (name, source);
         }
@@ -937,60 +940,6 @@ fn is_windows_reserved_stem(stem: &str) -> bool {
     false
 }
 
-fn extract_json_string_field(text: &str, field: &str) -> Option<String> {
-    let needle = format!("\"{field}\"");
-    let start = text.find(&needle)?;
-    let after_name = &text[start + needle.len()..];
-    let colon = after_name.find(':')?;
-    let after_colon = after_name[colon + 1..].trim_start();
-    parse_json_string(after_colon).map(|(value, _)| value)
-}
-
-fn parse_json_string(text: &str) -> Option<(String, usize)> {
-    let mut chars = text.char_indices();
-    let (_, first) = chars.next()?;
-    if first != '"' {
-        return None;
-    }
-
-    let mut out = String::new();
-    while let Some((index, ch)) = chars.next() {
-        match ch {
-            '\\' => {
-                let (_, esc) = chars.next()?;
-                match esc {
-                    '"' => out.push('"'),
-                    '\\' => out.push('\\'),
-                    '/' => out.push('/'),
-                    'b' => out.push('\u{0008}'),
-                    'f' => out.push('\u{000c}'),
-                    'n' => out.push('\n'),
-                    'r' => out.push('\r'),
-                    't' => out.push('\t'),
-                    'u' => {
-                        let mut hex = String::new();
-                        for _ in 0..4 {
-                            if let Some((_, h)) = chars.next() {
-                                hex.push(h);
-                            }
-                        }
-                        let decoded = u32::from_str_radix(&hex, 16)
-                            .ok()
-                            .and_then(char::from_u32)
-                            .unwrap_or('\u{FFFD}');
-                        out.push(decoded);
-                    }
-                    other => out.push(other),
-                }
-            }
-            '"' => return Some((out, index + 1)),
-            other => out.push(other),
-        }
-    }
-
-    None
-}
-
 fn compact_whitespace(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -1045,15 +994,6 @@ mod tests {
     }
 
     #[test]
-    fn extracts_simple_json_string_field() {
-        let text = r#"{ "state": "healthy", "runtime_home": "D:\\release\\runtime" }"#;
-        assert_eq!(
-            extract_json_string_field(text, "runtime_home").as_deref(),
-            Some("D:\\release\\runtime")
-        );
-    }
-
-    #[test]
     fn rejects_path_like_profile_names() {
         assert!(profile_name_allowed("snd-desk-composed"));
         assert!(profile_name_allowed("quiet.1"));
@@ -1078,30 +1018,6 @@ mod tests {
         assert!(profile_name_allowed("console"));
         assert!(profile_name_allowed("com10"));
         assert!(profile_name_allowed("nul-backup"));
-    }
-
-    #[test]
-    fn decodes_unicode_escape_in_json_string() {
-        let bs = char::from_u32(0x5C).unwrap(); // '\'
-
-        // Build `{ "_comment": "abAcd" }` so the parser sees a real
-        // \uXXXX sequence; A must decode to 'A'.
-        let mut text = String::from(r#"{ "_comment": "ab"#);
-        text.push(bs);
-        text.push_str(r#"u0041cd" }"#);
-        assert_eq!(
-            extract_json_string_field(&text, "_comment").as_deref(),
-            Some("abAcd")
-        );
-
-        // Invalid hex digits fall back to U+FFFD with all 4 units consumed.
-        let mut bad = String::from(r#"{ "_comment": "x"#);
-        bad.push(bs);
-        bad.push_str(r#"uZZZZy" }"#);
-        assert_eq!(
-            extract_json_string_field(&bad, "_comment").as_deref(),
-            Some("x\u{FFFD}y")
-        );
     }
 
     #[test]
