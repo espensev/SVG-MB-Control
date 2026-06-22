@@ -65,6 +65,8 @@ Result values:
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Done | Implemented 2026-06-17 (Direction A; decision `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md` Current). A corrupt `pending_writes.json` is quarantined to `pending_writes.json.corrupt` and the startup reconcile proceeds as empty instead of aborting into a relaunch-thrash loop; emits `reconcile.sidecar_quarantined` and degrades health (`sidecar_quarantined_present`). Collapses the former duplicate sidecar read. §14 filled; CTest + pytest green. |
 | `FEAT-0013` Source-aware primary-dropout safe mode | Done | Implemented 2026-06-17 (decision `docs/source-aware-cpu-dropout-decision-2026-06-17.md` Current). A CPU dropout on a `max_cpu_gpu_source_aware` channel (CPU seen, now gone, GPU present) now counts toward the existing 3-miss sensor-failure trip and enters safe mode (`safety_override` + response source `source_aware_cpu_dropout_safe_mode`), reusing the `CpuOnly` mechanism; recovers on CPU return. Only new state is the additive `cpu_input_was_available` flag. §14 filled; CTest green. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
+| `FEAT-0015` Event JSONL has a retention bound | Accepted | Buildable; promoted 2026-06-18 (decision `docs/event-log-retention-decision-2026-06-18.md`, A+B: rotate the event JSONL on the `log_rotate_hours`/`log_retain_days` window + severity-aware reduction of `control_loop.write_applied`, keeping `warning`+). Issue #4 Finding 1; `runtime_event_log.cpp:210` append-only. Implementation + verification staged for a Windows-host `Test-LocalCI` session (Windows-only build). |
+| `FEAT-0016` Analyze SQLite DB has a retention bound | Accepted | Buildable; promoted 2026-06-18 (decision `docs/analyze-db-run-purge-decision-2026-06-18.md`: age-based `--db-retain-days` purge inside `analyze prune`, cascade-delete old `runs` under `foreign_keys=ON`, post-purge `VACUUM` only when rows were deleted, explicit W7-1 zero-retain guard). Issue #4 Finding 2. Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
 
 ## 3. Requirement map
 
@@ -220,6 +222,32 @@ the maintainer authorizes promotion (gate 3).
 | `REQ-RESTOREGUARD-03` | T, R | `RunWriteOnce`/restore path does not write a baseline to a blocked channel; review that the existing `write_orchestrator.cpp:151-165` exit-5 refusal is preserved. | pending (held-Draft) |
 | `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
 | `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
+
+### FEAT-0015 - Event JSONL has a retention bound
+
+Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
+`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-EVENTRET-01` | T, R | `Test-LocalCI` test writing past the accepted bound asserts the event JSONL is rotated/capped (or routine `info` reduced); review vs the design decision recording the model and bound. | pending |
+| `REQ-EVENTRET-02` | T, R | Test asserts whole NDJSON lines across a rotation boundary (no split/interleave); review of atomic-append + rotation vs `runtime_event_log.cpp:28-40,299-321` and the torn-write finding. | pending |
+| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced/rotated out within the window. | pending |
+| `REQ-EVENTRET-04` | T, R | Test asserts an absent config key preserves current append behavior and existing event JSONL + `CachedEventCount` still parse; review vs `RUNTIME_HOME.md` schema stability. | pending |
+| `REQ-EVENTRET-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; control-thread append non-blocking; docs updated. | pending |
+
+### FEAT-0016 - Analyze SQLite DB has a retention bound
+
+Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
+`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-DBRETAIN-01` | T, R | `Test-LocalCI` (`tests/test_analyze_ingest.py` sibling): ingest runs spanning the bound, purge, assert out-of-bound runs deleted and in-bound retained; review vs the design decision recording the bound. | pending |
+| `REQ-DBRETAIN-02` | T | Test asserts no `tick_samples`/`tick_fan_samples`/`tick_channel_samples`/`events` row references a deleted `run_id` (cascade fired under `foreign_keys = ON`). | pending |
+| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs (`page_count` drops), and no VACUUM when nothing was deleted. | pending |
+| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest (`IsManifestPathInDb`/`IsSessionInDb`) and dry-run vs `--apply` behavior; review vs the `analyze prune` dry-run convention. | pending |
+| `REQ-DBRETAIN-05` | R | Review vs `RUNTIME_HOME.md` / `MEASUREMENT_GATE.md`: analyze schema/`schema_version`, per-tick fidelity, and existing CSV-bundle prune unchanged; offline-only; docs updated. | pending |
 
 ### FEAT-0005 / FEAT-0007 — Reserved (parked)
 

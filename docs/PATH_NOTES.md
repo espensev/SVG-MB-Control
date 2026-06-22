@@ -25,6 +25,18 @@ checkable.
 
 ## 2026-06-18
 
+- **Added** — FEAT-0015 (`REQ-EVENTRET-*`, event-JSONL retention) and FEAT-0016
+  (`REQ-DBRETAIN-*`, analyze-DB age-based run-purge + reclaim) landed in-repo as
+  Accepted specs with dated decision records
+  (`docs/event-log-retention-decision-2026-06-18.md`,
+  `docs/analyze-db-run-purge-decision-2026-06-18.md`), promoting the issue #4
+  retention bounds from the off-`main` PR-#9 intake to real specs on `main`. Also
+  added a `windows-latest` CI workflow (`.github/workflows/ci-windows.yml`) running
+  `Test-LocalCI`. The rest of PR #9 (FEAT-0011..0014 promotions + the all-in-one
+  implementation handoff) was dropped: FEAT-0011..0013 already shipped on `main`
+  (`62b4a56`/`1bade64`/`d0f5d99`) and FEAT-0014 is deliberately held. Registry +
+  `TRACEABILITY.md` rows added; `tests/test_feature_specs.py` green (5/5).
+  Implementation staged for a Windows-host build.
 - **Added** — `## Current priority` read-first index at the top of
   `docs/features/README.md`: the active feature work (FEAT-0006 downstream,
   FEAT-0001), the decisions/gates-owed queue (FEAT-0014, FEAT-0009, FEAT-0004,

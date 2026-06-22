@@ -29,6 +29,12 @@ decision queue changes. A fuller standing review is
   read. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006 downstream work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
+- **FEAT-0015** (`Accepted`) — event-JSONL retention bound (issue #4). Spec +
+  decision record landed; implementation (size/age rotation + severity-aware
+  reduction of `control_loop.write_applied`) staged for a Windows-host build.
+- **FEAT-0016** (`Accepted`) — analyze-DB age-based run-purge + post-purge VACUUM
+  (issue #4). Spec + decision record landed; implementation staged for a
+  Windows-host build.
 
 **Decisions or gates owed (not buildable until cleared):**
 
@@ -37,7 +43,6 @@ decision queue changes. A fuller standing review is
 | **FEAT-0014** (held Draft) | §11: where the reconcile/restore blocked-channel guard lives (Control-layer pre-check only vs also mirror `channel_blocked` into the vendored restore); whether a skipped entry is cleared or retained; whether `--write-once`'s exit-5 refusal suffices. Not reachable under the shipped single-profile config; promote only if a multi-profile config makes it reachable. |
 | **FEAT-0009** (held Draft) | §12 measurement gate: run the A/B contention experiment to justify promotion (the default is already `inherit`). §11 also holds two open choices (`above_normal` vs `high_timecritical`; hot-reloadable vs startup-only). Not in `docs/next_steps.md`. |
 | **FEAT-0004** (`Draft`) | Promotion gate 3 (§13): write and mark current the §9 design-decision record for the PawnIO-availability health signal — an operator-visible gap, not buildable until that record exists. |
-| **FEAT-0015 / FEAT-0016** | Retention bounds for the runtime SQLite DB and event JSONL (GitHub issue #4). No in-repo spec yet — intake on draft PR #9, not on `main`; not in `docs/next_steps.md`. |
 
 **Held design-capture (a `Draft`, not open work):** **FEAT-0003** — selectable
 control-law profile; recorded in §2 as not-a-net-benefit and not scheduled.
@@ -164,3 +169,5 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0012](FEAT-0012-startup-tolerates-corrupt-pending-writes-sidecar.md) | Startup quarantines a corrupt `pending_writes.json` and proceeds as empty instead of fatally aborting the worker into a relaunch-thrash loop | `REQ-SIDECARRESIL-*` | Done (2026-06-17; Direction A — quarantine + proceed + event + degraded health; C++ + smoke tests green) |
 | [FEAT-0013](FEAT-0013-source-aware-primary-dropout-safe-mode.md) | Source-aware channels enter safe mode on primary-source dropout (a CPU dropout on a max-blend channel now trips the existing safe-mode mechanism instead of being masked by GPU) | `REQ-SRCSAFE-*` | Done (2026-06-17; reuses the 3-miss sensor-failure trip; C++ tests green) |
 | [FEAT-0014](FEAT-0014-reconcile-restore-blocked-channel-guard.md) | Reconcile/restore honor the runtime blocked-channel write policy | `REQ-RESTOREGUARD-*` | Draft (held — real restore-path gap, not reachable by the shipped single-profile config; pending maintainer direction) |
+| [FEAT-0015](FEAT-0015-event-log-retention.md) | Event JSONL has a retention bound (the runtime event log is append-only with no rotation/retention and grows without limit; issue #4) | `REQ-EVENTRET-*` | Accepted (2026-06-18; decision record current; implementation staged for a Windows-host build) |
+| [FEAT-0016](FEAT-0016-analyze-db-run-purge.md) | Analyze SQLite DB has a retention bound (age/size run-purge + reclaim; the designed retention sink has no bound of its own; issue #4) | `REQ-DBRETAIN-*` | Accepted (2026-06-18; decision record current; implementation staged for a Windows-host build) |
