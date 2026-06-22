@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Component is `tools/profile_switch_ui` only — a **non-shipped local operator helper**. No controller, runtime-protocol, schema/status/log field, CLI surface, or shipped-config change (outside the `AGENTS.md` Feature Intake Gate).
-- Reads only. The existing `POST /switch` same-origin guard and `--set-profile` path are untouched.
+- The helper's own code performs no writes, and the existing `POST /switch` same-origin guard and `--set-profile` path are untouched. Note: the `--health --json` it calls each refresh persists `control_health.json`/`last_health_time` (pre-existing controller behavior), so the 3s auto-refresh drives that write — and the `tools/eval_dashboard` freshness signal — continuously while the page is open.
 - Rust edition `2021`. New deps: `serde = { version = "1", features = ["derive"] }`, `serde_json = "1"`.
 - All runtime JSON parsing tolerates missing/extra keys (`#[serde(default)]`) and never panics on malformed input — degrade to "unavailable".
 - Channels are shown as `ch0`..`ch5` (no friendly names). Duty shown is the **actual hardware readback** (`fans[].duty_percent`).

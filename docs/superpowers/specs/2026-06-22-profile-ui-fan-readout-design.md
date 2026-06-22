@@ -15,7 +15,11 @@ profile.
 This is a display enhancement to the **non-shipped local dev helper** only. It is
 outside the `AGENTS.md` Feature Intake Gate: no controller capability, runtime
 protocol, schema/status/log field, CLI surface, or shipped-config behavior
-changes. Reads only; no new write path.
+changes. The helper's own code performs no writes; however, it invokes the
+existing `svg-mb-control --health --json` on every page load, and that command
+(pre-existing controller behavior) persists `control_health.json` and stamps
+`last_health_time`. With the whole-page auto-refresh below, that write recurs
+every ~3 s while the page is open — see the trade-off note in the UI section.
 
 Non-goals (explicitly out):
 
@@ -67,8 +71,13 @@ match).
   page `<head>` so the page reloads roughly every 3 seconds.
 
 Accepted trade-offs of whole-page refresh: each reload re-runs `--health` and
-`--status` (two subprocess spawns per ~3 s — fine for a local helper), and a
-just-shown "profile switch requested" notice clears on the next reload.
+`--status` (two subprocess spawns per ~3 s — fine for a local helper); a
+just-shown "profile switch requested" notice clears on the next reload; and,
+because `--health` persists `control_health.json` + `last_health_time`, leaving
+the page open keeps that file (and the `tools/eval_dashboard` "last checked"
+freshness signal that reads `last_health_time`) continuously fresh even when no
+operator ran a health check. This is a pre-existing controller write amplified
+by the auto-refresh, not a new write path in the helper.
 
 ## Error handling
 
