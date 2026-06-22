@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+mod runtime;
+
 #[derive(Clone, Debug)]
 struct AppConfig {
     repo: PathBuf,
