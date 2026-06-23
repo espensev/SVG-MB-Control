@@ -351,7 +351,13 @@ class ControlLoopTests(WindowsExeTestCase):
             )
             with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
-                env=_sim_direct_env(channel=0, amd_temp_c=86.0),
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=86.0),
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "50.0",
+                },
             ):
                 status = _wait_for(
                     lambda: (
