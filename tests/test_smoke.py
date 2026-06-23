@@ -45,6 +45,7 @@ class SmokeTests(WindowsExeTestCase):
         self.assertIn("Health/safety:", out)
         self.assertIn("Channels (", out)
         self.assertIn("ch0", out)
+        self.assertIn("controller=curve_overlay", out)
         self.assertIn("blend=", out)
         self.assertIn("curve  ", out)
 
@@ -66,6 +67,8 @@ class SmokeTests(WindowsExeTestCase):
         channels = loop["channels"]
         self.assertGreater(len(channels), 0)
         ch0 = next(ch for ch in channels if ch["channel"] == 0)
+        self.assertEqual(ch0["controller"], "curve_overlay")
+        self.assertIsNone(ch0["pid"])
         self.assertEqual(ch0["temp_blend"], "max_cpu_gpu_source_aware")
         self.assertEqual(ch0["source_aware_cpu_hot_guard_c"], 75.0)
         self.assertEqual(ch0["curve_shape"], "smootherstep")
@@ -73,6 +76,46 @@ class SmokeTests(WindowsExeTestCase):
         self.assertIn("thermal_pressure", ch0)
         self.assertIn("midband_pressure", ch0)
         self.assertIn("gpu_airflow", ch0)
+
+    def test_show_config_json_renders_pid_controller_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=td / "runtime",
+                channel=0,
+                extra_channel_fields={
+                    "controller": "pid",
+                    "pid": {
+                        "target_c": 68.0,
+                        "kp": 0.3,
+                        "ki": 0.01,
+                        "kd": 0.0,
+                        "feedforward": "curve",
+                        "allow_live": True,
+                        "characterization_artifact": (
+                            "docs/pid-shadow-characterization-2026-06-21.md"
+                        ),
+                    },
+                },
+            )
+            result = _run_control(
+                "--show-config", "--json", "--config", str(config_path)
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            data = json.loads(result.stdout)
+            channel = data["control_loop"]["channels"][0]
+            self.assertEqual(channel["controller"], "pid")
+            self.assertEqual(channel["pid"]["target_c"], 68.0)
+            self.assertEqual(channel["pid"]["kp"], 0.3)
+            self.assertEqual(channel["pid"]["ki"], 0.01)
+            self.assertEqual(channel["pid"]["kd"], 0.0)
+            self.assertEqual(channel["pid"]["feedforward"], "curve")
+            self.assertTrue(channel["pid"]["allow_live"])
+            self.assertEqual(
+                channel["pid"]["characterization_artifact"],
+                "docs/pid-shadow-characterization-2026-06-21.md",
+            )
 
     def test_show_config_without_config_errors(self) -> None:
         result = _run_control(

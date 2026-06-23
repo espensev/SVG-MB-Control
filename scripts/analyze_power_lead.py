@@ -2,7 +2,7 @@
 """Gate 2 characterization for the proposed power-anticipation boost.
 
 Measures, from a control-loop CSV, the evidence the feed-forward plan
-(docs/cpu-power-feedforward-plan-2026-06-10.md §5 Gate 2) requires before any
+(docs/archive/cpu-power-feedforward-plan-2026-06-10.md §5 Gate 2) requires before any
 FEAT intake:
 
   (a) power->Tctl lead time on load steps (lag scan of Pearson correlation
@@ -261,7 +261,7 @@ def render_markdown(r: dict) -> str:
         f"- system busy %  -> dTctl/dt:     {fmt_lead(r['lead']['busy_to_dtctl'])}",
         "",
         "Interpretation is owned by the plan's Gate 2"
-        " (docs/cpu-power-feedforward-plan-2026-06-10.md §5): a power lead that"
+        " (docs/archive/cpu-power-feedforward-plan-2026-06-10.md §5): a power lead that"
         " does not usefully exceed fan-side response latency, or a busy-pct lead"
         " close to the power lead, are both documented no-go outcomes.",
     ]

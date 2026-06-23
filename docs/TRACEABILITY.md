@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.4   **Updated:** 2026-06-16
+**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-22
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -53,20 +53,27 @@ Result values:
 |---|---|---|
 | `FEAT-0001` Hot-swap runtime write policy | Accepted | Buildable when implementation is explicitly authorized; verification pending. |
 | `FEAT-0002` CPU settings evidence logger | Implemented (source/test load layer; label deferred) | Source/test requirements pass except `REQ-CPUSETTINGS-06`, which is deferred; the 2026-06-09 rebuild confirmed the `system_cpu_*` columns in the live CSV header (git_hash `dd2c02214128`, session `2026-06-09T02:32:40`), closing the packaging-evidence gap. |
-| `FEAT-0003` Selectable control-law profile with hot-swap | Draft | Not buildable; design capture only. |
-| `FEAT-0004` Hardware-access dependency health signal | Accepted | Buildable when implementation is explicitly authorized; verification pending. Promoted Draft→Accepted 2026-06-18; decision record `docs/hwaccess-health-signal-decision-2026-06-18.md` Current (additive observability; exit codes unchanged). |
+| `FEAT-0003` Restart-selected control-law profile seam | Done | Built 2026-06-21 across slices F3-1..F3-5: the `IChannelController` seam + `CurveOverlayController` (output-identical, forward-wrap) + `PidController` (shadow/dry-run by default) + `controller`/`pid` config dispatch + the decision-D6 measurement-gate downgrade gate + kind-aware CSV/status reporting; hardened per a 5-lens adversarial review. REQ-PROFILE-05 is a deliberate functional-pass partial (curve state stays on `ChannelState` under the restart-selected scope). The first real-archive shadow replay (`docs/pid-shadow-characterization-2026-06-21.md`) rejects all-channel live PID; the channel-0-only live M gate passed 2026-06-22 with `pid.allow_live`, the release-package characterization artifact, and the positive slew cap in `docs/pid-live-channel0-evidence-2026-06-22.md`. The shipped default remains `curve_overlay`. |
+| `FEAT-0004` Hardware-access dependency health signal | Done | Implemented 2026-06-21: additive `hwaccess_state`, read/write tri-state fields, and detail strings in runtime status/health; startup transition events for control-loop/read-loop; `--diagnose-amd` reports the read-path state. Exit codes, watchdog behavior, fan writes, and PawnIO driver management are unchanged. Full `Test-LocalCI` passed; live M event-log evidence captured 2026-06-22 in `docs/feat-0004-live-hwaccess-event-log-evidence-2026-06-22.md`. |
 | `FEAT-0005` Write actuation confirmation | Accepted | Buildable when implementation is explicitly authorized; verification pending. Un-parked and promoted Reserved→Accepted 2026-06-18; decision `docs/actuation-confirmation-decision-2026-06-18.md` Current. Accepted scope is Phase-1 RPM-based detection/evidence; Phase-2 escalation is a separate, measurement-gated step. |
-| `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed behind default-off gates. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
+| `FEAT-0006` CPU work and energy efficiency evidence | Accepted | Promoted Draft→Accepted 2026-06-07 (all gates met). The one-shot read-only live MSR validation ran 2026-06-07 — PASS (energy-only): RAPL package energy works on Family 1Ah; the APERF/MPERF `#GP` was corrected 2026-06-09 by using the shipped AMD read-only aliases. Energy, cycle, and analyzer derivations have landed; the standard power-logging profile now enables package-energy capture through FEAT-0020 while cycles remain opt-in/default-off. Enabled integration sessions 1-3 passed (each 5 PASS / 0 FAIL / 1 MANUAL); the unsupported fixed >=7-day span was removed 2026-06-14. Energy quarantine-exit evidence is complete; the 2026-06-18 standard-loop power/temp snapshot preserves CPU and GPU watts beside temperatures; marker promotion remains a manual maintainer decision. FEAT-0004 recommended, not blocking. |
 | `FEAT-0007` RAM temperature telemetry | Reserved (body parked) | Not buildable; body parked. Read path exists (SVG-MB-SIO `read_sio_temperatures` DIMM sources); promotion would require DIMM-source validity confirmation from `evidence-log` plus a sampling/schema decision. |
-| `FEAT-0008` Watchdog hung-worker recovery | Done | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains: the separate natural-hard-freeze premise was closed on evidence as not reproducible by load on this system (n=6 aggressive cells, 0 force-terminations), and the AVX-512 escalation was rejected as the wrong instrument for FEAT-0008; post-v1 options live in FEAT-0008 §11. |
+| `FEAT-0008` Watchdog hung-worker recovery | Done | The bounded force-terminate escalation landed in `src/control/worker_force_terminate.{h,cpp}` (the `Win32ProcessTerminator` calls `TerminateProcess`) plus the `app_main.cpp` `--restart` `stop_result == 2` branch; C++ unit + Python suspend-based integration tests pass (CTest + pytest green); the recovery **mechanism** is also verified live (M) on the deployed build via an `NtSuspendProcess` hung-worker proxy (REQ-WATCHDOG-01). Decision record current (`docs/watchdog-hung-worker-recovery-decision-2026-06-16.md`, all 7 gates met). No v1 recovery-path work remains; post-v1 options live in FEAT-0008 §11. |
 | `FEAT-0009` Controller scheduling-priority elevation | Draft (held) | Not buildable; design capture only, held at promotion gate 1 pending the FEAT-0009 §12 A/B contention experiment (whether the cadence degradation under `above`-load is scheduling-bound rather than file-lock bound). |
 | `FEAT-0010` Write actuation survives a sidecar-persistence fault | Done | Implemented 2026-06-17 (decision record `docs/write-actuation-sidecar-fault-decision-2026-06-17.md` current). Fixes runtime-reproduced finding H1: a `pending_writes.json` persist fault no longer vetoes the fan write (incl. the sensor-safe command); it records `control_loop.sidecar_upsert_failed`, increments `consecutive_sidecar_persist_failures` (degrades health), and still actuates. §14 verification log filled; CTest 13/13 green. |
 | `FEAT-0011` Write-failure breaker must not block rising cooling demand | Done | Implemented 2026-06-17 (decision `docs/breaker-probe-decision-2026-06-17.md` Current). A bounded half-open probe at `channel_write.cpp:307`: while the breaker is open, a rising cooling demand (setpoint above last applied duty) triggers at most one probe write per 5 s (`kBreakerProbeBackoff`); a successful probe closes the breaker, a failed one keeps it open. `safety_override` unchanged; additive `circuit_breaker_probe` event. §14 filled; CTest green. |
 | `FEAT-0012` Startup tolerates a corrupt pending-writes sidecar | Done | Implemented 2026-06-17 (Direction A; decision `docs/corrupt-sidecar-quarantine-decision-2026-06-17.md` Current). A corrupt `pending_writes.json` is quarantined to `pending_writes.json.corrupt` and the startup reconcile proceeds as empty instead of aborting into a relaunch-thrash loop; emits `reconcile.sidecar_quarantined` and degrades health (`sidecar_quarantined_present`). Collapses the former duplicate sidecar read. §14 filled; CTest + pytest green. |
 | `FEAT-0013` Source-aware primary-dropout safe mode | Done | Implemented 2026-06-17 (decision `docs/source-aware-cpu-dropout-decision-2026-06-17.md` Current). A CPU dropout on a `max_cpu_gpu_source_aware` channel (CPU seen, now gone, GPU present) now counts toward the existing 3-miss sensor-failure trip and enters safe mode (`safety_override` + response source `source_aware_cpu_dropout_safe_mode`), reusing the `CpuOnly` mechanism; recovers on CPU return. Only new state is the additive `cpu_input_was_available` flag. §14 filled; CTest green. |
 | `FEAT-0014` Reconcile and restore honor the blocked-channel guard | Draft (held) | Not buildable; investigated code/contract gap, held at promotion gate 3 (no decision record) pending maintainer direction on guard placement and retain-vs-clear. The restore/reconcile path omits the `channel_blocked`/`writes_enabled` check `set_fan_duty` enforces, but a blocked-channel sidecar entry is unreachable under the shipped single-profile config and the fail direction is bounded/one-shot. |
-| `FEAT-0015` Event JSONL has a retention bound | Accepted | Buildable; promoted 2026-06-18 (decision `docs/event-log-retention-decision-2026-06-18.md`, A+B: rotate the event JSONL on the `log_rotate_hours`/`log_retain_days` window + severity-aware reduction of `control_loop.write_applied`, keeping `warning`+). Issue #4 Finding 1; `runtime_event_log.cpp:210` append-only. Implementation + verification staged for a Windows-host `Test-LocalCI` session (Windows-only build). |
-| `FEAT-0016` Analyze SQLite DB has a retention bound | Accepted | Buildable; promoted 2026-06-18 (decision `docs/analyze-db-run-purge-decision-2026-06-18.md`: age-based `--db-retain-days` purge inside `analyze prune`, cascade-delete old `runs` under `foreign_keys=ON`, post-purge `VACUUM` only when rows were deleted, explicit W7-1 zero-retain guard). Issue #4 Finding 2. Implementation + verification staged for a Windows-host `Test-LocalCI` session. |
+| `FEAT-0015` Event JSONL retention | Implemented | Implemented 2026-06-18 (decision record `docs/event-log-retention-decision-2026-06-18.md` Current). Event JSONL rotates on the configured age/retention window, routine `control_loop.write_applied` info events are sampled, diagnostics/lifecycle events remain persisted, and full `Test-LocalCI` passed. |
+| `FEAT-0016` Analyze SQLite DB retention | Implemented | Implemented 2026-06-18 (decision record `docs/analyze-db-run-purge-decision-2026-06-18.md` Current). `analyze prune --db-retain-days` purges old runs under foreign keys, verifies no orphans, reclaims space after deletes, and full `Test-LocalCI` passed. Immediate derived DB reclaim completed 2026-06-18. |
+| `FEAT-0017` Faster fan reaction under load (control-response retune) | Draft (held) | Not buildable; design capture (`docs/control-latency-reduction-design-2026-06-18.md` D-REACT-1, Proposed). Config-only joint rise-rate + step-cap raise, asymmetric, lane-targeted; held pending the decision on lanes/target ceiling and a response-evaluation Pass-3 validation. Does not cross the measurement gate. |
+| `FEAT-0018` Adaptive-cadence enablement under thermal transient | Draft (held) | Not buildable; design capture (D-CADENCE-1, Proposed). Engages the dormant `poll_tick_floor_ms` engine; **crosses `MEASUREMENT_GATE.md`** (adaptive floor below the shipped profile), held until the floor characterization evidence exists. |
+| `FEAT-0019` Sidecar persistence off the actuation hot path | Implemented | Implemented 2026-06-18 (D-WRITEHOT-1 Current). Identity-gated `Persist()` removes the per-tick sidecar write from the actuation hot path (sync only on a baseline-identity change; same-baseline churn deferred to the end-of-tick `Flush()`); behavior-preserving for recovery. REQ-WRITEHOT-06 two-point counter reset (Upsert bool + Flush bool/tick_runner). T/R verified; CTest 14/14. |
+| `FEAT-0020` Standard control-loop power logging | Implemented | Implemented 2026-06-18 (D-PWRLOG-1 Current; full Test-LocalCI green — CTest + 169 hermetic). CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp, summarized by the analyzer (v11) as mean/percentile (not an energy integral). `T`/`B`/`R`/`M` verified; the live flip executed under explicit live-runtime authorization and gate 6 is closed. Current comparison evidence is `docs/feat-0020-live-flip-validation-results-2026-06-18.md` plus `docs/power-temp-comparison-snapshot-2026-06-18.md`. Archived implementation plan: `docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
+| `FEAT-0021` Standard control-loop GPU workload context logging | Implemented (T/R; live M pending) | D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Current. Implemented 2026-06-20 as an additive cached 1000 ms GPU context slice beside FEAT-0020 GPU power; analyzer schema v12 ingests/reports context optionally. Live 250 ms cadence evidence remains the REQ-GPUCTX-04 deployment check. |
+| `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
+| `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M deferred) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. Only the on-hardware live M (REQ-10) is deferred. The control-law/PID seam stays FEAT-0003, sequenced after. |
 
 ## 3. Requirement map
 
@@ -95,31 +102,31 @@ Result values:
 | `REQ-CPUSETTINGS-05` | R | Review confirms logger records raw values only, with no activity classification. | pass |
 | `REQ-CPUSETTINGS-06` | T, R | Optional CPU-settings label propagation test/config review. | deferred |
 
-### FEAT-0003 - Selectable control-law profile with hot-swap
+### FEAT-0003 - Restart-selected control-law profile seam
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-PROFILE-01` | T, R | Curve-overlay output-equivalence test vs current `EvaluateChannel`; review single call site. | not buildable |
-| `REQ-PROFILE-02` | T | One `PidController` covers P, PI, PD, and PID by gain selection. | not buildable |
-| `REQ-PROFILE-03` | T, R | Config-load tests for absent `controller` and per-law validation. | not buildable |
-| `REQ-PROFILE-04` | T | Profile request applies at tick boundary; validation failure retains running profile and emits rejection. | not buildable |
-| `REQ-PROFILE-05` | T | Swap resets new controller dynamic state by default. | not buildable |
-| `REQ-PROFILE-06` | T, R | Sensor-safe mode, deadband, cooldown, breaker, clamp, and write gates behave identically by controller kind. | not buildable |
-| `REQ-PROFILE-07` | T, R, M | Config-load test that `pid.allow_live: true` is rejected without characterization evidence and a non-NaN slew cap; review vs. `MEASUREMENT_GATE.md` and decision record D6; PID runs shadow/dry-run by default, live only under an evidenced and slew-bounded `allow_live` crossing. | not buildable |
-| `REQ-PROFILE-08` | T | CSV/status tests assert per-channel controller-kind field and kind-aware/nullable law-specific reporting fields. | not buildable |
-| `REQ-PROFILE-09` | T, R | Differing channel-set candidate rejected until FEAT-0001 restore/capture path exists. | not buildable |
-| `REQ-PROFILE-10` | R | Review control-identity docs for curve-overlay scope and PID identity reference. | not buildable |
+| `REQ-PROFILE-01` | T, R | `channel_controller_tests` curve-overlay forward-equivalence + 31/31 `test_control_loop.py` through the index dispatch; single call site `tick_runner.cpp` `controllers[i]->Evaluate`. Commit `2fec980`. | pass |
+| `REQ-PROFILE-02` | T | `pid_controller_tests`: one `PidController` covers P/PI/PD/PID by gain, derivative sign, derivative-on-measurement, anti-windup. Commit `9f4b79d`. | pass |
+| `REQ-PROFILE-03` | T, R | `control_loop_config_tests`: absent `controller` -> curve default; `controller:pid` parse; malformed-pid + unknown controller/feedforward throw. Commit `31a5e6d`. | pass |
+| `REQ-PROFILE-04` | T, R | Restart-selected: law built once at construction; no FEAT-0003 runtime request or tick-boundary swap; FEAT-0023 owns the restart (`test_profile_switch.py`). | pass (R) |
+| `REQ-PROFILE-05` | T | Functional pass: `PidController` owns `PidState`; controller state worker-lifetime-scoped, fresh per restart. Architectural decouple of curve state out of `ChannelState` is a deliberate deferred partial (decision D2 note). | partial |
+| `REQ-PROFILE-06` | T, R | Shared output conditioning law-agnostic: PID reuses hoisted `SelectPrimaryCurveInput` + `RateLimitSetpoint`, the `[min_duty,100]` clamp, the `channel_write.cpp` gates, and sensor-safe mode (`pid_controller_tests`). | pass |
+| `REQ-PROFILE-07` | T, R, M | Shadow default + decision-D6 gate (`pid_controller_tests` `PidLiveAuthorized` + live step-cap clamp; `test_control_loop.py` pid-shadow e2e: `total_writes=0`, `pid_shadow` event). Write path `write_suppressed` early-return. First real-archive shadow replay (`docs/pid-shadow-characterization-2026-06-21.md`) rejects all-channel live PID; channel-0 live M passed 2026-06-22 with `Kp=0.3`, `Ki=0.01`, `Kd=0.0`, target `68 C`, `allow_live=true`, release-package characterization artifact, `max_setpoint_step_pct=0.6`, healthy 60 s hold, and rollback to packaged `curve_overlay` default. Evidence: `docs/pid-live-channel0-evidence-2026-06-22.md` (clean-tree build, reproducible from committed `913dda3`). Commits `9f4b79d`, `490f7f0`, package `913dda3e5e3d`. | pass |
+| `REQ-PROFILE-08` | T, R | Additive `controller_kind` + `pid_*` in CSV (append-only, bind-by-name) and kind-aware JSON status (curve-only fields null for PID). pid-shadow e2e asserts `controller_kind=pid`, blanked feedforward, null curve-only status. Commit `490f7f0`. | pass |
+| `REQ-PROFILE-09` | R | `CreateChannelController` only selects the law for an already-resolved channel; no channel add/remove/reorder; channel-set validation stays in FEAT-0023. | pass (R) |
+| `REQ-PROFILE-10` | R | `CONTROL_PIPELINE_MATH.md` scoped to the curve law; new sibling `CONTROL_PID_MATH.md` carries the PID identity. | pass (R) |
 
 ### FEAT-0004 - Hardware-access dependency health signal
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-HWHEALTH-01` | T, R | Status-field test; review `RUNTIME_HOME.md`. | pending |
-| `REQ-HWHEALTH-02` | T | Read-path-down vs write-path-down init outcomes set distinct fields. | pending |
-| `REQ-HWHEALTH-03` | T, R | Analyzer/ingest compatibility with old status files; additive-only schema review. | pending |
-| `REQ-HWHEALTH-04` | T, M | Tests assert transition events; runtime event-log evidence. | pending |
-| `REQ-HWHEALTH-05` | R | Review confirms no driver load/start/restart path. | pending |
-| `REQ-HWHEALTH-06` | T | No successful open means unknown/unavailable, never healthy. | pending |
+| `REQ-HWHEALTH-01` | T, R | `runtime_status_tests`: status JSON + typed status expose `hwaccess_state`, `hwaccess_read_state`, `hwaccess_write_state`, and details; `docs/RUNTIME_HOME.md` updated. `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed 2026-06-21. | pass |
+| `REQ-HWHEALTH-02` | T | `runtime_status_tests`: read and write path states round-trip independently (`read=available`, `write=unavailable`). Startup code sets read from `AmdReader` and write from `CreateFanWriter(...)` success/failure. | pass |
+| `REQ-HWHEALTH-03` | T, R | Status fields are additive on existing control-loop v4/read-loop v1 schemas; `ReadRuntimeStatus` defaults absent/unknown fields to `unknown`. `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | pass |
+| `REQ-HWHEALTH-04` | T, M | `runtime_status_tests`: transition classifier covers unknown→unavailable and unavailable→available. Live M 2026-06-22: isolated `read-loop` runtime slice emitted `read_loop.hwaccess_restored` with `read=available`, `write=available`; final status reported `hwaccess_state=available` after one successful poll. Evidence: `docs/feat-0004-live-hwaccess-event-log-evidence-2026-06-22.md`. | pass (T, M) |
+| `REQ-HWHEALTH-05` | R | Review: implementation only reads existing `AmdReader` / `CreateFanWriter(...)` initialization outcomes and writes status/events; no driver load/start/restart or watchdog exit-code change was added. | pass |
+| `REQ-HWHEALTH-06` | T | `runtime_status_tests`: default/absent hardware-access fields remain `unknown`; overall state becomes `available` only when both read and write paths report `available`. | pass |
 
 ### FEAT-0005 - Write actuation confirmation (non-actuating-write detection)
 
@@ -137,8 +144,8 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | partial — cycle logger landed default-off (`cpu_cycles.h` math + `cpu_cycles_tests`; `amd_reader` per-core APERF/MPERF reads logging `cpu_aperf_delta` / `cpu_mperf_delta`); analyzer effective-frequency derivation landed 2026-06-10 (schema v10). Enabled live CSV sessions 1-3 captured `cpu_cycles_acquisition=quarantine`; criterion 4 remains MANUAL in the evidence notes, so cycle promotion and cycles-per-Joule join remain pending; `INST_RETIRED` stays out of read-only scope. |
-| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | pass (marker promotion pending) — energy logger landed 2026-06-07; analyzer time-weighted avg-power derivation landed 2026-06-09 (schema v9, sample-id de-duplication, no-false-zero; `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end). Enabled live CSV sessions 1-3 captured `cpu_pkg_energy_acquisition=quarantine`; each scored 5 PASS / 0 FAIL / 1 MANUAL, with the MANUAL item limited to cycle effective-frequency validity. Energy quarantine-exit evidence is complete across 3 independent sessions; flipping to `validated` remains a manual maintainer decision. |
+| `REQ-CPUEFF-01` | T, M | Work-counter (APERF/MPERF) delta-math unit/smoke test; runtime CSV evidence on a supported machine. | partial — cycle logger landed default-off (`cpu_cycles.h` math + `cpu_cycles_tests`; `amd_reader` per-core APERF/MPERF reads logging `cpu_aperf_delta` / `cpu_mperf_delta`); analyzer effective-frequency derivation landed 2026-06-10 (schema v10). Enabled live CSV sessions 1-3 captured `cpu_cycles_acquisition=quarantine`; criterion 4 remains MANUAL in the evidence notes, so cycle promotion and cycles-per-Joule join remain pending; `INST_RETIRED` stays out of read-only scope. All-core package roll-up landed 2026-06-21 (default-off): pure `cycles::AggregatePackageCycles` + `TestPackage_*` unit tests, an off-thread sweeper in `amd_reader.cpp` (own PawnIO handle, affinity-verified per-core reads), the five `cpu_*_allcore` CSV columns, and analyzer `SummariseCpuCyclesAllcore` (schema v13, pre-v13 degrades to unavailable). |
+| `REQ-CPUEFF-02` | T, M | Energy-counter delta → Joules/avg-power unit/smoke test; sample-id/window de-duplication; runtime CSV evidence. | pass (marker promotion pending) — energy logger landed 2026-06-07; analyzer time-weighted avg-power derivation landed 2026-06-09 (schema v9, sample-id de-duplication, no-false-zero; `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end). Enabled live CSV sessions 1-3 captured `cpu_pkg_energy_acquisition=quarantine`; each scored 5 PASS / 0 FAIL / 1 MANUAL, with the MANUAL item limited to cycle effective-frequency validity. Energy quarantine-exit evidence is complete across 3 independent sessions; the FEAT-0020 live flip and `docs/power-temp-comparison-snapshot-2026-06-18.md` keep package-energy windows in the standard control-loop comparison stream. Flipping to `validated` remains a manual maintainer decision. |
 | `REQ-CPUEFF-03` | T, R | Context/provenance propagation test, explicit deferred-signal unavailable handling, and review vs `RUNTIME_HOME.md`. | pass (v1 scope) — temperature stays aligned with the window; energy and cycle acquisition markers remain independent; effective-frequency inputs are emitted only when the default-off cycle path is enabled and are derived by analyzer schema v10 rather than guessed. |
 | `REQ-CPUEFF-04` | T, R | Analyzer-ingest tests with old archives missing the new fields; no-false-zero test. | pass — additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility guard |
 | `REQ-CPUEFF-05` | R | Review confirms read paths only; no CPU-control write. | pass — the energy and cycle helpers issue `ioctl_read_msr` only; no write in the FEAT-0006 paths |
@@ -150,7 +157,7 @@ Result values:
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-WATCHDOG-01` | T, M | (T) `test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched PID differs); (M) live deploy 2026-06-16 commit `e5bafdb`: suspended live worker pid 44984 force-terminated by the production watchdog `--restart` (`supervisor.worker_force_terminated`, stop_result=2), fresh worker pid 36348, loop resumed ticking. M verifies the recovery **mechanism** under an `NtSuspendProcess` proxy (the deterministic hung-worker trigger); whether a natural 15 s+ hard freeze occurs by load is resolved on evidence — by mechanism the scheduling axis cannot produce it (timer-bound stop poll + balance-set boost + watchdog asymmetry), corroborated by n=6 aggressive cells with 0 force-terminations (`cpu-0609-freeze-classification-2026-06-16.md`; `cpu-loop-survival-live-sweep-findings-2026-06-16.md` Appendix C). Not a recovery-path gap. | pass (T, M) |
+| `REQ-WATCHDOG-01` | T, M | (T) `test_hung_worker_is_force_terminated_and_relaunched` (suspended worker force-terminated; relaunched PID differs); (M) live deploy 2026-06-16 commit `e5bafdb`: suspended live worker pid 44984 force-terminated by the production watchdog `--restart` (`supervisor.worker_force_terminated`, stop_result=2), fresh worker pid 36348, loop resumed ticking. M verifies the recovery **mechanism** under an `NtSuspendProcess` proxy, the deterministic hung-worker trigger. | pass (T, M) |
 | `REQ-WATCHDOG-02` | T, R | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; review vs the additive `supervisor.*force_terminate*` event types in `RUNTIME_HOME.md`. | pass |
 | `REQ-WATCHDOG-03` | T, R | Same integration test seeds an orphaned `pending_writes.json` entry the force-killed relaunch reconciles to `[]`; review that the escalation leaves the `app_main.cpp` startup `ReconcilePendingWrites` path unchanged. | pass |
 | `REQ-WATCHDOG-04` | T, R | `test_graceful_worker_is_not_force_terminated` (no escalation on a graceful stop) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard / PID-corroboration refusal, single-shot bound); trigger gated on `stop_result == 2`. | pass |
@@ -223,37 +230,156 @@ the maintainer authorizes promotion (gate 3).
 | `REQ-RESTOREGUARD-04` | T | Unblocked-channel restore is byte-for-byte unchanged (FEAT-0010 crash-recovery replay regression guard). | pending (held-Draft) |
 | `REQ-RESTOREGUARD-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/live-channel set/identity unchanged; event additive, no schema break. | pending (held-Draft) |
 
-### FEAT-0015 - Event JSONL has a retention bound
+### FEAT-0015 - Event JSONL retention
 
-Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
-`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
-
-| Requirement | Verify | Verification home | Result |
-|---|---|---|---|
-| `REQ-EVENTRET-01` | T, R | `Test-LocalCI` test writing past the accepted bound asserts the event JSONL is rotated/capped (or routine `info` reduced); review vs the design decision recording the model and bound. | pending |
-| `REQ-EVENTRET-02` | T, R | Test asserts whole NDJSON lines across a rotation boundary (no split/interleave); review of atomic-append + rotation vs `runtime_event_log.cpp:28-40,299-321` and the torn-write finding. | pending |
-| `REQ-EVENTRET-03` | T | Test asserts a `warning`/`error` event is retained while routine `info` `write_applied` is reduced/rotated out within the window. | pending |
-| `REQ-EVENTRET-04` | T, R | Test asserts an absent config key preserves current append behavior and existing event JSONL + `CachedEventCount` still parse; review vs `RUNTIME_HOME.md` schema stability. | pending |
-| `REQ-EVENTRET-05` | R | Review vs `CONTROL_PIPELINE_MATH.md` / `MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; control-thread append non-blocking; docs updated. | pending |
-
-### FEAT-0016 - Analyze SQLite DB has a retention bound
-
-Accepted 2026-06-18; not yet implemented. Verification homes are below; results stay
-`pending` until a Windows-host `Test-LocalCI` session builds and runs the tests.
+Implemented 2026-06-18. Results mirror the owning spec's §14 verification log.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-DBRETAIN-01` | T, R | `Test-LocalCI` (`tests/test_analyze_ingest.py` sibling): ingest runs spanning the bound, purge, assert out-of-bound runs deleted and in-bound retained; review vs the design decision recording the bound. | pending |
-| `REQ-DBRETAIN-02` | T | Test asserts no `tick_samples`/`tick_fan_samples`/`tick_channel_samples`/`events` row references a deleted `run_id` (cascade fired under `foreign_keys = ON`). | pending |
-| `REQ-DBRETAIN-03` | T | Test asserts page/file-size reclaim after a purge that deleted runs (`page_count` drops), and no VACUUM when nothing was deleted. | pending |
-| `REQ-DBRETAIN-04` | T, R | Test asserts retained runs still de-duplicate on re-ingest (`IsManifestPathInDb`/`IsSessionInDb`) and dry-run vs `--apply` behavior; review vs the `analyze prune` dry-run convention. | pending |
-| `REQ-DBRETAIN-05` | R | Review vs `RUNTIME_HOME.md` / `MEASUREMENT_GATE.md`: analyze schema/`schema_version`, per-tick fidelity, and existing CSV-bundle prune unchanged; offline-only; docs updated. | pending |
+| `REQ-EVENTRET-01` | T, R | `runtime_event_log_tests.cpp::TestRotationUsesActiveStartAndPrunesArchives` verifies active-start rotation with a fresh last-write mtime plus archive pruning; `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` sampling; review vs decision record. | pass |
+| `REQ-EVENTRET-02` | T, R | `TestConcurrentAppendRotationKeepsWholeLines` parses every active/archive line as JSON after concurrent appends across a rotation boundary; review confirms single-call append and in-process rotation/append serialization. | pass |
+| `REQ-EVENTRET-03` | T | `TestWriteAppliedReductionPreservesDiagnostics` verifies routine `write_applied` ticks are reduced while `control_loop.write_failed` and `control_loop.shutdown` remain persisted. | pass |
+| `REQ-EVENTRET-04` | T, R | Runtime event-log tests plus review: event payload schema stays `svg_mb_control.event.v1`, unconfigured append paths keep historical behavior, and `CachedEventCount` still reads the active file. | pass |
+| `REQ-EVENTRET-05` | R | Review vs `docs/CONTROL_PIPELINE_MATH.md` / `docs/MEASUREMENT_GATE.md`: computed duty/cadence/channels/identity and CSV retention unchanged; event logging remains best-effort and docs updated. | pass |
 
-### FEAT-0005 / FEAT-0007 — Reserved (parked)
+### FEAT-0016 - Analyze SQLite DB retention
 
-`REQ-ACTCONFIRM-*` (FEAT-0005) and `REQ-RAMTEMP-*` (FEAT-0007) are **not mirrored
-here while their specs are Reserved.** Their requirement rows live in the parked
-bodies under `docs/features/_parked/` and rejoin this map when a spec is promoted
-back to `Draft` (see `docs/features/README.md` §5). This map mirrors only the
-`REQ-*` IDs of the active, enforced feature specs, which is what
+Implemented 2026-06-18. The 2026-06-18 operational reclaim deleted the derived
+analyzer DB to free 7.80 GiB; the structural DB purge/reclaim code now lands in
+`analyze prune`.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-DBRETAIN-01` | T, R | `test_analyze_ingest.py::test_db_prune_apply_cascades_and_reclaims` ingests old/recent runs, applies `--db-retain-days 1`, and asserts only the recent run remains; review vs decision record. | pass |
+| `REQ-DBRETAIN-02` | T | `test_db_prune_apply_cascades_and_reclaims` asserts dependent `tick_samples`, `tick_fan_samples`, `tick_channel_samples`, and `events` rows for the deleted run are removed; implementation treats orphan rows as an error. | pass |
+| `REQ-DBRETAIN-03` | T | `test_db_prune_apply_cascades_and_reclaims` asserts page/file-size shrink after deleting old runs; `test_db_prune_zero_retain_days_is_explicit_disable` verifies the disable path. | pass |
+| `REQ-DBRETAIN-04` | T, R | `test_db_prune_dry_run_keeps_old_run` verifies dry-run reports without deleting; apply test re-runs ingest after purge and confirms retained runs still de-duplicate. | pass |
+| `REQ-DBRETAIN-05` | R | Review vs `docs/RUNTIME_HOME.md` / `docs/MEASUREMENT_GATE.md`: analyze schema/version, per-tick fidelity, and existing CSV-bundle prune unchanged; README/runtime docs updated. | pass |
+
+### FEAT-0017 - Faster fan reaction under load (control-response retune)
+
+Held at Draft; verification homes are planned, results `not buildable` until the
+decision record settles the lanes/target ceiling (gate 3) and a response-evaluation
+Pass-3 validation exists.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-REACT-01` | T, R | Config-contract test that each retuned lane raised both `rise_rate_pct_per_min` and `max_setpoint_step_pct` (effective rise ceiling rose); review the ceiling identity vs `docs/control-latency-reduction-design-2026-06-18.md` §2.1. | not buildable |
+| `REQ-REACT-02` | T, R | Config-contract test that no retuned lane raised `fall_rate_pct_per_min` / `demand_smoothing_fall_alpha` / `decay_latch_pct_per_min` above the shipped value (rise-asymmetry). | not buildable |
+| `REQ-REACT-03` | R | Review the config diff vs `MEASUREMENT_GATE.md` / `CONTROL_PIPELINE_MATH.md`: curves, blend, channels, cadence, cooldown, deadband, overlays unchanged. | not buildable |
+| `REQ-REACT-04` | M | Live combined-load (Pass 3) capture via `analyze ingest` + `analyze report`: before/after reaction improved; CPU Tctl / GPU memory percentiles within band; no post-startup authority reasserts. | not buildable |
+| `REQ-REACT-05` | T | `tests/test_config_contracts.py::test_release_intake_low_end_curves_follow_machine_policy` stays green (channels `2`/`3` keep `>= 4%` spacing). | not buildable |
+
+### FEAT-0018 - Adaptive-cadence enablement under thermal transient
+
+Held at Draft; **crosses the measurement gate**, results `not buildable` until the
+floor characterization evidence exists (gate 6) and the decision record settles the
+floor/thresholds (gate 3).
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-CADENCE-01` | T, M | Config-load test that the shipped config sets `poll_tick_floor_ms` in `[25, poll_tick_ms)`; existing `ComputeCadence` unit tests cover full-slew→floor; (M) a transient capture reaches the floor. | not buildable |
+| `REQ-CADENCE-02` | T | Config-load / `ComputeCadence` tests: `start < full`; relax returns to `poll_tick_ms` after slew subsides; no tighten below `cadence_slew_start_c_per_s`. | not buildable |
+| `REQ-CADENCE-03` | M | Characterization capture: steady-state achieved interval, `loop_slip_ms`, `loop_overrun`, process CPU% within `MEASUREMENT_GATE.md` exit criteria. | not buildable |
+| `REQ-CADENCE-04` | R, M | Review the config diff (`write_cooldown_ms`/channels unchanged); runtime evidence that write frequency stays bounded by deadband + cooldown. | not buildable |
+| `REQ-CADENCE-05` | M, R | The `MEASUREMENT_GATE.md` characterization summary exists (AMD/SIO/GPU cadence + fan-write response at the floor); review the chosen floor/thresholds are justified by it. | not buildable |
+
+### FEAT-0019 - Sidecar persistence off the actuation hot path
+
+Implemented 2026-06-18 (T/R verified; isolated Test-LocalCI green — CTest 14/14,
+169 hermetic, `test_feature_specs` 5/5). D-WRITEHOT-1 promoted to Current (gate 3).
+The change strictly reduces synchronous writes and is behavior-preserving for
+recovery, so no `M` evidence is required by §10. Results mirror the owning spec's
+§14 verification log.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-WRITEHOT-01` | T | C++ test (sidecar file-existence over a temp runtime home): an `Upsert` changing only `target_pct` on a same-baseline entry performs no synchronous file write; a first entry and a baseline change each persist one synchronously. | pass |
+| `REQ-WRITEHOT-02` | T, R | C++ test: a sidecar from several same-baseline `Upsert`s reconciles to restore each channel's baseline; review `ReconcilePendingWrites` consumes only `(channel, baseline_duty_raw, baseline_mode_raw)`. | pass |
+| `REQ-WRITEHOT-03` | T | C++ test: the first `Upsert` for a channel persists before the simulated `ApplyDuty` (activation record on disk before actuation). | pass |
+| `REQ-WRITEHOT-04` | T | C++ test: a skipped same-baseline update is written by `Flush()`; `QueueRemove` + `Flush` removal path unchanged; a baseline re-capture triggers a fresh synchronous persist. | pass |
+| `REQ-WRITEHOT-05` | R | Review `docs/RUNTIME_HOME.md` (clarified `target_pct`/`started_iso` ≤1-tick-stale/advisory semantics; schema unchanged) and that no consumer reads `target_pct` as authoritative per-tick current. | pass |
+| `REQ-WRITEHOT-06` | T, R | C++ test: after a forced identity-change persist failure, a following same-baseline `Upsert` does not reset `consecutive_sidecar_persist_failures`; review the changed `channel_write.cpp` reset site vs FEAT-0010. | pass |
+
+### FEAT-0020 - Standard control-loop power logging
+
+Implemented 2026-06-18 (T/B/R/M verified; full Test-LocalCI green — CTest + 169
+hermetic). Results mirror the owning spec's §14 verification log. The live-runtime
+flip was executed under explicit authorization on 2026-06-18 (deploy of commit
+`1ea44c7` via `Build-Release.ps1` + `Set-EnergyLoggingProfile.ps1 -Enable`),
+capturing the `M` evidence for `REQ-PWRLOG-01/-02/-04/-06` (gate 6 closed). Live
+results: `docs/feat-0020-live-flip-validation-results-2026-06-18.md`.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-PWRLOG-01` | T, M, R | Config/script test for the CPU RAPL profile (`test_energy_logging_profile.py`); live M 2026-06-18: `cpu_pkg_energy_acquisition=quarantine` with `cpu_power_sample_id` populating (run 318, analyzer `package_power` avg 86.74 W); review vs FEAT-0006 marker semantics. | pass |
+| `REQ-PWRLOG-02` | T, M, R | CSV header/row tests (`csv_rows_tests`, `test_control_loop.py`); analyzer ingest (`test_analyze_ingest.py`); live M 2026-06-18: `gpu_power_mw` nonempty (`acquisition`/`source=nvml`, 1658/1659; one leading `unavailable`, no false zero); no-false-zero review. | pass |
+| `REQ-PWRLOG-03` | T, R | `test_control_loop.py` asserts response source stays `primary_curve`; review power is not in `TempInputs`/`EvaluateChannel` and `power_anticipation.h` stays unwired; `CONTROL_PIPELINE_MATH.md` unchanged. | pass |
+| `REQ-PWRLOG-04` | M, R | Review: one `nvmlDeviceGetPowerUsage` piggybacked on the per-tick thermal sample (`poll_nvml_board_power`); live M 2026-06-18: post-flip `loop_work_duration_ms` steady-state mean 3.45 ms / max 34.9 ms and, under GPU load ≥350 W (648 ticks), mean 3.15 ms / max 14.6 ms, 0 overruns vs the 250 ms period — the read does not move the baseline; residual idle-only spikes are pre-existing (old build max 3274 ms). Results: `docs/feat-0020-live-flip-validation-results-2026-06-18.md`. | pass |
+| `REQ-PWRLOG-05` | T, R | Analyzer tests for the GPU distribution (mean, not energy integral), old-archive degrade, and v10→v11 migration; review CPU watts derivation unchanged, not double-logged. | pass |
+| `REQ-PWRLOG-06` | T, M, R | `test_energy_logging_profile.py` dry-run flip/revert (`-Enable`/`-Disable`); live M 2026-06-18: `-Enable` disabled the `SVG-MB Energy Safety Revert` task (→ `Disabled`), set User `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`, and restarted the worker tree; `-Disable` reversibility documented; README/operator docs reviewed. | pass |
+
+### FEAT-0021 - Standard control-loop GPU workload context logging
+
+Implemented 2026-06-20. Results mirror the owning spec's §14 verification log.
+The implementation keeps FEAT-0020's per-tick thermal/power sample unchanged and
+mirrors a cached GPU workload context sample into standard control-loop rows.
+Live cadence M evidence is intentionally not claimed here; it remains the
+deployment check for `REQ-GPUCTX-04`.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-GPUCTX-01` | T, R | `runtime_csv_rows.cpp` emits the 11 additive context fields; `csv_rows_tests` locks header/row alignment and values; `test_control_loop.py` verifies simulated control-loop rows include context fields. | pass |
+| `REQ-GPUCTX-02` | T, R | Review `GpuReader::Sample()` cached context path: in-repo GPU reader fast/rare sample family, no foreground `evidence-log`, sibling repo, or subprocess bridge. | pass |
+| `REQ-GPUCTX-03` | T, R | Review: context fields only feed CSV/analyzer; `channel_evaluator` still consumes GPU temperatures via `GpuControlEnvelopeC`. `test_control_loop.py` keeps `channel0_response_source=primary_curve` with GPU power/context present. | pass |
+| `REQ-GPUCTX-04` | T, R, M | T/R pass: cached 1000 ms context refresh keeps per-tick thermal/power read unchanged and full `Test-LocalCI` passed. Live 250 ms cadence/process-resource M evidence was not collected in this change and remains a deployment check. | partial |
+| `REQ-GPUCTX-05` | T, R | Analyzer schema v12 nullable context columns; `test_analyze_ingest.py::test_report_derives_gpu_context_distribution` verifies ingest/report summary, old archives report unavailable, and migration reaches v12. | pass |
+| `REQ-GPUCTX-06` | T, R | CSV/header tests and review confirm v1 standard rows exclude throttle reasons, PCIe, voltage, GPU fans, power rails, and raw thermal slots. | pass |
+
+### FEAT-0022 - Runtime logging failure visibility
+
+Implemented Slices A/B plus status/snapshot retry and Slice C on 2026-06-20.
+Results mirror the owning spec's §14 verification log.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-LOGHEALTH-01` | T, R | `tick_runner.cpp`, `read_loop.cpp`, and `evidence_log.cpp` observe `WriteRow(...)` and emit `runtime_logging.csv_write_failed` on first failure; `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-02` | T, R | `RuntimeCsvLogger` records `last_error_sink/detail`; `runtime_csv_archive_tests` cover mirror-open and manifest-write failure detail; `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-03` | T, R | `runtime_status_tests` verifies sticky status publish failure/recovery; `test_control_loop.py` verifies failed `current_state.json` publish does not advance retry timing; `test_read_loop.py` verifies snapshot mirror failure/recovery events. `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-04` | T, R | `runtime_event_log_tests` simulates an unwritable event-log path and verifies sticky `logging_health.json` plus recovered state without relying on the failed event log; `test_runtime_health.py` verifies health degrades while active. `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-05` | T, R | CSV, status, and snapshot failure events use sticky in-memory state; event-log append failure writes `logging_health.json` once per active failure and rewrites recovery on the next successful append. `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-06` | T, R, M | `analyze_report_tests` verifies running mismatches emit `running_csv_manifest_consistency_warning` and closed mismatches emit `closed_csv_manifest_consistency_suspect_evidence`; `test_analyze_ingest.py` verifies `analyze report` reads `csv_latest` row counts and surfaces the flags in JSON/text. `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-07` | T, R | Review: logging-health events/sidecar/health fields are observational and are not read by setpoint computation, write gates, breaker, restore, cadence, or channel policy; `Test-LocalCI` passed. | pass |
+| `REQ-LOGHEALTH-08` | T, R | Event schema remains `svg_mb_control.event.v1`; CSV/status/snapshot logging-health events, `logging_health.json`, and health JSON fields are additive and optional; runtime docs updated; `Test-LocalCI` passed. | pass |
+
+### FEAT-0023 - Machine profiles and restart-based profile switch
+
+Implemented 2026-06-21 (commits `0952e3d` / `1195d84` / `9a78a11` startup + live
+switch; `79145e4` CSV/status fields; `e431dfd` revert test; `fb70be5`
+composition). Results mirror the owning spec's §14 verification log. The
+control-law/PID seam stays FEAT-0003, restart-selected and sequenced after. The
+2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile`
+CLI path without adding runtime semantics.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-MPROFILE-01` | T, R | `ComposeConfigRoot` composes a `machine_cooling_policy.v1` base (per-channel `release_min_duty_pct`) with a behavior overlay (min-duty removed), routed through both loaders; no-`compose` path unchanged. Ships `release.behavior.json` + `snd-desk-composed.json`; `profile_composition_tests` proves compose(snd-desk) == `control.release.json` + rejects an uncontrolled channel. | pass |
+| `REQ-MPROFILE-02` | T, R | `machine_identity` host-name + `machine_id.txt` override; precedence falls back to the built-in default; `machine_identity_tests`, `machine_profile_tests`, `test_machine_profile.py`. | pass |
+| `REQ-MPROFILE-03` | T, R | Precedence `--config` > `--profile`/`SVG_MB_PROFILE` > identity > default; `--show-config` reports name/source; `machine_profile_tests` + `test_machine_profile.py`. | pass |
+| `REQ-MPROFILE-04` | T, R | The supervisor consumes a take-once `profile.switch.request.json`; `runtime_lifecycle_tests` + `test_profile_switch.py`. | pass |
+| `REQ-MPROFILE-05` | T, R | Validate-before-activate rejects invalid candidates, worker untouched, request cleared, `profile_rejected` event; `profile_switch_decision_tests` + `test_profile_switch.py`. | pass |
+| `REQ-MPROFILE-06` | T, R | Graceful cycle without crash backoff; `test_profile_switch.py` asserts a new PID, `profile_applied`, no `worker_restart_scheduled`, unchanged `restart_count`. | pass |
+| `REQ-MPROFILE-07` | T, R | `DecideAfterStartupOutcome` revert + last-known-good unit-tested + wired (revert before the supervisor-killing guard); a double-gated startup-fault sim hook drives `test_profile_switch.py::test_failed_switch_reverts_to_last_known_good` (asserts `profile_reverted`, revert to baseline, self-heal). On-hardware bind-failure M deferred. | pass |
+| `REQ-MPROFILE-08` | T, R | The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing restore runs; no latch/watchdog added; `test_profile_switch.py` + review vs D-MPROFILE-2. | pass |
+| `REQ-MPROFILE-09` | T, R | Switch events emitted; active profile name in `control_supervisor.json` AND name + resolution source in the worker status (`control_runtime.json`) and additive control-loop-only CSV columns `active_profile_name`/`active_profile_source` (threaded from `ControlConfig`, never read by control); `csv_rows_tests` + `test_profile_switch.py`. | pass |
+| `REQ-MPROFILE-10` | T, R, M | T+R pass: `profile_composition_tests` proves the composed snd-desk default reproduces `control.release.json` field-by-field incl. resolved runtime paths (byte-identical drop-in); the no-`compose` default path is untouched. On-hardware live M deferred (gates wiring host identity + catalog into Build-Release). | partial |
+
+### FEAT-0007 — Reserved (parked)
+
+`REQ-RAMTEMP-*` (FEAT-0007) is **not mirrored here while its spec is Reserved.**
+Its requirement rows live in the parked body under `docs/features/_parked/` and
+rejoin this map when the spec is promoted back to `Draft` (see
+`docs/features/README.md` §5). FEAT-0005 was un-parked and promoted to
+`Accepted`; its `REQ-ACTCONFIRM-*` rows are mirrored above. This map mirrors only
+the `REQ-*` IDs of the active, enforced feature specs, which is what
 `tests/test_feature_specs.py` requires.

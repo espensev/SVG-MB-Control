@@ -65,6 +65,15 @@ Optional channel overrides:
 - `curve_shape`: `linear` or `smootherstep`
 - `rise_rate_pct_per_min`
 - `fall_rate_pct_per_min`
+- `controller`: optional control-law selector (FEAT-0003), `curve_overlay`
+  (default) or `pid`. Restart-selected and fixed for the worker lifetime; an
+  absent key keeps the curve law, so existing configs are unchanged.
+- `pid`: PID parameters, consulted only when `controller` is `pid` — `target_c`,
+  `kp`/`ki`/`kd`, `feedforward` (`curve`|`fixed`) with `fixed_feedforward_pct`,
+  optional `integral_min`/`integral_max`, `allow_live` (default `false`), and
+  `characterization_artifact`. PID is shadow/dry-run (computes + logs, does not
+  write) unless `allow_live` is set with a positive slew cap and an existing
+  characterization artifact (decision D6). See `docs/CONTROL_PID_MATH.md`.
 - `cpu_override_curve`: optional CPU/Tctl curve evaluated separately from
   `temp_blend`; the loop commands the higher duty from `curve` and
   `cpu_override_curve`
@@ -130,6 +139,10 @@ evaluated in Horner form in the curve lookup path.
 1. Resolve config, runtime home, and runtime policy.
 2. Initialize the direct fan backend.
 3. On each tick, sample AMD, GPU, and fan telemetry in-process.
+   FEAT-0020 GPU board power is copied from the per-tick GPU thermal sample.
+   FEAT-0021 GPU workload context is copied from a cached GPU reader sample
+   refreshed at most once per 1000 ms; it is emitted to CSV with sample age and
+   is not part of temperature selection or fan-control decisions.
 4. Append the sampled row to the active CSV chunk and refresh the fixed live
    CSV mirror on the configured flush interval.
 5. Capture the baseline duty and mode for each configured channel.
@@ -169,10 +182,25 @@ evaluated in Horner form in the curve lookup path.
 - `runtime\logs\svg_mb_control_events.jsonl`
 
 `control_runtime.json` includes loop-level counters, timing-quality fields, the
-active worker `process_id`, active log paths, and per-channel totals plus last
+active worker `process_id`, active log paths, additive `hwaccess_*` fields for
+PawnIO-backed read/write initialization state, and per-channel totals plus last
 observed values. The status JSON is rate-limited, so it is a live status view
 rather than the per-tick data source. The control-loop CSV carries the same
 timing fields per row:
+
+If `control_runtime.json` publication fails, the loop keeps the forced status
+write active and retries on the next tick. If `current_state.json` publication
+fails, the snapshot retry timer is not advanced, so the next tick retries the
+publish instead of waiting for the normal snapshot interval. Both failure classes
+emit sticky `runtime_logging.status_publish_*` or
+`runtime_logging.snapshot_publish_*` events.
+
+Hardware-access availability is observational: `hwaccess_read_state` records
+the AMD/SMN read path and `hwaccess_write_state` records the Super I/O fan
+backend. Startup emits `control_loop.hwaccess_unavailable` when either path is
+unavailable and `control_loop.hwaccess_restored` when a previously unavailable
+status is followed by a fully available startup. Exit-code mapping and PawnIO
+driver management are unchanged.
 
 - `loop_started_wall_clock`
 - `loop_finished_wall_clock`
@@ -254,10 +282,11 @@ start.
 
 Operator commands use the same runtime-home resolution as the active config:
 
-- `--status` reads `control_runtime.json` and checks `process_id`.
+- `--status` reads `control_runtime.json`, checks `process_id`, and prints the
+  additive hardware-access state.
 - `--status --json` or `--health --json` emits the machine-readable health
   contract with exit codes `0=healthy`, `1=degraded`, `2=stale/stopped`, and
-  `3=failed`.
+  `3=failed`, plus the additive `hwaccess_*` fields.
 - `--stop` writes `stop.request.json`; the worker exits through the normal
   restore/shutdown path.
 - `--restart` performs the same cooperative stop and only launches a new
@@ -273,6 +302,52 @@ visible but not restarted, and `failed` is left for operator review.
 
 Passing `--mode control-loop --config <path>` keeps the loop attached to the
 current terminal and does not add supervisor restart behavior.
+
+## Profile Switch (FEAT-0023)
+
+The supervisor can switch the worker to a different machine profile at runtime
+through a restart, so the control loop never reloads config in place.
+
+- An operator requests a switch by writing `profile.switch.request.json` in the
+  runtime home. The supervisor consumes it take-once while the worker runs.
+- Before tearing down the healthy worker, the supervisor parse-validates the
+  candidate profile: it resolves the named profile through the profile catalog
+  and loads it (and `LoadControlLoopConfig` in control-loop mode), with no
+  hardware bind. A candidate that fails to resolve or load is rejected and the
+  running worker is left untouched; the supervisor logs
+  `supervisor.profile_rejected` (FEAT-0023).
+- On a valid candidate, the supervisor signals the worker by writing
+  `profile.cycle.request.json` and logs `supervisor.profile_switch_signaled`.
+  The worker loop (`control-loop` and the `read-loop` status path) checks for
+  this signal each iteration and exits the loop cleanly. In `control-loop` this
+  runs the existing shutdown restore, so controlled channels return to their
+  captured baseline before respawn; the `read-loop` path writes no fans, so it
+  exits with nothing to restore.
+- When the worker exits cleanly, the supervisor repoints to the new profile,
+  logs `supervisor.profile_applied`, and respawns from it. The respawn is not
+  delayed by crash backoff: it continues without incrementing the worker
+  restart counter, unlike the ordinary crash-restart path.
+- If the worker does not honor the cycle signal within `kSwitchCycleTimeout`
+  (`10 s`), the supervisor force-terminates it and logs
+  `supervisor.profile_switch_force_terminated`. The shutdown restore is skipped
+  in that case, so fans latch at their last commanded duty until the respawned
+  worker recaptures its baseline.
+- If a freshly switched worker then fails its own startup window, the supervisor
+  auto-reverts to the last-known-good profile (the profile that last survived
+  its startup window) and respawns from it, logging
+  `supervisor.profile_reverted`, instead of ending the supervisor.
+
+The active profile identity is recorded as `active_profile_name` and
+`active_profile_source` in `control_runtime.json` and as the matching
+`active_profile_name`,`active_profile_source` columns in the control-loop CSV.
+These fields are observational: they are not read by setpoint, cadence, or
+channel-policy logic, and they are not ingested by the analyzer.
+
+The optional Rust helper at `tools\profile_switch_ui` is a local browser UI over
+this same operator surface. It reads the catalog/profile files for display and
+invokes `svg-mb-control.exe --set-profile <name>` when Apply is clicked; it does
+not add a second request format, bypass supervisor validation, or reload the
+worker in process.
 
 ## Policy Behavior
 

@@ -49,6 +49,22 @@ struct AmdSnapshot {
     double cpu_cycles_window_ms = std::numeric_limits<double>::quiet_NaN();
     double cpu_aperf_delta = std::numeric_limits<double>::quiet_NaN();
     double cpu_mperf_delta = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0006 all-core effective frequency: the package roll-up
+    // (Sigma-dAPERF / Sigma-dMPERF over all logical processors), produced by a
+    // dedicated OFF-THREAD sweeper so the 32x affinity hops never touch the
+    // 250 ms control loop. It carries its OWN sample id / window (the worker's
+    // own cadence, NOT cpu_cycles_sample_id above) plus the count of cores that
+    // contributed a fresh window, so a partial (<32-core) sweep is auditable.
+    // Deltas/window blank (NaN) on baseline / all-blanked / package-implausible
+    // (no false zero); the control thread only copies the published snapshot
+    // O(1), it never reads MSRs for this path. Provenance reuses
+    // cpu_cycles_acquisition above.
+    std::uint64_t cpu_cycles_allcore_sample_id = 0u;
+    double cpu_cycles_window_ms_allcore = std::numeric_limits<double>::quiet_NaN();
+    double cpu_aperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    double cpu_mperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    int cpu_cycles_allcore_cores = 0;
 };
 
 // RAII wrapper around the current private AMD SMN reader. Construction never

@@ -1,5 +1,7 @@
 #include "runtime_event_log.h"
 
+#include "json_io.h"
+
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -7,7 +9,10 @@
 #include <cmath>
 #include <cwctype>
 #include <fstream>
+#include <iomanip>
+#include <limits>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -97,26 +102,49 @@ std::string EventCountKey(const std::filesystem::path& path) {
     return key;
 }
 
-struct EventCountCache {
+struct EventLogRegistry {
     std::mutex mutex;
     std::unordered_map<std::string, std::uint64_t> counts;
+    struct RetentionState {
+        RuntimeEventLogOptions options;
+        std::chrono::system_clock::time_point active_started_at;
+    };
+    struct WriteFailureState {
+        bool active = false;
+        bool fallback_write_failed = false;
+        bool recovery_probe_done = false;
+        std::uint64_t failure_count = 0u;
+        std::string first_failure_time;
+        std::string last_failure_time;
+        std::string last_recovery_time;
+        std::string last_error_sink;
+        std::string last_error_detail;
+        std::string last_failed_event_type;
+    };
+    std::unordered_map<std::string, RetentionState> retention;
+    std::unordered_map<std::string, WriteFailureState> write_failures;
 };
 
-EventCountCache& RuntimeEventCountCache() {
-    static EventCountCache cache;
-    return cache;
+EventLogRegistry& RuntimeEventLogRegistry() {
+    static EventLogRegistry registry;
+    return registry;
 }
 
-void NoteEventAppended(const std::filesystem::path& path) {
-    EventCountCache& cache = RuntimeEventCountCache();
-    const std::string key = EventCountKey(path);
-    std::lock_guard<std::mutex> lock(cache.mutex);
-    auto existing = cache.counts.find(key);
-    if (existing == cache.counts.end()) {
-        cache.counts.emplace(key, CountNonEmptyLines(path));
+void NoteEventAppendedLocked(EventLogRegistry& registry,
+                             const std::filesystem::path& path,
+                             const std::string& key) {
+    auto existing = registry.counts.find(key);
+    if (existing == registry.counts.end()) {
+        registry.counts.emplace(key, CountNonEmptyLines(path));
         return;
     }
     ++existing->second;
+}
+
+void ResetEventCountLocked(EventLogRegistry& registry,
+                           const std::string& key,
+                           std::uint64_t value) {
+    registry.counts[key] = value;
 }
 
 void PutOptionalDouble(nlohmann::json& payload,
@@ -190,39 +218,421 @@ std::string InferErrorCode(const RuntimeLogEvent& event,
     return NormalizeEventCode(event.event_type);
 }
 
+std::string FormatEventArchiveTimestamp(
+    std::chrono::system_clock::time_point tp) {
+    const std::time_t tt = std::chrono::system_clock::to_time_t(tp);
+    std::tm local{};
+#ifdef _WIN32
+    if (localtime_s(&local, &tt) != 0) {
+        return {};
+    }
+#else
+    if (localtime_r(&tt, &local) == nullptr) {
+        return {};
+    }
+#endif
+    std::ostringstream out;
+    out << std::put_time(&local, "%Y%m%d_%H%M%S");
+    return out.str();
+}
+
+std::string EventArchiveStem(const std::filesystem::path& active_path) {
+    const std::filesystem::path filename = active_path.filename();
+    if (filename.extension() == ".jsonl") {
+        return filename.stem().string();
+    }
+    return filename.string();
+}
+
+std::filesystem::path ResolveEventArchivePath(
+    const std::filesystem::path& active_path,
+    std::chrono::system_clock::time_point now) {
+    const auto archive_dir = active_path.parent_path() / "archive";
+    const std::string stem = EventArchiveStem(active_path);
+    const std::string timestamp = FormatEventArchiveTimestamp(now);
+    const std::string base = stem + "_" +
+        (timestamp.empty() ? std::string("unknown") : timestamp);
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::string name = base;
+        if (attempt > 0) {
+            name += "_";
+            name += std::to_string(attempt);
+        }
+        name += ".jsonl";
+        std::filesystem::path candidate = archive_dir / name;
+        std::error_code ec;
+        if (!std::filesystem::exists(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return archive_dir / (base + "_overflow.jsonl");
+}
+
+void PruneOldEventArchives(const std::filesystem::path& active_path,
+                           const RuntimeEventLogOptions& options) {
+    if (options.retain_days == 0u) {
+        return;
+    }
+    const auto archive_dir = active_path.parent_path() / "archive";
+    std::error_code ec;
+    if (!std::filesystem::is_directory(archive_dir, ec) || ec) {
+        return;
+    }
+    const std::string prefix = EventArchiveStem(active_path) + "_";
+    const auto cutoff = std::filesystem::file_time_type::clock::now() -
+                        std::chrono::hours(
+                            24ll * static_cast<long long>(options.retain_days));
+    for (const auto& entry :
+         std::filesystem::directory_iterator(archive_dir, ec)) {
+        if (ec) {
+            break;
+        }
+        if (!entry.is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+        const std::filesystem::path path = entry.path();
+        const std::string name = path.filename().string();
+        if (path.extension() != ".jsonl" ||
+            name.compare(0, prefix.size(), prefix) != 0) {
+            continue;
+        }
+        const auto mtime = entry.last_write_time(ec);
+        if (ec) {
+            ec.clear();
+            continue;
+        }
+        if (mtime < cutoff) {
+            std::filesystem::remove(path, ec);
+            ec.clear();
+        }
+    }
+}
+
+void RotateEventLogIfDueLocked(
+    EventLogRegistry& registry,
+    const std::filesystem::path& path,
+    const std::string& key,
+    EventLogRegistry::RetentionState& retention_state) {
+    const RuntimeEventLogOptions& options = retention_state.options;
+    if (options.rotate_hours == 0u) {
+        return;
+    }
+    const auto now = std::chrono::system_clock::now();
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) {
+        retention_state.active_started_at = now;
+        return;
+    }
+    const auto elapsed = std::chrono::duration_cast<std::chrono::hours>(
+        now - retention_state.active_started_at);
+    if (elapsed.count() < static_cast<long long>(options.rotate_hours)) {
+        return;
+    }
+
+    const auto archive_path = ResolveEventArchivePath(path, now);
+    std::filesystem::create_directories(archive_path.parent_path(), ec);
+    if (ec) {
+        return;
+    }
+    std::filesystem::rename(path, archive_path, ec);
+    if (ec) {
+        return;
+    }
+    ResetEventCountLocked(registry, key, 0u);
+    retention_state.active_started_at = now;
+    PruneOldEventArchives(path, options);
+}
+
+bool ShouldPersistEvent(const RuntimeLogEvent& event,
+                        std::string_view severity,
+                        const RuntimeEventLogOptions& options) {
+    if (!options.reduce_routine_write_applied ||
+        event.event_type != "control_loop.write_applied" ||
+        severity != "info") {
+        return true;
+    }
+    if (!event.tick_count.has_value() || *event.tick_count <= 1u) {
+        return true;
+    }
+    const std::uint32_t interval =
+        options.write_applied_sample_interval == 0u
+            ? 1u
+            : options.write_applied_sample_interval;
+    return (*event.tick_count % interval) == 0u;
+}
+
+bool AppendLineAtomic(const std::filesystem::path& path,
+                      const std::string& line,
+                      std::string* error_message) {
+#ifdef _WIN32
+    if (line.size() > (std::numeric_limits<DWORD>::max)()) {
+        if (error_message != nullptr) {
+            *error_message = "event line too large for single append: " +
+                std::to_string(line.size()) + " bytes";
+        }
+        return false;
+    }
+    HANDLE handle = CreateFileW(
+        path.wstring().c_str(),
+        FILE_APPEND_DATA | SYNCHRONIZE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        if (error_message != nullptr) {
+            *error_message = "failed to open event log " + path.string() +
+                " for append: Windows error " + std::to_string(GetLastError());
+        }
+        return false;
+    }
+    DWORD written = 0u;
+    const BOOL ok = WriteFile(
+        handle,
+        line.data(),
+        static_cast<DWORD>(line.size()),
+        &written,
+        nullptr);
+    const DWORD write_error = ok ? 0u : GetLastError();
+    CloseHandle(handle);
+    if (!ok) {
+        if (error_message != nullptr) {
+            *error_message = "failed to write event log " + path.string() +
+                ": Windows error " + std::to_string(write_error);
+        }
+        return false;
+    }
+    if (written != line.size()) {
+        if (error_message != nullptr) {
+            *error_message = "partial event-log write to " + path.string() +
+                ": wrote " + std::to_string(written) + " of " +
+                std::to_string(line.size()) + " bytes";
+        }
+        return false;
+    }
+    if (error_message != nullptr) {
+        error_message->clear();
+    }
+    return ok && written == line.size();
+#else
+    std::ofstream stream(path, std::ios::binary | std::ios::app);
+    if (!stream.is_open()) {
+        if (error_message != nullptr) {
+            *error_message = "failed to open event log " + path.string() +
+                " for append";
+        }
+        return false;
+    }
+    stream << line;
+    stream.flush();
+    if (!stream.good()) {
+        if (error_message != nullptr) {
+            *error_message = "failed to write event log " + path.string();
+        }
+        return false;
+    }
+    if (error_message != nullptr) {
+        error_message->clear();
+    }
+    return true;
+#endif
+}
+
+std::uint64_t JsonUInt64Or(const nlohmann::json& value,
+                           std::string_view key,
+                           std::uint64_t fallback = 0u) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_number_unsigned()) {
+        return found->get<std::uint64_t>();
+    }
+    if (found != value.end() && found->is_number_integer()) {
+        const auto raw = found->get<std::int64_t>();
+        if (raw >= 0) {
+            return static_cast<std::uint64_t>(raw);
+        }
+    }
+    return fallback;
+}
+
+bool WriteLoggingHealthFallback(
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& event_log_path,
+    const EventLogRegistry::WriteFailureState& state,
+    std::string_view updated_time) {
+    nlohmann::json payload = MakeSchemaObject(1u);
+    payload["schema"] = "svg_mb_control.logging_health.v1";
+    payload["logging_health_state"] =
+        state.active ? "event_log_unwritable" : "event_log_recovered";
+    payload["event_log_failure_active"] = state.active;
+    payload["event_log_writable"] = !state.active;
+    payload["event_log_path"] = event_log_path.string();
+    payload["first_failure_time"] = state.first_failure_time;
+    payload["last_failure_time"] = state.last_failure_time;
+    payload["last_recovery_time"] = state.last_recovery_time;
+    payload["failure_count"] = state.failure_count;
+    payload["last_error_sink"] = state.last_error_sink;
+    payload["last_error_detail"] = state.last_error_detail;
+    payload["last_failed_event_type"] = state.last_failed_event_type;
+    payload["updated_time"] = std::string(updated_time);
+
+    std::string write_error;
+    return TryWriteJsonFileAtomic(
+        RuntimeLoggingHealthPath(runtime_home), payload, 2, &write_error);
+}
+
+bool LoadActiveFallbackState(
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& event_log_path,
+    EventLogRegistry::WriteFailureState* state) {
+    if (state == nullptr) {
+        return false;
+    }
+    const auto payload = TryReadJsonObject(
+        RuntimeLoggingHealthPath(runtime_home), "logging health");
+    if (!payload.has_value() ||
+        !JsonBoolOr(*payload, "event_log_failure_active")) {
+        return false;
+    }
+    const std::string failed_path = JsonStringOr(*payload, "event_log_path");
+    if (!failed_path.empty() &&
+        EventCountKey(std::filesystem::path(failed_path)) !=
+            EventCountKey(event_log_path)) {
+        return false;
+    }
+
+    state->active = true;
+    state->failure_count = JsonUInt64Or(*payload, "failure_count", 1u);
+    state->first_failure_time =
+        JsonStringOr(*payload, "first_failure_time");
+    state->last_failure_time = JsonStringOr(*payload, "last_failure_time");
+    state->last_recovery_time =
+        JsonStringOr(*payload, "last_recovery_time");
+    state->last_error_sink = JsonStringOr(*payload, "last_error_sink");
+    state->last_error_detail = JsonStringOr(*payload, "last_error_detail");
+    state->last_failed_event_type =
+        JsonStringOr(*payload, "last_failed_event_type");
+    return true;
+}
+
+void RecordEventLogWriteFailureLocked(
+    EventLogRegistry& registry,
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& event_log_path,
+    const RuntimeLogEvent& event,
+    std::string_view event_time,
+    std::string sink,
+    std::string detail) {
+    auto& state = registry.write_failures[EventCountKey(event_log_path)];
+    const bool first_active_failure = !state.active;
+    if (first_active_failure) {
+        state.first_failure_time = std::string(event_time);
+        state.active = true;
+    }
+    state.recovery_probe_done = true;
+    ++state.failure_count;
+    state.last_failure_time = std::string(event_time);
+    state.last_recovery_time.clear();
+    state.last_error_sink = std::move(sink);
+    state.last_error_detail = std::move(detail);
+    state.last_failed_event_type = event.event_type;
+
+    if (first_active_failure || state.fallback_write_failed) {
+        state.fallback_write_failed = !WriteLoggingHealthFallback(
+            runtime_home, event_log_path, state, event_time);
+    }
+}
+
+void RecordEventLogWriteRecoveredLocked(
+    EventLogRegistry& registry,
+    const std::filesystem::path& runtime_home,
+    const std::filesystem::path& event_log_path,
+    std::string_view event_time) {
+    auto& state = registry.write_failures[EventCountKey(event_log_path)];
+    if (!state.active && !state.recovery_probe_done) {
+        state.recovery_probe_done = true;
+        LoadActiveFallbackState(runtime_home, event_log_path, &state);
+    }
+    if (!state.active) {
+        return;
+    }
+    state.active = false;
+    state.last_recovery_time = std::string(event_time);
+    state.fallback_write_failed = !WriteLoggingHealthFallback(
+        runtime_home, event_log_path, state, event_time);
+}
+
 }  // namespace
 
 std::uint64_t CachedEventCount(const std::filesystem::path& path,
                                bool refresh_from_disk) {
-    EventCountCache& cache = RuntimeEventCountCache();
+    EventLogRegistry& registry = RuntimeEventLogRegistry();
     const std::string key = EventCountKey(path);
-    std::lock_guard<std::mutex> lock(cache.mutex);
-    const auto existing = cache.counts.find(key);
-    if (!refresh_from_disk && existing != cache.counts.end()) {
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    const auto existing = registry.counts.find(key);
+    if (!refresh_from_disk && existing != registry.counts.end()) {
         return existing->second;
     }
 
     const std::uint64_t count = CountNonEmptyLines(path);
-    cache.counts[key] = count;
+    registry.counts[key] = count;
     return count;
+}
+
+void ConfigureRuntimeEventLogRetention(
+    const std::filesystem::path& event_log_path,
+    const RuntimeEventLogOptions& options) {
+    EventLogRegistry& registry = RuntimeEventLogRegistry();
+    const std::string key = EventCountKey(event_log_path);
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    registry.retention[key] = EventLogRegistry::RetentionState{
+        .options = options,
+        .active_started_at =
+            options.active_started_at.value_or(std::chrono::system_clock::now()),
+    };
 }
 
 bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
                         const RuntimeLogEvent& event,
                         const RuntimeArtifactNaming& naming) {
-    std::error_code ec;
     const std::filesystem::path path =
         ResolveRuntimeEventLogPath(runtime_home, naming);
-    std::filesystem::create_directories(path.parent_path(), ec);
-    if (ec) {
-        return false;
-    }
-
     const std::string event_time = event.event_time_iso.empty()
         ? FormatLocalIso8601(std::chrono::system_clock::now())
         : event.event_time_iso;
+
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        EventLogRegistry& registry = RuntimeEventLogRegistry();
+        std::lock_guard<std::mutex> lock(registry.mutex);
+        RecordEventLogWriteFailureLocked(
+            registry, runtime_home, path, event, event_time, "event_log_dir",
+            "failed to create event log directory " +
+                path.parent_path().string() + ": " + ec.message());
+        return false;
+    }
+
     const std::string severity = InferSeverity(event);
     const std::string error_code = InferErrorCode(event, severity);
+    const std::string key = EventCountKey(path);
+
+    EventLogRegistry& registry = RuntimeEventLogRegistry();
+    std::lock_guard<std::mutex> lock(registry.mutex);
+    RuntimeEventLogOptions options;
+    EventLogRegistry::RetentionState* retention_state = nullptr;
+    if (auto it = registry.retention.find(key);
+        it != registry.retention.end()) {
+        retention_state = &it->second;
+        options = it->second.options;
+    }
+    if (!ShouldPersistEvent(event, severity, options)) {
+        return true;
+    }
+    if (retention_state != nullptr) {
+        RotateEventLogIfDueLocked(registry, path, key, *retention_state);
+    }
 
     nlohmann::json payload = {
         {"schema", "svg_mb_control.event.v1"},
@@ -296,42 +706,17 @@ bool AppendRuntimeEvent(const std::filesystem::path& runtime_home,
     std::string line = payload.dump();
     line.push_back('\n');
 
-#ifdef _WIN32
-    HANDLE handle = CreateFileW(
-        path.wstring().c_str(),
-        FILE_APPEND_DATA | SYNCHRONIZE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        nullptr,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        nullptr);
-    if (handle == INVALID_HANDLE_VALUE) {
+    std::string write_error;
+    if (!AppendLineAtomic(path, line, &write_error)) {
+        RecordEventLogWriteFailureLocked(
+            registry, runtime_home, path, event, event_time,
+            "event_log_append", std::move(write_error));
         return false;
     }
-    DWORD written = 0u;
-    const BOOL ok = WriteFile(
-        handle,
-        line.data(),
-        static_cast<DWORD>(line.size()),
-        &written,
-        nullptr);
-    CloseHandle(handle);
-    if (!ok || written != line.size()) {
-        return false;
-    }
-#else
-    std::ofstream stream(path, std::ios::binary | std::ios::app);
-    if (!stream.is_open()) {
-        return false;
-    }
-    stream << line;
-    stream.flush();
-    if (!stream.good()) {
-        return false;
-    }
-#endif
 
-    NoteEventAppended(path);
+    NoteEventAppendedLocked(registry, path, key);
+    RecordEventLogWriteRecoveredLocked(registry, runtime_home, path,
+                                       event_time);
     return true;
 }
 

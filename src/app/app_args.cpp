@@ -62,6 +62,23 @@ double ParseDoubleArg(const wchar_t* value, const char* flag_name) {
     }
 }
 
+std::string ParseAsciiStringArg(const wchar_t* value, const char* flag_name) {
+    const std::wstring text(value == nullptr ? L"" : value);
+    if (text.empty()) {
+        throw std::runtime_error(std::string("Invalid ") + flag_name + " value.");
+    }
+    std::string out;
+    out.reserve(text.size());
+    for (const wchar_t ch : text) {
+        if (ch <= 0 || ch > 127) {
+            throw std::runtime_error(
+                std::string("Invalid ") + flag_name + " value.");
+        }
+        out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
 std::uint32_t ParseWriteChannel(const wchar_t* value) {
     return ParseUInt32Arg(value, "--write-channel");
 }
@@ -83,10 +100,10 @@ std::uint32_t ParseWriteHoldMs(const wchar_t* value) {
 void PrintUsage() {
     std::cout
         << "Usage:\n"
-        << "  svg-mb-control [--start|--status|--health|--service-probe|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>]\n"
+        << "  svg-mb-control [--start|--status|--health|--service-probe|--show-config|--stop|--restart|--reset-breakers] [--json] [--config <path>] [--profile <name>] [--set-profile <name>]\n"
         << "                 [--reset-breaker-channel <n>]\n"
         << "  svg-mb-control [--mode <one-shot|read-loop|write-once|control-loop|calibrate|evidence-log>] [--config <path>] "
-           << "[--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
+           << "[--profile <name>] [--write-channel <n>] [--write-pct <pct>] [--write-hold-ms <ms>]\n"
         << "  svg-mb-control --mode calibrate [--calibrate-channel <n>] "
            << "[--calibrate-step-ms <ms>] [--calibrate-cooldown-ms <ms>] "
            << "[--calibrate-sequence <pct:ms[,pct:ms...]>] "
@@ -134,6 +151,13 @@ CliOptions ParseCliOptions(int argc, wchar_t** argv) {
         if (arg == L"--config") {
             options.config_path = std::filesystem::path(require_value());
             options.config_path_explicit = true;
+        } else if (arg == L"--profile") {
+            options.profile_name =
+                ParseAsciiStringArg(require_value(), "--profile");
+        } else if (arg == L"--set-profile") {
+            options.set_profile_name =
+                ParseAsciiStringArg(require_value(), "--set-profile");
+            options.set_profile_requested = true;
         } else if (arg == L"--run-foreground") {
             options.foreground_launch = true;
         } else if (arg == L"--run-supervisor") {

@@ -7,14 +7,11 @@ force-terminate escalation (D1–D3) landed in
 tests. See FEAT-0008 §14 for the verification log and spec-vs-implementation
 deltas (testable `ProcessTerminator` seam; PID-corroboration guard;
 `NtSuspendProcess` test fixture instead of a controller ignore-stop mode). The
-live deterministic suspend evidence has passed; no live A4 / AVX-512 load
+live deterministic suspend evidence has passed; no additional live load
 reproduction remains for v1.
 **Owns:** `docs/features/FEAT-0008-watchdog-hung-worker-recovery.md` (`REQ-WATCHDOG-*`).
-**Basis:** `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 (L0-A4) and the
-verified gap in `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`; the
-natural-load hard-freeze premise is closed by the live-sweep evidence in
-`docs/cpu-loop-survival-live-sweep-findings-2026-06-16.md` and the mechanism
-classification in `docs/cpu-0609-freeze-classification-2026-06-16.md`.
+**Basis:** source review of the `--restart` stop-timeout path and the absence of a
+force-terminate recovery path before FEAT-0008.
 **Scope guard:** this record captures the decision and the implemented v1 slice.
 Future behavior expansion still requires the `AGENTS.md` Feature Intake Gate.
 
@@ -23,7 +20,7 @@ Future behavior expansion still requires the `AGENTS.md` Feature Intake Gate.
 Verified from source 2026-06-16: on `--restart` the handler calls
 `RequestStopAndWait` (`src/control/control_supervisor.cpp:399-423`), which writes a
 stop **sentinel file** and waits 15 s for the worker to report stopped
-(`WaitForRuntimeStop`). A worker frozen hard enough never polls the sentinel, so the
+(`WaitForRuntimeStop`). A hung worker never polls the sentinel, so the
 wait returns **2**; `src/app/app_main.cpp:190-197` then does
 `if (stop_result != 0) return stop_result;` **before** `start_requested = true`, so
 no relaunch happens — and a grep of `src/` finds **no** `TerminateProcess`/force-kill.
@@ -108,9 +105,7 @@ is left graceful-only in v1):
   terminated and a fresh worker is launched. Manual (M): the live deployed
   controller was measured through the same deterministic suspend proxy; the
   production watchdog `--restart` force-terminated the hung worker and relaunched
-  a fresh PID. Natural load testing is not remaining v1 evidence: it only
-  produced graceful recovery, and the AVX-512 escalation was rejected as the
-  wrong instrument for FEAT-0008's worker-specific stop-timeout trigger.
+  a fresh PID.
 - **REQ-WATCHDOG-02 (T, R):** assert the `supervisor.worker_force_terminated` event
   is emitted with PID + reason; review the event against `docs/RUNTIME_HOME.md`.
 - **REQ-WATCHDOG-03 (T, R):** seed an orphaned `pending_writes.json` entry, force-kill

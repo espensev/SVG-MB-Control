@@ -43,15 +43,19 @@ class RuntimeCsvLogger {
     const std::filesystem::path& mirror_path() const;
     const std::filesystem::path& manifest_path() const;
     std::uint64_t row_count() const;
+    const std::string& last_error_sink() const;
+    const std::string& last_error_detail() const;
 
   private:
     bool OpenNewChunk();
     void ResolveIdentityHashes();
     void WritePrologue();
     bool FlushStreams();
-    void WriteManifest(std::string_view status);
+    bool WriteManifest(std::string_view status);
     void CloseActiveChunk(std::string_view status);
     void PruneOldArchives();
+    void SetLastError(std::string sink, std::string detail);
+    void ClearLastError();
 
     std::filesystem::path runtime_home_;
     std::filesystem::path logs_dir_;
@@ -75,6 +79,8 @@ class RuntimeCsvLogger {
     std::ofstream archive_stream_;
     std::ofstream mirror_stream_;
     std::string mirror_pending_rows_;
+    std::string last_error_sink_;
+    std::string last_error_detail_;
 };
 
 }  // namespace svg_mb_control

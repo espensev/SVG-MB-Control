@@ -92,6 +92,15 @@ void MergeAmdTelemetry(RuntimeSnapshot& snapshot,
     snapshot.cpu_cycles_window_ms = amd_snapshot.cpu_cycles_window_ms;
     snapshot.cpu_aperf_delta = amd_snapshot.cpu_aperf_delta;
     snapshot.cpu_mperf_delta = amd_snapshot.cpu_mperf_delta;
+    // FEAT-0006 all-core package roll-up (off-thread sweeper), independent of the
+    // per-core fields above and of temperature availability.
+    snapshot.cpu_cycles_allcore_sample_id =
+        amd_snapshot.cpu_cycles_allcore_sample_id;
+    snapshot.cpu_cycles_window_ms_allcore =
+        amd_snapshot.cpu_cycles_window_ms_allcore;
+    snapshot.cpu_aperf_delta_allcore = amd_snapshot.cpu_aperf_delta_allcore;
+    snapshot.cpu_mperf_delta_allcore = amd_snapshot.cpu_mperf_delta_allcore;
+    snapshot.cpu_cycles_allcore_cores = amd_snapshot.cpu_cycles_allcore_cores;
     if (!amd_snapshot.available || amd_snapshot.samples.empty()) {
         return;
     }
@@ -111,6 +120,28 @@ void MergeGpuTelemetry(RuntimeSnapshot& snapshot,
     snapshot.gpu.hotspot_c = gpu_sample.hotspot_c;
     snapshot.gpu.gpu_name = gpu_sample.gpu_name;
     snapshot.gpu.last_warning = gpu_sample.last_warning;
+    // FEAT-0020 read-only GPU board power (logging-only; never a control input).
+    snapshot.gpu.power_acquisition = gpu_sample.power_acquisition;
+    snapshot.gpu.power_source = gpu_sample.power_source;
+    snapshot.gpu.power_sample_id = gpu_sample.power_sample_id;
+    snapshot.gpu.power_time_ms = gpu_sample.power_time_ms;
+    snapshot.gpu.power_mw = gpu_sample.power_mw;
+    // FEAT-0021 read-only GPU workload context (logging-only; never a control
+    // input). Values are cached by GpuReader and mirrored into the control CSV
+    // with an explicit sample age.
+    snapshot.gpu.context_acquisition = gpu_sample.context_acquisition;
+    snapshot.gpu.context_sample_id = gpu_sample.context_sample_id;
+    snapshot.gpu.context_time_ms = gpu_sample.context_time_ms;
+    snapshot.gpu.context_sample_age_ms = gpu_sample.context_sample_age_ms;
+    snapshot.gpu.context_util_gpu_pct = gpu_sample.context_util_gpu_pct;
+    snapshot.gpu.context_util_mem_pct = gpu_sample.context_util_mem_pct;
+    snapshot.gpu.context_pstate = gpu_sample.context_pstate;
+    snapshot.gpu.context_clock_graphics_mhz =
+        gpu_sample.context_clock_graphics_mhz;
+    snapshot.gpu.context_clock_memory_mhz =
+        gpu_sample.context_clock_memory_mhz;
+    snapshot.gpu.context_vram_used_mb = gpu_sample.context_vram_used_mb;
+    snapshot.gpu.context_vram_total_mb = gpu_sample.context_vram_total_mb;
 }
 
 void MergeFanTelemetry(RuntimeSnapshot& snapshot,

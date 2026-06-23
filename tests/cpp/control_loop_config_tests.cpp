@@ -330,11 +330,119 @@ void TestAllFourStagesTogether() {
                "all-four: CpuLowSoak release_c populated");
 }
 
+// ---------- FEAT-0003: controller discriminator + PID config ----------
+
+void TestController_DefaultIsCurveOverlay() {
+    TempJsonFile cfg_file(ChannelConfigJson(""));
+    const auto loaded = svg_mb_control::LoadControlLoopConfig(cfg_file.path());
+    ExpectTrue(loaded.channels[0].controller_kind ==
+                   svg_mb_control::ControllerKind::CurveOverlay,
+               "absent controller key defaults to curve_overlay");
+}
+
+void TestController_ParsePidFields() {
+    const std::string body =
+        R"(,"controller":"pid","pid":{"target_c":65.0,"kp":2.0,"ki":0.1,)"
+        R"("kd":0.5,"feedforward":"fixed","fixed_feedforward_pct":30.0,)"
+        R"("integral_min":-40.0,"integral_max":40.0,"allow_live":false,)"
+        R"("characterization_artifact":"shadow.csv"})";
+    TempJsonFile cfg_file(ChannelConfigJson(body));
+    const auto loaded = svg_mb_control::LoadControlLoopConfig(cfg_file.path());
+    const auto& ch = loaded.channels[0];
+    ExpectTrue(ch.controller_kind == svg_mb_control::ControllerKind::Pid,
+               "controller:pid parses to ControllerKind::Pid");
+    ExpectNear(ch.pid.target_c, 65.0, 1e-12, "pid target_c");
+    ExpectNear(ch.pid.kp, 2.0, 1e-12, "pid kp");
+    ExpectNear(ch.pid.ki, 0.1, 1e-12, "pid ki");
+    ExpectNear(ch.pid.kd, 0.5, 1e-12, "pid kd");
+    ExpectTrue(ch.pid.feedforward == svg_mb_control::PidFeedforward::Fixed,
+               "pid feedforward fixed");
+    ExpectNear(ch.pid.fixed_feedforward_pct, 30.0, 1e-12,
+               "pid fixed_feedforward_pct");
+    ExpectNear(ch.pid.integral_min, -40.0, 1e-12, "pid integral_min");
+    ExpectNear(ch.pid.integral_max, 40.0, 1e-12, "pid integral_max");
+    ExpectTrue(!ch.pid.allow_live, "pid allow_live false");
+    ExpectTrue(ch.pid.characterization_artifact == "shadow.csv",
+               "pid characterization_artifact");
+}
+
+void TestController_UnknownThrows() {
+    TempJsonFile cfg_file(ChannelConfigJson(R"(,"controller":"bogus")"));
+    ExpectThrowsContaining(
+        [&]() { svg_mb_control::LoadControlLoopConfig(cfg_file.path()); },
+        "Unknown controller", "unknown controller string -> throw");
+}
+
+void TestPid_MissingTargetThrows() {
+    TempJsonFile cfg_file(
+        ChannelConfigJson(R"(,"controller":"pid","pid":{"kp":1.0})"));
+    ExpectThrowsContaining(
+        [&]() { svg_mb_control::LoadControlLoopConfig(cfg_file.path()); },
+        "target_c", "pid without target_c -> throw");
+}
+
+void TestPid_NegativeGainThrows() {
+    TempJsonFile cfg_file(ChannelConfigJson(
+        R"(,"controller":"pid","pid":{"target_c":65.0,"kp":-1.0})"));
+    ExpectThrowsContaining(
+        [&]() { svg_mb_control::LoadControlLoopConfig(cfg_file.path()); },
+        "kp", "pid negative kp -> throw");
+}
+
+void TestPid_FixedFeedforwardRequiresPct() {
+    TempJsonFile cfg_file(ChannelConfigJson(
+        R"(,"controller":"pid","pid":{"target_c":65.0,"feedforward":"fixed"})"));
+    ExpectThrowsContaining(
+        [&]() { svg_mb_control::LoadControlLoopConfig(cfg_file.path()); },
+        "fixed_feedforward_pct", "pid fixed feedforward without pct -> throw");
+}
+
+void TestPid_UnknownFeedforwardThrows() {
+    TempJsonFile cfg_file(ChannelConfigJson(
+        R"(,"controller":"pid","pid":{"target_c":65.0,"feedforward":"bogus"})"));
+    ExpectThrowsContaining(
+        [&]() { svg_mb_control::LoadControlLoopConfig(cfg_file.path()); },
+        "Unknown pid feedforward", "unknown pid feedforward -> throw");
+}
+
+void TestPid_IntegralBoundsOrderThrows() {
+    TempJsonFile cfg_file(ChannelConfigJson(
+        R"(,"controller":"pid","pid":{"target_c":65.0,"integral_min":40.0,)"
+        R"("integral_max":-40.0})"));
+    ExpectThrowsContaining(
+        [&]() { svg_mb_control::LoadControlLoopConfig(cfg_file.path()); },
+        "integral_min", "pid integral_min >= integral_max -> throw");
+}
+
+void TestPid_AllowLiveWithoutEvidenceStillLoads() {
+    // Decision D6: allow_live without a slew cap + characterization artifact is
+    // NOT a config-load failure; the channel is downgraded to shadow/dry-run at
+    // controller construction. The loader must accept it (downgrade is tested at
+    // the controller level, not here).
+    const std::string body =
+        R"(,"controller":"pid","pid":{"target_c":65.0,"kp":1.0,)"
+        R"("allow_live":true})";
+    TempJsonFile cfg_file(ChannelConfigJson(body));
+    const auto loaded = svg_mb_control::LoadControlLoopConfig(cfg_file.path());
+    ExpectTrue(loaded.channels[0].pid.allow_live,
+               "allow_live parses true and load succeeds (downgrade is "
+               "construction-time, not a load throw)");
+}
+
 }  // namespace
 
 int main() {
     try {
         TestNoBoostFields_AllStagesInactive();
+        TestController_DefaultIsCurveOverlay();
+        TestController_ParsePidFields();
+        TestController_UnknownThrows();
+        TestPid_MissingTargetThrows();
+        TestPid_NegativeGainThrows();
+        TestPid_FixedFeedforwardRequiresPct();
+        TestPid_UnknownFeedforwardThrows();
+        TestPid_IntegralBoundsOrderThrows();
+        TestPid_AllowLiveWithoutEvidenceStillLoads();
         TestThermalPressure_CompleteFields();
         TestThermalPressure_PartialOk();
         TestThermalPressure_MissingStartFails();

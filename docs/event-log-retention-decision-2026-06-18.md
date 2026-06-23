@@ -24,6 +24,11 @@ mid-file, indicating at least one partial/torn write.
 This is the issue [#4](https://github.com/espensev/SVG-MB-Control/issues/4) Finding 1
 design gap, not an unset config value.
 
+The 2026-06-18 live check after FEAT-0020 confirmed the file continued growing:
+`release/runtime/logs/svg_mb_control_events.jsonl` was 270.3 MB, while the
+runtime log directory was 3.265 GiB total. This decision bounds only the event
+JSONL; the analyzer DB reclaim and DB-side retention are handled by FEAT-0016.
+
 ## Options considered
 
 - **A — size/age rotation only.** Rotate the active event JSONL to an archived
@@ -78,7 +83,6 @@ expected mitigation.
 - **Schema:** the `svg_mb_control.event.v1` payload is unchanged; rotation adds
   archived-file naming and at most an additive config key. Doc updates at
   implementation: `docs/RUNTIME_HOME.md` and `docs/RUNTIME_LOGGING_AND_EVALUATION.md`.
-- **Implementation/verification** are authorized by this decision but are **staged
-  for a Windows-host session**, because this repo's build is Windows-only
-  (`CMAKE_RC_COMPILER`) and the `Test-LocalCI` C++/Python lanes must verify the
+- **Implementation/verification** are authorized by this decision but remain
+  pending product-code work. The `Test-LocalCI` C++/Python lanes must verify the
   rotation/atomicity/severity behavior before the spec's §14 log is filled.

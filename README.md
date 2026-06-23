@@ -98,6 +98,9 @@ Release-script outputs:
 - `release\Install-SVG-MB-ControlShortcut.ps1`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
 - `release\Install-SVG-MB-ControlWatchdogScheduledTask.ps1`
+- `release\scripts\Compare-CpuTemps.ps1`
+- `release\scripts\Install-CpuTempBaselineTask.ps1`
+- `release\scripts\analyze_cpu_temp_power.py`
 - `release\resources\pawnio\AMDFamily17.bin` (vendored from PawnIO.Modules
   release 0.2.6; provenance and SHA-256 in
   `third_party\pawnio\README.md`)
@@ -135,26 +138,57 @@ cd .\release
 .\svg-mb-control.exe --health --json
 .\svg-mb-control.exe --show-config
 .\svg-mb-control.exe --show-config --json
+.\svg-mb-control.exe --show-config --profile snd-desk-composed --json
 .\svg-mb-control.exe --stop
 .\svg-mb-control.exe --restart
 .\svg-mb-control.exe --reset-breakers
 .\svg-mb-control.exe --reset-breakers --reset-breaker-channel 4
+.\svg-mb-control.exe --set-profile snd-desk-composed
 ```
 
-`--show-config` prints an operator-facing summary of the loaded
-`control.json`: schema version, default mode, loop cadence, write timing,
-health/safety thresholds, low-band global state, and per-channel blend,
-source-aware CPU guard, rate limits, smoothing, boost stages, and curve
-endpoints. It does not
-require the controller to be running and reads the same config the worker
-would. `--show-config --json` emits the same fields as a structured JSON
-document for tooling.
+FEAT-0023 profile selection: the controller resolves its profile at startup by
+precedence `--config` > `--profile <name>` / `SVG_MB_PROFILE` > machine identity
+(`GetComputerNameW` plus an optional `runtime\machine_id.txt`) > the built-in
+default, where a named profile is `config\profiles\<name>.json`. `--set-profile
+<name>` switches the active profile on a running controller: the supervisor
+validates the candidate and gracefully cycles the worker into it (fans revert to
+BIOS SmartFan auto during the brief restart gap), with auto-revert to the
+last-known-good profile if the new profile fails to start. The active profile is
+recorded in `runtime\control_supervisor.json` and in
+`supervisor.profile_applied` / `_rejected` / `_reverted` events.
+
+Minimal local profile UI:
+
+```powershell
+# From the repo root. Requires a Rust toolchain in PATH.
+.\scripts\Start-ProfileSwitchUi.ps1
+```
+
+The Rust helper binds to `127.0.0.1:8766`, lists profile files from the same
+profile catalog locations, shows `--health` / `--status`, and applies a profile
+only when the operator clicks Apply. Apply uses the existing
+`svg-mb-control.exe --set-profile <name>` path; the helper does not add a new
+runtime request file or switch protocol.
+
+`--show-config` prints an operator-facing summary of the loaded config:
+source path, profile source/name when selected, schema version, default mode,
+loop cadence, write timing, health/safety thresholds, low-band global state, and
+per-channel controller kind, PID parameters when selected, blend, source-aware
+CPU guard, rate limits, smoothing, boost stages, and curve endpoints. It does not
+require the controller to be running and reads the same config the worker would.
+`--show-config --json` emits the same fields as a structured JSON document for
+tooling. `--profile <name>` loads
+`config\profiles\<name>.json`; an explicit `--config <path>` wins over
+`--profile`, and `SVG_MB_PROFILE=<name>` is used when no flag is given.
 
 `--stop` asks the running loop to shut down through `release\runtime`; it does
 not hard-kill the controller. The status command prints the active worker PID,
-mode, status detail, runtime home, and log paths. `--health --json` returns a
+mode, status detail, runtime home, log paths, and PawnIO hardware-access state
+for the AMD/SMN read path and Super I/O write path. `--health --json` returns a
 machine-readable health state: `healthy`, `degraded`, `stale`, `stopped`, or
-`failed`. `--reset-breakers` writes a live control-loop request to clear open
+`failed`, plus the same additive hardware-access state. The hardware-access
+fields are observational and do not change health exit-code mapping.
+`--reset-breakers` writes a live control-loop request to clear open
 per-channel write-failure breakers without restarting; omit
 `--reset-breaker-channel` to reset all channels.
 
@@ -277,6 +311,7 @@ release\svg-mb-control.exe analyze ingest --runtime-home .\release\runtime --db 
 release\svg-mb-control.exe analyze ingest --force --quiet
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --dry-run
 release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --retain-days 14 --apply
+release\svg-mb-control.exe analyze prune --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --db-retain-days 30 --apply
 release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db .\release\runtime\svg_mb_control.db --idle-seconds 300
 release\svg-mb-control.exe analyze report --run 7 --load-threshold-c 70 --json
 release\svg-mb-control.exe analyze report --run 7 --p0-mhz 4300 --json
@@ -288,7 +323,7 @@ Behavior:
 - Default `--runtime-home` is resolved from the active config (the same
   resolution as the control modes); default `--db` is
   `<runtime-home>\svg_mb_control.db`.
-- The DB schema is bootstrapped on first use (schema version `10`). The schema
+- The DB schema is bootstrapped on first use (schema version `13`). The schema
   defines `runs`, `tick_samples`, `tick_fan_samples`, `tick_channel_samples`,
   `events`, `plant_model_captures`, `plant_model_channels`, and
   `plant_model_steps`; `tick_samples.gpu_envelope_c` stores the derived GPU
@@ -307,7 +342,29 @@ Behavior:
   evidence (FEAT-0006) from which `analyze report` derives the cycle-weighted
   APERF/MPERF ratio over distinct sample-id windows — and effective frequency
   (ratio × P0) only when `--p0-mhz <mhz>` supplies the base frequency, since
-  no logged field records P0.
+  no logged field records P0. The nullable (schema v13)
+  `tick_samples.cpu_aperf_delta_allcore` / `cpu_mperf_delta_allcore` /
+  `cpu_cycles_window_ms_allcore` / `cpu_cycles_allcore_sample_id` /
+  `cpu_cycles_allcore_cores` columns carry the all-core package effective
+  frequency from an off-thread sweep (FEAT-0006) — `analyze report` derives the
+  same ratio / effective frequency over distinct `cpu_cycles_allcore_sample_id`
+  windows (a `cpu_cycles_allcore` block, with the contributing-core count),
+  separate from the per-core block above. The nullable
+  `tick_samples.gpu_power_sample_id` /
+  `gpu_power_time_ms` / `gpu_power_mw` / `gpu_power_source` /
+  `gpu_power_acquisition` columns carry the read-only GPU board-power evidence
+  (FEAT-0020) from which `analyze report` derives mean / p50 / p90 / max over
+  distinct sample-id samples — instantaneous board power, not an energy
+  integral. The nullable FEAT-0021 `tick_samples.gpu_context_sample_id` /
+  `gpu_context_time_ms` / `gpu_context_sample_age_ms` /
+  `gpu_context_acquisition`, `gpu_util_*`, `gpu_pstate`, `gpu_clock_*`, and
+  `gpu_vram_*` columns carry cached GPU workload context from which
+  `analyze report` emits a `gpu_context` summary only when present.
+  GPU power records automatically on the standard loop whenever NVML returns a
+  reading; to also enable the comparable CPU package-energy columns there, run
+  `scripts\Set-EnergyLoggingProfile.ps1 -Enable` (and `-Disable` to revert,
+  `-DryRun` to preview) — it sets `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled` and
+  keeps the profile from being undone by the boot/logon energy safety-revert task.
 - Runs are deduplicated by `(session_start, mode)` and by canonical
   `manifest_path`, so re-running ingest is idempotent. The live manifest and
   its rotated archive copy resolve to a single run row.
@@ -319,9 +376,13 @@ Behavior:
   requires `--apply` before deleting files. It only deletes a bundle after the
   run is present in the SQLite ingest DB and the archive is older than
   `--retain-days`; running manifests are always skipped.
-- Runtime retention also removes the matching archive manifest when it prunes an
-  old archive CSV chunk. The global event JSONL and plant-model captures are
-  intentionally not pruned by this first-pass cleanup.
+- Add `--db-retain-days <days>` to the same prune command to delete analyzer DB
+  `runs` older than the age bound, cascade their dependent tick/fan/channel/event
+  rows under SQLite foreign keys, and run one post-delete reclaim. `0` explicitly
+  disables the DB-side purge; dry-run reports candidates without deleting rows.
+- Runtime retention removes the matching archive manifest when it prunes an old
+  archive CSV chunk. Event JSONL files rotate into `logs\archive\*.jsonl` and are
+  pruned by the runtime `log_rotate_hours` / `log_retain_days` window.
 - `analyze report` summarizes one ingested run (the most recent run unless
   `--run <id>` or `--session <ts>` is given). It reports idle/load/cooldown
   `p50`/`p90`/`max` for `cpu_tctl_c` and `gpu_memjn_c`/`gpu_envelope_c`,
@@ -333,7 +394,12 @@ Behavior:
   counts. The idle band is the ticks whose elapsed time is below
   `--idle-seconds` (default `300`, matching the evaluation passes); percentiles
   use nearest-rank on sorted ascending values where `p100` is the maximum.
-  `--json` emits the same metrics as a JSON object.
+  It also compares manifest-declared, archive-ingested, and latest-mirror CSV
+  row counts when the runtime manifest names `artifacts.csv_latest.path`.
+  Running mismatches are reported as
+  `running_csv_manifest_consistency_warning`; closed-run mismatches are reported
+  as `closed_csv_manifest_consistency_suspect_evidence`. `--json` emits the
+  same metrics as a JSON object.
 - `analyze report --out <path>` writes the text or JSON report to a file. For
   text reports, a sibling `*.decision.md` record is written automatically unless
   `--no-decision-record` is set. Use `--decision-record-out <path>` or
@@ -342,7 +408,8 @@ Behavior:
   identity, profile/notes/decision context, source artifact hashes, generated
   output hashes, response metrics, channel attribution counts, event
   severity/error-code counts, and diagnostic flags for no-response,
-  slow-response, hot-but-low-setpoint, authority, write, and restore issues.
+  slow-response, hot-but-low-setpoint, CSV evidence consistency, authority,
+  write, and restore issues.
   `analyze report` is read-only; it never writes to fans, the runtime, or the
   database.
 
@@ -368,6 +435,32 @@ shells the in-repo `svg-mb-control.exe` to `analyze ingest --csv` into a
 temporary database and forwards native `analyze report` output (text or JSON),
 so all analysis is native. Prefer native `analyze ingest` plus `analyze
 report` for new work.
+
+CPU temperature trend and power-normalized comparison:
+
+```powershell
+.\scripts\Compare-CpuTemps.ps1 -Label stock-preoc -AmbientC 21
+python .\scripts\analyze_cpu_temp_power.py `
+  --runtime-home .\release\runtime `
+  --machine-policy .\config\machines\snd-desk.cooling.policy.json `
+  --ambient-c 21 `
+  --out .\release\runtime\analysis\cpu-temp-power-latest.md `
+  --json-out .\release\runtime\analysis\cpu-temp-power-latest.json `
+  --window-csv-out .\release\runtime\analysis\cpu-temp-power-latest-windows.csv
+```
+
+Use `Compare-CpuTemps.ps1` for continuity with the long busy-band baseline. Use
+`analyze_cpu_temp_power.py` when CPU package-energy fields are present, so CPU
+temperature is compared against actual package watts with GPU-confound and
+policy-marked radiator-response context. It also reports per-CCD Tdie (the
+`CCD2-CCD1 C` balance between the frequency and V-cache dies), parsed from the
+existing `amd_sensor_summary` column with no schema change.
+
+To detect BIOS/Curve-Optimizer/PBO changes from telemetry alone (no operator
+annotation), `scripts\cpu_config_fingerprint.py` segments runs into auto-labeled
+config regimes from config-pure dimensions; effective-MHz/W and Vcore dimensions
+fill in after a `CPU_CYCLES_MODE=enabled` capture and the SVI probe
+(`docs\cpu-cycles-capture-and-vcore-probe-plan-2026-06-21.md`).
 
 Local eval dashboard:
 
@@ -480,9 +573,11 @@ Control writes:
 - `circuit_breaker_reset.request.json`
 - `logs\svg_mb_control_output.csv`
 - `logs\svg_mb_control_events.jsonl`
+- `logs\archive\svg_mb_control_events_<timestamp>.jsonl`
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv`
 - `logs\svg_mb_control_evidence.csv`
 - `logs\svg_mb_control_evidence_events.jsonl`
+- `logs\archive\svg_mb_control_evidence_events_<timestamp>.jsonl`
 - `logs\svg_mb_control_evidence_manifest.json`
 - `svg-mb-control.supervisor.stdout.log`
 - `svg-mb-control.supervisor.stderr.log`
@@ -540,9 +635,9 @@ Current contract and operator references:
 Compacted implementation records, kept separate from the current operator
 workflow:
 
-- `docs\CONTROL_SIMPLIFICATION_TARGETS.md`
-- `docs\LOGGING_IMPROVEMENT_PLAN.md`
-- `docs\SCRIPT_STACK_REVIEW.md`
+- `docs\archive\implemented-plans\CONTROL_SIMPLIFICATION_TARGETS.md`
+- `docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`
+- `docs\archive\implemented-plans\SCRIPT_STACK_REVIEW.md`
 - `docs\bench-logging-history.md`
 
 Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and

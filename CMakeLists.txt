@@ -67,6 +67,18 @@ if(GIT_FOUND)
     )
     if(_git_result EQUAL 0 AND NOT _git_output STREQUAL "")
         set(SVG_MB_CONTROL_GIT_HASH "${_git_output}")
+        # Suffix -dirty when the working tree has uncommitted changes so a build
+        # from a dirty tree is not stamped as a clean commit in --version.
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" status --porcelain
+            RESULT_VARIABLE _git_status_result
+            OUTPUT_VARIABLE _git_status_output
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(_git_status_result EQUAL 0 AND NOT _git_status_output STREQUAL "")
+            set(SVG_MB_CONTROL_GIT_HASH "${SVG_MB_CONTROL_GIT_HASH}-dirty")
+        endif()
     endif()
 endif()
 
@@ -133,10 +145,15 @@ add_library(svg_mb_control_core STATIC
     src/control/boost_stage.cpp
     src/control/cadence_score.cpp
     src/control/calibration.cpp
+    src/control/channel_controller.cpp
     src/control/channel_evaluator.cpp
     src/control/channel_write.cpp
     src/control/control_config.cpp
     src/control/control_config_print.cpp
+    src/control/machine_profile.cpp
+    src/control/pid_controller.cpp
+    src/control/profile_composition.cpp
+    src/control/profile_switch_decision.cpp
     src/control/control_loop.cpp
     src/control/control_loop_config.cpp
     src/control/control_math.cpp
@@ -160,11 +177,13 @@ add_library(svg_mb_control_core STATIC
     src/platform/runtime_singleton.cpp
     src/platform/runtime_util.cpp
     src/platform/service_probe.cpp
+    src/platform/machine_identity.cpp
     src/policy/control_policy.cpp
     src/runtime/csv_util.cpp
     src/runtime/evidence_log.cpp
     src/runtime/evidence_signatures.cpp
     src/runtime/gpu_evidence_csv.cpp
+    src/runtime/hardware_access_status.cpp
     src/runtime/json_io.cpp
     src/runtime/pending_writes.cpp
     src/runtime/read_loop.cpp
@@ -271,6 +290,38 @@ if(SVG_MB_CONTROL_BUILD_CYCLE_PROBE AND WIN32)
         OUTPUT_NAME "cpu-cycle-counter-probe")
 endif()
 
+# Throwaway one-shot read-only probe: discover whether live CPU core/SoC voltage
+# (SVI telemetry) is reachable on Zen5 / Family 1Ah (9950X3D) via the shipped bin's
+# `ioctl_read_smn` path (the same arbitrary-SMN-address transport already used for
+# Tctl/per-CCD Tdie). The MSR allow-list does not apply to SMN, so this needs no
+# new module -- only the unknown SVI3 plane address/decode, which the probe sweeps
+# and a human validates vs HWiNFO64. OFF by default: not built by Test-LocalCI /
+# Build-Release / CTest, never shipped in release\, not part of the control loop.
+# Reuses only the bin-load API (pawnio_binary) + env_util + the pure decode header
+# (amd_decode.h); does not link svg_mb_control_core. Build with
+#   cmake -DSVG_MB_CONTROL_BUILD_VCORE_PROBE=ON ... && cmake --build ... \
+#         --target cpu_vcore_probe
+option(SVG_MB_CONTROL_BUILD_VCORE_PROBE
+    "Build the throwaway read-only CPU Vcore/SVI SMN discovery probe (Zen5 fingerprint)" OFF)
+if(SVG_MB_CONTROL_BUILD_VCORE_PROBE AND WIN32)
+    add_executable(cpu_vcore_probe
+        tools/cpu_vcore_probe.cpp
+        src/hardware/pawnio_binary.cpp
+        src/platform/env_util.cpp
+    )
+    target_include_directories(cpu_vcore_probe PRIVATE
+        ${SVG_MB_CONTROL_INCLUDE_DIRS})
+    target_compile_features(cpu_vcore_probe PRIVATE cxx_std_20)
+    target_compile_definitions(cpu_vcore_probe PRIVATE
+        ${SVG_MB_CONTROL_COMMON_DEFINITIONS})
+    if(MSVC)
+        target_compile_options(cpu_vcore_probe PRIVATE /W4 /permissive-)
+    endif()
+    target_link_libraries(cpu_vcore_probe PRIVATE bcrypt)
+    set_target_properties(cpu_vcore_probe PROPERTIES
+        OUTPUT_NAME "cpu-vcore-probe")
+endif()
+
 # Throwaway synthetic CPU load generator for the FEAT-0006 CPU-energy
 # quarantine-exit capture: drives a controlled all-core load so a session has a
 # clean idle->load->cooldown step. OFF by default: not built by Test-LocalCI /
@@ -330,14 +381,40 @@ if(BUILD_TESTING)
         tests/cpp/control_loop_config_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_csv_rows_tests
         tests/cpp/csv_rows_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_profile_composition_tests
+        tests/cpp/profile_composition_tests.cpp)
+    # FEAT-0023 (REQ-MPROFILE-01/10): the composition reproduction test reads the
+    # real shipped config/ files to prove compose(snd-desk) == control.release.json.
+    target_compile_definitions(svg_mb_control_profile_composition_tests PRIVATE
+        SVG_MB_CONTROL_REPO_DIR="${CMAKE_SOURCE_DIR}")
+    svg_mb_control_add_core_test(svg_mb_control_runtime_event_log_tests
+        tests/cpp/runtime_event_log_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_runtime_status_tests
+        tests/cpp/runtime_status_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_runtime_csv_archive_tests
+        tests/cpp/runtime_csv_archive_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_channel_write_tests
         tests/cpp/channel_write_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_channel_controller_tests
+        tests/cpp/channel_controller_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_pid_controller_tests
+        tests/cpp/pid_controller_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_force_terminate_tests
         tests/cpp/worker_force_terminate_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests
         tests/cpp/amd_decode_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_power_anticipation_tests
         tests/cpp/power_anticipation_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_pending_writes_store_tests
+        tests/cpp/pending_writes_store_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_machine_profile_tests
+        tests/cpp/machine_profile_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_machine_identity_tests
+        tests/cpp/machine_identity_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_runtime_lifecycle_tests
+        tests/cpp/runtime_lifecycle_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_profile_switch_decision_tests
+        tests/cpp/profile_switch_decision_tests.cpp)
 
     # rapl_energy.h is header-only and dependency-free, so this test does not
     # link svg_mb_control_core (keeps it fast and isolated like the math it covers).

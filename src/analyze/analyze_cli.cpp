@@ -38,12 +38,16 @@ void PrintAnalyzeUsage() {
         << "    manifest, synthesizing one run row keyed on the CSV path.\n";
     std::cout
         << "  svg-mb-control analyze prune [--runtime-home <path>] "
-           << "[--db <path>] [--retain-days <days>] [--dry-run|--apply] [--quiet]\n"
+           << "[--db <path>] [--retain-days <days>] "
+           << "[--db-retain-days <days>] [--dry-run|--apply] [--quiet]\n"
         << "    Finds old archive CSV/manifest bundles. Dry-run is the default; "
            << "--apply is\n"
         << "    required before files are deleted. Deletion is gated on the run "
            << "already\n"
-        << "    being present in the sqlite ingest database.\n";
+        << "    being present in the sqlite ingest database. "
+           "--db-retain-days also\n"
+        << "    prunes old DB runs and reclaims space after deletion; 0 disables "
+           "DB retention explicitly.\n";
     std::cout
         << "  svg-mb-control analyze report [--runtime-home <path>] "
            << "[--db <path>] [--run <id>|--session <ts>] [--idle-seconds <s>] "
@@ -208,6 +212,14 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
             }
             prune_options.retain_days = retain_days;
             retain_days_explicit = true;
+        } else if (arg == L"--db-retain-days") {
+            if (!only_for(L"prune", "prune", "--db-retain-days")) return 1;
+            std::uint32_t retain_days = 0u;
+            if (!ParseUint32Option(require_value(index), retain_days)) {
+                std::cerr << "Error: invalid --db-retain-days value.\n";
+                return 1;
+            }
+            prune_options.db_retain_days = retain_days;
         } else if (arg == L"--apply") {
             if (!only_for(L"prune", "prune", "--apply")) return 1;
             prune_options.apply = true;

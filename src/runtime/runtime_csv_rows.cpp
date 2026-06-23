@@ -320,7 +320,7 @@ constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 2>
          }},
     }};
 
-constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 13>
+constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 19>
     kChannelPostBoostColumns{{
         {"_low_band_stage_boost_pct",
          [](std::ostringstream& csv, bool present,
@@ -392,6 +392,38 @@ constexpr std::array<CsvColumn<RuntimeControlChannelLogState>, 13>
                  !std::isnan(state.feedforward_pct);
              AppendCsvFieldDoubleIf(csv, correction_present,
                                     state.setpoint_pct - state.feedforward_pct);
+         }},
+        // FEAT-0003 (REQ-PROFILE-08): append-only control-law attribution + PID
+        // evidence. Blank cell for the curve law (empty kind / NaN pid_*).
+        {"_controller_kind",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldStringIf(csv, present, state.controller_kind);
+         }},
+        {"_pid_error_c",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_error_c);
+         }},
+        {"_pid_p_term",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_p_term);
+         }},
+        {"_pid_i_term",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_i_term);
+         }},
+        {"_pid_d_term",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_d_term);
+         }},
+        {"_pid_setpoint_raw_pct",
+         [](std::ostringstream& csv, bool present,
+            const RuntimeControlChannelLogState& state) {
+             AppendCsvFieldDoubleIf(csv, present, state.pid_setpoint_raw_pct);
          }},
     }};
 
@@ -610,7 +642,28 @@ std::string BuildControlLoopCsvHeader() {
            << ",cpu_cycles_window_ms"
            << ",cpu_aperf_delta"
            << ",cpu_mperf_delta"
-           << ",cpu_cycles_acquisition";
+           << ",cpu_cycles_acquisition"
+           << ",cpu_aperf_delta_allcore"
+           << ",cpu_mperf_delta_allcore"
+           << ",cpu_cycles_window_ms_allcore"
+           << ",cpu_cycles_allcore_sample_id"
+           << ",cpu_cycles_allcore_cores"
+           << ",gpu_power_sample_id"
+           << ",gpu_power_time_ms"
+           << ",gpu_power_mw"
+           << ",gpu_power_source"
+           << ",gpu_power_acquisition"
+           << ",gpu_context_sample_id"
+           << ",gpu_context_time_ms"
+           << ",gpu_context_sample_age_ms"
+           << ",gpu_context_acquisition"
+           << ",gpu_util_gpu_pct"
+           << ",gpu_util_mem_pct"
+           << ",gpu_pstate"
+           << ",gpu_clock_graphics_mhz"
+           << ",gpu_clock_memory_mhz"
+           << ",gpu_vram_used_mb"
+           << ",gpu_vram_total_mb";
     for (std::uint32_t channel = 0u;
          channel < static_cast<std::uint32_t>(kRuntimeLogFanChannelCount);
          ++channel) {
@@ -628,6 +681,9 @@ std::string BuildControlLoopCsvHeader() {
         AppendEntityColumns(header, "channel", channel,
                             kChannelPostBoostColumns);
     }
+    // FEAT-0023 (REQ-MPROFILE-09): additive active-profile identity, control-loop
+    // only (not in BuildCommonCsvHeader, so read-loop/evidence-log are unchanged).
+    header << ",active_profile_name,active_profile_source";
     return header.str();
 }
 
@@ -636,7 +692,9 @@ std::string BuildControlLoopCsvRow(
     const RuntimeSnapshotIndex& snapshot_index,
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
-    const std::vector<RuntimeControlChannelLogState>& channels) {
+    const std::vector<RuntimeControlChannelLogState>& channels,
+    const std::string& active_profile_name,
+    const std::string& active_profile_source) {
     std::ostringstream csv;
     BuildCommonCsvPrefix(csv, snapshot, snapshot_index, "control-loop");
     AppendCsvField(csv, tick_count);
@@ -676,6 +734,50 @@ std::string BuildControlLoopCsvRow(
     AppendCsvFieldDouble(csv, snapshot.cpu_aperf_delta);
     AppendCsvFieldDouble(csv, snapshot.cpu_mperf_delta);
     AppendCsvFieldString(csv, snapshot.cpu_cycles_acquisition);
+    // FEAT-0006 all-core package roll-up (off-thread sweeper). sample_id blank
+    // when 0; window/deltas blank (NaN) on baseline / all-blanked /
+    // package-implausible; cores blank when 0 (no contributing window). Order
+    // matches the header block above.
+    AppendCsvFieldDouble(csv, snapshot.cpu_aperf_delta_allcore);
+    AppendCsvFieldDouble(csv, snapshot.cpu_mperf_delta_allcore);
+    AppendCsvFieldDouble(csv, snapshot.cpu_cycles_window_ms_allcore);
+    AppendCsvFieldIf(csv, snapshot.cpu_cycles_allcore_sample_id != 0u,
+                     snapshot.cpu_cycles_allcore_sample_id);
+    AppendCsvFieldIf(csv, snapshot.cpu_cycles_allcore_cores > 0,
+                     snapshot.cpu_cycles_allcore_cores);
+    // FEAT-0020 read-only GPU board power (from snapshot.gpu, logging-only;
+    // never a control input). sample_id blank when 0 (no sample yet / not
+    // advanced on a skipped or failed read); time_ms/mw blank (NaN) when there
+    // is no live read; source/acquisition are always state strings.
+    AppendCsvFieldIf(csv, snapshot.gpu.power_sample_id != 0u,
+                     snapshot.gpu.power_sample_id);
+    AppendCsvFieldDouble(csv, snapshot.gpu.power_time_ms);
+    AppendCsvFieldDouble(csv, snapshot.gpu.power_mw);
+    AppendCsvFieldString(csv, snapshot.gpu.power_source);
+    AppendCsvFieldString(csv, snapshot.gpu.power_acquisition);
+    // FEAT-0021 read-only GPU workload context. sample_id blanks when no
+    // context sample is available; cached rows repeat the id and carry a
+    // growing sample_age_ms. Integer sentinels/zeros are blanked so missing
+    // values never become false workload zeros.
+    AppendCsvFieldIf(csv, snapshot.gpu.context_sample_id != 0u,
+                     snapshot.gpu.context_sample_id);
+    AppendCsvFieldDouble(csv, snapshot.gpu.context_time_ms);
+    AppendCsvFieldDouble(csv, snapshot.gpu.context_sample_age_ms);
+    AppendCsvFieldString(csv, snapshot.gpu.context_acquisition);
+    AppendCsvFieldInt32IfAvailable(csv, true,
+                                   snapshot.gpu.context_util_gpu_pct);
+    AppendCsvFieldInt32IfAvailable(csv, true,
+                                   snapshot.gpu.context_util_mem_pct);
+    AppendCsvFieldInt32IfAvailable(csv, true,
+                                   snapshot.gpu.context_pstate);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_clock_graphics_mhz != 0u,
+                     snapshot.gpu.context_clock_graphics_mhz);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_clock_memory_mhz != 0u,
+                     snapshot.gpu.context_clock_memory_mhz);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_vram_total_mb != 0u,
+                     snapshot.gpu.context_vram_used_mb);
+    AppendCsvFieldIf(csv, snapshot.gpu.context_vram_total_mb != 0u,
+                     snapshot.gpu.context_vram_total_mb);
 
     static const RuntimeControlChannelLogState kEmptyChannel{};
     for (std::uint32_t channel = 0u;
@@ -692,6 +794,9 @@ std::string BuildControlLoopCsvRow(
         }
         AppendEntityFields(csv, present, state, kChannelPostBoostColumns);
     }
+    // FEAT-0023 (REQ-MPROFILE-09): additive active-profile identity columns.
+    AppendCsvFieldString(csv, active_profile_name);
+    AppendCsvFieldString(csv, active_profile_source);
     return csv.str();
 }
 

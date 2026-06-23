@@ -451,7 +451,7 @@ at ~200 W), and cooldown. Use the in-tree analyzer
   validation from the verification doc follow-up status (RAPL on Family 1Ah;
   PawnIO affinity honoring;
   `#GP`→blank), feeding the Evaluation. Its procedure is
-  `docs/cpu-work-energy-live-validation-plan-2026-06-07.md`.
+  `docs/archive/implemented-plans/cpu-work-energy-live-validation-plan-2026-06-07.md`.
 
 ## What this does not authorize / open items
 

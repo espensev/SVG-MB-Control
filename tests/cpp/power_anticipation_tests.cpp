@@ -1,5 +1,5 @@
 // Unit tests for the pure power-anticipation stage math
-// (src/control/power_anticipation.h, docs/cpu-power-feedforward-plan-2026-06-10.md
+// (src/control/power_anticipation.h, docs/archive/cpu-power-feedforward-plan-2026-06-10.md
 // §4). Core-linked for control_math's SmoothStep. The stage is design support
 // only -- nothing in the runtime calls it; these tests pin the intended
 // semantics, in particular decay-on-unavailable (the deliberate difference

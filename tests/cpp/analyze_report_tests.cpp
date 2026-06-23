@@ -70,6 +70,16 @@ void ExpectNullopt(const std::optional<double>& v,
 
 constexpr double kEps = 1e-9;
 
+bool HasFlag(const std::vector<std::string>& flags,
+             const std::string& expected) {
+    for (const auto& flag : flags) {
+        if (flag == expected) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void TestPercentile_Empty() {
     ExpectNullopt(Percentile({}, 50.0),
                   "Percentile of empty input is nullopt");
@@ -386,6 +396,40 @@ void TestBuildDiagnosticFlags_RobustnessAndSlowResponse() {
     ExpectTrue(restores, "restore_failures_present flag emitted");
 }
 
+void TestBuildDiagnosticFlags_RunningCsvManifestMismatchIsWarning() {
+    ReportOptions options;
+
+    ReportData data;
+    data.status = "running";
+    data.row_count_declared = 100;
+    data.row_count_ingested = 96;
+    data.manifest_evidence.csv_latest_row_count = 92;
+
+    const auto flags = BuildDiagnosticFlags(options, data);
+    ExpectTrue(HasFlag(flags, "running_csv_manifest_consistency_warning"),
+               "running CSV/manifest row-count mismatch emits warning flag");
+    ExpectFalse(
+        HasFlag(flags, "closed_csv_manifest_consistency_suspect_evidence"),
+        "running CSV/manifest row-count mismatch does not emit closed-run flag");
+}
+
+void TestBuildDiagnosticFlags_ClosedCsvManifestMismatchIsSuspectEvidence() {
+    ReportOptions options;
+
+    ReportData data;
+    data.status = "completed";
+    data.row_count_declared = 100;
+    data.row_count_ingested = 96;
+    data.manifest_evidence.csv_latest_row_count = 96;
+
+    const auto flags = BuildDiagnosticFlags(options, data);
+    ExpectTrue(
+        HasFlag(flags, "closed_csv_manifest_consistency_suspect_evidence"),
+        "closed CSV/manifest row-count mismatch emits suspect-evidence flag");
+    ExpectFalse(HasFlag(flags, "running_csv_manifest_consistency_warning"),
+                "closed CSV/manifest row-count mismatch does not emit warning flag");
+}
+
 void TestBuildDiagnosticFlags_SlowResponse() {
     ReportOptions options;
     options.load_threshold_c = 75.0;
@@ -582,6 +626,8 @@ int main() {
     TestAssignBands_HotInIdleIgnored();
     TestBuildDiagnosticFlags_HotButLowSetpoint();
     TestBuildDiagnosticFlags_RobustnessAndSlowResponse();
+    TestBuildDiagnosticFlags_RunningCsvManifestMismatchIsWarning();
+    TestBuildDiagnosticFlags_ClosedCsvManifestMismatchIsSuspectEvidence();
     TestBuildDiagnosticFlags_SlowResponse();
     TestBuildDiagnosticFlags_NoFlagsOnHealthyRun();
     TestComputePackagePower_EmptyIsUnavailable();

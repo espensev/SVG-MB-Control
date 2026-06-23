@@ -84,7 +84,7 @@ class ThrowingPendingWritesStore
     : public svg_mb_control::PendingWritesStoreInterface {
  public:
     int upsert_calls = 0;
-    void Upsert(const svg_mb_control::PendingWriteEntry&) override {
+    bool Upsert(const svg_mb_control::PendingWriteEntry&) override {
         ++upsert_calls;
         throw std::runtime_error("simulated sidecar persist failure");
     }
@@ -98,7 +98,7 @@ class ThrowingPendingWritesStore
 class Utf8ThrowingPendingWritesStore
     : public svg_mb_control::PendingWritesStoreInterface {
  public:
-    void Upsert(const svg_mb_control::PendingWriteEntry&) override {
+    bool Upsert(const svg_mb_control::PendingWriteEntry&) override {
         throw std::runtime_error(
             std::string("sidecar persist failed \xFF\xFE invalid-utf8"));
     }
@@ -876,6 +876,107 @@ void TestProbeRateLimitedWithinBackoff() {
 
 }  // namespace
 
+// FEAT-0019 REQ-WRITEHOT-06: a deferred same-baseline Upsert (which performs no
+// synchronous persist) must NOT clear the FEAT-0010 persist-failure counter --
+// otherwise a still-missing activation record would falsely read as healthy. The
+// store is pre-seeded with the channel's entry at the same baseline so the write's
+// Upsert is a same-baseline change that defers; the channel's first write
+// (last_issued_pct is NaN) bypasses the deadband/cooldown gates so it reaches the
+// Upsert call.
+void TestDeferredUpsertDoesNotClearPersistFailureCounter() {
+    const std::filesystem::path home = MakeTempHome("deferred_no_reset");
+    svg_mb_control::ControlRuntimeContext context = MakeContext(home);
+    svg_mb_control::ChannelState channel =
+        MakeReadyChannel(/*breaker_open=*/false);
+    svg_mb_control::PendingWritesStore working_store(home);
+
+    svg_mb_control::PendingWriteEntry seed;
+    seed.channel = channel.config.channel;               // 2
+    seed.baseline_duty_raw = channel.baseline_duty_raw;  // 10
+    seed.baseline_mode_raw = channel.baseline_mode_raw;  // 1
+    seed.target_pct = 50.0;
+    ExpectTrue(working_store.Upsert(seed),
+               "seeding a new channel entry persists synchronously (returns true)");
+
+    channel.consecutive_sidecar_persist_failures = 3u;  // simulate prior faults
+
+    RecordingFanWriter writer;
+    const svg_mb_control::ChannelEvaluation eval =
+        MakeEvaluation(60.0, /*safety_override=*/false);
+    RunWrite(context, channel, eval, writer, working_store);
+
+    ExpectTrue(writer.apply_calls.size() == 1u,
+               "the deferred-persist write still actuates");
+    ExpectTrue(channel.consecutive_sidecar_persist_failures == 3u,
+               "a deferred same-baseline Upsert does not clear the persist-failure "
+               "counter");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
+// FEAT-0019 REQ-WRITEHOT-06: the tick-loop helper that clears persist-failure
+// counters after a successful end-of-tick Flush zeroes every channel's counter
+// (the full-file flush made every record current).
+void TestClearSidecarPersistFailuresZeroesCounters() {
+    std::vector<svg_mb_control::ChannelState> channels(3);
+    channels[0].consecutive_sidecar_persist_failures = 4u;
+    channels[1].consecutive_sidecar_persist_failures = 0u;
+    channels[2].consecutive_sidecar_persist_failures = 1u;
+    svg_mb_control::ClearSidecarPersistFailures(channels);
+    ExpectTrue(channels[0].consecutive_sidecar_persist_failures == 0u &&
+                   channels[1].consecutive_sidecar_persist_failures == 0u &&
+                   channels[2].consecutive_sidecar_persist_failures == 0u,
+               "ClearSidecarPersistFailures zeroes all channels' counters");
+}
+
+// FEAT-0019 REQ-WRITEHOT-06: the end-of-tick composition the control loop runs
+// (FlushAndClearPersistFailures) must clear persist-failure counters ONLY when
+// the Flush actually persisted. This pins both branches through real
+// PendingWritesStore state so the tick wiring cannot be mutated to an
+// unconditional clear (which would falsely heal a channel on a quiescent tick)
+// or to never-clear (which would never self-heal) without failing here.
+void TestFlushAndClearPersistFailuresGatesClearOnPersist() {
+    const std::filesystem::path home = MakeTempHome("flush_clear_gated");
+    svg_mb_control::PendingWritesStore store(home);
+
+    svg_mb_control::PendingWriteEntry entry;
+    entry.channel = 2u;
+    entry.baseline_duty_raw = 10u;
+    entry.baseline_mode_raw = 1u;
+    entry.target_pct = 30.0;
+    entry.requested_hold_ms = 0u;
+    entry.started_iso = "2026-06-18T00:00:00";
+    store.Upsert(entry);                 // activation persists synchronously, clears dirty
+    entry.target_pct = 40.0;
+    store.Upsert(entry);                 // same baseline -> deferred (store now dirty)
+
+    std::vector<svg_mb_control::ChannelState> channels(2);
+    channels[0].consecutive_sidecar_persist_failures = 3u;
+    channels[1].consecutive_sidecar_persist_failures = 5u;
+
+    const bool persisted =
+        svg_mb_control::FlushAndClearPersistFailures(store, channels);
+    ExpectTrue(persisted, "a dirty store flushes (returns true)");
+    ExpectTrue(channels[0].consecutive_sidecar_persist_failures == 0u &&
+                   channels[1].consecutive_sidecar_persist_failures == 0u,
+               "a flush that persisted clears every channel's persist-failure "
+               "counter");
+
+    // Store is now clean; a second call must NOT persist and must NOT clear.
+    channels[0].consecutive_sidecar_persist_failures = 7u;
+    const bool persisted_again =
+        svg_mb_control::FlushAndClearPersistFailures(store, channels);
+    ExpectFalse(persisted_again,
+                "a clean store does not flush (returns false)");
+    ExpectTrue(channels[0].consecutive_sidecar_persist_failures == 7u,
+               "a no-op flush leaves persist-failure counters untouched (the "
+               "clear stays gated on the persist)");
+
+    std::error_code ec;
+    std::filesystem::remove_all(home, ec);
+}
+
 int main() {
     TestSensorSafeBypassesOpenBreaker();
     TestNonCoolingWriteSuppressedByOpenBreaker();
@@ -890,6 +991,9 @@ int main() {
     TestSafetyOverrideActuatesDespiteSidecarPersistFailure();
     TestSidecarPersistFailureIncrementsCounterNotBreaker();
     TestSidecarPersistFailureCounterResetsOnSuccess();
+    TestDeferredUpsertDoesNotClearPersistFailureCounter();
+    TestClearSidecarPersistFailuresZeroesCounters();
+    TestFlushAndClearPersistFailuresGatesClearOnPersist();
     TestSidecarPersistFailureDegradesHealth();
     TestSidecarBaselineSurvivesStaleAndAbsentEntry();
     TestSidecarPersistFailureEmitsEvent();

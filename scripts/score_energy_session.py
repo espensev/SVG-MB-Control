@@ -46,6 +46,26 @@ WRAP_JOULES = 2 ** 32 * 15.26e-6   # ESU=16 -> 15.26 uJ/unit -> ~65.5 kJ per wra
 TOL_PCT = 15.0             # criterion 3 tolerance
 
 
+def _has_value(values):
+    return any(v not in (None, "") for v in values)
+
+
+def select_cycle_deltas(header, rows):
+    """Criterion-4 cycle source: prefer the all-core package columns
+    (cpu_*_delta_allcore) when the run carries real data, else fall back to the
+    per-core (core-0) columns. Returns (aperf, mperf, source) with source
+    'allcore' or 'core0'. Pure; mirrors the analyzer preferring the package
+    ratio while staying valid on captures that predate the all-core columns. The
+    verdict is a ratio of sums, so the per-window mirroring (and the off-thread
+    sweeper's independent cadence) does not bias it."""
+    a_all = col(header, rows, "cpu_aperf_delta_allcore")
+    m_all = col(header, rows, "cpu_mperf_delta_allcore")
+    if _has_value(a_all) and _has_value(m_all):
+        return a_all, m_all, "allcore"
+    return (col(header, rows, "cpu_aperf_delta"),
+            col(header, rows, "cpu_mperf_delta"), "core0")
+
+
 def parse_wall(x):
     try:
         return datetime.strptime(x, WALL_FMT)
@@ -307,8 +327,9 @@ def main(argv=None):
 
     # --- Criterion 4: effective frequency (cycles) ---
     if man.get("include_cycles"):
-        aperf = col(header, rows, "cpu_aperf_delta")
-        mperf = col(header, rows, "cpu_mperf_delta")
+        # Prefer the all-core package ratio when the run carries it; fall back to
+        # the per-core (core-0) columns so pre-all-core captures still score.
+        aperf, mperf, cyc_src = select_cycle_deltas(header, rows)
 
         def ratio(mask):
             a = sum(to_f(x) for x, m in zip(aperf, mask)
@@ -320,7 +341,7 @@ def main(argv=None):
         c4, c4_detail = effective_freq_verdict(
             r_idle, r_load, p0_mhz, locked_mhz, freq_tol)
         results.append((4, "Effective-frequency validity (cycles)", c4,
-                        c4_detail))
+                        f"{c4_detail} (cycle source: {cyc_src})"))
 
     # --- Criterion 5: fault behavior ---
     enabled_rows = sum(1 for m in markers if m == "quarantine")

@@ -37,6 +37,16 @@ struct RuntimeControlChannelLogState {
     std::uint64_t total_writes = 0u;
     bool write_active = false;
     bool baseline_captured = false;
+    // FEAT-0003 (REQ-PROFILE-08): control-law attribution + PID evidence. The
+    // pid_* fields stay NaN (blank cell) for the curve law; controller_kind is
+    // "curve_overlay" or "pid". Appended after the existing columns, so column
+    // names that consumers bind by string keep their positions.
+    std::string controller_kind;
+    double pid_error_c = std::numeric_limits<double>::quiet_NaN();
+    double pid_p_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_i_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_d_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_setpoint_raw_pct = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct RuntimeControlLoopTimingState {
@@ -147,6 +157,10 @@ std::string BuildControlLoopCsvRow(
     const RuntimeSnapshotIndex& snapshot_index,
     std::uint64_t tick_count,
     const RuntimeControlLoopTimingState& timing,
-    const std::vector<RuntimeControlChannelLogState>& channels);
+    const std::vector<RuntimeControlChannelLogState>& channels,
+    // FEAT-0023 (REQ-MPROFILE-09): additive, observational active-profile
+    // identity. Recorded for offline attribution only; never read by control.
+    const std::string& active_profile_name = {},
+    const std::string& active_profile_source = {});
 
 }  // namespace svg_mb_control

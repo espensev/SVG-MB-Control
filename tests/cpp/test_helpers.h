@@ -1,7 +1,8 @@
 #pragma once
 
 // Shared assertion helpers and temp-name salt for the bespoke C++ tests
-// (TS-1/TS-2, docs/testing-and-hotpath-simplification-review-2026-06-10.md).
+// (TS-1/TS-2,
+// docs/archive/implemented-plans/testing-and-hotpath-simplification-review-2026-06-10.md).
 // Each test executable is a single translation unit that includes this header:
 // the inline g_failures is that TU's failure counter and main() returns
 // nonzero when it is > 0. File-specific helpers (CSV field matchers,

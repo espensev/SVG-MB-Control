@@ -26,10 +26,29 @@ enum class CurveShape {
     SmootherStep,
 };
 
+// Per-channel control-law selector (FEAT-0003 REQ-PROFILE-03). Absent in config
+// means CurveOverlay, so existing configs keep today's behavior unedited.
+enum class ControllerKind {
+    CurveOverlay,
+    Pid,
+};
+
+// PID feed-forward bias source (FEAT-0003 decision D3a). Curve adds the PID
+// terms on top of the existing temperature->duty curve; Fixed adds them on top
+// of a constant resting duty.
+enum class PidFeedforward {
+    Curve,
+    Fixed,
+};
+
 TempBlend ParseTempBlend(const std::string& text);
 std::string TempBlendToString(TempBlend blend);
 CurveShape ParseCurveShape(const std::string& text);
 std::string CurveShapeToString(CurveShape shape);
+ControllerKind ParseControllerKind(const std::string& text);
+std::string ControllerKindToString(ControllerKind kind);
+PidFeedforward ParsePidFeedforward(const std::string& text);
+std::string PidFeedforwardToString(PidFeedforward feedforward);
 
 // Per-cycle temperature readings fed to the policy. Missing sources are
 // flagged via the *_available bits.

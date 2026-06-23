@@ -10,6 +10,8 @@
 #include "control_loop.h"
 #include "control_supervisor.h"
 #include "evidence_log.h"
+#include "machine_identity.h"
+#include "machine_profile.h"
 #include "read_loop.h"
 #include "runtime_health.h"
 #include "runtime_lifecycle.h"
@@ -22,12 +24,15 @@
 
 #include "windows_lean.h"
 
+#include <array>
 #include <exception>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -40,6 +45,30 @@ using svg_mb_control::PrintRuntimeStatus;
 using svg_mb_control::RequestStopAndWait;
 using svg_mb_control::RunMode;
 using svg_mb_control::RunSupervisedLongRunningMode;
+
+std::string GetEnvironmentAsciiString(std::wstring_view name) {
+    std::array<wchar_t, 4096> buffer{};
+    const DWORD length = GetEnvironmentVariableW(
+        std::wstring(name).c_str(), buffer.data(),
+        static_cast<DWORD>(buffer.size()));
+    if (length == 0u || length >= buffer.size()) {
+        return {};
+    }
+    std::string out;
+    out.reserve(length);
+    for (DWORD i = 0; i < length; ++i) {
+        const wchar_t ch = buffer[i];
+        if (ch <= 0 || ch > 127) {
+            return {};
+        }
+        out.push_back(static_cast<char>(ch));
+    }
+    return out;
+}
+
+// Profile catalog directory resolution now lives in machine_profile.{h,cpp}
+// (svg_mb_control::DefaultProfileCatalogDirs) so the supervisor can also use it
+// for live-switch candidate validation.
 
 }  // namespace
 
@@ -73,6 +102,31 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 options.config_path_explicit = true;
             }
         }
+
+        const auto profile_dirs = DefaultProfileCatalogDirs();
+        const std::string profile_env =
+            GetEnvironmentAsciiString(L"SVG_MB_PROFILE");
+        const std::filesystem::path machine_id_override =
+            svg_mb_control::ResolveRuntimeHomePath(
+                svg_mb_control::ControlConfig{}) /
+            "machine_id.txt";
+        const std::string machine_id =
+            svg_mb_control::ResolveMachineId(machine_id_override);
+        const svg_mb_control::ProfileResolution profile_resolution =
+            svg_mb_control::ResolveProfileSelection(
+                svg_mb_control::ProfileResolutionRequest{
+                    options.config_path,
+                    options.profile_name,
+                    profile_env,
+                    machine_id,
+                },
+                [&](const std::string& profile_name) {
+                    return svg_mb_control::ResolveProfileConfigPath(
+                        profile_dirs, profile_name);
+                });
+        if (!profile_resolution.config_path.empty()) {
+            options.config_path = profile_resolution.config_path;
+        }
         if (options.config_path.empty()) {
             options.config_path =
                 svg_mb_control::ResolveDefaultControlConfigPath();
@@ -90,6 +144,20 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
                 }
             } else {
                 config = svg_mb_control::LoadControlConfig(absolute_config_path);
+                config->profile_name = profile_resolution.profile_name;
+                config->profile_resolution_source = std::string(
+                    svg_mb_control::ProfileResolutionSourceLabel(
+                        profile_resolution.source));
+                // FEAT-0023 (REQ-MPROFILE-09): under supervision a worker is
+                // launched with --config <path> (the resolved profile's config),
+                // so profile_name is empty here; fall back to the config stem so
+                // the worker status/CSV carry a meaningful name. After a switch
+                // the config path is config/profiles/<name>.json, so the stem is
+                // the switched profile name.
+                if (config->profile_name.empty()) {
+                    config->profile_name =
+                        absolute_config_path.stem().string();
+                }
             }
         }
 
@@ -178,6 +246,22 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             std::cout << '\n'
                       << "  request: "
                       << svg_mb_control::RuntimeBreakerResetRequestPath(
+                             command_runtime_home)
+                             .string()
+                      << '\n';
+            return 0;
+        }
+
+        if (options.set_profile_requested) {
+            if (!svg_mb_control::RequestRuntimeProfileSwitch(
+                    command_runtime_home, options.set_profile_name)) {
+                std::cerr << "Error: failed to write profile-switch request.\n";
+                return 1;
+            }
+            std::cout << "svg-mb-control: profile switch requested\n"
+                      << "  profile: " << options.set_profile_name << '\n'
+                      << "  request: "
+                      << svg_mb_control::RuntimeProfileSwitchRequestPath(
                              command_runtime_home)
                              .string()
                       << '\n';
@@ -292,6 +376,27 @@ int svg_mb_control::RunApp(int argc, wchar_t** argv) {
             const int singleton_result = acquire_worker_singleton();
             if (singleton_result != 0) {
                 return singleton_result;
+            }
+        }
+
+        // FEAT-0023 (REQ-MPROFILE-07): sim-only worker-startup fault injection
+        // for the supervisor auto-revert path. Double-gated — the env names a
+        // config stem to fail AND this worker's own --config stem must match —
+        // so a switched-in candidate (config/profiles/<stem>.json) fails its
+        // own startup while the baseline worker (a different stem) survives.
+        // Never set in production; fires here, before reconcile and before any
+        // PID publish, so the non-zero exit lands inside the supervisor's
+        // ~1500 ms startup window and arms last-known-good revert.
+        if ((options.run_mode == RunMode::kControlLoop ||
+             options.run_mode == RunMode::kReadLoop) &&
+            config.has_value()) {
+            const std::string fail_stem = GetEnvironmentAsciiString(
+                L"SVG_MB_CONTROL_SIM_FAIL_STARTUP_CONFIG_STEM");
+            if (!fail_stem.empty() &&
+                config->source_path.stem().string() == fail_stem) {
+                std::cerr << "svg-mb-control: sim fail-startup for config stem '"
+                          << fail_stem << "'\n";
+                return 3;
             }
         }
 

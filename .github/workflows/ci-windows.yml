@@ -37,6 +37,29 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Configure vcpkg
+        shell: pwsh
+        run: |
+          if ($env:VCPKG_ROOT) {
+            "VCPKG_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
+            exit 0
+          }
+
+          $candidates = @(
+            $env:VCPKG_INSTALLATION_ROOT,
+            'C:\vcpkg'
+          ) | Where-Object { $_ }
+
+          foreach ($candidate in $candidates) {
+            $toolchain = Join-Path $candidate 'scripts\buildsystems\vcpkg.cmake'
+            if (Test-Path -LiteralPath $toolchain) {
+              "VCPKG_ROOT=$candidate" >> $env:GITHUB_ENV
+              exit 0
+            }
+          }
+
+          throw 'VCPKG_ROOT is not set and no hosted-runner vcpkg checkout was found.'
+
       - name: Local CI (Test-LocalCI.ps1)
         shell: pwsh
         run: .\scripts\Test-LocalCI.ps1 -KeepBuildDir

@@ -39,6 +39,35 @@ struct RuntimeGpuSnapshot {
     double hotspot_c = 0.0;
     std::string gpu_name;
     std::string last_warning;
+
+    // FEAT-0020 read-only GPU board power (REQ-PWRLOG-02), copied from the GPU
+    // reader's per-tick thermal+power sample. Logging-only; never a control
+    // input. Carried in-memory to the control-loop CSV; not serialized to the
+    // snapshot JSON sidecar. acquisition: "disabled" | "unavailable" | "nvml".
+    // sample_id advances only on a fresh nonzero NVML read (a repeated id marks
+    // a stale/mirrored value); time_ms/mw are blank (NaN) when no live read, so
+    // no false zero is emitted.
+    std::string power_acquisition = "disabled";
+    std::string power_source = "unknown";
+    std::uint64_t power_sample_id = 0u;
+    double power_time_ms = std::numeric_limits<double>::quiet_NaN();
+    double power_mw = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0021 read-only GPU workload context, copied from the GPU reader's
+    // cached context sample. Logging-only; never a control input. Carried
+    // in-memory to the control-loop CSV; not serialized to snapshot JSON.
+    // acquisition: "disabled" | "unavailable" | "nvml".
+    std::string context_acquisition = "disabled";
+    std::uint64_t context_sample_id = 0u;
+    double context_time_ms = std::numeric_limits<double>::quiet_NaN();
+    double context_sample_age_ms = std::numeric_limits<double>::quiet_NaN();
+    std::int32_t context_util_gpu_pct = -1;
+    std::int32_t context_util_mem_pct = -1;
+    std::int32_t context_pstate = -1;
+    std::uint32_t context_clock_graphics_mhz = 0u;
+    std::uint32_t context_clock_memory_mhz = 0u;
+    std::uint32_t context_vram_used_mb = 0u;
+    std::uint32_t context_vram_total_mb = 0u;
 };
 
 struct RuntimeSnapshot {
@@ -69,6 +98,18 @@ struct RuntimeSnapshot {
     double cpu_cycles_window_ms = std::numeric_limits<double>::quiet_NaN();
     double cpu_aperf_delta = std::numeric_limits<double>::quiet_NaN();
     double cpu_mperf_delta = std::numeric_limits<double>::quiet_NaN();
+
+    // FEAT-0006 all-core effective frequency (off-thread package sweep), copied
+    // from AmdSnapshot. Sigma-dAPERF / Sigma-dMPERF over all logical processors
+    // on the worker's OWN sample-id cadence, plus the per-sweep window and the
+    // count of contributing cores. Deltas blank (NaN) on baseline / all-blanked
+    // / package-implausible. Provenance reuses cpu_cycles_acquisition above.
+    std::uint64_t cpu_cycles_allcore_sample_id = 0u;
+    double cpu_cycles_window_ms_allcore =
+        std::numeric_limits<double>::quiet_NaN();
+    double cpu_aperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    double cpu_mperf_delta_allcore = std::numeric_limits<double>::quiet_NaN();
+    int cpu_cycles_allcore_cores = 0;
 };
 
 // Per-snapshot lookup cache for hot paths that need to query the same sampled
@@ -107,8 +148,10 @@ double FindRuntimeAmdSensorTemperature(const RuntimeSnapshot& snapshot,
 
 std::string SerializeRuntimeSnapshotJson(const RuntimeSnapshot& snapshot);
 bool WriteRuntimeSnapshotJsonFile(const std::filesystem::path& target_path,
-                                  const RuntimeSnapshot& snapshot);
+                                  const RuntimeSnapshot& snapshot,
+                                  std::string* error_message = nullptr);
 bool WriteRuntimeSnapshotFile(const std::filesystem::path& runtime_home,
-                              const RuntimeSnapshot& snapshot);
+                              const RuntimeSnapshot& snapshot,
+                              std::string* error_message = nullptr);
 
 }  // namespace svg_mb_control

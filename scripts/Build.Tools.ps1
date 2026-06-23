@@ -86,6 +86,26 @@ function Get-GitCommitHash {
     return $trimmed
 }
 
+function Get-GitWorkingTreeDirty {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        return $false
+    }
+
+    # `status --porcelain` excludes git-ignored paths (build/, dist/, release/,
+    # runtime/) but reports tracked modifications and non-ignored untracked
+    # files, i.e. any source state not captured by HEAD.
+    $status = & $git.Source -C $RepositoryRoot status --porcelain 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        return $false
+    }
+
+    return -not [string]::IsNullOrWhiteSpace(($status -join "`n"))
+}
+
 function Resolve-ToolFromPathOrVcpkg {
     [CmdletBinding()]
     param(

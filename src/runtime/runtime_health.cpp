@@ -25,12 +25,54 @@ namespace svg_mb_control {
 
 namespace {
 
+std::uint64_t JsonUInt64Or(const nlohmann::json& value,
+                           std::string_view key,
+                           std::uint64_t fallback = 0u) {
+    const auto found = value.find(std::string(key));
+    if (found != value.end() && found->is_number_unsigned()) {
+        return found->get<std::uint64_t>();
+    }
+    if (found != value.end() && found->is_number_integer()) {
+        const auto raw = found->get<std::int64_t>();
+        if (raw >= 0) {
+            return static_cast<std::uint64_t>(raw);
+        }
+    }
+    return fallback;
+}
+
 void FillSidecarHealth(RuntimeHealthResult* result) {
     if (result == nullptr) {
         return;
     }
 
     result->stop_request_present = RuntimeStopRequested(result->runtime_home);
+    result->logging_health_path =
+        RuntimeLoggingHealthPath(result->runtime_home);
+
+    const auto logging_health =
+        TryReadJsonObject(result->logging_health_path, "logging health");
+    if (logging_health.has_value()) {
+        result->logging_health_present = true;
+        result->event_log_failure_active =
+            JsonBoolOr(*logging_health, "event_log_failure_active");
+        result->event_log_failure_count =
+            JsonUInt64Or(*logging_health, "failure_count");
+        result->event_log_failure_state =
+            JsonStringOr(*logging_health, "logging_health_state");
+        result->event_log_failure_path =
+            JsonStringOr(*logging_health, "event_log_path");
+        result->event_log_failure_first_time =
+            JsonStringOr(*logging_health, "first_failure_time");
+        result->event_log_failure_last_time =
+            JsonStringOr(*logging_health, "last_failure_time");
+        result->event_log_failure_recovery_time =
+            JsonStringOr(*logging_health, "last_recovery_time");
+        result->event_log_failure_sink =
+            JsonStringOr(*logging_health, "last_error_sink");
+        result->event_log_failure_detail =
+            JsonStringOr(*logging_health, "last_error_detail");
+    }
 
     try {
         const std::vector<PendingWriteEntry> entries =
@@ -100,6 +142,7 @@ void AssessHealthState(RuntimeHealthResult& result,
     result.status = snapshot->status.empty() ? "(unknown)" : snapshot->status;
     result.status_detail = snapshot->status_detail;
     result.last_update = snapshot->last_update_iso;
+    result.hardware_access = snapshot->hardware_access;
     result.process_id = snapshot->process_id;
     result.process_active = IsProcessActive(result.process_id);
     result.degraded_channel_count = snapshot->DegradedChannelCount();
@@ -177,6 +220,13 @@ void AssessHealthState(RuntimeHealthResult& result,
         return;
     }
 
+    if (result.event_log_failure_active) {
+        SetState(&result, RuntimeHealthState::kDegraded,
+                 "event log is currently unwritable (inspect "
+                 "logging_health.json)");
+        return;
+    }
+
     if (result.status != "running") {
         SetState(&result, RuntimeHealthState::kDegraded,
                  "runtime status is not running");
@@ -198,6 +248,11 @@ void PersistHealthAssessment(const RuntimeHealthResult& result) {
     payload["last_health_exit_code"] = RuntimeHealthExitCode(result.state);
     payload["last_health_time"] =
         FormatLocalIso8601(std::chrono::system_clock::now());
+    payload["logging_health_present"] = result.logging_health_present;
+    payload["event_log_failure_active"] = result.event_log_failure_active;
+    payload["event_log_failure_last_time"] =
+        result.event_log_failure_last_time;
+    payload["event_log_failure_path"] = result.event_log_failure_path;
     std::string write_error;
     if (!TryWriteJsonFileAtomic(result.runtime_home / "control_health.json",
                                 payload, 2, &write_error)) {
@@ -266,6 +321,15 @@ nlohmann::json RuntimeHealthToJson(const RuntimeHealthResult& result) {
     payload["mode"] = result.mode;
     payload["status"] = result.status;
     payload["status_detail"] = result.status_detail;
+    payload["hwaccess_state"] =
+        HardwareAccessStateName(
+            HardwareAccessOverallState(result.hardware_access));
+    payload["hwaccess_read_state"] =
+        HardwareAccessStateName(result.hardware_access.read_state);
+    payload["hwaccess_write_state"] =
+        HardwareAccessStateName(result.hardware_access.write_state);
+    payload["hwaccess_read_detail"] = result.hardware_access.read_detail;
+    payload["hwaccess_write_detail"] = result.hardware_access.write_detail;
     payload["process_id"] = result.process_id;
     payload["process_active"] = result.process_active;
     payload["last_update"] = result.last_update;
@@ -280,6 +344,20 @@ nlohmann::json RuntimeHealthToJson(const RuntimeHealthResult& result) {
     payload["degraded_channel_count"] = result.degraded_channel_count;
     payload["last_successful_restore_time"] =
         result.last_successful_restore_time;
+    payload["logging_health_file"] = result.logging_health_path.string();
+    payload["logging_health_present"] = result.logging_health_present;
+    payload["event_log_failure_active"] = result.event_log_failure_active;
+    payload["event_log_failure_state"] = result.event_log_failure_state;
+    payload["event_log_failure_count"] = result.event_log_failure_count;
+    payload["event_log_failure_path"] = result.event_log_failure_path;
+    payload["event_log_failure_first_time"] =
+        result.event_log_failure_first_time;
+    payload["event_log_failure_last_time"] =
+        result.event_log_failure_last_time;
+    payload["event_log_failure_recovery_time"] =
+        result.event_log_failure_recovery_time;
+    payload["event_log_failure_sink"] = result.event_log_failure_sink;
+    payload["event_log_failure_detail"] = result.event_log_failure_detail;
     payload["supervisor_state_present"] = result.supervisor_state_present;
     payload["supervisor_pid"] = result.supervisor_pid;
     payload["supervisor_active"] = result.supervisor_active;
@@ -323,12 +401,37 @@ int PrintRuntimeHealth(const std::filesystem::path& runtime_home,
         if (!result.status.empty()) {
             std::cout << "  status: " << result.status << '\n';
         }
+        std::cout << "  hwaccess: "
+                  << HardwareAccessStateName(
+                         HardwareAccessOverallState(result.hardware_access))
+                  << " (read="
+                  << HardwareAccessStateName(result.hardware_access.read_state)
+                  << ", write="
+                  << HardwareAccessStateName(result.hardware_access.write_state)
+                  << ")\n";
+        if (!result.hardware_access.read_detail.empty()) {
+            std::cout << "  hwaccess_read_detail: "
+                      << result.hardware_access.read_detail << '\n';
+        }
+        if (!result.hardware_access.write_detail.empty()) {
+            std::cout << "  hwaccess_write_detail: "
+                      << result.hardware_access.write_detail << '\n';
+        }
         if (!result.last_update.empty()) {
             std::cout << "  last_update: " << result.last_update << '\n';
         }
         if (!result.last_successful_restore_time.empty()) {
             std::cout << "  last_successful_restore: "
                       << result.last_successful_restore_time << '\n';
+        }
+        if (result.event_log_failure_active) {
+            std::cout << "  logging_health: event log unwritable\n"
+                      << "  logging_health_file: "
+                      << result.logging_health_path.string() << '\n';
+            if (!result.event_log_failure_last_time.empty()) {
+                std::cout << "  event_log_failure_last_time: "
+                          << result.event_log_failure_last_time << '\n';
+            }
         }
         if (result.supervisor_state_present) {
             std::cout << "  supervisor_pid: " << result.supervisor_pid
@@ -378,6 +481,22 @@ int PrintRuntimeStatus(const std::filesystem::path& runtime_home) {
               << "  status: " << state << '\n';
     if (!snapshot->status_detail.empty()) {
         std::cout << "  detail: " << snapshot->status_detail << '\n';
+    }
+    std::cout << "  hwaccess: "
+              << HardwareAccessStateName(
+                     HardwareAccessOverallState(snapshot->hardware_access))
+              << " (read="
+              << HardwareAccessStateName(snapshot->hardware_access.read_state)
+              << ", write="
+              << HardwareAccessStateName(snapshot->hardware_access.write_state)
+              << ")\n";
+    if (!snapshot->hardware_access.read_detail.empty()) {
+        std::cout << "  hwaccess_read_detail: "
+                  << snapshot->hardware_access.read_detail << '\n';
+    }
+    if (!snapshot->hardware_access.write_detail.empty()) {
+        std::cout << "  hwaccess_write_detail: "
+                  << snapshot->hardware_access.write_detail << '\n';
     }
     if (snapshot->process_id != 0u) {
         std::cout << "  pid: " << snapshot->process_id

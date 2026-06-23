@@ -130,6 +130,83 @@ class ControlLoopTests(WindowsExeTestCase):
                 self.assertEqual(write_event["severity"], "info")
                 self.assertEqual(write_event["error_code"], "none")
 
+    def test_control_loop_pid_shadow_computes_but_does_not_write(self) -> None:
+        # FEAT-0003 (REQ-PROFILE-07/08): a PID channel with no pid.allow_live runs
+        # shadow/dry-run -- it computes + logs a setpoint and is attributed to the
+        # pid law, but never actuates the fan (no writes) and records the shadow
+        # law at startup.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
+                control_hold_ms=800,
+                min_duty_pct=40.0,
+                extra_channel_fields={
+                    "controller": "pid",
+                    "pid": {
+                        "target_c": 60.0,
+                        "kp": 2.0,
+                        "feedforward": "fixed",
+                        "fixed_feedforward_pct": 30.0,
+                    },
+                },
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0),
+            ):
+                observed = _wait_for(
+                    lambda: (_read_runtime_status(runtime_home) or {}).get(
+                        "loop_tick_count", 0
+                    )
+                    >= 25,
+                    timeout_s=8.0,
+                )
+                self.assertTrue(observed)
+                status = _read_runtime_status(runtime_home)
+                self.assertIsNotNone(status)
+                channel_status = status["controlled_channels"][0]
+                # Attribution + kind-aware PID evidence (REQ-PROFILE-08).
+                self.assertEqual(channel_status["controller_kind"], "pid")
+                self.assertEqual(channel_status["last_response_source"], "pid")
+                self.assertIsNotNone(channel_status["pid_error_c"])
+                # REQ-PROFILE-08: curve-only telemetry is null for a PID channel,
+                # not published as a meaningful 0.0.
+                self.assertIsNone(channel_status["last_raw_demand_pct"])
+                self.assertIsNone(channel_status["last_smoothed_demand_pct"])
+                self.assertIsNone(channel_status["last_thermal_pressure_boost_pct"])
+                # Shadow/dry-run (REQ-PROFILE-07): the PID computed a setpoint, but
+                # the channel never actuated -- no writes despite 25+ ticks at 75C.
+                self.assertEqual(channel_status["total_writes"], 0)
+                # The worker recorded the shadow law at startup.
+                shadow_event = next(
+                    (
+                        item
+                        for item in _read_runtime_events(runtime_home)
+                        if item.get("event_type") == "control_loop.pid_shadow"
+                    ),
+                    None,
+                )
+                self.assertIsNotNone(shadow_event)
+                self.assertIn("allow_live", shadow_event.get("detail", ""))
+                # CSV carries the additive kind-aware columns; the curve-only
+                # feedforward column blanks for a PID channel.
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows, msg="pid-shadow CSV rows missing")
+                latest_row = rows[-1]
+                self.assertEqual(latest_row["channel0_controller_kind"], "pid")
+                self.assertNotEqual(latest_row["channel0_pid_error_c"], "")
+                self.assertEqual(latest_row["channel0_feedforward_pct"], "")
+
     def test_control_loop_limits_first_write_from_observed_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
@@ -199,6 +276,64 @@ class ControlLoopTests(WindowsExeTestCase):
                 fan0 = next(fan for fan in state["fans"] if fan["channel"] == 0)
                 self.assertEqual(fan0["duty_raw"], 222)
                 self.assertEqual(fan0["mode_raw"], 7)
+
+    def test_control_loop_retries_current_state_publish_after_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            blocked_snapshot = runtime_home / "current_state.json"
+            blocked_snapshot.mkdir(parents=True)
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
+                control_hold_ms=800,
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=75.0),
+            ):
+                failed = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type")
+                            == "runtime_logging.snapshot_publish_failed"
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(failed)
+                self.assertIn("current_state.json", failed["detail"])
+
+                shutil.rmtree(blocked_snapshot)
+                state = _wait_for(
+                    lambda: _read_runtime_current_state(runtime_home),
+                    timeout_s=0.85,
+                    poll_s=0.02,
+                )
+                self.assertIsNotNone(
+                    state,
+                    msg="current_state.json was not retried promptly after failure",
+                )
+                recovered = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type")
+                            == "runtime_logging.snapshot_publish_recovered"
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(recovered)
 
     def test_control_loop_cpu_override_can_drive_gpu_blend_channel(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -373,6 +508,157 @@ class ControlLoopTests(WindowsExeTestCase):
                 self.assertEqual(
                     rows[-1]["channel0_primary_temp_source"], "cpu_fallback"
                 )
+
+    def test_control_loop_logs_gpu_board_power(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
+                control_hold_ms=0,
+            )
+            env = _sim_direct_env(channel=0, amd_temp_c=70.0)
+            env.update(
+                {
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "60.0",
+                    "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "70.0",
+                    "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "70.0",
+                    "SVG_MB_CONTROL_SIM_GPU_NVML_POWER_MW": "275000",
+                    "SVG_MB_CONTROL_SIM_GPU_POWER_SOURCE": "nvml",
+                    "SVG_MB_CONTROL_SIM_GPU_UTIL_GPU_PCT": "68",
+                    "SVG_MB_CONTROL_SIM_GPU_UTIL_MEM_PCT": "22",
+                    "SVG_MB_CONTROL_SIM_GPU_PSTATE": "0",
+                    "SVG_MB_CONTROL_SIM_GPU_CLOCK_GRAPHICS_MHZ": "2490",
+                    "SVG_MB_CONTROL_SIM_GPU_CLOCK_MEMORY_MHZ": "10490",
+                    "SVG_MB_CONTROL_SIM_GPU_VRAM_USED_MB": "8192",
+                    "SVG_MB_CONTROL_SIM_GPU_VRAM_TOTAL_MB": "16384",
+                }
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env=env,
+            ):
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status.get("loop_tick_count", 0) >= 5
+                        else None
+                    ),
+                    timeout_s=6.0,
+                )
+                self.assertIsNotNone(status)
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows, msg="control-loop CSV rows missing")
+                latest = rows[-1]
+                for col in (
+                    "gpu_power_sample_id",
+                    "gpu_power_time_ms",
+                    "gpu_power_mw",
+                    "gpu_power_source",
+                    "gpu_power_acquisition",
+                    "gpu_context_sample_id",
+                    "gpu_context_time_ms",
+                    "gpu_context_sample_age_ms",
+                    "gpu_context_acquisition",
+                    "gpu_util_gpu_pct",
+                    "gpu_util_mem_pct",
+                    "gpu_pstate",
+                    "gpu_clock_graphics_mhz",
+                    "gpu_clock_memory_mhz",
+                    "gpu_vram_used_mb",
+                    "gpu_vram_total_mb",
+                ):
+                    self.assertIn(col, latest)
+                # A fresh nonzero NVML read: source/acquisition both "nvml", the
+                # value matches the simulated board power, and the read identity
+                # (sample id + timestamp) is populated.
+                self.assertEqual(latest["gpu_power_source"], "nvml")
+                self.assertEqual(latest["gpu_power_acquisition"], "nvml")
+                self.assertNotEqual(latest["gpu_power_mw"], "")
+                self.assertAlmostEqual(
+                    float(latest["gpu_power_mw"]), 275000.0, places=0
+                )
+                self.assertNotEqual(latest["gpu_power_sample_id"], "")
+                self.assertGreaterEqual(int(latest["gpu_power_sample_id"]), 1)
+                self.assertNotEqual(latest["gpu_power_time_ms"], "")
+                # FEAT-0021 context rides beside power as logging-only cached
+                # context. The simulation path produces a fresh nvml context
+                # sample and no false-zero blanks.
+                self.assertEqual(latest["gpu_context_acquisition"], "nvml")
+                self.assertNotEqual(latest["gpu_context_sample_id"], "")
+                self.assertNotEqual(latest["gpu_context_time_ms"], "")
+                self.assertNotEqual(latest["gpu_context_sample_age_ms"], "")
+                self.assertEqual(latest["gpu_util_gpu_pct"], "68")
+                self.assertEqual(latest["gpu_util_mem_pct"], "22")
+                self.assertEqual(latest["gpu_pstate"], "0")
+                self.assertEqual(latest["gpu_clock_graphics_mhz"], "2490")
+                self.assertEqual(latest["gpu_clock_memory_mhz"], "10490")
+                self.assertEqual(latest["gpu_vram_used_mb"], "8192")
+                self.assertEqual(latest["gpu_vram_total_mb"], "16384")
+                # Power must not become a control input: response source stays
+                # temperature-derived.
+                self.assertEqual(
+                    latest["channel0_response_source"], "primary_curve"
+                )
+
+    def test_control_loop_gpu_power_unavailable_emits_no_false_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
+                control_hold_ms=0,
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=70.0),
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "unavailable",
+                },
+            ):
+                status = _wait_for(
+                    lambda: (
+                        status
+                        if (status := _read_runtime_status(runtime_home))
+                        and status.get("loop_tick_count", 0) >= 5
+                        else None
+                    ),
+                    timeout_s=6.0,
+                )
+                self.assertIsNotNone(status)
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows)
+                latest = rows[-1]
+                # No false zero: an unavailable GPU power read leaves the numeric
+                # fields blank and records why in the acquisition marker.
+                self.assertEqual(latest["gpu_power_mw"], "")
+                self.assertEqual(latest["gpu_power_sample_id"], "")
+                self.assertEqual(latest["gpu_power_time_ms"], "")
+                self.assertEqual(latest["gpu_power_acquisition"], "unavailable")
+                self.assertEqual(latest["gpu_context_sample_id"], "")
+                self.assertEqual(latest["gpu_context_time_ms"], "")
+                self.assertEqual(latest["gpu_context_sample_age_ms"], "")
+                self.assertEqual(latest["gpu_context_acquisition"], "unavailable")
+                self.assertEqual(latest["gpu_util_gpu_pct"], "")
+                self.assertEqual(latest["gpu_vram_total_mb"], "")
 
     def test_control_loop_thermal_pressure_boost_accumulates_under_sustained_heat(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:

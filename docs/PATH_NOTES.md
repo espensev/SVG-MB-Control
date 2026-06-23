@@ -25,34 +25,40 @@ checkable.
 
 ## 2026-06-18
 
-- **Added** — FEAT-0015 (`REQ-EVENTRET-*`, event-JSONL retention) and FEAT-0016
-  (`REQ-DBRETAIN-*`, analyze-DB age-based run-purge + reclaim) landed in-repo as
-  Accepted specs with dated decision records
-  (`docs/event-log-retention-decision-2026-06-18.md`,
-  `docs/analyze-db-run-purge-decision-2026-06-18.md`), promoting the issue #4
-  retention bounds from the off-`main` PR-#9 intake to real specs on `main`. Also
-  added a `windows-latest` CI workflow (`.github/workflows/ci-windows.yml`) running
-  `Test-LocalCI`. The rest of PR #9 (FEAT-0011..0014 promotions + the all-in-one
-  implementation handoff) was dropped: FEAT-0011..0013 already shipped on `main`
-  (`62b4a56`/`1bade64`/`d0f5d99`) and FEAT-0014 is deliberately held. Registry +
-  `TRACEABILITY.md` rows added; `tests/test_feature_specs.py` green (5/5).
-  Implementation staged for a Windows-host build.
+- **Fixed** — FEAT-0015 event JSONL rotation now uses the registered active-file
+  start time instead of the file's last-write mtime. Frequent control-loop
+  appends no longer postpone `log_rotate_hours`; the regression test keeps the
+  active file mtime fresh and still verifies rotation/archive pruning.
+- **Done** — FEAT-0015/0016 runtime disk-growth retention implemented and
+  verified with `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` (CTest + hermetic
+  tests green): event JSONL rotates into `logs\archive\*_events_<timestamp>.jsonl`
+  on the configured runtime window and samples routine
+  `control_loop.write_applied`; `analyze prune --db-retain-days` purges old
+  analyzer DB runs, cascades dependent rows, and reclaims space after deletes.
+- **Done** — runtime disk-growth retention intake promoted to in-repo specs:
+  `docs/features/FEAT-0015-event-log-retention.md` (event JSONL rotation +
+  severity-aware reduction) and
+  `docs/features/FEAT-0016-analyze-db-run-purge.md` (age-based
+  `analyze prune --db-retain-days`, cascade delete, post-delete reclaim), with
+  current decision records and `docs/TRACEABILITY.md` rows. Immediate operational
+  reclaim was also completed: deleted the derived analyzer DB
+  `release\runtime\svg_mb_control.db`, reclaiming 8,377,511,936 bytes
+  (7.80 GiB); raw CSV/event files and live sidecars were untouched.
 - **Added** — `## Current priority` read-first index at the top of
   `docs/features/README.md`: the active feature work (FEAT-0006 downstream,
-  FEAT-0001), the decisions/gates-owed queue (FEAT-0014, FEAT-0009, FEAT-0004,
-  and off-main FEAT-0015/0016), and FEAT-0003 noted as held design-capture. It
+  FEAT-0001, and now FEAT-0015/0016 retention), the decisions/gates-owed queue
+  (FEAT-0014, FEAT-0009, FEAT-0004), and FEAT-0003 noted as held design-capture. It
   links the per-topic backlogs rather than copying them; the §5 registry stays
   the authoritative per-feature status. `AGENTS.md` §Navigation now points at it.
   Gate-safe: `tests/test_feature_specs.py` parses only registry rows whose first
   cell is a `[FEAT-NNNN](...)` link, so the index block is invisible to it.
-- **Added** — `docs/spec-and-backlog-structure-assessment-2026-06-18.md`: a
+- **Added** — `docs/archive/spec-and-backlog-structure-assessment-2026-06-18.md`: a
   snapshot review of the spec/plan/backlog structure (the machinery is sound and
   CI-enforced; the gap was the absence of a single aggregated priority/decision
   view, which the index above adds). Authorizes nothing.
-- **Idea** — `docs/next_steps.md` is a maintained topical backlog but omits
-  FEAT-0009 and the disk-growth retention (issue #4 / PR #9); fold those in or
-  treat the new `## Current priority` index as the aggregation point. Not done in
-  this pass.
+- **Done** — the disk-growth retention omission in `docs/next_steps.md` was
+  closed by adding a FEAT-0015/0016 section after FEAT-0020. FEAT-0009 remains
+  visible through the `docs/features/README.md` current-priority index.
 
 ## 2026-06-14
 
@@ -63,10 +69,10 @@ checkable.
   10 seams, 36 findings → 26 verified survivors. Pass 2 (`wf_32fc8e34-cee`, 54
   agents): the 12 pass-1-critic-flagged unscanned seams, 40 findings → 25
   survivors. New docs:
-  `docs/discovery-loop-targets-value-ranked-2026-06-14.md` (master value-ranked
-  list, 40 clustered candidates), `docs/discovery-loop-plan-tighter-pass-2026-06-14.md`
-  (full evidence per item + Now/Next/Later), `docs/loop-checkpoint-tighter-pass-targets.md`
-  (resume checkpoint), `docs/loop-rotation-state.md` (seam coverage).
+  `docs/archive/discovery-loop-targets-value-ranked-2026-06-14.md` (master value-ranked
+  list, 40 clustered candidates), `docs/archive/discovery-loop-plan-tighter-pass-2026-06-14.md`
+  (full evidence per item + Now/Next/Later), `docs/archive/loop-checkpoint-tighter-pass-targets.md`
+  (resume checkpoint), `docs/archive/loop-rotation-state.md` (seam coverage).
 - **Added** — two corrections the verify layer caught vs a solo read, recorded in
   the docs: the `duty_pct→duty_raw` conversion is CORRECT
   (`fan_sio.cpp:830`, only a test gap remains, W3-3); and the
@@ -90,7 +96,7 @@ checkable.
 ## 2026-06-10
 
 - **Done** — applied all four finding groups of
-  `docs/testing-and-hotpath-simplification-review-2026-06-10.md`, one commit
+  `docs/archive/implemented-plans/testing-and-hotpath-simplification-review-2026-06-10.md`, one commit
   per group: TS-1/TS-2 (`tests/cpp/test_helpers.h` shared
   `g_failures`/`ExpectTrue`/`ExpectFalse`/`ExpectNear`/`ExpectEqual`/
   `UniqueTempSuffix`; 11 test files migrated; `csv_rows_tests` keeps its
@@ -116,14 +122,14 @@ checkable.
   CSVs). `BUILD_TARGETS_AND_DEPENDENCIES.md` §Test executables and the plan
   doc §4/§5/§7 updated. Validated: `Test-LocalCI` exit 0 (CTest 12/12,
   hermetic Python lane 133 tests).
-- **Added** — `docs/testing-and-hotpath-simplification-review-2026-06-10.md`:
+- **Added** — `docs/archive/implemented-plans/testing-and-hotpath-simplification-review-2026-06-10.md`:
   two-sweep simplification review (test/script stack + runtime hot paths),
   every kept finding re-verified at the cited lines. Net: no critical
   findings; actionable cleanups are TS-1/TS-2 (shared C++ test helper header,
   ~120 LOC), TS-3 (shared Windows-gate test base, ~40 LOC), HP-1 (delete the
   test-only 3-arg `BuildControlLoopCsvRow` overload); one sweep claim
   rejected (Build-Release double hash is deliberate copy verification).
-- **Added / Idea** — `docs/cpu-power-feedforward-plan-2026-06-10.md`: planning
+- **Added / Idea** — `docs/archive/cpu-power-feedforward-plan-2026-06-10.md`: planning
   scaffold for a CPU package-power anticipation boost (a fifth
   `kBoostStageSpecs` stage keyed on derived watts), explicitly NOT authorized
   work — the v1 energy decision bans control use, so the path is gated:
@@ -202,7 +208,7 @@ checkable.
   `channel_evaluator.cpp:55-57`). Propagated source-of-truth-first: D6 →
   `REQ-PROFILE-07` (FEAT-0003 §4/§5/§6/§7/§9/§10/§11/§12; verify now `T,R,M`) →
   `docs/TRACEABILITY.md` → modular plan §6/§7-8; the brief
-  `docs/profile-hot-swap-allow-live-decision-2026-06-06.md` is marked **Resolved
+  `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md` is marked **Resolved
   (B1+B2)**. Refreshed the discussion doc's measurement-gate section (its
   evidence-vs-consent argument was *adopted*; added a resolution note and fixed
   drifted decision-doc citations). Citation sweep + line→section de-drift: converted
@@ -232,7 +238,7 @@ checkable.
   status said "Proposed — awaits maintainer acceptance"; updated to the selected
   `D2`/`D3a`/`D6` directions, consistent with §11/§13 and the decision doc's
   "Selected directions." Reframed
-  `docs/modular-profile-hotswap-plan-2026-06-06.md` §6/§7-4/§7-8: the
+  `docs/archive/modular-profile-hotswap-plan-2026-06-06.md` §6/§7-4/§7-8: the
   requirement-vs-decision divergence is resolved, the substantive D6-vs-gate
   question is flagged open, and FEAT-0001's matching `runtime/requests/` subdir is
   corrected the same way (flat-root `write_policy.request.json`). Corrected the
@@ -241,7 +247,7 @@ checkable.
   (`:197-202`→`§7`). `tests/test_feature_specs.py` green (5/5). D6's *decision* is
   unchanged (only a dated reconsideration pointer appended to the decision doc);
   the discussion doc's other in-flight edits are the user's, left untouched.
-- **Added** — `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`: a
+- **Added** — `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md`: a
   reconsideration brief for D6's `pid.allow_live` posture (Status: Open), drafting
   **accept-as-is vs tighten** after the discussion doc's measurement-gate section
   argued `MEASUREMENT_GATE.md` reads as an evidence gate, not a consent gate.
@@ -264,7 +270,7 @@ checkable.
   `docs/features/README.md` §2 names the "Draft with all gates checked, held as
   design-capture" state (`FEAT-0003`). `tests/test_feature_specs.py` stays green
   (5/5) after the demotion.
-- **Added** — `docs/modular-profile-hotswap-discussion-2026-06-06.md`: a
+- **Added** — `docs/archive/modular-profile-hotswap-discussion-2026-06-06.md`: a
   non-normative design-commentary companion to the plan doc — a grounded,
   two-sided discussion of each element (premise, skeptic's case, seam, state
   decouple, conditioning split, PID-as-example, measurement gate, Proposals A/B,
@@ -274,7 +280,7 @@ checkable.
   *building* under FEAT-0003's current status. Authorizes nothing. Adversarially
   reviewed (5 agents) for doctrine + ref accuracy; cross-doc citations to the
   plan are by section (not line) to resist drift.
-- **Added** — `docs/modular-profile-hotswap-plan-2026-06-06.md`: deepens
+- **Added** — `docs/archive/modular-profile-hotswap-plan-2026-06-06.md`: deepens
   `FEAT-0003` design-capture on the "change the entire per-channel control
   function at runtime" idea — the *modular* angle the existing D1–D7 decisions
   left open. Adds two labeled proposals (A: law-dispatch shape — hard-named

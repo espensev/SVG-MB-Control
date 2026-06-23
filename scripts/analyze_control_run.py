@@ -7,7 +7,8 @@ per-channel boost totals, decision records, manifests). This script remains a
 convenience for summarizing a bare, not-yet-ingested control-loop CSV (and an
 optional events JSONL) without a runtime home: it ingests the CSV into a
 temporary database with the in-repo svg-mb-control.exe and forwards that exe's
-native `analyze report` output. See docs/SCRIPT_STACK_REVIEW.md.
+native `analyze report` output. See
+docs/archive/implemented-plans/SCRIPT_STACK_REVIEW.md.
 """
 from __future__ import annotations
 

@@ -31,7 +31,8 @@ function New-BuildInfo {
         [Parameter(Mandatory = $true)][string]$PresetName,
         [Parameter(Mandatory = $true)][bool]$TestsRun,
         [Parameter(Mandatory = $true)][bool]$TestsPassed,
-        [string]$SourceCommit
+        [string]$SourceCommit,
+        [bool]$WorkingTreeDirty = $false
     )
 
     $mainFile = Get-Item -LiteralPath $MainArtifactPath
@@ -62,13 +63,16 @@ function New-BuildInfo {
         architecture   = $Architecture
         preset         = $PresetName
         builtUtc       = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        testsRun       = $TestsRun
-        testsPassed    = $TestsPassed
-        artifactCount  = $artifactHashes.Count
-        artifactHashes = $artifactHashes
+        testsRun         = $TestsRun
+        testsPassed      = $TestsPassed
+        workingTreeDirty = $WorkingTreeDirty
+        artifactCount    = $artifactHashes.Count
+        artifactHashes   = $artifactHashes
     }
 
     if ($SourceCommit) {
+        # sourceCommit stays a pure git ref (for checkout/reproduction); the
+        # workingTreeDirty flag (and the -dirty version suffix) carry dirtiness.
         $info['sourceCommit'] = $SourceCommit
     }
 

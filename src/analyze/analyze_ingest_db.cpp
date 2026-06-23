@@ -169,10 +169,21 @@ void InsertTickRows(Database& db,
         "cpu_power_sample_id, cpu_power_window_ms, cpu_pkg_energy_delta_uj,"
         "cpu_pkg_energy_acquisition,"
         "cpu_cycles_sample_id, cpu_cycles_window_ms, cpu_aperf_delta,"
-        "cpu_mperf_delta, cpu_cycles_acquisition"
+        "cpu_mperf_delta, cpu_cycles_acquisition,"
+        "gpu_power_sample_id, gpu_power_time_ms, gpu_power_mw,"
+        "gpu_power_source, gpu_power_acquisition,"
+        "gpu_context_sample_id, gpu_context_time_ms,"
+        "gpu_context_sample_age_ms, gpu_context_acquisition,"
+        "gpu_util_gpu_pct, gpu_util_mem_pct, gpu_pstate,"
+        "gpu_clock_graphics_mhz, gpu_clock_memory_mhz,"
+        "gpu_vram_used_mb, gpu_vram_total_mb,"
+        "cpu_aperf_delta_allcore, cpu_mperf_delta_allcore,"
+        "cpu_cycles_window_ms_allcore, cpu_cycles_allcore_sample_id,"
+        "cpu_cycles_allcore_cores"
         ") VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,"
         "?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,"
-        "?33,?34,?35,?36,?37,?38,?39,?40,?41)");
+        "?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,"
+        "?49,?50,?51,?52,?53,?54,?55,?56,?57,?58,?59,?60,?61,?62)");
 
     Statement fan = db.Prepare(
         "INSERT INTO tick_fan_samples("
@@ -225,6 +236,27 @@ void InsertTickRows(Database& db,
         tick.BindOptionalDouble(39, row.cpu_aperf_delta);
         tick.BindOptionalDouble(40, row.cpu_mperf_delta);
         tick.BindOptionalText(41, row.cpu_cycles_acquisition);
+        tick.BindOptionalInt(42, row.gpu_power_sample_id);
+        tick.BindOptionalDouble(43, row.gpu_power_time_ms);
+        tick.BindOptionalDouble(44, row.gpu_power_mw);
+        tick.BindOptionalText(45, row.gpu_power_source);
+        tick.BindOptionalText(46, row.gpu_power_acquisition);
+        tick.BindOptionalInt(47, row.gpu_context_sample_id);
+        tick.BindOptionalDouble(48, row.gpu_context_time_ms);
+        tick.BindOptionalDouble(49, row.gpu_context_sample_age_ms);
+        tick.BindOptionalText(50, row.gpu_context_acquisition);
+        tick.BindOptionalInt(51, row.gpu_util_gpu_pct);
+        tick.BindOptionalInt(52, row.gpu_util_mem_pct);
+        tick.BindOptionalInt(53, row.gpu_pstate);
+        tick.BindOptionalInt(54, row.gpu_clock_graphics_mhz);
+        tick.BindOptionalInt(55, row.gpu_clock_memory_mhz);
+        tick.BindOptionalInt(56, row.gpu_vram_used_mb);
+        tick.BindOptionalInt(57, row.gpu_vram_total_mb);
+        tick.BindOptionalDouble(58, row.cpu_aperf_delta_allcore);
+        tick.BindOptionalDouble(59, row.cpu_mperf_delta_allcore);
+        tick.BindOptionalDouble(60, row.cpu_cycles_window_ms_allcore);
+        tick.BindOptionalInt(61, row.cpu_cycles_allcore_sample_id);
+        tick.BindOptionalInt(62, row.cpu_cycles_allcore_cores);
         tick.Step();
         tick.Reset();
 

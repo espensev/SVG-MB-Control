@@ -113,6 +113,59 @@ class ReadLoopTests(WindowsExeTestCase):
                 )
                 self.assertTrue(start_events[-1]["snapshot_mirror_configured"])
 
+    def test_read_loop_reports_snapshot_publish_failure_and_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            snapshot_path = td / "mirror" / "current_state.json"
+            snapshot_path.mkdir(parents=True)
+            config_path = _write_read_loop_config(
+                td,
+                runtime_home=runtime_home,
+                snapshot_path=snapshot_path,
+                poll_ms=50,
+            )
+            with RuntimeProbe(
+                ["--mode", "read-loop", "--config", str(config_path)],
+                env=_sim_direct_env(channel=0, amd_temp_c=83.0),
+            ):
+                failed = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type")
+                            == "runtime_logging.snapshot_publish_failed"
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(failed)
+                self.assertFalse(failed["snapshot_mirror_published"])
+                self.assertIn("snapshot_mirror_path", failed["detail"])
+
+                shutil.rmtree(snapshot_path)
+                mirror = _wait_for(
+                    lambda: _read_json(snapshot_path),
+                    timeout_s=1.0,
+                    poll_s=0.02,
+                )
+                self.assertIsNotNone(mirror)
+                recovered = _wait_for(
+                    lambda: next(
+                        (
+                            item
+                            for item in _read_runtime_events(runtime_home)
+                            if item.get("event_type")
+                            == "runtime_logging.snapshot_publish_recovered"
+                        ),
+                        None,
+                    ),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(recovered)
+
     def test_read_loop_shutdown_updates_runtime_status(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)

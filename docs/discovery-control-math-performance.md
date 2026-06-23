@@ -111,11 +111,11 @@
 
 ### Q6: Which docs should hold the resulting queue so it stays separate from historical notes?
 
-**Answer:** Keep this discovery as the new evidence record. `docs/CONTROL_SIMPLIFICATION_TARGETS.md` should remain the completed 2026-05-26 list; `docs/CONTROL_PIPELINE_MATH.md` remains the normative identity reference; `docs/COOLING_STRATEGY.md` remains the policy/tuning gate.
+**Answer:** Keep this discovery as the new evidence record. `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md` should remain the completed 2026-05-26 list; `docs/CONTROL_PIPELINE_MATH.md` remains the normative identity reference; `docs/COOLING_STRATEGY.md` remains the policy/tuning gate.
 
 **Evidence:**
-- `docs/CONTROL_SIMPLIFICATION_TARGETS.md:3` - the original target list is fully closed.
-- `docs/CONTROL_SIMPLIFICATION_TARGETS.md:11` - future behavior-preserving work should use `CONTROL_PIPELINE_MATH.md` as the identity reference.
+- `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md:3` - the original target list is fully closed.
+- `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md:11` - future behavior-preserving work should use `CONTROL_PIPELINE_MATH.md` as the identity reference.
 - `docs/STRUCTURE_AND_STABILITY.md:180` - remaining structural polish is intentionally small and separate from control tuning.
 
 **Implications:**

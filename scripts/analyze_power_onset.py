@@ -19,7 +19,7 @@ runtime home, and no elevated rights. Requires an energy-enabled session
 directory containing manifest.json (for the phase boundaries) and session.csv.
 
 This script reports numbers. It does not interpret them against the feed-forward
-plan's go/no-go criteria (docs/cpu-power-feedforward-plan-2026-06-10.md Section 5/6).
+plan's go/no-go criteria (docs/archive/cpu-power-feedforward-plan-2026-06-10.md Section 5/6).
 """
 from __future__ import annotations
 

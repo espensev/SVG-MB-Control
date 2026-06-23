@@ -106,7 +106,7 @@ struct PackageEnergyWindow {
 
 // FEAT-0006 (REQ-CPUEFF-02) derived package-power evidence. avg_watts is the
 // time-weighted average (total energy / total window time) over distinct
-// sample-id windows — NOT a mean of per-window watts. nullopt avg_watts means
+// sample-id windows - NOT a mean of per-window watts. nullopt avg_watts means
 // no valid window was ingested (RAPL off/unavailable, or old archive): the
 // report says "unavailable", never a false zero. acquisition_counts is the raw
 // provenance breakdown over all ticks of the run.
@@ -131,7 +131,7 @@ struct CycleEvidenceWindow {
 
 // FEAT-0006 (REQ-CPUEFF-01/-03) derived APERF/MPERF cycle evidence.
 // aperf_mperf_ratio is the cycle-weighted aggregate (total dAPERF / total
-// dMPERF) over distinct sample-id windows — NOT a mean of per-window ratios.
+// dMPERF) over distinct sample-id windows - NOT a mean of per-window ratios.
 // effective_mhz = ratio x P0; no logged field or document fixes a P0 source,
 // so it is derived only when the operator passes --p0-mhz, and p0_mhz echoes
 // that input so the report shows the reference it used. nullopt ratio means
@@ -149,6 +149,47 @@ struct CpuCyclesSummary {
     std::optional<double> ratio_max;
     std::optional<double> p0_mhz;
     std::optional<double> effective_mhz;
+    // FEAT-0006 all-core rollup only: the max/min contributing-core count over
+    // the package sweep windows, so a partial (<32-core) sweep is auditable and
+    // the Sigma-dAPERF work numerator is not misread as a full-package figure.
+    // Left nullopt for the per-core (core-0) summary, which has no core count.
+    std::optional<std::int64_t> contributing_cores_max;
+    std::optional<std::int64_t> contributing_cores_min;
+    std::map<std::string, int> acquisition_counts;
+};
+
+// FEAT-0020 (REQ-PWRLOG-02/-05) derived GPU board-power evidence. gpu_power_mw
+// is INSTANTANEOUS board milliwatts (not an accumulating energy counter), so this
+// summarizes the per-sample distribution (mean + nearest-rank p50/p90/max) over
+// distinct gpu_power_sample_id values - deliberately NOT the time-weighted
+// Sigma-energy/Sigma-window integral used for CPU package power. nullopt avg_mw
+// means no valid sample was ingested (GPU power off/unavailable, or old archive):
+// the report says "unavailable", never a false zero. acquisition_counts is the
+// raw provenance breakdown over all ticks of the run.
+struct GpuPowerSummary {
+    int sample_count = 0;
+    std::optional<double> avg_mw;
+    std::optional<double> mw_p50;
+    std::optional<double> mw_p90;
+    std::optional<double> mw_max;
+    std::map<std::string, int> acquisition_counts;
+};
+
+// FEAT-0021 (REQ-GPUCTX-05) derived GPU workload-context evidence. Samples are
+// de-duplicated by gpu_context_sample_id because the control loop mirrors a
+// cached context sample across rows; sample_age_ms is summarized over rows to
+// show cache staleness. Empty stats mean the archive lacks context or the
+// reader reported unavailable.
+struct GpuContextSummary {
+    int sample_count = 0;
+    PercentileSet sample_age_ms;
+    PercentileSet util_gpu_pct;
+    PercentileSet util_mem_pct;
+    PercentileSet clock_graphics_mhz;
+    PercentileSet clock_memory_mhz;
+    PercentileSet vram_used_mb;
+    PercentileSet vram_total_mb;
+    std::map<std::string, int> pstate_counts;
     std::map<std::string, int> acquisition_counts;
 };
 
@@ -158,6 +199,8 @@ struct RuntimeManifestEvidence {
     std::filesystem::path runtime_policy_path;
     std::string runtime_policy_sha256;
     std::filesystem::path events_path;
+    std::filesystem::path csv_latest_path;
+    std::optional<std::int64_t> csv_latest_row_count;
 };
 
 // Aggregated state assembled before output. Both emitters consume this; the
@@ -191,6 +234,9 @@ struct ReportData {
     TimingResourceStats timing_resources;
     PackagePowerSummary package_power;
     CpuCyclesSummary cpu_cycles;
+    CpuCyclesSummary cpu_cycles_allcore;
+    GpuPowerSummary gpu_power;
+    GpuContextSummary gpu_context;
     int authority_reasserted = 0;
     int write_failures = 0;
     int restore_failures = 0;
@@ -218,5 +264,14 @@ CpuCyclesSummary ComputeCpuCycles(
     const std::vector<CycleEvidenceWindow>& windows,
     std::map<std::string, int> acquisition_counts,
     std::optional<double> p0_mhz);
+
+// Pure: GPU board-power distribution (mean + nearest-rank p50/p90/max) from the
+// already-deduplicated instantaneous milliwatt samples (one per sample id).
+// acquisition_counts is provenance, copied through unchanged. Empty samples ->
+// avg_mw nullopt. This is a mean of instantaneous samples, NOT a Sigma-energy
+// integral, because gpu_power_mw is an instantaneous reading.
+GpuPowerSummary ComputeGpuPower(
+    std::vector<double> sample_mw,
+    std::map<std::string, int> acquisition_counts);
 
 }  // namespace svg_mb_control::analyze::report_detail

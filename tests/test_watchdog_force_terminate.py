@@ -8,9 +8,8 @@ from tests.helpers import *
 # terminate a genuinely hung worker (one that cannot honor the graceful stop
 # sentinel) and relaunch a fresh worker, rather than detecting the stall and
 # leaving the loop down. The hung condition is created by SUSPENDING the real
-# worker process (NtSuspendProcess) so it cannot poll the stop sentinel -- the
-# 06-09 "everything stopped updating" freeze class -- with no test-only code in
-# the controller. The decisive assertion is that the relaunched worker PID
+# worker process (NtSuspendProcess) so it cannot poll the stop sentinel, with no
+# test-only code in the controller. The decisive assertion is that the relaunched worker PID
 # DIFFERS from the killed one: a silent relaunch no-op (old supervisor not truly
 # dead -> "already running") would otherwise pass as a false recovery.
 
@@ -87,7 +86,7 @@ class WatchdogForceTerminateTests(WindowsExeTestCase):
                 ],
             )
 
-            # Freeze the worker so it can never honor the stop sentinel.
+            # Suspend the worker so it can never honor the stop sentinel.
             self.assertEqual(
                 _nt_suspend(old_pid), 0, "NtSuspendProcess did not succeed"
             )

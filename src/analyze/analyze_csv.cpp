@@ -312,6 +312,47 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
         GetField(fields, header, "cpu_mperf_delta"));
     row.cpu_cycles_acquisition = AsText(
         GetField(fields, header, "cpu_cycles_acquisition"));
+    row.cpu_aperf_delta_allcore = AsDouble(
+        GetField(fields, header, "cpu_aperf_delta_allcore"));
+    row.cpu_mperf_delta_allcore = AsDouble(
+        GetField(fields, header, "cpu_mperf_delta_allcore"));
+    row.cpu_cycles_window_ms_allcore = AsDouble(
+        GetField(fields, header, "cpu_cycles_window_ms_allcore"));
+    row.cpu_cycles_allcore_sample_id = AsInt(
+        GetField(fields, header, "cpu_cycles_allcore_sample_id"));
+    row.cpu_cycles_allcore_cores = AsInt(
+        GetField(fields, header, "cpu_cycles_allcore_cores"));
+    row.gpu_power_sample_id = AsInt(
+        GetField(fields, header, "gpu_power_sample_id"));
+    row.gpu_power_time_ms = AsDouble(
+        GetField(fields, header, "gpu_power_time_ms"));
+    row.gpu_power_mw = AsDouble(
+        GetField(fields, header, "gpu_power_mw"));
+    row.gpu_power_source = AsText(
+        GetField(fields, header, "gpu_power_source"));
+    row.gpu_power_acquisition = AsText(
+        GetField(fields, header, "gpu_power_acquisition"));
+    row.gpu_context_sample_id = AsInt(
+        GetField(fields, header, "gpu_context_sample_id"));
+    row.gpu_context_time_ms = AsDouble(
+        GetField(fields, header, "gpu_context_time_ms"));
+    row.gpu_context_sample_age_ms = AsDouble(
+        GetField(fields, header, "gpu_context_sample_age_ms"));
+    row.gpu_context_acquisition = AsText(
+        GetField(fields, header, "gpu_context_acquisition"));
+    row.gpu_util_gpu_pct = AsInt(
+        GetField(fields, header, "gpu_util_gpu_pct"));
+    row.gpu_util_mem_pct = AsInt(
+        GetField(fields, header, "gpu_util_mem_pct"));
+    row.gpu_pstate = AsInt(GetField(fields, header, "gpu_pstate"));
+    row.gpu_clock_graphics_mhz = AsInt(
+        GetField(fields, header, "gpu_clock_graphics_mhz"));
+    row.gpu_clock_memory_mhz = AsInt(
+        GetField(fields, header, "gpu_clock_memory_mhz"));
+    row.gpu_vram_used_mb = AsInt(
+        GetField(fields, header, "gpu_vram_used_mb"));
+    row.gpu_vram_total_mb = AsInt(
+        GetField(fields, header, "gpu_vram_total_mb"));
 
     for (std::uint32_t fi = 0u; fi < 64u; ++fi) {
         const std::string prefix = "fan" + std::to_string(fi) + "_";

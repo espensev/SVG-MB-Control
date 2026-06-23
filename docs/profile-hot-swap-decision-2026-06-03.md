@@ -1,13 +1,17 @@
-# Selectable Control-Law Profile Hot-Swap Decision - 2026-06-03
+# Selectable Control-Law Profile Decision - 2026-06-03
 
-Status: design-capture only. Per the maintainer (2026-06-03), this feature is not
-scheduled and is not believed to be a net benefit; PID is recorded here as a
-worked **example of the range** of control laws the per-channel seam must be able
-to host — a feedback law as different from the current feed-forward curve as
-possible — so the abstraction is designed for that breadth rather than
-curve-specific. Any implementation would be a demonstration. The directional
-choices below (D2, D3a, D6) record what such a demonstration would do if
-undertaken; they are not a commitment to build. Design decision record for
+Status: Current for the FEAT-0003 control-law seam, PID structure, controller
+state ownership, shared output conditioning, and measurement-gate posture.
+Updated 2026-06-20: FEAT-0003 is reopened as a restart-selected later phase after
+FEAT-0023, not as an in-process hot-swap. The original in-process swap choices
+(D5/D7) are historical for the current scope and are superseded by
+`docs/multiprofile-restart-switch-decision-2026-06-20.md` D-MPROFILE-6. This
+record does not authorize implementation by itself.
+
+PID remains the worked **example of the range** of control laws the per-channel
+seam must be able to host — a feedback law as different from the current
+feed-forward curve as possible — so the abstraction is designed for that breadth
+rather than curve-specific. Design decision record for
 `docs/features/FEAT-0003-selectable-profile-hot-swap.md`.
 
 **Companion to:** `docs/features/FEAT-0003-selectable-profile-hot-swap.md`,
@@ -26,10 +30,10 @@ feed-forward temperature→duty curve plus a CPU-override curve, demand smoothin
 four boost overlays, a low-band residual, and a per-channel rate limiter. The
 tick body calls it directly (`src/control/tick_runner.cpp:241-243`).
 
-The operator wants to select a different control **law** at runtime — for
+The operator wants a resolved profile to select a different control **law** — for
 example a PID controller (or its P / PI / PD forms) that regulates a measured
 temperature to a target temperature — not only different tuning numbers for the
-existing law. Two facts make this more than a config swap:
+existing law. Two facts make this more than a config-key toggle:
 
 1. **The current law is feed-forward; PID is feedback.** Today
    `duty = curve(temp) + overlays`. PID computes `error = temp − target` and
@@ -111,6 +115,23 @@ curve state. Cost: the larger first change must reproduce today's
 output-equivalence test over representative inputs is the gate that this move did
 not alter the curve law.
 
+**Scope override (2026-06-21, implementation): full decouple deferred; REQ-05 met
+functionally by worker-lifetime scope.** The restart-selected scope (D-MPROFILE-6)
+makes the in-one-pass decouple optional, not required. As built, the curve law is
+forward-wrapped — `CurveOverlayController::Evaluate` forwards to the unchanged
+`EvaluateChannel`, so the curve law's dynamic state (`boosts[]`,
+`smoothed_demand_pct`, `low_band_*`) **stays on `ChannelState`** rather than moving
+into `CurveOverlayController`. `PidController` does own its integral/derivative
+state (`PidState`), so the new law has no slot in `ChannelState`. REQ-PROFILE-05
+is therefore satisfied **functionally** — every controller's dynamic state is
+created with the worker and discarded on worker exit, and a FEAT-0023 profile
+switch restarts the worker into fresh instances, so no PID or curve state carries
+across a switch — while the **architectural** decouple of curve state out of
+`ChannelState` is a recorded deferred partial (no behavioral consequence under the
+restart-selected scope; revisit only if an in-process same-law re-init is ever
+needed). This trades the larger, riskier first change for the output-identical
+forward-wrap that REQ-PROFILE-01 already guards.
+
 ## D3 — PID structure
 
 PID covers P, PI, PD, and PID with one class by gain selection: a zero gain
@@ -132,6 +153,19 @@ Sub-decision D3a is selected below; D3b and D3c carry recorded leans:
   derivative-on-measurement (`−Kd·d(temp)/dt`). Derivative-on-measurement avoids
   a setpoint-change "derivative kick" when `target_c` is swapped live, which this
   feature can do. Lean: **derivative-on-measurement.**
+
+  **Sign reconciliation (2026-06-21, implementation).** The `−Kd·d(temp)/dt`
+  written above is the textbook form for the convention `error = setpoint −
+  measurement`. This feature uses the opposite, cooling-native convention
+  `error = temp − target_c` (a hotter-than-target channel must drive *more*
+  duty), under which the same derivative-on-measurement term is **`+Kd·d(temp)/dt`
+  with `Kd ≥ 0`**: a rising temperature *raises* duty (anticipatory cooling) and
+  a live `target_c` change still produces no derivative kick. The implemented
+  `PidStep` (`src/control/pid_controller.cpp`) uses the positive sign, pinned by a
+  behavioral test (`tests/cpp/pid_controller_tests.cpp`
+  `TestDerivativeSignRaisesDutyOnRisingTemp`). The negative sign would invert the
+  derivative and fight the proportional term during a thermal spike. The PID
+  identity reference `docs/CONTROL_PID_MATH.md` carries the full signed form.
 - **D3c — integral anti-windup.** Clamp the integral accumulator to
   `[integral_min, integral_max]` and stop integrating while the output is
   saturated at `min_duty_pct` or `100`. Lean: **clamp + conditional integration
@@ -158,12 +192,16 @@ capture/restore, and the write gate.
   lean **curve-law-specific** — a PID has its own integral/derivative dynamics
   and should not also be EMA-smoothed.
 
-## D5 — Dynamic-state carry-over vs. reset on swap
+## D5 — Dynamic-state carry-over vs. reset on swap (historical; restart scope uses fresh worker state)
 
 **Decision: reset by default.** On a profile swap, each channel's control-law
 dynamic state is reset (PID integral = 0 and derivative memory cleared; curve
 smoothing/boost/low-band-stage state cleared). Carry-over is opt-in and out of
 the first slice.
+
+2026-06-20 update: current FEAT-0003 no longer swaps laws in process. The active
+meaning is simpler: controller state is scoped to one worker lifetime, and a
+FEAT-0023 profile switch restarts the worker into fresh controller instances.
 
 Rationale: a law change makes carried state meaningless (a curve `smoothed_demand`
 has no meaning to a PID integral). Even a same-law swap is more predictable when
@@ -181,9 +219,19 @@ write only when **both** hold: (a) the channel has the characterization evidence
 `docs/MEASUREMENT_GATE.md` requires — a shadow-log comparison of the PID trajectory
 against the curve baseline for that channel is accepted as that evidence; and
 (b) the channel sets a non-NaN, positive slew cap (`max_setpoint_step_pct` and/or
-the rise/fall rate fields). Both are enforced as a config-load precondition: with
-either missing, `allow_live: true` is rejected at load and the channel stays in
-shadow/dry-run.
+the rise/fall rate fields). With either missing, `allow_live: true` does not
+authorize a live write and the channel stays in shadow/dry-run.
+
+**Enforcement point (2026-06-21, implementation).** The gate is evaluated at
+**controller construction** (`PidLiveAuthorized`, `src/control/pid_controller.cpp`),
+not as a config-load throw: an unevidenced `allow_live` is **downgraded** to
+shadow/dry-run so one mis-evidenced channel cannot stop the whole worker, and the
+worker emits `control_loop.pid_shadow` (with the reason) / `control_loop.profile_applied`
+at startup. Only *malformed* PID config (missing `target_c`, invalid gains, fixed
+feed-forward without `fixed_feedforward_pct`, `integral_min >= integral_max`) fails
+config load (`ValidateChannelConfig`). The slew cap is itself enforced per tick by
+the shared `RateLimitSetpoint`, which honors `max_setpoint_step_pct` independently
+of the rise/fall rates so a step-cap-only live PID is still bounded.
 
 A live `allow_live` crossing must still emit a `control_loop.profile_applied` event
 naming the channel and the law, so the baseline move is recorded as well as
@@ -193,8 +241,9 @@ sensor-safe mode, the circuit breaker) remain the safety floor regardless.
 **Revised 2026-06-06 (why).** The original 2026-06-03 form authorized `allow_live`
 *immediately, without first requiring the characterization evidence*, on the ground
 that the crossing was explicit and recorded. A 2026-06-06 review
-(`docs/profile-hot-swap-allow-live-decision-2026-06-06.md`; the measurement-gate
-section of `docs/modular-profile-hotswap-discussion-2026-06-06.md`) found that
+(`docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md`; the
+measurement-gate section of
+`docs/archive/modular-profile-hotswap-discussion-2026-06-06.md`) found that
 `docs/MEASUREMENT_GATE.md` Exit Criteria are measurements, not authorizations, so a
 recorded crossing is *consent, not evidence*; and that the slew cap the floor
 relies on defaults to NaN/off in code (`src/control/control_loop.h:29-31`;
@@ -206,27 +255,13 @@ closed-loop modes (limit cycle, overshoot, integral windup) that appear only onc
 PID drives the loop it reads, so B2's slew cap is the standing bound on exactly what
 B1's evidence cannot catch.
 
-## D7 — Apply order (normative for implementation)
+## D7 — Apply order (historical; superseded by FEAT-0023 restart switching)
 
-A profile change is delivered as a runtime-home request file consumed once per
-tick, mirroring the breaker-reset pattern (`TakeRuntimeBreakerResetRequest`,
-`src/runtime/runtime_lifecycle.cpp:55-103`; intake at `tick_runner.cpp:195`). On
-a valid request:
-
-1. **Validate.** Parse and validate the candidate profile via
-   `LoadControlLoopConfig` (`control_loop_config.cpp:507-568`) plus per-law
-   validation. On failure keep the running profile, emit
-   `control_loop.profile_rejected`, and stop — no channel state is touched.
-2. **Channel-set delta (if any).** For the first slice the candidate's channel
-   set must equal the running set or the request is rejected. When FEAT-0001 is
-   implemented, dropped channels restore baseline and clear `write_active` via
-   `RestoreSavedState` / `HandleExpiredHoldRestore` (`channel_write.h:38-48`);
-   added channels capture baseline fresh; survivors match by `channel` id.
-3. **Build + reset + swap.** Build each channel's new controller, reset its
-   dynamic state (D5), then swap `context.loop`, each
-   `context.channels[i].config`, and each controller at the tick boundary. Emit
-   `control_loop.profile_applied` with the per-channel law/parameter delta. The
-   next tick evaluates with the new law.
+2026-06-20 update: current FEAT-0003 does not add a runtime-home request consumed
+by the tick runner and does not swap controller instances mid-worker. FEAT-0023
+owns the profile-switch request, validation, supervised restart, and revert
+behavior. The old in-process apply order is intentionally not retained here; it
+is no longer the current design.
 
 ## Consequences
 
@@ -240,9 +275,8 @@ a valid request:
 - Status and CSV gain an additive per-channel controller-kind field so behavior
   can be attributed to the law that produced it (REQ-PROFILE-08).
 - Construction-time consumers (the CSV logger identity block,
-  `control_loop.cpp:66-77`; the `FanWriter`) are unaffected by a law/param swap
-  on a fixed channel set; a live `poll_tick_ms` change remains out of scope, as
-  in FEAT-0001.
+  `control_loop.cpp:66-77`; the `FanWriter`) are rebuilt with the worker under
+  the restart-selected scope; a live `poll_tick_ms` change remains out of scope.
 - No control-identity change to the curve law; `docs/CONTROL_PIPELINE_MATH.md`
   values are preserved, scope narrowed.
 
@@ -255,10 +289,10 @@ a valid request:
    `pid.allow_live` per-channel opt-in that requires both characterization evidence
    (shadow-log comparison accepted) and a non-NaN slew cap, enforced at config load.
 
-These record what a demonstration build would do. They are not a commitment to
-build; per the status above the feature is not scheduled and is not believed to be
-a net benefit. PID stands in as the worked example of how different a swappable
-control law may be from the current feed-forward curve.
+These remain the current directional choices for the restart-selected FEAT-0003
+Draft. They are not implementation authorization by themselves; FEAT-0003 is
+sequenced after FEAT-0023. PID stands in as the worked example of how different a
+selectable control law may be from the current feed-forward curve.
 
 ## Verification
 
@@ -270,8 +304,9 @@ control law may be from the current feed-forward curve.
 - Code review vs. `docs/CONTROL_LOOP.md`, `docs/CONTROL_PIPELINE_MATH.md`, and
   this decision: single control-law call site; curve identity preserved; PID
   identity documented.
-- Runtime evidence for `control_loop.profile_*` events and PID shadow/dry-run
-  behavior when exercised live (respecting `AGENTS.md` §Live Runtime Safety).
+- Runtime evidence that a FEAT-0023 profile switch restarts the worker into the
+  requested law, plus PID shadow/dry-run behavior when exercised live (respecting
+  `AGENTS.md` §Live Runtime Safety).
 
 ## Reconsideration (2026-06-06) — resolved
 
@@ -282,4 +317,4 @@ on defaults to NaN/off in code (`src/control/control_loop.h:29-31`;
 `src/control/channel_evaluator.cpp:55-57`). **Resolved 2026-06-06:** the maintainer
 selected B1+B2 — `allow_live` now requires both the characterization evidence and a
 non-NaN slew cap (the D6 text above is the revised form). The options considered are
-in `docs/profile-hot-swap-allow-live-decision-2026-06-06.md`.
+in `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md`.

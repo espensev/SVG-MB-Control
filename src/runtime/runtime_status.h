@@ -1,6 +1,7 @@
 #pragma once
 
 #include "control_runtime_context.h"
+#include "hardware_access_status.h"
 #include "read_loop.h"
 #include "runtime_csv_rows.h"
 
@@ -42,6 +43,7 @@ struct RuntimeStatusSnapshot {
     std::string last_successful_restore_iso;
     std::string log_csv_path;
     std::string event_log_path;
+    HardwareAccessStatus hardware_access;
     bool stale = false;
     std::vector<RuntimeStatusChannelSnapshot> controlled_channels;
 
@@ -75,8 +77,14 @@ bool WriteControlLoopStatus(const std::filesystem::path& runtime_home,
                             const std::string& log_csv_path,
                             const std::string& log_manifest_path,
                             const std::string& event_log_path,
-                            const std::string& last_successful_restore_iso =
-                                {});
+                            const std::string& last_successful_restore_iso = {},
+                            // FEAT-0023 (REQ-MPROFILE-09): additive,
+                            // observational active-profile identity in the
+                            // worker runtime status (name + resolution source).
+                            const std::string& active_profile_name = {},
+                            const std::string& active_profile_source = {},
+                            const HardwareAccessStatus& hardware_access =
+                                HardwareAccessStatus{});
 
 // Writes the read-loop schema (v1). Moved here from a file-local helper
 // inside read_loop.cpp.

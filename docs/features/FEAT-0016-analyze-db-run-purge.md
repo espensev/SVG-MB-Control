@@ -1,16 +1,16 @@
-# FEAT-0016: Analyze SQLite DB has a retention bound (age/size run-purge + reclaim)
+# FEAT-0016: Analyze SQLite DB has a retention bound (age run-purge + reclaim)
 
 **Project:** svg-mb-control
-**Status:** Accepted (2026-06-18)   **Version:** 0.2   **Updated:** 2026-06-18
+**Status:** Implemented (2026-06-18; Test-LocalCI green)   **Version:** 0.3   **Updated:** 2026-06-18
 **Namespace:** `REQ-DBRETAIN-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/RUNTIME_HOME.md`, `docs/discovery-runtime-disk-growth-2026-06-14.md`,
 `docs/features/FEAT-0015-event-log-retention.md`
-**Purpose:** investigate, and propose a maintainer-decidable direction for, the
-analyze SQLite database (`svg_mb_control.db`), which is the designed long-term
-telemetry sink and the prune authority but has no bound of its own — no age/size
-purge of old runs and no space reclaim.
+**Purpose:** define the accepted retention direction for the analyze SQLite
+database (`svg_mb_control.db`), which is the designed long-term telemetry sink
+and the prune authority but had no bound of its own — no age purge of old runs
+and no space reclaim.
 
 ## 1. Summary
 
@@ -21,7 +21,7 @@ sink — per `docs/RUNTIME_HOME.md`, `prune` only removes bundles that the DB ha
 absorbed — yet nothing bounds the DB itself. The only `DELETE FROM runs`
 statements in the codebase are idempotent-reingest deletes keyed by manifest path
 or by `session_start`+`mode` (`src/analyze/analyze_ingest_db.cpp:67,84`), not an
-age- or size-based retention purge. There is no `VACUUM` anywhere in `src/`.
+age-based retention purge. There was no reclaim path in `src/`.
 
 On the snapshot in `docs/discovery-runtime-disk-growth-2026-06-14.md` the DB was
 4.9 GB. The Finding 2 investigation (resolved 2026-06-14, read-only `sqlite3`)
@@ -29,15 +29,15 @@ established the size is **genuine ingested telemetry, not bloat**:
 `PRAGMA freelist_count` = 0 (so VACUUM alone reclaims nothing), 208/208 distinct
 `runs` (no duplicate ingest), with the file dominated by two 23,004,429-row
 `tick_fan_samples` / `tick_channel_samples` tables at ~1.57 KB/tick (~500 MB/day
-of continuous running). The remedy is therefore an age/size-based purge of old
+of continuous running). The remedy is therefore an age-based purge of old
 `runs` — `ON DELETE CASCADE` from `runs(id)` drops the dependent `tick_*` and
 `events` rows (`src/analyze/analyze_db.cpp:41,108,113,147,175`) — **followed by**
 a one-time `VACUUM` to shrink the file once deletes have created free pages.
 
-This spec structures that gap and proposes one direction (an age/size run-purge
-plus a reclaim step). **It does not authorize code and does not assert a bound is
-chosen**; the retention window, where the purge lives, and the reclaim trigger are
-left as a maintainer decision (§11).
+This spec structures that gap and promotes the accepted direction: an
+age-based run-purge inside `analyze prune` plus post-purge reclaim. The
+implementation is now in `src/analyze/analyze_prune.*` and
+`src/analyze/analyze_cli.cpp`; verification is recorded in §14.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
 
@@ -54,7 +54,14 @@ and a static-verified code gap.
    DB. So pruning frees CSV archive space while the DB — where the same telemetry
    now lives — keeps growing unbounded.
 
-2. **No age/size run-purge exists.** The `DELETE FROM runs WHERE manifest_path = ?`
+   The 2026-06-18 live check after FEAT-0020 and validation found
+   `release/runtime/svg_mb_control.db` at 8,377,511,936 bytes (7.80 GiB). Because
+   the DB is a derived analyzer artifact, it was deleted as an immediate safe
+   reclaim, freeing that space; no raw CSV/event files or live sidecars were
+   touched. `release/runtime` was 3.439 GiB after the reclaim, with logs still
+   3.265 GiB.
+
+2. **No age run-purge existed.** The `DELETE FROM runs WHERE manifest_path = ?`
    and `DELETE FROM runs WHERE session_start = ? AND mode = ?` statements
    (`analyze_ingest_db.cpp:67-72,84-92`) are called only to replace a run before
    re-ingesting it (idempotent ingest). Neither is age- or size-bounded; there is
@@ -78,7 +85,7 @@ and a static-verified code gap.
 ## 3. Goals & non-goals
 
 **Goals**
-- Give the analyze DB an enforced upper bound: an age/size-based purge of old
+- Give the analyze DB an enforced upper bound: an age-based purge of old
   `runs` so the file does not grow without limit across ingested sessions.
 - Reclaim disk after a purge: a one-time `VACUUM` (or equivalent) once the purge
   has created free pages, so the file shrinks rather than only stopping growth.
@@ -100,7 +107,7 @@ and a static-verified code gap.
 
 | Invariant | Source | How this proposal stays inside it |
 |---|---|---|
-| Runtime sidecar / status / manifest / archive schema stays backward-compatible | `docs/RUNTIME_HOME.md` | The analyze schema columns and `schema_version` are unchanged; the purge deletes rows by age/size and relies on existing `ON DELETE CASCADE`. No runtime-home file or archive becomes invalid. |
+| Runtime sidecar / status / manifest / archive schema stays backward-compatible | `docs/RUNTIME_HOME.md` | The analyze schema columns and `schema_version` are unchanged; the purge deletes rows by age and relies on existing `ON DELETE CASCADE`. No runtime-home file or archive becomes invalid. |
 | No fan write / start / stop / breaker reset outside an explicit live task | `AGENTS.md` §Live Runtime Safety | `analyze` is an offline CLI over the runtime DB; the purge issues no live action and touches no control path. |
 | Repo stays standalone; no sibling-repo / bridge dependency | `AGENTS.md` §Repo Boundary | The change is confined to `src/analyze/*` over the vendored `third_party/sqlite3`; no external dependency. |
 | Shipped 250 ms cadence / channel set / input strategy is the measured baseline | `docs/MEASUREMENT_GATE.md` | Offline analyze-side retention only; cadence, channels, and input strategy are unchanged, so the gate baseline does not move. |
@@ -108,15 +115,14 @@ and a static-verified code gap.
 
 ## 5. Behavior specification
 
-Behavior is **proposed (not yet implemented)** and is one direction for the
-maintainer to accept, refine, or reject. It lives in `src/analyze/` near the
-prune path (`analyze_prune.cpp`) and the run-delete helpers
-(`analyze_ingest_db.cpp`).
+Implemented behavior lives in `src/analyze/` near the prune path
+(`analyze_prune.cpp`) and the analyzer CLI parser (`analyze_cli.cpp`).
 
-- **Age/size run-purge.** An `analyze` operation deletes `runs` rows that fall
-  outside the accepted bound — older than a retention window (`session_start <
-  cutoff`), and/or beyond a total-size or run-count cap, keeping the most recent.
-  The exact bound is an open decision (§11).
+- **Age run-purge.** `analyze prune --db-retain-days <days> --apply` deletes
+  `runs` rows older than the retention window (`session_start < cutoff`),
+  keeping recent runs. Total-size or run-count caps are follow-on knobs if the
+  age bound proves insufficient (§11). `--db-retain-days 0` explicitly disables
+  DB-side retention.
 - **Cascade-driven detail removal.** With `PRAGMA foreign_keys = ON`, deleting a
   `runs` row removes its dependent `tick_samples`, `tick_fan_samples`,
   `tick_channel_samples`, and ingested `events` via `ON DELETE CASCADE`
@@ -133,15 +139,15 @@ prune path (`analyze_prune.cpp`) and the run-delete helpers
   bundle still exists may be re-ingestable, which is acceptable; a retained run
   must continue to de-duplicate correctly.
 - **Dry-run parity.** The purge follows the existing prune convention of a
-  dry-run default and an explicit `--apply`, reporting selected vs. deleted rows
-  and reclaimed bytes (mirroring the `RunAnalyzePrune` summary line at
-  `analyze_prune.cpp:365-377`).
+  dry-run default and an explicit `--apply`, reporting selected vs. deleted rows,
+  orphan-check result, reclaim execution, and before/after DB bytes in the prune
+  summary.
 
 ## 6. Requirements  *(promotion gate 4)*
 
 | ID | Requirement |
 |---|---|
-| REQ-DBRETAIN-01 | The analyze DB must gain an age/size-based purge of old `runs` (a bounded `DELETE FROM runs WHERE ...`), so the DB does not grow without limit across ingested sessions. The accepted bound (age window, size cap, and/or run-count cap, and which runs are retained) is recorded in §11 and the design decision before implementation. |
+| REQ-DBRETAIN-01 | The analyze DB must gain an age-based purge of old `runs` (a bounded `DELETE FROM runs WHERE ...`), so the DB does not grow without limit across ingested sessions. The accepted bound (age window and which runs are retained) is recorded in §11 and the design decision before implementation. |
 | REQ-DBRETAIN-02 | The purge must remove dependent detail rows, not orphan them: it must run with `PRAGMA foreign_keys = ON` so `ON DELETE CASCADE` from `runs(id)` drops the dependent `tick_samples` / `tick_fan_samples` / `tick_channel_samples` / ingested `events`, and a post-purge check must confirm no detail rows reference a deleted run. |
 | REQ-DBRETAIN-03 | After a purge that deleted runs, the operation must reclaim freed space via a one-time `VACUUM` (or incremental vacuum), and it must not run an unconditional VACUUM when nothing was deleted (Finding 2: freelist is 0 on an un-purged DB). |
 | REQ-DBRETAIN-04 | The purge must preserve idempotent ingest: the by-manifest-path and by-session de-duplication (`IsManifestPathInDb` / `IsSessionInDb`) must remain correct for retained runs, and the operation must default to dry-run with an explicit `--apply`, reporting selected/deleted runs and reclaimed bytes. |
@@ -151,21 +157,19 @@ prune path (`analyze_prune.cpp`) and the run-delete helpers
 
 - New/changed fields: none. The analyze schema (`runs`, `tick_samples`,
   `tick_fan_samples`, `tick_channel_samples`, `events`, `plant_model_*`) and
-  `schema_version` (10) are unchanged; the purge uses existing columns
+  `schema_version` (11) are unchanged; the purge uses existing columns
   (`session_start`, `runs(id)`) and existing `ON DELETE CASCADE`.
 - Config impact (`config/control.*.json`, `config/machines/*.json`): none unless
-  the bound is made config-driven rather than a CLI flag; recorded as an open
-  decision (§11).
+  a later scheduled-maintenance pass makes the bound config-driven rather than a
+  CLI flag (§11).
 - Schema/version impact: none. Update `docs/RUNTIME_HOME.md` (the DB now has a
   documented retention bound, narrowing the current "no DB-side retention/VACUUM"
   framing) and `README.md` (analyze maintenance workflow) at implementation.
 
 ## 8. CLI / config / operator surface deltas
 
-- Proposed operator surface (one of, open decision §11): extend `analyze prune`
-  with a DB-retention flag (e.g. `--db-retain-days` / `--db-max-runs`), or add a
-  sibling subcommand (e.g. `analyze db-prune` / `analyze vacuum`). Either reuses
-  the existing `analyze` flag conventions — `--db <path>`, `--dry-run|--apply`,
+- Operator surface: extend `analyze prune` with `--db-retain-days`, reusing the
+  existing `analyze` flag conventions — `--db <path>`, `--dry-run|--apply`,
   `--quiet` (`src/analyze/analyze_cli.cpp:41`) and the `PruneOptions` shape
   (`src/analyze/analyze_prune.h`). UI is out of scope (`docs/MEASUREMENT_GATE.md`).
 - Doc updates at implementation are `docs/RUNTIME_HOME.md` and `README.md` per
@@ -193,15 +197,15 @@ Verify legend:
 - **M** = manual runtime measurement (runtime CSV / status / event-log evidence; respects `AGENTS.md` §Live Runtime Safety).
 - **R** = code review against the cited contract doc.
 
-## 11. Open decisions
+## 11. Accepted decisions and follow-on choices
 
 | Decision | Needed before | Current default |
 |---|---|---|
-| Whether to add DB-side retention at all, or accept the current unbounded sink. | promotion | Hold; the current behavior is shipped behavior until a maintainer judges the unbounded DB material (Finding 2 confirms it is real telemetry, ~500 MB/day, not bloat). |
-| The bound: age window (`session_start < cutoff`), total-size cap, run-count cap, or a combination, and which runs are retained. | implementation | Undecided. An age window mirrors `analyze prune --retain-days`, but the maintainer may prefer a size or run-count cap given ~500 MB/day. |
-| Where the purge lives: extend `analyze prune` vs. a new `analyze db-prune` / `analyze vacuum` subcommand. | implementation | Undecided. Extending `analyze prune` reuses the bundle-retention window; a separate subcommand keeps DB reclaim explicit. |
-| Whether VACUUM runs automatically after a purge or as a separate explicit step. | implementation | Lean: automatic only when runs were deleted (REQ-DBRETAIN-03); never unconditional. |
-| Whether the bound is CLI-flag or config-driven. | implementation | Lean: CLI flag initially (no runtime config surface), revisited if scheduled maintenance wants a config key. |
+| Whether to add DB-side retention at all, or accept the current unbounded sink. | promotion | Resolved: add DB-side retention. Finding 2 and the 2026-06-18 7.80 GiB DB confirm material structural growth. |
+| The bound: age window (`session_start < cutoff`), total-size cap, run-count cap, or a combination, and which runs are retained. | implementation | Resolved for v1: age window via `--db-retain-days`; size/run-count caps are follow-on knobs if the age bound is insufficient. |
+| Where the purge lives: extend `analyze prune` vs. a new `analyze db-prune` / `analyze vacuum` subcommand. | implementation | Resolved: extend `analyze prune`, reusing the existing dry-run/`--apply` operator model. |
+| Whether VACUUM runs automatically after a purge or as a separate explicit step. | implementation | Resolved: automatic one-time `VACUUM` only when rows were deleted; never unconditional. |
+| Whether the bound is CLI-flag or config-driven. | implementation | Resolved for v1: CLI flag initially; revisit config/scheduled maintenance only after the offline surface exists. |
 
 ## 12. Measurement gate & dependencies
 
@@ -230,24 +234,23 @@ Verify legend:
 - [x] 6. Confirmed it does not violate `AGENTS.md` §Live Runtime Safety or §Repo Boundary, and does not silently move the `MEASUREMENT_GATE.md` baseline (offline analyze-side; schema/identity unchanged).
 - [x] 7. Doctrine check: current behavior claims grounded with file:line; proposed behavior labeled as proposed; `must`/`should`/`is` used per `CLAUDE.md`; no undefined terms or unqualified vague adjectives.
 
-> Promoted to Accepted 2026-06-18: the maintainer accepted the age-based run-purge
-> inside `analyze prune` + post-purge VACUUM direction (§9 decision record). All
-> seven promotion gates pass; the spec is buildable. Implementation and
-> verification are staged for a Windows-host session (this repo's build is
-> Windows-only), after which §14 is filled.
+> Promoted to Accepted 2026-06-18 and implemented the same day after maintainer
+> authorization: age-based run-purge inside `analyze prune` plus post-purge
+> reclaim is built and verified. Run `.\scripts\Test-LocalCI.ps1 -KeepBuildDir`
+> for the maintained gate.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
 
-Not started — Accepted 2026-06-18, not yet implemented. Each row is filled after
-implementation, which is staged for a Windows-host session where `Test-LocalCI`
-can build and run the tests (this repo's build is Windows-only).
-
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-DBRETAIN-01 | | | |
-| REQ-DBRETAIN-02 | | | |
-| REQ-DBRETAIN-03 | | | |
-| REQ-DBRETAIN-04 | | | |
-| REQ-DBRETAIN-05 | | | |
+| REQ-DBRETAIN-01 | pass | `tests/test_analyze_ingest.py::test_db_prune_apply_cascades_and_reclaims` ingests old/recent runs, applies `--db-retain-days 1`, and asserts only the recent run remains. Full `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-18 |
+| REQ-DBRETAIN-02 | pass | `test_db_prune_apply_cascades_and_reclaims` asserts old-run `tick_samples`, `tick_fan_samples`, `tick_channel_samples`, and `events` are removed; the implementation enables foreign keys and reports nonzero orphan counts as an error. | 2026-06-18 |
+| REQ-DBRETAIN-03 | pass | `test_db_prune_apply_cascades_and_reclaims` asserts page/file-size shrink after deleting old runs; `test_db_prune_zero_retain_days_is_explicit_disable` verifies the disable path does not reclaim/delete. | 2026-06-18 |
+| REQ-DBRETAIN-04 | pass | `test_db_prune_dry_run_keeps_old_run` verifies dry-run reports candidates without deletion; `test_db_prune_apply_cascades_and_reclaims` re-runs ingest after purge and confirms retained runs still de-duplicate. | 2026-06-18 |
+| REQ-DBRETAIN-05 | pass | Review: change is confined to offline `analyze prune`; schema version and columns are unchanged, per-tick ingest fidelity is unchanged, existing CSV-bundle prune remains, and `README.md` / `docs/RUNTIME_HOME.md` are updated. | 2026-06-18 |
 
-**Spec vs. implementation deltas:** none yet (not implemented).
+**Spec vs. implementation deltas:** Implemented the accepted v1 age-bound only;
+size and run-count caps remain deferred. The reclaim path uses `VACUUM` followed
+by `PRAGMA wal_checkpoint(TRUNCATE)` after rows are deleted. The prune summary
+reports DB candidates/deletes/orphans/reclaim and before/after bytes; `0`
+retention days is an explicit disable.

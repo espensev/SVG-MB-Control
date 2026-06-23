@@ -18,6 +18,16 @@ This document is normative for the **computation**, not for the lifecycle
 `CONTROL_LOOP.md`. Section anchors call out the source line that implements
 each equation so this can be diffed against future changes.
 
+**Law scope (FEAT-0003).** This reference describes the **curve/overlay control
+law** (`CurveOverlayController`, the default and only law for an unchanged
+config), whose computation is `EvaluateChannel`. The per-channel
+`IChannelController` seam can also select a **PID law** (`PidController`); its
+identity — error, P/I/D terms, derivative-on-measurement sign, anti-windup,
+feed-forward, and the shared output conditioning — lives in the sibling reference
+`docs/CONTROL_PID_MATH.md`. Both laws share the primary-temperature selection
+(`SelectPrimaryCurveInput`), the `[min_duty, 100]` clamp, and the
+`RateLimitSetpoint` safety slew cap documented here.
+
 Keep this file in lock-step with source, shipped config, and runtime traces.
 Any change to curve lookup, smoothing, boost composition, low-band behavior,
 cadence scoring, CSV/status control fields, or channel response attribution
@@ -822,8 +832,8 @@ changes enough that these checks are incomplete.
 | §5   | `channel_evaluator.cpp:ApplyDemandSmoothing` |
 | §6.1–6.2 | `boost_stage.cpp:UpdateBoostStage` (BelowStart specs in `kBoostStageSpecs`: ThermalPressure, MidbandPressure, GpuAirflow) |
 | §6.3 | `boost_stage.cpp:UpdateBoostStage` (ExplicitRelease spec: CpuLowSoak) |
-| §7   | `low_band_integrator.cpp:UpdateLowBandState`, `cadence_score.cpp:SmoothScale` |
-| §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `cadence_score.cpp:MoveTowardRateLimited` |
+| §7   | `low_band_integrator.cpp:UpdateLowBandState`, `control_math.cpp:SmoothScale` |
+| §8.1 | `channel_evaluator.cpp:RateLimitSetpoint`, `control_math.cpp:MoveTowardRateLimited` |
 | §8.2–8.3 | `channel_evaluator.cpp:EvaluateChannel` (final composition) |
 | §9   | `channel_write.cpp:TryApplyChannelSetpoint`, `channel_evaluator.cpp:FanNeedsAuthorityReassert`, `WriteCooldownForAuthorityReassert` |
 | §10  | `cadence_score.cpp:ComputeCadence`, `control_scheduler.cpp:WaitForNextControlTick`, `tick_runner.cpp` (CSV `loop_slip_ms` derivation) |

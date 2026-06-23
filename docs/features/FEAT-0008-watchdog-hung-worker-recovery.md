@@ -8,7 +8,7 @@
 `docs/WRITE_ORCHESTRATION.md`
 **Purpose:** when the watchdog detects a stale (hung) worker but the graceful
 stop times out, escalate to a forced termination and relaunch so a truly frozen
-control loop is actually recovered, not merely detected.
+control-loop worker is actually recovered, not merely detected.
 
 ## 1. Summary
 
@@ -19,7 +19,7 @@ returned **without relaunching** and no force-kill existed, so the loop stayed
 down until the next event (reboot, manual restart). This feature adds a bounded
 force-terminate escalation on the restart path: after the graceful stop times
 out, force-terminate the worker (and supervisor if still present), then relaunch
-— recovering the `{worker alive but frozen}` case the old path detected but could
+— recovering the `{worker alive but unresponsive}` case the old path detected but could
 not clear.
 
 ## 2. Problem & motivation  *(promotion gate 1)*
@@ -34,13 +34,10 @@ force-kill in the watchdog or supervisor paths. The watchdog scheduled task
 therefore detected a hung worker (`kStale` -> exit 2 -> `--restart`) but could
 not recover one that would not honor the stop sentinel.
 
-This is the "everything stopped updating" freeze class from the 06-09 incident
-(`docs/cpu-peak-temp-excursion-2026-06-09.md`). The 2026-06-16 reproduction
-(`docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`) only exercised the
-*recoverable* case — the worker honored the graceful stop — so the non-recovery
-gap is currently unguarded. While a worker is down, fans hold the last PWM
-(SuperIO/EC) with the SMU 95 °C throttle as the hardware backstop; recovery still
-matters so the loop resumes tracking rather than holding a stale duty indefinitely.
+This is a watchdog recovery gap independent of the cause of the hang. While a
+worker is down, fans hold the last PWM (SuperIO/EC) with the SMU 95 °C throttle
+as the hardware backstop; recovery still matters so the loop resumes tracking
+rather than holding a stale duty indefinitely.
 
 ## 3. Goals & non-goals
 
@@ -53,8 +50,7 @@ matters so the loop resumes tracking rather than holding a stale duty indefinite
 
 **Non-goals**
 - No change to detection (the `kStale`/10 s staleness verdict and the 1-minute
-  watchdog cadence are out of scope here; see `docs/cpu-loop-survival-layer0-plan-2026-06-16.md`
-  §3.3 L0-C).
+  watchdog cadence are out of scope here).
 - No new software thermal clamp; emergency protection stays hardware-owned.
 - No change to the sidecar-gated actuation path (that is the separate L0-A1 lever).
 - No priority elevation (separate, deferred L0-B lever).
@@ -126,13 +122,13 @@ the new event-log entries on a forced recovery.
 
 | Decision doc | Decision it must settle | Status |
 |---|---|---|
-| `docs/watchdog-hung-worker-recovery-decision-2026-06-16.md` | Force-kill escalation is the chosen recovery: D1 worker-first (supervisor self-exits), D2 reuse the 15 s graceful deadline, D3 bounded single-shot with a PID-reuse image-path guard. Basis: `docs/cpu-loop-survival-layer0-plan-2026-06-16.md` §3.2 and `docs/cpu-loop-stall-reproduction-findings-2026-06-16.md`. | Current (implemented) |
+| `docs/watchdog-hung-worker-recovery-decision-2026-06-16.md` | Force-kill escalation is the chosen recovery: D1 worker-first (supervisor self-exits), D2 reuse the 15 s graceful deadline, D3 bounded single-shot with a PID-reuse image-path guard. | Current (implemented) |
 
 ## 10. Acceptance criteria & verification mapping  *(promotion gate 5)*
 
 | Requirement | Verify (T/B/M/R) | Where |
 |---|---|---|
-| REQ-WATCHDOG-01 | T, M | Integration test suspends the real worker (`NtSuspendProcess`) so it misses the 15 s stop deadline and asserts force-terminate + relaunch; (M) the live deploy verified the same recovery mechanism on the production watchdog via the suspend proxy. The natural-load hard-freeze premise is a separate Layer-0 characterization, closed on evidence as not reproducible by load (see §14). |
+| REQ-WATCHDOG-01 | T, M | Integration test suspends the real worker (`NtSuspendProcess`) so it misses the 15 s stop deadline and asserts force-terminate + relaunch; (M) the live deploy verified the same recovery mechanism on the production watchdog via the suspend proxy. |
 | REQ-WATCHDOG-02 | T, R | Test asserts the `supervisor.worker_force_terminated` event is emitted with PID/reason; review against the event schema in `docs/RUNTIME_HOME.md`. |
 | REQ-WATCHDOG-03 | T, R | Reconcile-after-force-kill test (orphaned sidecar restored on relaunch); review vs `docs/WRITE_ORCHESTRATION.md` that ordering/recovery is unchanged. |
 | REQ-WATCHDOG-04 | T, R | Test that a worker honoring the graceful stop is not force-terminated and that the escalation is attempt-bounded; review of the trigger gate. |
@@ -154,9 +150,9 @@ Remaining items are non-blocking and post-v1:
 | Apply the same force-stop escalation to a plain `--stop` after timeout | post-v1 | Graceful-only for `--stop`; escalation scoped to `--restart` recovery. |
 
 **Known limitations (v1):**
-- *PID-corroboration refusal on a pre-first-write freeze.* The worker-PID guard refuses
+- *PID-corroboration refusal on a pre-first-write hang.* The worker-PID guard refuses
   to force-terminate when `control_supervisor.json` `last_worker_pid` disagrees with
-  `control_runtime.json` `process_id`. If a worker freezes *before* its first status
+  `control_runtime.json` `process_id`. If a worker hangs *before* its first status
   write while a prior incarnation's `process_id` still sits in `control_runtime.json`,
   the PIDs disagree and the escalation refuses; because the frozen worker can never
   republish its PID, every subsequent watchdog poll refuses too, so this narrow startup
@@ -197,10 +193,10 @@ Remaining items are non-blocking and post-v1:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-WATCHDOG-01 | pass (T, M) | (T) `tests/test_watchdog_force_terminate.py::test_hung_worker_is_force_terminated_and_relaunched`: the worker is suspended (`NtSuspendProcess`) so it cannot honor the stop sentinel, `--restart` force-terminates it, and the relaunched worker PID **differs** from the killed one. (M) live deploy 2026-06-16 (commit `e5bafdb`): the live control-loop worker (pid 44984) was suspended; the production watchdog scheduled task fired `--restart`, the 15 s graceful stop timed out, the worker was force-terminated (`supervisor.worker_force_terminated`, detail "stop_result=2"), and a fresh worker (pid 36348) relaunched and resumed ticking. **Scope:** (T) and (M) both verify the recovery *mechanism* using an `NtSuspendProcess` hung-worker proxy (the deterministic way to make a worker miss the 15 s stop). Whether a worker freezes that hard *naturally* is a separate Layer-0 characterization question, now resolved on evidence: load only degrades-and-graceful-recovers across the most aggressive AVX2 cell at **n=6** (`docs/cpu-loop-survival-live-sweep-findings-2026-06-16.md` §3.2 + Appendix C: n=5 repeat, 5/5 survive, 0 force-terminations, peak 76.1 °C) and the protocol §5 AVX-512 escalation was evaluated and **rejected as the wrong test** (a uniform thermal slowdown cannot produce a worker-specific 15 s stop-miss, and the 06-09 whole-system class is outside this feature's recovery envelope; `docs/cpu-0609-freeze-classification-2026-06-16.md` §2). By mechanism (timer-bound `steady_clock` stop poll + balance-set-manager boost capping runnable-thread starvation at seconds + the watchdog-asymmetry; classification §2) the scheduling axis cannot produce a natural `stop_result==2`, and the n=6 aggressive load cells corroborate it (0 force-terminations; 0/6 is consistent with, not a tight rate bound on, the rate). FEAT-0008 is validated defense-in-depth for the deterministic-deschedule / kernel-block class. This is not a REQ-WATCHDOG-01 recovery-path gap. | 2026-06-16 |
+| REQ-WATCHDOG-01 | pass (T, M) | (T) `tests/test_watchdog_force_terminate.py::test_hung_worker_is_force_terminated_and_relaunched`: the worker is suspended (`NtSuspendProcess`) so it cannot honor the stop sentinel, `--restart` force-terminates it, and the relaunched worker PID **differs** from the killed one. (M) live deploy 2026-06-16 (commit `e5bafdb`): the live control-loop worker (pid 44984) was suspended; the production watchdog scheduled task fired `--restart`, the 15 s graceful stop timed out, the worker was force-terminated (`supervisor.worker_force_terminated`, detail "stop_result=2"), and a fresh worker (pid 36348) relaunched and resumed ticking. **Scope:** (T) and (M) verify the recovery mechanism using an `NtSuspendProcess` hung-worker proxy, the deterministic way to make a worker miss the 15 s stop. | 2026-06-16 |
 | REQ-WATCHDOG-02 | pass | Same integration test asserts the `supervisor.worker_force_terminated` event records the killed PID; `docs/RUNTIME_HOME.md` documents the three additive `supervisor.*force_terminate*` event types (R). | 2026-06-16 |
 | REQ-WATCHDOG-03 | pass | Same integration test seeds an orphaned `pending_writes.json` entry that the force-killed relaunch reconciles to `[]`; the escalation does not touch the reconcile path (`app_main.cpp` startup `ReconcilePendingWrites` unchanged; a force-kill is a crash) (R). | 2026-06-16 |
-| REQ-WATCHDOG-04 | pass | `tests/test_watchdog_force_terminate.py::test_graceful_worker_is_not_force_terminated` (a graceful stop never escalates) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard refusal, PID-corroboration refusal, single-shot no-retry bound); trigger gated on `stop_result == 2` in `app_main.cpp` (R). (M) the 2026-06-16 live AVX2 starvation sweep (`cpu-synth-load` high / pin / oversubscribe×4, sweep-wide peak `cpu_tctl_c` 76.4 °C) degraded loop cadence but the worker honored the graceful stop each time: two watchdog restarts, both `supervisor.worker_exited exit_code=0 stop_requested=true`, **zero** force-terminations. Strengthened 2026-06-16 by an n=5 repeat of the most aggressive cell (`--oversubscribe 4 --priority high --pin`; live-sweep Appendix C): 5/5 survive, 0 force-terminations, 0 graceful restarts, peak 76.1 °C — n=6 total at the aggressive cell with zero `stop_result==2`. Force-terminate is correctly gated to the hard-freeze case, which the scheduling axis does not reach; the protocol §5 AVX-512 escalation was evaluated and rejected as the wrong test (`docs/cpu-0609-freeze-classification-2026-06-16.md` §2). | 2026-06-16 |
+| REQ-WATCHDOG-04 | pass | `tests/test_watchdog_force_terminate.py::test_graceful_worker_is_not_force_terminated` (a graceful stop never escalates) + `tests/cpp/worker_force_terminate_tests.cpp` (image-guard refusal, PID-corroboration refusal, single-shot no-retry bound); trigger gated on `stop_result == 2` in `app_main.cpp` (R). | 2026-06-16 |
 
 **Spec vs. implementation deltas:**
 - **Testable seam (additive, no behavior change).** The escalation logic lives
@@ -221,7 +217,7 @@ Remaining items are non-blocking and post-v1:
   `last_worker_pid` is cross-checked against `control_runtime.json`'s
   `process_id`, and a disagreement refuses the kill (an uncorroborated PID is
   never terminated).
-- **Integration-test fixture.** REQ-WATCHDOG-01's (T) creates a genuinely frozen
+- **Integration-test fixture.** REQ-WATCHDOG-01's (T) creates a genuinely hung
   worker by suspending the real process (`NtSuspendProcess` via `ctypes`),
   rather than adding a test-only "ignore-stop" mode to the controller as §4
   contemplated — no production worker code path was added.

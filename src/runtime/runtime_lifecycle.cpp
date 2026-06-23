@@ -113,4 +113,82 @@ void ClearRuntimeBreakerResetRequest(
     std::filesystem::remove(RuntimeBreakerResetRequestPath(runtime_home), ec);
 }
 
+std::filesystem::path RuntimeProfileSwitchRequestPath(
+    const std::filesystem::path& runtime_home) {
+    return runtime_home / "profile.switch.request.json";
+}
+
+bool RequestRuntimeProfileSwitch(const std::filesystem::path& runtime_home,
+                                 const std::string& profile_name) {
+    if (profile_name.empty()) {
+        return false;
+    }
+    nlohmann::json payload = MakeSchemaObject(1u);
+    payload["requested_at"] =
+        FormatLocalIso8601(std::chrono::system_clock::now());
+    payload["reason"] = "operator-request";
+    payload["profile"] = profile_name;
+    return TryWriteJsonFileAtomic(
+        RuntimeProfileSwitchRequestPath(runtime_home), payload);
+}
+
+std::optional<RuntimeProfileSwitchRequest> TakeRuntimeProfileSwitchRequest(
+    const std::filesystem::path& runtime_home) {
+    const std::filesystem::path path =
+        RuntimeProfileSwitchRequestPath(runtime_home);
+    std::error_code exists_ec;
+    if (!std::filesystem::exists(path, exists_ec) || exists_ec) {
+        return std::nullopt;
+    }
+
+    RuntimeProfileSwitchRequest request;
+    try {
+        const nlohmann::json payload =
+            ReadJsonFile(path, "profile switch request");
+        request.requested_at = JsonStringOr(payload, "requested_at");
+        request.profile_name = JsonStringOr(payload, "profile");
+        if (request.profile_name.empty()) {
+            request.parse_error = "profile is missing or empty";
+        }
+    } catch (const std::exception& error) {
+        request.parse_error = error.what();
+    }
+
+    ClearRuntimeProfileSwitchRequest(runtime_home);
+    return request;
+}
+
+void ClearRuntimeProfileSwitchRequest(
+    const std::filesystem::path& runtime_home) {
+    std::error_code ec;
+    std::filesystem::remove(RuntimeProfileSwitchRequestPath(runtime_home), ec);
+}
+
+std::filesystem::path RuntimeProfileCycleRequestPath(
+    const std::filesystem::path& runtime_home) {
+    return runtime_home / "profile.cycle.request.json";
+}
+
+bool RequestRuntimeProfileCycle(const std::filesystem::path& runtime_home) {
+    nlohmann::json payload = MakeSchemaObject(1u);
+    payload["requested_at"] =
+        FormatLocalIso8601(std::chrono::system_clock::now());
+    payload["reason"] = "profile-switch-cycle";
+    return TryWriteJsonFileAtomic(
+        RuntimeProfileCycleRequestPath(runtime_home), payload);
+}
+
+bool RuntimeProfileCycleRequested(const std::filesystem::path& runtime_home) {
+    std::error_code ec;
+    return std::filesystem::exists(
+               RuntimeProfileCycleRequestPath(runtime_home), ec) &&
+           !ec;
+}
+
+void ClearRuntimeProfileCycleRequest(
+    const std::filesystem::path& runtime_home) {
+    std::error_code ec;
+    std::filesystem::remove(RuntimeProfileCycleRequestPath(runtime_home), ec);
+}
+
 }  // namespace svg_mb_control

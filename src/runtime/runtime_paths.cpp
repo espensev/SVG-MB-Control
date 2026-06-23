@@ -45,6 +45,11 @@ std::filesystem::path ResolveRuntimeLogManifestPath(
     return ResolveRuntimeLogsDir(runtime_home) / naming.latest_manifest_name;
 }
 
+std::filesystem::path RuntimeLoggingHealthPath(
+    const std::filesystem::path& runtime_home) {
+    return runtime_home / "logging_health.json";
+}
+
 std::filesystem::path RuntimeStatusPath(
     const std::filesystem::path& runtime_home) {
     return runtime_home / "control_runtime.json";

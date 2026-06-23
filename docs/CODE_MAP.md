@@ -68,12 +68,36 @@ the same responsibility; otherwise they are listed separately.
   and status emission (no JSON write — that lives in `runtime_status`).
 - `src/control/control_supervisor.{h,cpp}` — Supervised long-running
   mode: spawns/restarts the worker process, owns
-  `RunSupervisorWorkerLoop`, tracks restart counts.
+  `RunSupervisorWorkerLoop`, tracks restart counts. FEAT-0023: while the
+  worker runs it consumes the operator-written `profile.switch.request.json`
+  (`TakeRuntimeProfileSwitchRequest`), validates the candidate before it
+  signals a restart (only a request that resolves in the catalog and loads
+  triggers `RequestRuntimeProfileCycle`), and auto-reverts to the
+  last-known-good profile when a freshly-switched worker fails startup
+  (`DecideAfterStartupOutcome`).
 - `src/control/low_band_evidence.{h,cpp}` — Serializes the per-tick
   low-band evidence record (signal, debt, stage activation, CPU scale)
   to the event log.
 - `src/control/low_band_integrator.{h,cpp}` — Advances the global
   low-band signal and debt, and per-channel staged boost, each tick.
+- `src/control/machine_profile.{h,cpp}` — FEAT-0023 profile selection:
+  pure `ResolveProfileSelection` precedence (explicit `--config` >
+  `--profile` flag > `SVG_MB_PROFILE` env > machine id > default), plus
+  catalog resolution (`ResolveProfileConfigPath` /
+  `DefaultProfileCatalogDirs`) that maps a profile name to its
+  `config/profiles/<name>.json` path.
+- `src/control/profile_composition.{h,cpp}` — FEAT-0023 (REQ-MPROFILE-01)
+  `ComposeConfigRoot`: composes a `compose`-descriptor config into one
+  control-config JSON by injecting the machine-base
+  (`machine_cooling_policy.v1`) per-channel `release_min_duty_pct` into the
+  behavior-overlay channels; a config with no `compose` key is returned
+  unchanged.
+- `src/control/profile_switch_decision.{h,cpp}` — FEAT-0023 pure
+  switch-decision seam: `DecideSwitchRequest` (REQ-MPROFILE-05; reject or
+  activate a taken switch request after catalog and load/validate checks)
+  and `DecideAfterStartupOutcome` (REQ-MPROFILE-07; keep on worker
+  survival, revert to last-known-good on a startup failure), kept free of
+  process spawn/signal so they are unit-testable.
 - `src/control/tick_runner.{h,cpp}` — `ControlLoopRunState` and
   `RunControlTick`: per-tick sampling, channel evaluation, write
   attempts, artifact publication, and wait — the steady-state body.
@@ -180,6 +204,11 @@ the same responsibility; otherwise they are listed separately.
   reading env vars with a fallback.
 - `src/platform/file_hash.{h,cpp}` — Shared streaming SHA-256 helper for
   runtime and analyzer artifact identity.
+- `src/platform/machine_identity.{h,cpp}` — FEAT-0023 machine-identity
+  resolution (`ResolveMachineId` / pure `ResolveMachineIdFrom`): a
+  non-empty trimmed `machine_id.txt` override wins, otherwise the host name
+  (`GetComputerNameW`) is trimmed and lower-cased, used to auto-select a
+  catalog profile when no `--config` / `--profile` is given.
 - `src/platform/runtime_singleton.{h,cpp}` — Cross-process named
   mutex that enforces single-controller-per-runtime-home.
 - `src/platform/runtime_util.{h,cpp}` — `ProcessIsActive` and
@@ -273,6 +302,9 @@ the same responsibility; otherwise they are listed separately.
   `config/machines/snd-desk.cooling.policy.json` cooling-policy contract.
 - `tests/test_control_loop.py` — `control-loop` mode end-to-end
   hermetic coverage.
+- `tests/test_cpu_temp_power.py` — Coverage for the power-normalized CPU
+  temperature evaluator script, including package-watt banding and
+  GPU-confound splitting.
 - `tests/test_eval_dashboard.py` — `tools/eval_dashboard` HTTP API
   coverage.
 - `tests/test_evidence_log.py` — `evidence-log` mode coverage.
@@ -314,6 +346,28 @@ the same responsibility; otherwise they are listed separately.
 - `scripts/Compare-CpuTemps.ps1` — read-only harness that bins control-loop
   CSV `cpu_tctl_c` by sustained `system_cpu_busy_pct` into idle/low/high and
   records a per-setting comparison ledger.
+- `scripts/analyze_cpu_temp_power.py` — read-only evaluator that bins distinct
+  FEAT-0006 CPU package-energy windows by package watts, reports apparent
+  `theta C/W`, separates GPU-confounded windows, surfaces per-CCD Tdie
+  (`ccd1_tdie_c`/`ccd2_tdie_c`/`ccd_delta_c`, parsed from `amd_sensor_summary`
+  via `control_csv.parse_ccd_temps`), and reads radiator/context channel
+  membership from the machine cooling policy.
+- `scripts/score_loop_timing_gate.py` — read-only FEAT-0006 section-12 gate
+  scorer: compares `loop_work_duration_ms` baseline-vs-candidate (GPU-bucketed,
+  p99-of-bulk discriminator; max/overruns as context) to check the all-core
+  off-thread sweeper does not move the 250 ms control-loop profile before any
+  enabled-live promotion.
+- `scripts/cpu_config_fingerprint.py` — read-only analyzer (skeleton) that builds
+  a per-run config-pure fingerprint (idle package-power floor, per-busy-band
+  watts, effective MHz/W, CCD balance) and segments runs into auto-labeled
+  regimes (median/MAD step detection over exact `git_hash`/`config_sha256` cuts)
+  to detect BIOS/Curve-Optimizer/PBO changes from telemetry without operator
+  annotation. Emits `svg_mb_control.cpu_fingerprint.v1`.
+- `scripts/control_csv.py` — shared read-only helper (one source of truth):
+  splits a `svg_mb_control.log.v1` CSV into (meta, header, rows), reads columns
+  by name, and parses per-CCD Tdie (`parse_ccd_temps`). Consumed by
+  `analyze_power_lead.py`, `score_energy_session.py`, `analyze_cpu_temp_power.py`,
+  and `cpu_config_fingerprint.py`.
 - `scripts/Install-CpuTempBaselineTask.ps1` — registers/removes a scheduled
   task that runs `Compare-CpuTemps.ps1` on a cadence for a long-term baseline.
 
@@ -343,6 +397,15 @@ the same responsibility; otherwise they are listed separately.
 - `config/machines/snd-desk.cooling.policy.json` — Machine-specific
   fan topology, pressure-balance strategy, and cooling-policy data
   behind the shipped profile.
+- `config/overlays/release.behavior.json` — FEAT-0023 behavior overlay:
+  the tunable `control_loop` curves / boosts / cadence with each
+  channel's `min_duty_pct` removed (the physical floor comes from the
+  machine base at composition time).
+- `config/profiles/snd-desk-composed.json` — FEAT-0023 composition
+  descriptor: a `compose` block (`machine_base`
+  `../machines/snd-desk.cooling.policy.json` + `behavior_overlay`
+  `../overlays/release.behavior.json`) that `ComposeConfigRoot` merges,
+  selectable with `--profile snd-desk-composed`.
 
 ## Tools
 
@@ -359,8 +422,18 @@ the same responsibility; otherwise they are listed separately.
 
 ## Docs
 
-Current contract and reference docs (the `AGENTS.md` navigation list
-plus other docs that are kept current):
+Feature intake, traceability, and verification:
+
+- `docs/features/README.md` — Feature registry, current priority queue,
+  promotion rules, and decisions-owed index.
+- `docs/features/FEAT-*.md` — Per-feature specs; these are the implementation
+  contracts for feature work once accepted and authorized.
+- `docs/TRACEABILITY.md` — Requirement-to-verification map.
+- `docs/FEATURE_VERIFICATION_CHECKLIST.md` — Checklist used while implementing
+  or verifying features.
+
+Current contract and reference docs (kept aligned with code and shipped
+behavior):
 
 - `docs/STRUCTURE_AND_STABILITY.md` — Module boundaries and migration
   status.
@@ -381,30 +454,71 @@ plus other docs that are kept current):
   baseline (maintained).
 - `docs/response-evaluation-tuning-plan.md` — Response evaluation
   plan (maintained).
-- `docs/source-aware-blend-decision-2026-05-26.md` — Current source-
-  aware blend decision and verification record.
 
-Compacted implementation records (closed topics; keep these short and
+Maintained evaluation and operational records:
+
+- `docs/logging-next-targets-2026-06-18.md` — Current logging-target
+  decision record across FEAT-0020/0021/0022.
+- `docs/runtime-logging-health-decision-2026-06-20.md` — FEAT-0022
+  logging-health decision.
+- `docs/power-temp-comparison-snapshot-2026-06-18.md` — Preserved
+  standard-loop CPU/GPU watts beside temperatures for future comparisons.
+- `docs/cpu-temp-comparison-harness.md` — CPU temperature comparison
+  harness workflow, current busy-band trend snapshot, and power-normalized
+  companion method.
+- `docs/next_steps.md` — Maintained topical backlog; not implementation
+  authorization by itself.
+
+Decision and design records that remain useful for navigation:
+
+- `docs/source-aware-blend-decision-2026-05-26.md` — Current
+  source-aware blend decision and verification record.
+- `docs/control-latency-reduction-design-2026-06-18.md` — FEAT-0017,
+  FEAT-0018, and FEAT-0019 latency-audit direction.
+- `docs/profile-hot-swap-decision-2026-06-03.md` — FEAT-0003
+  design-capture decision record; not scheduled work.
+- `docs/hwaccess-health-signal-decision-2026-06-18.md` — FEAT-0004
+  hardware-access health-signal direction.
+- `docs/actuation-confirmation-decision-2026-06-18.md` — FEAT-0005
+  write-actuation confirmation direction.
+- `docs/analyze-db-run-purge-decision-2026-06-18.md` — FEAT-0016
+  analyzer DB retention/prune direction.
+
+Compacted / archived records (closed topics; keep these short and
 do not merge them into operator docs unless the topic is reopened):
 
-- `docs/CONTROL_SIMPLIFICATION_TARGETS.md` — Completed simplification
+- `docs/archive/implemented-plans/CONTROL_SIMPLIFICATION_TARGETS.md` — Completed simplification
   record for the closed 2026-05-26 target list.
-- `docs/LOGGING_IMPROVEMENT_PLAN.md` — Completed logging/analyzer
+- `docs/archive/implemented-plans/LOGGING_IMPROVEMENT_PLAN.md` — Completed logging/analyzer
   implementation record.
-- `docs/SCRIPT_STACK_REVIEW.md` — Completed script-stack
+- `docs/archive/implemented-plans/SCRIPT_STACK_REVIEW.md` — Completed script-stack
   simplification record.
+- `docs/archive/implemented-plans/testing-and-hotpath-simplification-review-2026-06-10.md`
+  — Applied testing/script-stack and runtime hot-path simplification review.
 - `docs/bench-logging-history.md` — Consolidated history of the older
   Bench-vs-Control logging discovery notes.
+- `docs/archive/implemented-plans/` — Completed implementation plans and
+  executed procedures kept for audit history, separated from active plans.
+- `docs/archive/modular-profile-hotswap-discussion-2026-06-06.md` — Compacted
+  FEAT-0003 discussion pointer.
+- `docs/archive/modular-profile-hotswap-plan-2026-06-06.md` — Compacted FEAT-0003
+  primitive-table pointer.
+- `docs/archive/profile-hot-swap-allow-live-decision-2026-06-06.md` — Compacted
+  support record; the decision lives in
+  `docs/profile-hot-swap-decision-2026-06-03.md`.
+- `docs/archive/` — Historical discovery, parked planning, and evidence records
+  that are useful for audit trails but should not be treated as current
+  navigation or implementation queues.
 
 Historical / discovery (per `AGENTS.md`, treat as context, not
-current contract, unless re-validated):
+current contract, unless re-validated). Closed redirect stubs for control
+optimization, dashboard health polling, GPU response refinement, and next
+logging targets were folded into the current contract docs/backlog on
+2026-06-20 and deleted to reduce Markdown sprawl:
 
 - `docs/adaptive-cadence-design-2026-05-19.md`
-- `docs/discovery-control-optimization-options.md`
-- `docs/discovery-dashboard-health-polling.md`
-- `docs/discovery-gpu-response-refinement.md`
 - `docs/discovery-gpu-temp-envelope.md`
-- `docs/discovery-next-logging-targets.md`
+- `docs/archive/spec-and-backlog-structure-assessment-2026-06-18.md`
 - `docs/discovery-polling-logging-state.md`
 - `docs/discovery-recovery-gap-audit-2026-06-04.md`
 - `docs/discovery-steady-response-control.md`

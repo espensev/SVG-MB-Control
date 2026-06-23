@@ -25,6 +25,13 @@ cascade parent for the dependent `tick_*` / `events` rows
 (`src/analyze/analyze_db.cpp:41,108,113,147,175`). Issue
 [#4](https://github.com/espensev/SVG-MB-Control/issues/4) Finding 2.
 
+The 2026-06-18 live check after FEAT-0020 and validation found
+`release/runtime/svg_mb_control.db` at 8,377,511,936 bytes (7.80 GiB). Because
+the DB is a derived analyzer artifact, it was deleted as an immediate safe
+reclaim, freeing that space without touching raw CSV/event files or live
+sidecars. `release/runtime` was 3.439 GiB after the reclaim; the structural
+retention gap remains until this feature is implemented.
+
 ## Options considered
 
 - **Bound:** age window (`session_start < cutoff`) vs. total-size cap vs.
@@ -42,8 +49,8 @@ cascade parent for the dependent `tick_*` / `events` rows
 - **Age window**, exposed as `--db-retain-days`, mirrors the existing
   `analyze prune --retain-days` archive semantics — one mental model for the
   operator, and the natural unit for telemetry retention. A size cap is recorded as
-  a follow-on knob (§Open below), not v1, because age is the dimension the existing
-  CSV retention already uses.
+  a follow-on knob in Scope and gate, not v1, because age is the dimension the
+  existing CSV retention already uses.
 - **Extend `analyze prune`** rather than add a subcommand: the prune path already
   holds the resolved DB path and the dry-run/`--apply` convention
   (`src/analyze/analyze_cli.cpp:41`, `PruneOptions`), so a DB-retention flag reuses
@@ -72,9 +79,9 @@ not as a silent no-op, so the DB path does not reproduce the W7-1 trap.
   window, and whether the bound becomes a scheduled-maintenance config key rather
   than a CLI flag.
 - **Measurement gate:** not crossed (`docs/MEASUREMENT_GATE.md`). Offline analyze
-  CLI over a gitignored artifact; no live action, no schema/`schema_version` change,
-  no control-identity movement.
-- **Implementation/verification** are authorized by this decision but are **staged
-  for a Windows-host session**: the build is Windows-only (`CMAKE_RC_COMPILER`), and
-  the purge/cascade/reclaim tests (`tests/test_analyze_ingest.py` sibling) must run
-  under `Test-LocalCI` before the spec's §14 log is filled.
+  CLI over a gitignored artifact; no live action, no schema/`schema_version`
+  change (current analyze schema remains v11), no control-identity movement.
+- **Implementation/verification** are authorized by this decision but remain
+  pending product-code work. The purge/cascade/reclaim tests
+  (`tests/test_analyze_ingest.py` sibling) must run under `Test-LocalCI` before
+  the spec's §14 log is filled.

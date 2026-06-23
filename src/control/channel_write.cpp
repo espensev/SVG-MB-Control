@@ -269,6 +269,15 @@ void TryApplyChannelSetpoint(
     if (!evaluation.has_setpoint) {
         return;
     }
+    if (evaluation.write_suppressed) {
+        // FEAT-0003 shadow/dry-run (REQ-PROFILE-07): the law already computed and
+        // logged this setpoint -- PidController wrote the ChannelState.last_*
+        // trajectory the CSV/status reporting reads -- but this channel must NOT
+        // actuate or assert authority. Return before any fan write, sidecar
+        // upsert, circuit-breaker probe, or post-write state mutation, so no
+        // baseline-moving write or authority change can leave this function.
+        return;
+    }
 
     const double observed_temp_c = evaluation.observed_temp_c;
     const double setpoint = evaluation.setpoint_pct;
@@ -357,10 +366,16 @@ void TryApplyChannelSetpoint(
     entry.started_iso = std::string(eval_iso);
     entry.child_pid = 0u;
     try {
-        pending_store.Upsert(entry);
-        // Persist succeeded: the crash-recovery record is current and the store
-        // has self-healed, so clear any prior persist-failure degradation.
-        channel.consecutive_sidecar_persist_failures = 0u;
+        const bool persisted = pending_store.Upsert(entry);
+        // FEAT-0019 (REQ-WRITEHOT-06): clear the persist-failure degradation only
+        // when an actual synchronous persist ran (persisted == true). A deferred
+        // same-baseline Upsert (persisted == false) performs no write, so it must
+        // not falsely self-heal a still-missing activation record; tick_runner
+        // clears the counter via ClearSidecarPersistFailures once a successful
+        // end-of-tick Flush() puts that record on disk.
+        if (persisted) {
+            channel.consecutive_sidecar_persist_failures = 0u;
+        }
     } catch (const std::exception& e) {
         // FEAT-0010 (REQ-WRITESAFE-01/02): a sidecar persist failure must NOT
         // veto the fan write. PendingWritesStore::Upsert already updated its
@@ -441,6 +456,27 @@ void TryApplyChannelSetpoint(
             .setpoint_pct = setpoint,
             .success = true,
         });
+}
+
+void ClearSidecarPersistFailures(std::vector<ChannelState>& channels) {
+    for (ChannelState& channel : channels) {
+        channel.consecutive_sidecar_persist_failures = 0u;
+    }
+}
+
+bool FlushAndClearPersistFailures(PendingWritesStore& store,
+                                  std::vector<ChannelState>& channels) {
+    // Clear ONLY when the flush actually persisted: a successful flush rewrites
+    // the whole sidecar, so every channel's recovery record is then current and
+    // any persist-failure degradation a deferred write self-healed is resolved
+    // (REQ-WRITEHOT-06). A no-op flush (nothing dirty) wrote nothing, so the
+    // counters must stay as-is — clearing them would falsely heal a channel
+    // whose record is not on disk.
+    if (store.Flush()) {
+        ClearSidecarPersistFailures(channels);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace svg_mb_control

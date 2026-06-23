@@ -160,7 +160,7 @@ remains.
    PawnIO honor caller `SetThreadAffinityMask`** for the `rdmsr`; (b) **RAPL
    availability/encoding on Family 1Ah** (`0xC0010299`/`0xC001029B`);
    (c) APERF/MPERF effective frequency; (d) an unsupported MSR returns error →
-   blank. Procedure: `docs/cpu-work-energy-live-validation-plan-2026-06-07.md`.
+   blank. Procedure: `docs/archive/implemented-plans/cpu-work-energy-live-validation-plan-2026-06-07.md`.
    **Outcome: PASS (energy-only).** RAPL energy works and is correctly encoded on
    Family 1Ah. The run also reported APERF/MPERF `#GP`, but that was a
    **probe-index error** (corrected 2026-06-09): it read the architectural

@@ -141,5 +141,71 @@ inline CycleWindowResult AdvanceCycleWindow(bool* have_prev,
     return r;
 }
 
+// Package (all-core) roll-up result -- one window summed across logical
+// processors (FEAT-0006 all-core effective frequency). Mirrors the per-core
+// no-false-zero contract: deltas left 0 on baseline / blank so the caller emits
+// empty columns, never a false zero.
+struct PackageCycleResult {
+    std::uint64_t sum_d_aperf = 0u;
+    std::uint64_t sum_d_mperf = 0u;
+    int contributing_cores = 0;  // cores with a fresh non-baseline, non-blanked window
+    double window_ms = std::numeric_limits<double>::quiet_NaN();
+    bool baseline = false;  // every core only established its prev this sweep
+    bool blanked = false;   // zero contributors, or the package sum is implausible
+};
+
+// Pure package roll-up of per-core AdvanceCycleWindow results (REQ-CPUEFF-01/03).
+// Sums dAPERF / dMPERF over cores that produced a fresh, non-baseline,
+// non-blanked window this sweep; the package effective multiplier is then
+// Sigma-dAPERF / Sigma-dMPERF (a C0-residency-weighted package ratio, since each
+// logical processor accrues APERF/MPERF by its own C0 residency). No-false-zero
+// blank policy, mirroring CycleWindowImplausible / AdvanceCycleWindow:
+//   - BASELINE: no core has a delta yet (all baseline) -> baseline=true, sums 0.
+//   - ALL-BLANKED: non-baseline cores exist but every one was blanked (straddled
+//     migration / per-core implausible) -> blanked=true, sums 0.
+//   - PACKAGE-IMPLAUSIBLE: contributors exist but the package sum fails
+//     CycleWindowImplausible (window gap, Sigma-dMPERF==0, ratio out of range)
+//     -> blanked=true; deltas were summed but the caller must emit empty.
+// Composes the already-tested per-core results, so the only new behavior is the
+// sum + package blank, and it is unit-testable without hardware. The caller owns
+// the per-core pinned reads, the worker cadence/clock, and the affinity sweep;
+// this owns only the pure aggregation.
+inline PackageCycleResult AggregatePackageCycles(const CycleWindowResult* per_core,
+                                                 std::size_t count,
+                                                 double window_ms,
+                                                 double dt_cap_ms,
+                                                 double ratio_cap) {
+    PackageCycleResult r;
+    r.window_ms = window_ms;
+    int nonbaseline = 0;
+    for (std::size_t i = 0; i < count; ++i) {
+        if (per_core[i].baseline) {
+            continue;  // core only established its prev this sweep
+        }
+        ++nonbaseline;
+        if (per_core[i].blanked) {
+            continue;  // straddled migration / per-core implausible
+        }
+        r.sum_d_aperf += per_core[i].d_aperf;
+        r.sum_d_mperf += per_core[i].d_mperf;
+        ++r.contributing_cores;
+    }
+    if (r.contributing_cores == 0) {
+        // Distinguish a package baseline (nothing has a delta yet) from an
+        // all-blanked window (non-baseline cores existed but every one blanked).
+        if (nonbaseline == 0) {
+            r.baseline = true;
+        } else {
+            r.blanked = true;
+        }
+        return r;  // deltas left 0 -> caller emits empty (no false zero)
+    }
+    if (CycleWindowImplausible(r.sum_d_aperf, r.sum_d_mperf, window_ms,
+                               dt_cap_ms, ratio_cap)) {
+        r.blanked = true;  // package sum garbage -> blank
+    }
+    return r;
+}
+
 }  // namespace cycles
 }  // namespace svg_mb_control

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "control_config.h"
+#include "hardware_access_status.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -27,6 +28,13 @@ class ReadLoop {
         std::string log_csv_path;
         std::string log_manifest_path;
         std::string event_log_path;
+        // FEAT-0004 (REQ-HWHEALTH-*): additive hardware-access availability
+        // signal. It names PawnIO-backed read/write-path availability without
+        // changing the existing status strings or health exit-code mapping.
+        HardwareAccessStatus hardware_access;
+        // FEAT-0023 (REQ-MPROFILE-09): observational active-profile identity.
+        std::string active_profile_name;
+        std::string active_profile_source;
     };
 
     ReadLoop(ControlConfig config, std::filesystem::path runtime_home);

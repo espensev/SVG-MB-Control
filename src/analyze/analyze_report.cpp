@@ -133,6 +133,10 @@ int RunAnalyzeReport(const ReportOptions& options) {
     data.gpu_response = SummariseGpuResponse(db, run_id, data.ticks, options);
     data.package_power = SummarisePackagePower(db, run_id);
     data.cpu_cycles = SummariseCpuCycles(db, run_id, options.p0_mhz);
+    data.cpu_cycles_allcore =
+        SummariseCpuCyclesAllcore(db, run_id, options.p0_mhz);
+    data.gpu_power = SummariseGpuPower(db, run_id);
+    data.gpu_context = SummariseGpuContext(db, run_id);
     data.authority_reasserted = robustness.authority_reasserted;
     data.write_failures = robustness.write_failures;
     data.restore_failures = robustness.restore_failures;

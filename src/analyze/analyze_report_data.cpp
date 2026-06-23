@@ -134,4 +134,26 @@ CpuCyclesSummary ComputeCpuCycles(
     return out;
 }
 
+GpuPowerSummary ComputeGpuPower(
+    std::vector<double> sample_mw,
+    std::map<std::string, int> acquisition_counts) {
+    GpuPowerSummary out;
+    out.acquisition_counts = std::move(acquisition_counts);
+    // Drop any non-finite straggler so the mean and distribution stay clean.
+    // gpu_power_mw is instantaneous board milliwatts, so the summary is a plain
+    // mean of the per-sample values, NOT a time-weighted energy integral.
+    sample_mw.erase(
+        std::remove_if(sample_mw.begin(), sample_mw.end(),
+                       [](double mw) {
+                           return !std::isfinite(mw) || mw <= 0.0;
+                       }),
+        sample_mw.end());
+    out.sample_count = static_cast<int>(sample_mw.size());
+    out.avg_mw = Mean(sample_mw);
+    out.mw_p50 = Percentile(sample_mw, 50.0);
+    out.mw_p90 = Percentile(sample_mw, 90.0);
+    out.mw_max = Percentile(sample_mw, 100.0);
+    return out;
+}
+
 }  // namespace svg_mb_control::analyze::report_detail

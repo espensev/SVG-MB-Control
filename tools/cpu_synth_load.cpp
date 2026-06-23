@@ -6,14 +6,11 @@
 //      idle -> load -> cooldown step with a steady sub-window for the external
 //      (SMU) power cross-check. This is the original use; the default invocation
 //      (no scheduling flags) is byte-identical to that behavior.
-//   2. Layer-0 loop-stall reproduction instrument
-//      (docs/cpu-loop-stall-reproduction-protocol-2026-06-15.md): a controllable
-//      antagonist for the 06-09 control-loop starvation, which does NOT reproduce
-//      under a plain Normal-priority all-core load. The scheduling knobs below
-//      (--priority, --pin, --oversubscribe) let an operator sweep the suspected
-//      causes one at a time -- the load's priority class, its per-core affinity,
-//      and thread oversubscription -- while the shipped BelowNormal controller is
-//      held fixed, to find the minimal condition that stalls the loop.
+//   2. Scheduler/cadence stress instrument
+//      A controllable CPU-load antagonist for scheduler and thermal-response
+//      experiments. The scheduling knobs below (--priority, --pin, --oversubscribe)
+//      let an operator sweep this process's priority class, per-core affinity,
+//      and thread oversubscription while the controller configuration is held fixed.
 //
 // NOT shipped, NOT part of the control loop, NOT a dependency of any runtime path.
 // Read-only on the machine: pure FP register math, no I/O, no MSR, no PCI, no fan
@@ -25,8 +22,7 @@
 //
 // Each worker runs eight independent 256-bit FMA accumulator chains (re-seeded per
 // outer iteration so values stay bounded and the compiler cannot fold the loop),
-// saturating both FMA ports to pull near-package-max power (AVX2 -- a safer, lower-
-// power proxy than a y-cruncher VT3 / AVX-512 power-virus). Stops after --seconds
+// saturating both FMA ports to pull near-package-max power. Stops after --seconds
 // (self-terminating) or runs until killed when --seconds is 0.
 //
 // Usage:

@@ -77,6 +77,18 @@ dependency-free.
 - `svg_mb_control_rapl_energy_tests` — `tests\cpp\rapl_energy_tests.cpp`
 - `svg_mb_control_cpu_cycles_tests` — `tests\cpp\cpu_cycles_tests.cpp`
 
+## Operator Helper Tools
+
+These tools are not CMake targets and are not part of the release package.
+
+- `tools\profile_switch_ui` (`svg-mb-profile-ui`) — a small Rust local HTTP UI
+  for profile switching. It is run manually through
+  `scripts\Start-ProfileSwitchUi.ps1`, binds to `127.0.0.1` by default, lists
+  known profile JSON files, shows `--health` / `--status`, and applies a profile
+  by invoking the shipped `svg-mb-control.exe --set-profile <name>` operator
+  path. It adds no runtime protocol and does not participate in scheduled-task
+  process lifetime.
+
 ## Runtime Processes
 
 Both processes run as Windows Scheduled Tasks under task path
@@ -153,6 +165,13 @@ Super I/O fan path loads independently of the AMD path. Live hardware access
 requires administrator privileges (`RunLevel=Highest` on the scheduled tasks,
 `Install-SVG-MB-ControlCommon.ps1`).
 
+Runtime status and health output expose FEAT-0004's additive hardware-access
+state as `hwaccess_state`, `hwaccess_read_state`, and
+`hwaccess_write_state`, with separate detail strings for the AMD/SMN read path
+and Super I/O write path. The signal is observational only: this repo still
+does not install, start, restart, or repair PawnIO, and health exit-code
+mapping is unchanged.
+
 PawnIO loads bytecode modules and executes named functions in them (load IOCTL
 `0xA084`, execute IOCTL `0xA104`) rather than the app issuing register or port
 access directly. The app loads two modules:
@@ -184,7 +203,7 @@ This repo contains no handling, configuration, or test coverage for
 Virtualization-Based Security (VBS), HVCI / Memory Integrity, test signing, or
 the Microsoft vulnerable-driver blocklist. (The only `VBS` string in the repo
 refers to a deprecated `.vbs` watchdog script, not Virtualization-Based
-Security: `docs\SCRIPT_STACK_REVIEW.md`.) The only stated requirement for live
+Security: `docs\archive\implemented-plans\SCRIPT_STACK_REVIEW.md`.) The only stated requirement for live
 hardware access is administrator privileges (above). If a security feature
 blocked the driver, it would surface as an `access_denied` / `no_device`
 `init_warning` from the AMD reader or SIO writer (`src\hardware\amd_reader.cpp`,

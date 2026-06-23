@@ -1,6 +1,7 @@
 #pragma once
 
 #include "control_loop.h"
+#include "hardware_access_status.h"
 
 #include <array>
 #include <chrono>
@@ -8,11 +9,19 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
 namespace svg_mb_control {
+
+// FEAT-0003: per-channel control law, owned by ControlRuntimeContext index-aligned
+// with `channels`. Forward-declared so this header stays free of
+// channel_controller.h (which includes this one); the out-of-line destructor in
+// control_runtime_context.cpp instantiates the unique_ptr deleter where the type
+// is complete.
+class IChannelController;
 
 struct ChannelState {
     ChannelControlConfig config;
@@ -70,6 +79,18 @@ struct ChannelState {
     std::string last_primary_temp_source = "unavailable";
     std::string last_response_source = "unavailable";
     std::string last_write_reason = "none";
+
+    // FEAT-0003: control-law attribution + PID evidence for reporting. The
+    // controller_kind is set once at construction from the channel's
+    // IChannelController::Kind(). The pid_* fields are written each tick only by
+    // PidController; they stay NaN for the curve law so the CSV/status reporting
+    // blanks them for curve channels (REQ-PROFILE-08).
+    std::string controller_kind = "curve_overlay";
+    double pid_error_c = std::numeric_limits<double>::quiet_NaN();
+    double pid_p_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_i_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_d_term = std::numeric_limits<double>::quiet_NaN();
+    double pid_setpoint_raw_pct = std::numeric_limits<double>::quiet_NaN();
     std::chrono::steady_clock::time_point last_evaluation_time =
         std::chrono::steady_clock::time_point{};
 
@@ -121,12 +142,20 @@ struct ControlRuntimeContext {
     ControlRuntimeContext(ControlConfig base_config,
                           ControlLoopConfig loop_config,
                           std::filesystem::path runtime_home_path);
+    // Defined in the .cpp where IChannelController is complete (the controllers
+    // vector holds unique_ptr<IChannelController>, an incomplete type here).
+    ~ControlRuntimeContext();
 
     ControlConfig base;
     ControlLoopConfig loop;
     std::filesystem::path runtime_home;
     RuntimeWritePolicy runtime_policy;
+    HardwareAccessStatus hardware_access;
     std::vector<ChannelState> channels;
+    // FEAT-0003: one control-law controller per entry in `channels`, built in the
+    // same constructor loop so the two vectors stay the same size and order. The
+    // tick loop dispatches controllers[i]->Evaluate(channels[i], ...).
+    std::vector<std::unique_ptr<IChannelController>> controllers;
     LowBandRuntimeState low_band;
     std::mutex wake_mutex;
     std::condition_variable wake_cv;

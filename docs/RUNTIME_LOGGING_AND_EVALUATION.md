@@ -2,7 +2,7 @@
 
 ## Status
 
-Current as of 2026-06-09.
+Current as of 2026-06-20.
 
 The packaged controller is now good enough for measured tuning of the current
 profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
@@ -10,7 +10,9 @@ profile: channels `0,1,2,3,4,5`, channel `6` blocked by live policy,
 `deadband_pct<=0.25` in the shipped configs.
 
 The completed implementation sequencing is summarized in
-`docs\LOGGING_IMPROVEMENT_PLAN.md`; the current operator workflow lives here.
+`docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`; the current
+operator workflow lives here. Later FEAT-0020/0021/0022 logging and analyzer
+additions are reflected below and in the owning feature specs.
 
 **Finding (closed 2026-06-09) - active package header drift (2026-06-07):** on
 2026-06-07 the live packaged runtime was a stale `2026-05-28T12:15:11Z` build
@@ -62,9 +64,13 @@ Control owns the runtime logging plane:
   active chunk.
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.csv` is the retained CSV
   history.
-- `logs\svg_mb_control_events.jsonl` is the append-only event stream for
-  starts, rotations, writes, restores, policy refusals, sensor failures,
-  circuit-breaker transitions, and sidecar warnings.
+- `logs\svg_mb_control_events.jsonl` is the active event stream for starts,
+  rotations, writes, restores, policy refusals, sensor failures,
+  circuit-breaker transitions, and sidecar warnings. It rotates into
+  `logs\archive\*_events_<timestamp>.jsonl` on the configured active-file
+  retention window. The deadline is independent of last-write mtime, so frequent
+  appends do not postpone rotation; routine `control_loop.write_applied` info
+  events are sampled while diagnostic and lifecycle events remain persisted.
 - `logs\svg_mb_control_manifest.json` is the latest native runtime manifest.
   It points at the active archive CSV, live CSV mirror, event log, archive
   manifest, and records row/event counts plus producer identity. Its
@@ -72,6 +78,9 @@ Control owns the runtime logging plane:
   logging should use this plane, not HWiNFO.
 - `logs\archive\svg_mb_control_<mode>_<timestamp>.manifest.json` is the
   per-archive manifest for the matching CSV chunk.
+- `logging_health.json` is the last-resort event-log health sidecar at the
+  runtime-home root. It records active/recovered event-log append failure without
+  relying on the failed event stream.
 
 `control_runtime.json` is intentionally a status view, not the per-tick data
 source. Use the CSV for timing and response analysis.
@@ -88,8 +97,8 @@ source. Use the CSV for timing and response analysis.
   fresh run is collected with the current shipped config.
 - JSONL events separate discrete control actions and failures from the dense CSV
   stream.
-- Rotation and retention are local config fields, so long runs do not require
-  external cleanup tooling.
+- Rotation and retention are local config fields for CSV and event JSONL, so
+  long runs do not require external cleanup tooling for active runtime logs.
 - Runtime manifests now make a Control run self-describing enough for normal
   validation without an external logger.
 
@@ -113,6 +122,32 @@ logging replacement.
   that have not been ingested: it ingests the CSV into a temporary DB with the
   in-repo `svg-mb-control.exe` and forwards native `analyze report` output. All
   analysis is native; the script reimplements nothing.
+- `scripts\extract_cpu_aio_segments.py` extracts compact CPU/AIO response
+  windows directly from control-loop CSV logs. It treats channels `1`, `4`, and
+  `5` as the AIO radiator fan group regardless of intake/exhaust direction,
+  keeps channels `0`, `2`, and `3` as context airflow, and defaults summary
+  metrics to stop at the first GPU-power/GPU-memory confound while still writing
+  the full segment trace for review.
+- `scripts\analyze_cpu_temp_power.py` summarizes CPU/Tctl by sustained CPU
+  package-power bands from the standard control-loop CSV. It de-duplicates the
+  mirrored FEAT-0006 package-energy rows by `cpu_power_sample_id`, derives
+  package watts, applies a same-power-band dwell gate, and carries GPU power /
+  GPU memory plus policy-marked radiator response context so temperature
+  comparisons are not ranked by raw Tctl alone. It also surfaces per-CCD Tdie
+  (`ccd1_tdie_c`/`ccd2_tdie_c` and the `CCD2-CCD1 C` balance) parsed from the
+  existing `amd_sensor_summary` text column via `control_csv.parse_ccd_temps`, so
+  the frequency die (CCD2) versus V-cache die (CCD1) split is visible without a
+  schema change.
+- `scripts\cpu_config_fingerprint.py` (skeleton) builds a per-run config-pure
+  fingerprint (idle package-power floor, per-busy-band watts, effective MHz/W,
+  CCD balance) and segments runs into auto-labeled regimes via median/MAD step
+  detection layered on exact `git_hash`/`config_sha256` cuts, to detect
+  BIOS/Curve-Optimizer/PBO changes from telemetry without operator annotation.
+  Cooling-output scalars (`theta`, Tctl-at-watt) are reported but never drive
+  segmentation. Effective MHz/W needs a `CPU_CYCLES_MODE=enabled` capture and
+  Vcore needs the SVI probe (docs/cpu-cycles-capture-and-vcore-probe-plan-2026-06-21.md);
+  those dimensions degrade to null until then. Output schema
+  `svg_mb_control.cpu_fingerprint.v1`.
 - Runtime CSV comment prologues include producer version, git hash, config
   path/SHA256, runtime-policy path/SHA256, and control-loop tick/write cooldown
   when applicable. A standalone CSV is therefore traceable without the live
@@ -124,11 +159,41 @@ logging replacement.
   Non-fault events use `severity=info` and `error_code=none`; warning, error,
   and critical rows use stable uppercase codes derived from `event_type` unless
   the caller supplies an explicit code.
+- FEAT-0022 Slice A adds logging-health events for CSV sink visibility:
+  `runtime_logging.csv_write_failed` and
+  `runtime_logging.csv_write_recovered`. The event `mode` identifies
+  `control-loop`, `read-loop`, or `evidence-log`; failure rows include
+  `log_csv_path`, `event_log_path`, and a detail string with the failing
+  logger sink when available. These events are rate-limited by an in-memory
+  failure-active flag so a persistent CSV sink failure emits one failure event
+  and one recovery event after a successful write.
+- FEAT-0022 Slice B adds `logging_health.json` for event-log-unwritable
+  visibility. A persistent event-log append failure writes one active marker
+  instead of one fallback file rewrite per event, and the marker is rewritten as
+  recovered after the next successful append. `--health --json` and
+  `--status --json` include `logging_health_*` / `event_log_failure_*` fields
+  and degrade an active otherwise-healthy runtime while the marker is active.
+- FEAT-0022 also adds sticky status/snapshot publication visibility:
+  `runtime_logging.status_publish_failed`,
+  `runtime_logging.status_publish_recovered`,
+  `runtime_logging.snapshot_publish_failed`, and
+  `runtime_logging.snapshot_publish_recovered`. Failed control-loop status
+  publication keeps the forced retry active for the next tick, and failed
+  control-loop `current_state.json` publication advances retry timing only after
+  a successful write.
+- FEAT-0022 Slice C adds analyzer diagnostics for CSV manifest/archive/latest
+  mirror consistency. `analyze report` reads the runtime manifest's
+  `artifacts.csv_latest.path` when available, reports `csv_latest_row_count`,
+  and emits `running_csv_manifest_consistency_warning` for running-session row
+  count disagreement or `closed_csv_manifest_consistency_suspect_evidence` for
+  closed-run disagreement.
 
 ## Remaining Gaps
 
 - CSV chunk files have no closed/ready marker. A reader must treat the active
-  archive path as mutable while Control is running.
+  archive path as mutable while Control is running. Analyzer reports now flag
+  count disagreement as a running warning versus a closed-run suspect-evidence
+  diagnostic, but strict comparisons should still use pinned closed archives.
 - The current-source control-loop CSV has loop timing, process cost, and, after
   FEAT-0002 is present in the packaged binary, whole-system CPU busy time
   (`system_cpu_busy_pct` plus the raw idle/kernel/user deltas and processor
@@ -141,7 +206,9 @@ logging replacement.
   adds **read-only AMD RAPL package energy** (off by default; enable with
   `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`): `cpu_pkg_energy_delta_uj` over
   `cpu_power_window_ms`, keyed by `cpu_power_sample_id`, with provenance in
-  `cpu_pkg_energy_acquisition` (`disabled`/`unavailable`/`quarantine`/`validated`).
+  `cpu_pkg_energy_acquisition` (the live loop emits `disabled`/`unavailable`/
+  `quarantine`; `validated` is applied post-capture by the promotion script, never
+  by the running worker).
   Average package power is derived, not logged:
   `(cpu_pkg_energy_delta_uj / 1e6) / (cpu_power_window_ms / 1000)` over distinct
   sample ids — heat dissipated (average package watts); pairing it with fan RPM
@@ -160,6 +227,59 @@ logging replacement.
   energy and cycle windows carry separate sample ids and no join rule is
   specified yet (see `docs/cpu-cycle-counter-source-decision-2026-06-07.md`).
   `system_cpu_busy_pct` remains the time-normalization context, not a substitute.
+- The FEAT-0006 **all-core** layer (same `SVG_MB_CONTROL_CPU_CYCLES_MODE` gate,
+  off by default) adds the package effective frequency: `cpu_aperf_delta_allcore`
+  / `cpu_mperf_delta_allcore` (Σ-dAPERF / Σ-dMPERF over all logical processors)
+  over `cpu_cycles_window_ms_allcore`, keyed by `cpu_cycles_allcore_sample_id`,
+  with `cpu_cycles_allcore_cores` recording how many cores contributed a fresh
+  window. These are produced by a dedicated OFF-THREAD sweeper (its own PawnIO
+  handle and affinity; the 32-way affinity sweep never runs on the 250 ms control
+  thread), so the all-core window has its OWN sample-id cadence — it must NOT be
+  joined to the per-core `cpu_cycles_sample_id`. `analyze report` derives the
+  package ratio / effective frequency (a `cpu_cycles_allcore` block with the
+  contributing-core max/min) from a separate `GROUP BY cpu_cycles_allcore_sample_id`
+  query (analyze schema v13; pre-v13 archives degrade that block to
+  `unavailable`). The per-core block is retained unchanged. Effective frequency
+  is analyzer evidence only — not a control input.
+- The FEAT-0020 layer adds **read-only GPU board power** to the same standard
+  control-loop CSV: `gpu_power_mw` (instantaneous NVML board milliwatts), keyed by
+  `gpu_power_sample_id` and stamped with `gpu_power_time_ms` (the GPU power read
+  timestamp), with the source in `gpu_power_source` (`nvml`/`unknown`) and
+  provenance in `gpu_power_acquisition` (`disabled`/`unavailable`/`nvml`). It is
+  one `nvmlDeviceGetPowerUsage` read added to the per-tick GPU thermal sample (not
+  the foreground `evidence-log` path) and is logging-only — never a control input.
+  Because the value is instantaneous (not an accumulating energy counter),
+  `analyze report` summarizes it as mean / p50 / p90 / max over distinct
+  `gpu_power_sample_id` samples (introduced in analyzer schema v11), **not** the
+  time-weighted Sigma-energy integral used for CPU package power. GPU power needs
+  no env gate; it records whenever NVML returns a nonzero reading. To turn on the comparable CPU
+  package-energy columns in the standard loop (and have the profile survive the
+  boot/logon safety revert), use `scripts/Set-EnergyLoggingProfile.ps1 -Enable` /
+  `-Disable` (`-DryRun` previews without touching live runtime); the live flip
+  needs explicit live-runtime authorization.
+- The FEAT-0021 layer adds **read-only GPU workload context** beside GPU power:
+  `gpu_context_sample_id`, `gpu_context_time_ms`,
+  `gpu_context_sample_age_ms`, `gpu_context_acquisition`,
+  `gpu_util_gpu_pct`, `gpu_util_mem_pct`, `gpu_pstate`,
+  `gpu_clock_graphics_mhz`, `gpu_clock_memory_mhz`, `gpu_vram_used_mb`, and
+  `gpu_vram_total_mb`. It is a cached in-repo GPU reader sample refreshed at
+  most once per 1000 ms, not another per-tick wide read. Rows between refreshes
+  repeat the same context sample id and carry an increasing sample age. Analyzer
+  schema v12 summarizes context only when present and treats older archives as
+  unavailable. Context is logging-only and never a response source, write gate,
+  breaker input, or fan-duty input.
+- The FEAT-0023 layer (REQ-MPROFILE-09) appends two **active-profile identity**
+  string columns to the standard control-loop CSV: `active_profile_name` (the
+  resolved profile name driving this run) and `active_profile_source` (how that
+  profile was selected — one of `explicit_config`, `profile_flag`, `profile_env`,
+  `machine_identity`, or `default`). Both are written verbatim as the last two
+  fields of every control-loop row and are not blanked. They are appended only to
+  the control-loop CSV (outside `BuildCommonCsvHeader`), so the read-loop and
+  foreground `evidence-log` CSVs are unchanged. These are additive evidence
+  columns only: they are **not** ingested by `analyze` (no analyzer schema bump),
+  and they are never a response source, write gate, breaker input, or fan-duty
+  input. The same `active_profile_name`/`active_profile_source` identity is also
+  mirrored into the worker `control_runtime.json` status payload.
 - Status publication is rate-limited in the current implementation, so tools
   must not assume `control_runtime.json` updates every tick.
 - Sensor-failure and circuit-breaker state is exposed in
@@ -194,6 +314,11 @@ Use this loop for controller changes:
    release\svg-mb-control.exe analyze ingest `
      --runtime-home .\release\runtime `
      --db .\release\runtime\svg_mb_control.db
+   release\svg-mb-control.exe analyze prune `
+     --runtime-home .\release\runtime `
+     --db .\release\runtime\svg_mb_control.db `
+     --db-retain-days 30 `
+     --dry-run
    release\svg-mb-control.exe analyze report `
      --runtime-home .\release\runtime `
      --db .\release\runtime\svg_mb_control.db `
@@ -229,6 +354,32 @@ Use this loop for controller changes:
    Also check `docs\CONTROL_PIPELINE_MATH.md` against the run's CSV/status
    identities: feedforward/correction math, low-band effective-cap behavior,
    cadence bounds, setpoint bounds, and response-source attribution.
+   For CPU/AIO tuning questions where the native report is too broad, extract
+   radiator-focused segments from the same CSV:
+   ```powershell
+   python .\scripts\extract_cpu_aio_segments.py `
+     --runtime-home .\release\runtime `
+     --out-dir .\release\runtime\analysis
+   ```
+   Review the segment index first, then the per-segment trace CSVs. The index
+   separates radiator channels `1/4/5` from context fans `0/2/3` and flags the
+   first GPU confound so CPU-only radiator magnitude is not overstated. Use
+   `--csv <archive.csv>` instead of `--runtime-home` when a comparison needs to
+   be pinned to a closed archive rather than the moving live mirror.
+   For CPU temperature comparisons after FEAT-0020 power logging, also run the
+   package-power view:
+   ```powershell
+   python .\scripts\analyze_cpu_temp_power.py `
+     --runtime-home .\release\runtime `
+     --machine-policy .\config\machines\snd-desk.cooling.policy.json `
+     --ambient-c 21 `
+     --out .\release\runtime\analysis\cpu-temp-power-latest.md `
+     --json-out .\release\runtime\analysis\cpu-temp-power-latest.json `
+     --window-csv-out .\release\runtime\analysis\cpu-temp-power-latest-windows.csv
+   ```
+   Compare same package-power band, ambient, GPU confound state, and radiator
+   setpoint/RPM context. Use the older busy-band ledger for long-term trend
+   continuity, not as the final arbiter once package watts are available.
 6. Change one class of knob at a time:
    - curve breakpoints,
    - thermal-pressure boost,
@@ -263,6 +414,14 @@ Tune that model from data first:
   fall alpha on that channel before changing rise behavior.
 - Keep off-floor rise behavior intact unless a measured run proves it is too
   abrupt or too noisy.
+
+PID status, 2026-06-22: FEAT-0003's seam and shadow/dry-run PID are implemented,
+and the first real-archive replay
+(`docs/pid-shadow-characterization-2026-06-21.md`) still rejects all-channel
+live PID. The channel-0-only live gate passed in
+`docs/pid-live-channel0-evidence-2026-06-22.md` with the existing
+`pid.allow_live` + characterization-artifact + positive-slew-cap gate; the
+shipped default remains `curve_overlay`.
 
 `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md` records the rationale, hardware basis,
 and re-validation procedure for the adopted low-load airflow policy in

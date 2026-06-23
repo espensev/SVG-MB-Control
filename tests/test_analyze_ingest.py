@@ -119,6 +119,51 @@ CYCLE_FIELDS = [
 ]
 CYCLE_HEADER = ",".join(CYCLE_FIELDS)
 
+# FEAT-0006 all-core effective-frequency columns (schema v13), trailing the
+# per-core cycle columns. These carry the off-thread package sweep
+# (Sigma-dAPERF / Sigma-dMPERF over all logical processors) on its OWN
+# sample-id cadence (does not share cpu_cycles_sample_id), plus the per-sweep
+# window and the contributing-core count. The base CSV_FIELDS schema omits them
+# so old archive fixtures keep exercising the nullable/degrade path.
+ALLCORE_FIELDS = [
+    "cpu_aperf_delta_allcore",
+    "cpu_mperf_delta_allcore",
+    "cpu_cycles_window_ms_allcore",
+    "cpu_cycles_allcore_sample_id",
+    "cpu_cycles_allcore_cores",
+]
+ALLCORE_HEADER = ",".join(ALLCORE_FIELDS)
+
+# FEAT-0020 read-only GPU board-power columns (schema v11), trailing the CPU
+# energy/cycle columns in the power-logging fixture. The base CSV_FIELDS schema
+# deliberately omits them so old archive fixtures keep testing the nullable path.
+GPU_POWER_FIELDS = [
+    "gpu_power_sample_id",
+    "gpu_power_time_ms",
+    "gpu_power_mw",
+    "gpu_power_source",
+    "gpu_power_acquisition",
+]
+GPU_POWER_HEADER = ",".join(GPU_POWER_FIELDS)
+
+# FEAT-0021 read-only GPU workload-context columns (schema v12), trailing the
+# GPU power columns. The base CSV_FIELDS schema deliberately omits them so old
+# archive fixtures keep testing the nullable path.
+GPU_CONTEXT_FIELDS = [
+    "gpu_context_sample_id",
+    "gpu_context_time_ms",
+    "gpu_context_sample_age_ms",
+    "gpu_context_acquisition",
+    "gpu_util_gpu_pct",
+    "gpu_util_mem_pct",
+    "gpu_pstate",
+    "gpu_clock_graphics_mhz",
+    "gpu_clock_memory_mhz",
+    "gpu_vram_used_mb",
+    "gpu_vram_total_mb",
+]
+GPU_CONTEXT_HEADER = ",".join(GPU_CONTEXT_FIELDS)
+
 
 def _csv_row(values: dict[str, str]) -> str:
     missing = [field for field in CSV_FIELDS if field not in values]
@@ -314,6 +359,7 @@ def _write_fixture_manifest(
     *,
     session_start: str,
     csv_path: Path,
+    csv_latest_path: Path | None = None,
     status: str = "finished",
     row_count: int = 3,
     event_count: int = 5,
@@ -342,6 +388,11 @@ def _write_fixture_manifest(
             },
         },
     }
+    if csv_latest_path is not None:
+        payload["artifacts"]["csv_latest"] = {
+            "path": str(csv_latest_path),
+            "schema": "svg_mb_control.log.v1",
+        }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -471,20 +522,33 @@ def _write_fixture_plant_model(path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def _build_fixture(td: Path, session_start: str = "2026-05-15T03:30:00") -> Path:
-    runtime_home = td / "runtime"
+def _add_archive_fixture(
+    runtime_home: Path,
+    *,
+    session_start: str,
+    stem: str = "svg_mb_control_control-loop_20260515_033000",
+    ticks: int = 3,
+) -> tuple[Path, Path]:
     logs = runtime_home / "logs"
     archive = logs / "archive"
     archive.mkdir(parents=True, exist_ok=True)
 
-    csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
-    manifest_path = archive / "svg_mb_control_control-loop_20260515_033000.manifest.json"
-    _write_fixture_csv(csv_path, session_start)
+    csv_path = archive / f"{stem}.csv"
+    manifest_path = archive / f"{stem}.manifest.json"
+    _write_fixture_csv(csv_path, session_start, ticks=ticks)
     _write_fixture_manifest(
         manifest_path,
         session_start=session_start,
         csv_path=csv_path,
+        row_count=ticks,
     )
+    return csv_path, manifest_path
+
+
+def _build_fixture(td: Path, session_start: str = "2026-05-15T03:30:00") -> Path:
+    runtime_home = td / "runtime"
+    logs = runtime_home / "logs"
+    _add_archive_fixture(runtime_home, session_start=session_start)
     _write_fixture_events(logs / "svg_mb_control_events.jsonl", session_start)
     _write_fixture_plant_model(runtime_home / "plant_model.json")
     return runtime_home
@@ -500,6 +564,12 @@ def _query_one(db: Path, sql: str, params: tuple = ()) -> tuple:
     with contextlib.closing(sqlite3.connect(str(db))) as conn:
         cur = conn.execute(sql, params)
         return cur.fetchone()
+
+
+def _db_pragma_int(db: Path, pragma: str) -> int:
+    with contextlib.closing(sqlite3.connect(str(db))) as conn:
+        cur = conn.execute(f"PRAGMA {pragma}")
+        return cur.fetchone()[0]
 
 
 def _run_ingest(
@@ -573,7 +643,7 @@ class AnalyzeIngestTests(WindowsExeTestCase):
                 db_path,
                 "SELECT value FROM schema_meta WHERE key='schema_version'",
             )
-            self.assertEqual(schema[0], "10")
+            self.assertEqual(schema[0], "13")
 
             run = _query_one(
                 db_path,
@@ -823,6 +893,114 @@ class AnalyzeIngestTests(WindowsExeTestCase):
             self.assertIn("candidates=0", result.stdout)
             self.assertIn("skipped_running=1", result.stdout)
 
+    def test_db_prune_dry_run_keeps_old_run(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "365",
+                "--db-retain-days",
+                "1",
+                "--dry-run",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(_table_count(db_path, "runs"), 1)
+            self.assertEqual(_table_count(db_path, "tick_samples"), 3)
+            self.assertIn("dry_run=true", result.stdout)
+            self.assertIn("db_retain_days=1", result.stdout)
+            self.assertIn("db_candidates=1", result.stdout)
+            self.assertIn("db_deleted_runs=0", result.stdout)
+            self.assertIn("db_reclaim_ran=false", result.stdout)
+
+    def test_db_prune_apply_cascades_and_reclaims(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            logs = runtime_home / "logs"
+            old_session = (
+                datetime.datetime.now() - datetime.timedelta(days=10)
+            ).strftime("%Y-%m-%dT%H:%M:%S")
+            recent_session = datetime.datetime.now().strftime(
+                "%Y-%m-%dT%H:%M:%S"
+            )
+            _add_archive_fixture(
+                runtime_home,
+                session_start=old_session,
+                stem="svg_mb_control_control-loop_20260601_010000",
+                ticks=800,
+            )
+            _add_archive_fixture(
+                runtime_home,
+                session_start=recent_session,
+                stem="svg_mb_control_control-loop_recent",
+                ticks=800,
+            )
+            _write_fixture_events(
+                logs / "svg_mb_control_events.jsonl", old_session
+            )
+
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+            self.assertEqual(_table_count(db_path, "runs"), 2)
+            page_count_before = _db_pragma_int(db_path, "page_count")
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "365",
+                "--db-retain-days",
+                "1",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertIn("dry_run=false", result.stdout)
+            self.assertIn("db_candidates=1", result.stdout)
+            self.assertIn("db_deleted_runs=1", result.stdout)
+            self.assertIn("db_orphan_rows=0", result.stdout)
+            self.assertIn("db_reclaim_ran=true", result.stdout)
+
+            self.assertEqual(_table_count(db_path, "runs"), 1)
+            self.assertEqual(_table_count(db_path, "tick_samples"), 800)
+            self.assertEqual(_table_count(db_path, "tick_fan_samples"), 1600)
+            self.assertEqual(_table_count(db_path, "tick_channel_samples"), 1600)
+            self.assertEqual(_table_count(db_path, "events"), 0)
+            retained = _query_one(
+                db_path,
+                "SELECT session_start FROM runs",
+            )[0]
+            self.assertEqual(retained, recent_session)
+            self.assertLess(_db_pragma_int(db_path, "page_count"), page_count_before)
+            self.assertEqual(_db_pragma_int(db_path, "freelist_count"), 0)
+
+    def test_db_prune_zero_retain_days_is_explicit_disable(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_prune(
+                runtime_home,
+                db_path,
+                "--retain-days",
+                "365",
+                "--db-retain-days",
+                "0",
+                "--apply",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(_table_count(db_path, "runs"), 1)
+            self.assertIn("db prune disabled: db_retain_days=0", result.stdout)
+            self.assertIn("db_retain_days=0", result.stdout)
+            self.assertIn("db_deleted_runs=0", result.stdout)
+
 
 def _ts(base_iso: str, secs: int) -> str:
     base = datetime.datetime.fromisoformat(base_iso)
@@ -931,6 +1109,41 @@ def _build_report_fixture(
     return runtime_home
 
 
+def _build_consistency_fixture(
+    td: Path,
+    *,
+    status: str,
+    manifest_is_live: bool,
+    declared_rows: int,
+    archive_ticks: int,
+    latest_ticks: int,
+    session_start: str = "2026-05-15T03:30:00",
+) -> Path:
+    runtime_home = td / "runtime"
+    logs = runtime_home / "logs"
+    archive = logs / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    csv_path = archive / "svg_mb_control_control-loop_20260515_033000.csv"
+    latest_path = logs / "svg_mb_control_output.csv"
+    manifest_path = (
+        logs / "svg_mb_control_manifest.json"
+        if manifest_is_live
+        else archive / "svg_mb_control_control-loop_20260515_033000.manifest.json"
+    )
+    _write_fixture_csv(csv_path, session_start, ticks=archive_ticks)
+    _write_fixture_csv(latest_path, session_start, ticks=latest_ticks)
+    _write_fixture_manifest(
+        manifest_path,
+        session_start=session_start,
+        csv_path=csv_path,
+        csv_latest_path=latest_path,
+        status=status,
+        row_count=declared_rows,
+        event_count=0,
+    )
+    return runtime_home
+
+
 def _run_report(
     runtime_home: Path,
     db_path: Path,
@@ -981,16 +1194,71 @@ _CYCLE_WINDOWS = [
     ("4", "1000.000", "", "", "quarantine"),
 ]
 
+# (aperf_delta_allcore, mperf_delta_allcore, window_ms_allcore,
+# allcore_sample_id, allcore_cores) per tick. The off-thread package sweep has
+# its OWN cadence/sample-id, so tick 1 is its baseline (no id), each id repeats
+# across 2 ticks (de-dup on cpu_cycles_allcore_sample_id, independent of the
+# core-0 id), and tick 8 is a guard-blanked sweep (id present, deltas/cores
+# blank). The 3 valid package windows all carry ratio 1.5 (distinct from the
+# core-0 1.34375): Sigma-aperf 126e6 / Sigma-mperf 84e6 = 1.5; cores 32/32/30
+# so contributing_cores max=32, min=30 makes a partial sweep auditable.
+_ALLCORE_WINDOWS = [
+    ("", "", "", "", ""),
+    ("48000000", "32000000", "1000.000", "1", "32"),
+    ("48000000", "32000000", "1000.000", "1", "32"),
+    ("48000000", "32000000", "1000.000", "2", "32"),
+    ("48000000", "32000000", "1000.000", "2", "32"),
+    ("30000000", "20000000", "2000.000", "3", "30"),
+    ("30000000", "20000000", "2000.000", "3", "30"),
+    ("", "", "1000.000", "4", ""),
+]
+
+# (sample_id, time_ms, mw, source, acquisition) per tick. sample ids repeat to
+# prove the report de-duplicates mirrored/cached rows. Tick 1 is unavailable, and
+# tick 8 has a sample id but blank mw; neither may become a false zero.
+_GPU_POWER_SAMPLES = [
+    ("", "", "", "unknown", "unavailable"),
+    ("1", "100.000", "250000", "nvml", "nvml"),
+    ("1", "100.000", "250000", "nvml", "nvml"),
+    ("2", "150.000", "300000", "nvml", "nvml"),
+    ("2", "150.000", "300000", "nvml", "nvml"),
+    ("3", "200.000", "150000", "nvml", "nvml"),
+    ("3", "200.000", "150000", "nvml", "nvml"),
+    ("4", "250.000", "", "nvml", "nvml"),
+]
+
+# (sample_id, time_ms, age_ms, acquisition, util_gpu, util_mem, pstate,
+# graphics_clock, memory_clock, vram_used, vram_total) per tick. Sample ids
+# repeat to prove report de-duplicates cached context rows while age remains
+# row-based.
+_GPU_CONTEXT_SAMPLES = [
+    ("", "", "", "unavailable", "", "", "", "", "", "", ""),
+    ("1", "1000.000", "0.000", "nvml", "20", "10", "2", "1000", "8000", "2048", "16384"),
+    ("1", "1000.000", "250.000", "nvml", "20", "10", "2", "1000", "8000", "2048", "16384"),
+    ("2", "2000.000", "0.000", "nvml", "80", "40", "0", "2500", "10500", "8192", "16384"),
+    ("2", "2000.000", "250.000", "nvml", "80", "40", "0", "2500", "10500", "8192", "16384"),
+    ("3", "3000.000", "0.000", "nvml", "60", "30", "0", "2300", "10000", "6144", "16384"),
+    ("3", "3000.000", "250.000", "nvml", "60", "30", "0", "2300", "10000", "6144", "16384"),
+    ("4", "4000.000", "0.000", "nvml", "", "", "", "", "", "", ""),
+]
+
 
 def _write_energy_csv(path: Path, session_start: str) -> None:
     lines = [
         "# schema=svg_mb_control.log.v1",
         "# mode=control-loop",
         f"# session_start={session_start}",
-        CSV_HEADER + "," + ENERGY_HEADER + "," + CYCLE_HEADER,
+        CSV_HEADER + "," + ENERGY_HEADER + "," + CYCLE_HEADER + ","
+        + ALLCORE_HEADER + "," + GPU_POWER_HEADER + "," + GPU_CONTEXT_HEADER,
     ]
-    for i, (energy, cycles) in enumerate(
-        zip(_ENERGY_WINDOWS, _CYCLE_WINDOWS)
+    for i, (energy, cycles, allcore, gpu_power, gpu_context) in enumerate(
+        zip(
+            _ENERGY_WINDOWS,
+            _CYCLE_WINDOWS,
+            _ALLCORE_WINDOWS,
+            _GPU_POWER_SAMPLES,
+            _GPU_CONTEXT_SAMPLES,
+        )
     ):
         base = _control_loop_fixture_row(
             wall=_ts(session_start, i),
@@ -1005,7 +1273,12 @@ def _write_energy_csv(path: Path, session_start: str) -> None:
             channel0_cpu_low_soak_boost_pct="0.000",
             channel0_response_source="primary_curve",
         )
-        lines.append(base + "," + ",".join(energy) + "," + ",".join(cycles))
+        lines.append(
+            base + "," + ",".join(energy) + "," + ",".join(cycles)
+            + "," + ",".join(allcore)
+            + "," + ",".join(gpu_power)
+            + "," + ",".join(gpu_context)
+        )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -1137,6 +1410,80 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertEqual(
                 obj["cpu_cycles"]["acquisition_counts"]["unavailable"], 30
             )
+            # Same no-false-zero contract for GPU power on old archives without
+            # FEAT-0020 columns.
+            self.assertEqual(obj["gpu_power"]["sample_count"], 0)
+            self.assertIsNone(obj["gpu_power"]["avg_mw"])
+            self.assertEqual(
+                obj["gpu_power"]["acquisition_counts"]["unavailable"], 30
+            )
+            self.assertEqual(obj["gpu_context"]["sample_count"], 0)
+            self.assertEqual(obj["gpu_context"]["util_gpu_pct"]["count"], 0)
+            self.assertEqual(
+                obj["gpu_context"]["acquisition_counts"]["unavailable"], 30
+            )
+
+    def test_report_warns_on_running_csv_manifest_count_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_consistency_fixture(
+                td,
+                status="running",
+                manifest_is_live=True,
+                declared_rows=10,
+                archive_ticks=3,
+                latest_ticks=2,
+            )
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            self.assertEqual(obj["run"]["row_count_declared"], 10)
+            self.assertEqual(obj["run"]["row_count_ingested"], 3)
+            self.assertEqual(obj["run"]["csv_latest_row_count"], 2)
+            self.assertIn(
+                "running_csv_manifest_consistency_warning",
+                obj["diagnostic_flags"],
+            )
+            self.assertNotIn(
+                "closed_csv_manifest_consistency_suspect_evidence",
+                obj["diagnostic_flags"],
+            )
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn("rows declared/ingested=10/3 latest=2", text)
+            self.assertIn("running_csv_manifest_consistency_warning", text)
+
+    def test_report_marks_closed_csv_manifest_mismatch_suspect(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_consistency_fixture(
+                td,
+                status="completed",
+                manifest_is_live=False,
+                declared_rows=10,
+                archive_ticks=3,
+                latest_ticks=3,
+            )
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            flags = json.loads(result.stdout)["diagnostic_flags"]
+            self.assertIn(
+                "closed_csv_manifest_consistency_suspect_evidence",
+                flags,
+            )
+            self.assertNotIn("running_csv_manifest_consistency_warning", flags)
 
     def test_report_derives_time_weighted_package_power(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -1168,6 +1515,101 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertIn(
                 "package_power: windows=3 avg_watts=15.000", text
             )
+
+    def test_report_derives_gpu_power_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            row = _query_one(
+                db_path,
+                "SELECT gpu_power_sample_id, gpu_power_time_ms, gpu_power_mw, "
+                "gpu_power_source, gpu_power_acquisition FROM tick_samples "
+                "WHERE tick_count=2",
+            )
+            self.assertEqual(row[0], 1)
+            self.assertEqual(row[1], 100.0)
+            self.assertEqual(row[2], 250000.0)
+            self.assertEqual(row[3], "nvml")
+            self.assertEqual(row[4], "nvml")
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            gp = json.loads(result.stdout)["gpu_power"]
+            # 8 ticks carry 4 sample ids, but sample id 4 has blank mw and ids
+            # 1-3 are mirrored across ticks -> 3 distinct instantaneous samples.
+            self.assertEqual(gp["sample_count"], 3)
+            self.assertAlmostEqual(gp["avg_mw"], 233333.33333333334)
+            self.assertEqual(gp["mw"]["p50"], 250000.0)
+            self.assertEqual(gp["mw"]["p90"], 300000.0)
+            self.assertEqual(gp["mw"]["max"], 300000.0)
+            self.assertEqual(gp["acquisition_counts"]["nvml"], 7)
+            self.assertEqual(gp["acquisition_counts"]["unavailable"], 1)
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn("gpu_power: samples=3 avg_mw=233333.333", text)
+
+    def test_report_derives_gpu_context_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            row = _query_one(
+                db_path,
+                "SELECT gpu_context_sample_id, gpu_context_time_ms, "
+                "gpu_context_sample_age_ms, gpu_context_acquisition, "
+                "gpu_util_gpu_pct, gpu_util_mem_pct, gpu_pstate, "
+                "gpu_clock_graphics_mhz, gpu_clock_memory_mhz, "
+                "gpu_vram_used_mb, gpu_vram_total_mb FROM tick_samples "
+                "WHERE tick_count=4",
+            )
+            self.assertEqual(row[0], 2)
+            self.assertEqual(row[1], 2000.0)
+            self.assertEqual(row[2], 0.0)
+            self.assertEqual(row[3], "nvml")
+            self.assertEqual(row[4], 80)
+            self.assertEqual(row[5], 40)
+            self.assertEqual(row[6], 0)
+            self.assertEqual(row[7], 2500)
+            self.assertEqual(row[8], 10500)
+            self.assertEqual(row[9], 8192)
+            self.assertEqual(row[10], 16384)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            gc = json.loads(result.stdout)["gpu_context"]
+            # 8 ticks carry 4 context sample ids, but sample id 4 has all
+            # workload values blank. It still counts as a context identity;
+            # metric distributions skip each blank value independently.
+            self.assertEqual(gc["sample_count"], 4)
+            self.assertEqual(gc["util_gpu_pct"]["p50"], 60.0)
+            self.assertEqual(gc["util_gpu_pct"]["p90"], 80.0)
+            self.assertEqual(gc["util_mem_pct"]["p50"], 30.0)
+            self.assertEqual(gc["pstate_counts"]["0"], 2)
+            self.assertEqual(gc["pstate_counts"]["2"], 1)
+            self.assertEqual(gc["clock_graphics_mhz"]["max"], 2500.0)
+            self.assertEqual(gc["clock_memory_mhz"]["p50"], 10000.0)
+            self.assertEqual(gc["vram_used_mb"]["p90"], 8192.0)
+            self.assertEqual(gc["vram_total_mb"]["p50"], 16384.0)
+            self.assertEqual(gc["sample_age_ms"]["max"], 250.0)
+            self.assertEqual(gc["acquisition_counts"]["nvml"], 7)
+            self.assertEqual(gc["acquisition_counts"]["unavailable"], 1)
+
+            text = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1"
+            ).stdout
+            self.assertIn("gpu_context: samples=4", text)
+            self.assertIn("util_gpu_pct p50=60.000", text)
 
     def test_report_derives_cycle_ratio_and_effective_frequency(self) -> None:
         with tempfile.TemporaryDirectory() as td_str:
@@ -1219,9 +1661,68 @@ class AnalyzeReportTests(WindowsExeTestCase):
                 text,
             )
 
+    def test_report_derives_allcore_cycle_ratio_and_cores(self) -> None:
+        # FEAT-0006 all-core rollup: the off-thread package sweep is reported as
+        # a SECOND cpu_cycles_allcore block, de-duplicated on its OWN
+        # cpu_cycles_allcore_sample_id (independent of the core-0 cpu_cycles
+        # block), with the contributing-core count exposed so a partial sweep is
+        # auditable. Package ratio 1.5 is deliberately distinct from the core-0
+        # 1.34375 to prove the two streams do not merge.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            ac = obj["cpu_cycles_allcore"]
+            # 3 distinct package windows (ids 1,2,3); the baseline (tick 1, no
+            # id) and the guard-blanked sweep (id 4, tick 8) are excluded -> 3
+            # de-duplicated windows, not 8 tick rows.
+            self.assertEqual(ac["window_count"], 3)
+            self.assertEqual(ac["total_aperf_cycles"], 126000000.0)
+            self.assertEqual(ac["total_mperf_cycles"], 84000000.0)
+            self.assertEqual(ac["total_window_s"], 4.0)
+            # Package ratio 126e6 / 84e6 = 1.5, distinct from core-0 1.34375.
+            self.assertEqual(ac["aperf_mperf_ratio"], 1.5)
+            # The core-0 block is still derived independently and unchanged.
+            self.assertEqual(obj["cpu_cycles"]["aperf_mperf_ratio"], 1.34375)
+            # Contributing cores: full sweeps 32, the partial window 30.
+            self.assertEqual(ac["contributing_cores_max"], 32)
+            self.assertEqual(ac["contributing_cores_min"], 30)
+            # No operator P0 -> no effective MHz, never a guessed base.
+            self.assertIsNone(ac["effective_mhz"])
+            self.assertIsNone(ac["p0_mhz"])
+
+            with_p0 = _run_report(
+                runtime_home, db_path,
+                "--idle-seconds", "1", "--p0-mhz", "4000", "--json",
+            )
+            self.assertEqual(with_p0.returncode, 0, msg=with_p0.stderr)
+            ac = json.loads(with_p0.stdout)["cpu_cycles_allcore"]
+            self.assertEqual(ac["p0_mhz"], 4000.0)
+            # effective = package ratio 1.5 x 4000 MHz.
+            self.assertEqual(ac["effective_mhz"], 6000.0)
+
+            text = _run_report(
+                runtime_home, db_path,
+                "--idle-seconds", "1", "--p0-mhz", "4000",
+            ).stdout
+            self.assertIn(
+                "cpu_cycles_allcore: windows=3 aperf_mperf_ratio=1.500 "
+                "effective_mhz=6000.000 p0_mhz=4000.000",
+                text,
+            )
+            self.assertIn("cores_max=32", text)
+            self.assertIn("cores_min=30", text)
+
     def test_report_degrades_when_cycle_columns_missing(self) -> None:
-        # A v9 DB read by a v10 binary: the cycle query references columns
-        # that do not exist and throws "no such column". The single try/catch
+        # A v9-shaped DB read by the current binary: the cycle query references
+        # columns that do not exist and throws "no such column". The single try/catch
         # in SummariseCpuCycles must degrade that to an "unavailable" block
         # (no false zero) while the v9 package-power block still derives.
         with tempfile.TemporaryDirectory() as td_str:
@@ -1257,11 +1758,14 @@ class AnalyzeReportTests(WindowsExeTestCase):
             # unaffected by the missing cycle columns.
             self.assertEqual(obj["package_power"]["avg_watts"], 15.0)
 
-    def test_ingest_migrates_v9_db_to_v10(self) -> None:
-        # A pre-existing v9 DB picked up by this binary: ingest bootstraps
-        # (BootstrapSchema -> MigrateSchema) before its strict version check,
-        # so the five cycle columns are added, the version moves to 10, and a
-        # forced re-ingest backfills the cycle data for the run.
+    def test_report_degrades_when_allcore_columns_missing(self) -> None:
+        # A pre-v13 DB read by the current binary: the all-core columns do not
+        # exist, so SummariseCpuCyclesAllcore's query throws "no such column".
+        # Its OWN try/catch must degrade only the all-core block to
+        # "unavailable" (no false zero) while the per-core cpu_cycles block --
+        # which uses a SEPARATE query with no all-core filter -- still derives.
+        # This is the filter-coupling regression guard: the two cycle streams
+        # must not share a WHERE clause.
         with tempfile.TemporaryDirectory() as td_str:
             td = Path(td_str)
             runtime_home = _build_energy_fixture(td)
@@ -1269,13 +1773,46 @@ class AnalyzeReportTests(WindowsExeTestCase):
             self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
 
             with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
-                for col in (
-                    "cpu_cycles_sample_id",
-                    "cpu_cycles_window_ms",
-                    "cpu_aperf_delta",
-                    "cpu_mperf_delta",
-                    "cpu_cycles_acquisition",
-                ):
+                for col in ALLCORE_FIELDS:
+                    conn.execute(
+                        f"ALTER TABLE tick_samples DROP COLUMN {col}"
+                    )
+                conn.execute(
+                    "UPDATE schema_meta SET value='12' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            result = _run_report(
+                runtime_home, db_path, "--idle-seconds", "1", "--json"
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            obj = json.loads(result.stdout)
+            # All-core block degrades to unavailable -- never a false zero.
+            self.assertEqual(obj["cpu_cycles_allcore"]["window_count"], 0)
+            self.assertIsNone(obj["cpu_cycles_allcore"]["aperf_mperf_ratio"])
+            self.assertIsNone(
+                obj["cpu_cycles_allcore"]["contributing_cores_max"]
+            )
+            self.assertIsNone(
+                obj["cpu_cycles_allcore"]["contributing_cores_min"]
+            )
+            # The per-core block is UNAFFECTED: separate query, no shared filter.
+            self.assertEqual(obj["cpu_cycles"]["window_count"], 3)
+            self.assertEqual(obj["cpu_cycles"]["aperf_mperf_ratio"], 1.34375)
+
+    def test_ingest_migrates_v9_db_to_current_schema(self) -> None:
+        # A pre-existing v9 DB picked up by this binary: ingest bootstraps
+        # (BootstrapSchema -> MigrateSchema) before its strict version check,
+        # so the cycle and GPU-power columns are added, the version moves to the
+        # current schema head, and forced re-ingest backfills the evidence data.
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = _build_energy_fixture(td)
+            db_path = td / "svg_mb_control.db"
+            self.assertEqual(_run_ingest(runtime_home, db_path).returncode, 0)
+
+            with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+                for col in CYCLE_FIELDS + GPU_POWER_FIELDS + GPU_CONTEXT_FIELDS:
                     conn.execute(
                         f"ALTER TABLE tick_samples DROP COLUMN {col}"
                     )
@@ -1291,7 +1828,11 @@ class AnalyzeReportTests(WindowsExeTestCase):
                 version = conn.execute(
                     "SELECT value FROM schema_meta WHERE key='schema_version'"
                 ).fetchone()[0]
-            self.assertEqual(version, "10")
+            # The migration ladder runs to the current head: v9->v10 adds the
+            # cycle columns, v10->v11 adds FEAT-0020 GPU power, v11->v12 adds
+            # FEAT-0021 GPU workload context, and v12->v13 adds the FEAT-0006
+            # all-core effective-frequency columns.
+            self.assertEqual(version, "13")
 
             result = _run_report(
                 runtime_home, db_path, "--idle-seconds", "1", "--json"
@@ -1300,6 +1841,12 @@ class AnalyzeReportTests(WindowsExeTestCase):
             cc = json.loads(result.stdout)["cpu_cycles"]
             self.assertEqual(cc["window_count"], 3)
             self.assertEqual(cc["aperf_mperf_ratio"], 1.34375)
+            gp = json.loads(result.stdout)["gpu_power"]
+            self.assertEqual(gp["sample_count"], 3)
+            self.assertEqual(gp["mw"]["max"], 300000.0)
+            gc = json.loads(result.stdout)["gpu_context"]
+            self.assertEqual(gc["sample_count"], 4)
+            self.assertEqual(gc["clock_graphics_mhz"]["max"], 2500.0)
 
     def test_report_degrades_when_energy_columns_missing(self) -> None:
         # An old (schema-8) DB read by a schema-9 binary: report.cpp checks only

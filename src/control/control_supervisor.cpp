@@ -7,8 +7,11 @@
 #include "control_supervisor.h"
 
 #include "control_config.h"
+#include "control_loop.h"
 #include "control_scheduler.h"
 #include "json_io.h"
+#include "machine_profile.h"
+#include "profile_switch_decision.h"
 #include "read_loop.h"
 #include "runtime_artifacts.h"
 #include "runtime_lifecycle.h"
@@ -546,16 +549,62 @@ int RunSupervisorWorkerLoop(
     const std::filesystem::path& stderr_path,
     SupervisorState& supervisor_state) {
     std::uint32_t restart_count = 0u;
+    bool have_seen_good_worker = false;
+    bool revert_armed = false;
+
+    // FEAT-0023 live-switch state. In-memory: a supervisor restart reverts to
+    // the launch-time config. active_config_path is what the next worker spawns
+    // with; last_known_good_config_path is the auto-revert target.
+    ProfileSwitchState switch_state;
+    switch_state.active_config_path = config_source_path;
+    switch_state.active_profile_name = config_source_path.stem().string();
+    switch_state.last_known_good_config_path = config_source_path;
+    switch_state.last_known_good_profile_name = switch_state.active_profile_name;
+
+    // How long to wait for a worker to honor a cycle signal before escalating to
+    // force-terminate (restore is skipped -> fans latch; the accepted degraded
+    // path for a wedged worker, since the respawn recaptures baseline).
+    constexpr std::chrono::seconds kSwitchCycleTimeout{10};
+
+    const auto catalog_lookup =
+        [](const std::string& name) -> std::filesystem::path {
+        return svg_mb_control::ResolveProfileConfigPath(
+            svg_mb_control::DefaultProfileCatalogDirs(), name);
+    };
+    const bool validate_control_loop = mode == RunMode::kControlLoop;
+    const auto load_validator =
+        [validate_control_loop](
+            const std::filesystem::path& path) -> std::optional<std::string> {
+        try {
+            svg_mb_control::LoadControlConfig(path);
+            if (validate_control_loop) {
+                // Match what the control-loop worker parses at startup, so a
+                // base-valid but control_loop-malformed profile is rejected here
+                // instead of tearing down the healthy worker only to fail at the
+                // new worker's startup. Still parse-only (no hardware bind) per
+                // decision D-MPROFILE-5.
+                svg_mb_control::LoadControlLoopConfig(path);
+            }
+            return std::nullopt;
+        } catch (const std::exception& error) {
+            return std::string(error.what());
+        }
+    };
+
+    // Drop any stale cycle signal left by a previous supervisor.
+    svg_mb_control::ClearRuntimeProfileCycleRequest(runtime_home);
 
     while (!svg_mb_control::RuntimeStopRequested(runtime_home)) {
         StartedProcess worker = StartHiddenProcess(
             exe_path,
-            BuildManagedCommandLine(exe_path, mode, config_source_path, false),
+            BuildManagedCommandLine(exe_path, mode,
+                                    switch_state.active_config_path, false),
             working_directory,
             stdout_path,
             stderr_path);
         supervisor_state.last_worker_pid = worker.pid;
         supervisor_state.worker_restart_count = restart_count;
+        supervisor_state.active_profile_name = switch_state.active_profile_name;
         supervisor_state.last_worker_started_time =
             FormatLocalIso8601(std::chrono::system_clock::now());
         WriteSupervisorState(runtime_home, supervisor_state);
@@ -577,12 +626,85 @@ int RunSupervisorWorkerLoop(
         DWORD wait_result =
             WaitForSingleObject(worker.process_handle, kWorkerStartupCheckMs);
         const bool exited_during_startup = wait_result == WAIT_OBJECT_0;
+
+        bool switch_committed = false;
+        bool force_terminated_for_switch = false;
+        std::filesystem::path committed_config;
+        std::string committed_profile;
+
         DWORD exit_code = STILL_ACTIVE;
         if (exited_during_startup) {
             GetExitCodeProcess(worker.process_handle, &exit_code);
         } else {
-            while (wait_result == WAIT_TIMEOUT) {
-                wait_result = WaitForSingleObject(worker.process_handle, 1000u);
+            // The worker cleared the startup window, so it is healthy: clear
+            // accumulated crash backoff and promote the active profile to
+            // last-known-good (REQ-MPROFILE-07).
+            have_seen_good_worker = true;
+            restart_count = 0u;
+            revert_armed = false;
+            DecideAfterStartupOutcome(switch_state,
+                                      /*worker_survived_startup=*/true);
+
+            // While the worker runs, poll the operator profile-switch request
+            // (REQ-MPROFILE-04/05/06).
+            auto cycle_deadline = std::chrono::steady_clock::time_point::max();
+            while ((wait_result = WaitForSingleObject(
+                        worker.process_handle, 1000u)) == WAIT_TIMEOUT) {
+                if (!switch_committed) {
+                    const std::optional<RuntimeProfileSwitchRequest> request =
+                        svg_mb_control::TakeRuntimeProfileSwitchRequest(
+                            runtime_home);
+                    if (request.has_value()) {
+                        const SwitchRequestDecision decision =
+                            DecideSwitchRequest(*request, catalog_lookup,
+                                                load_validator);
+                        if (decision.action ==
+                            SwitchRequestAction::kActivate) {
+                            // Validate-before-signal: only tear down a healthy
+                            // worker for a candidate that resolves and loads.
+                            committed_config = decision.config_path;
+                            committed_profile = decision.profile_name;
+                            svg_mb_control::RequestRuntimeProfileCycle(
+                                runtime_home);
+                            switch_committed = true;
+                            cycle_deadline = std::chrono::steady_clock::now() +
+                                             kSwitchCycleTimeout;
+                            svg_mb_control::AppendRuntimeEvent(
+                                runtime_home,
+                                svg_mb_control::RuntimeLogEvent{
+                                    .mode = std::string(RunModeLabel(mode)),
+                                    .event_type =
+                                        "supervisor.profile_switch_signaled",
+                                    .detail =
+                                        "cycling to profile " + committed_profile,
+                                    .success = true,
+                                });
+                        } else {
+                            svg_mb_control::AppendRuntimeEvent(
+                                runtime_home,
+                                svg_mb_control::RuntimeLogEvent{
+                                    .mode = std::string(RunModeLabel(mode)),
+                                    .event_type = "supervisor.profile_rejected",
+                                    .detail = decision.detail,
+                                    .success = false,
+                                });
+                        }
+                    }
+                } else if (std::chrono::steady_clock::now() >= cycle_deadline) {
+                    // The worker did not honor the cycle signal in time:
+                    // force-terminate it (advisor #1).
+                    TerminateProcess(worker.process_handle, 1u);
+                    force_terminated_for_switch = true;
+                    svg_mb_control::AppendRuntimeEvent(
+                        runtime_home,
+                        svg_mb_control::RuntimeLogEvent{
+                            .mode = std::string(RunModeLabel(mode)),
+                            .event_type =
+                                "supervisor.profile_switch_force_terminated",
+                            .detail = "worker wedged during profile cycle",
+                            .success = false,
+                        });
+                }
             }
             GetExitCodeProcess(worker.process_handle, &exit_code);
         }
@@ -615,7 +737,32 @@ int RunSupervisorWorkerLoop(
                 });
         }
 
-        if (restart_count == 0u && exited_during_startup &&
+        // FEAT-0023 auto-revert (REQ-MPROFILE-07): a freshly-switched worker
+        // that failed its own startup window reverts to last-known-good and
+        // respawns from it (no backoff) instead of killing the supervisor.
+        if (revert_armed && exited_during_startup && exit_code != 0u &&
+            !stop_requested) {
+            revert_armed = false;
+            const StartupOutcomeDecision reverted = DecideAfterStartupOutcome(
+                switch_state, /*worker_survived_startup=*/false);
+            svg_mb_control::ClearRuntimeProfileCycleRequest(runtime_home);
+            svg_mb_control::AppendRuntimeEvent(
+                runtime_home,
+                svg_mb_control::RuntimeLogEvent{
+                    .mode = std::string(RunModeLabel(mode)),
+                    .event_type = "supervisor.profile_reverted",
+                    .detail = "switched profile failed startup; reverting to " +
+                              reverted.profile_name,
+                    .success = false,
+                });
+            CloseHandle(worker.process_handle);
+            continue;
+        }
+
+        // First-boot bad config: only kill the supervisor when no healthy worker
+        // has EVER been seen (decoupled from restart_count, so a later crash or
+        // a switch failure can never end the supervisor).
+        if (!have_seen_good_worker && exited_during_startup &&
             !stop_requested && exit_code != 0u) {
             std::cerr << "Error: " << RunModeLabel(mode)
                       << " worker exited during startup"
@@ -634,6 +781,33 @@ int RunSupervisorWorkerLoop(
         }
 
         CloseHandle(worker.process_handle);
+
+        // FEAT-0023 commit a profile switch (REQ-MPROFILE-06): the worker cycled
+        // cleanly (exit 0) or was force-terminated after wedging. Repoint to the
+        // new profile and respawn with no crash backoff; arm auto-revert. An
+        // operator stop takes precedence (advisor #2: commit only on a clean
+        // cycle or our own force-terminate, never on an unrelated crash).
+        if (switch_committed && !stop_requested &&
+            (exit_code == 0u || force_terminated_for_switch)) {
+            svg_mb_control::ClearRuntimeProfileCycleRequest(runtime_home);
+            switch_state.active_profile_name = committed_profile;
+            switch_state.active_config_path = committed_config;
+            revert_armed = true;
+            svg_mb_control::AppendRuntimeEvent(
+                runtime_home,
+                svg_mb_control::RuntimeLogEvent{
+                    .mode = std::string(RunModeLabel(mode)),
+                    .event_type = "supervisor.profile_applied",
+                    .detail = "applied profile " + committed_profile,
+                    .success = true,
+                });
+            continue;
+        }
+        // A crash coincident with a signaled cycle: drop the cycle signal and
+        // fall through to ordinary crash handling (do not adopt the candidate).
+        if (switch_committed) {
+            svg_mb_control::ClearRuntimeProfileCycleRequest(runtime_home);
+        }
 
         if (stop_requested || exit_code == 0u) {
             break;

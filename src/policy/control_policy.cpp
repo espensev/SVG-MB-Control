@@ -45,6 +45,36 @@ std::string CurveShapeToString(CurveShape shape) {
     return "linear";
 }
 
+ControllerKind ParseControllerKind(const std::string& text) {
+    if (text == "curve_overlay" || text == "curve") {
+        return ControllerKind::CurveOverlay;
+    }
+    if (text == "pid") return ControllerKind::Pid;
+    throw std::runtime_error("Unknown controller: " + text);
+}
+
+std::string ControllerKindToString(ControllerKind kind) {
+    switch (kind) {
+        case ControllerKind::CurveOverlay: return "curve_overlay";
+        case ControllerKind::Pid: return "pid";
+    }
+    return "curve_overlay";
+}
+
+PidFeedforward ParsePidFeedforward(const std::string& text) {
+    if (text == "curve") return PidFeedforward::Curve;
+    if (text == "fixed") return PidFeedforward::Fixed;
+    throw std::runtime_error("Unknown pid feedforward: " + text);
+}
+
+std::string PidFeedforwardToString(PidFeedforward feedforward) {
+    switch (feedforward) {
+        case PidFeedforward::Curve: return "curve";
+        case PidFeedforward::Fixed: return "fixed";
+    }
+    return "curve";
+}
+
 double BlendTemps(const TempInputs& inputs, TempBlend mode) {
     constexpr double kAbsoluteZeroC = -273.15;
     const double cpu = inputs.cpu_available ? inputs.cpu_c : kAbsoluteZeroC;

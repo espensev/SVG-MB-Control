@@ -35,11 +35,22 @@ fan-policy metadata published in `current_state.json`.
 If `snapshot_path` is configured, it also mirrors the same current-state JSON to
 that location.
 
+Snapshot and status publication failures are visible through the additive
+logging-health events in `logs\svg_mb_control_events.jsonl`. A failed
+runtime-home or configured snapshot-mirror publish emits one sticky
+`runtime_logging.snapshot_publish_failed` event per active failure and a
+`runtime_logging.snapshot_publish_recovered` event after publication succeeds.
+Status publication uses `runtime_logging.status_publish_failed` and
+`runtime_logging.status_publish_recovered`. Hardware-access availability is
+reported separately through the additive `hwaccess_*` status fields and
+`read_loop.hwaccess_unavailable` / `read_loop.hwaccess_restored` events.
+
 ## Runtime Flow
 
 1. Resolve config and runtime home.
 2. Resolve runtime policy, if configured.
-3. Initialize the direct fan backend.
+3. Initialize the AMD/SMN read path and direct fan backend, recording their
+   PawnIO-backed hardware-access state.
 4. On each poll, sample AMD, GPU, and fan telemetry in-process.
 5. Append the sampled row to the active CSV chunk and refresh the fixed live
    CSV mirror on the configured flush interval.
@@ -68,10 +79,21 @@ that location.
 - `log_csv_path`
 - `log_manifest_path`
 - `event_log_path`
+- `hwaccess_state`
+- `hwaccess_read_state`
+- `hwaccess_write_state`
+- `hwaccess_read_detail`
+- `hwaccess_write_detail`
 
 `restart_count` and `child_pid` are retained for schema stability in the direct
 runtime and remain `0`. `process_id` is the active read-loop worker PID used by
 `svg-mb-control --status`.
+
+`hwaccess_read_state` describes the AMD/SMN read path, and
+`hwaccess_write_state` describes the Super I/O fan backend. Values are
+`available`, `unavailable`, or `unknown`; the detail fields carry the
+initialization warning/backend detail. The fields are observational and do not
+change `direct-read-failed` behavior or health exit-code mapping.
 
 ## Failure Behavior
 

@@ -79,6 +79,27 @@ CREATE TABLE IF NOT EXISTS tick_samples (
     cpu_aperf_delta REAL,
     cpu_mperf_delta REAL,
     cpu_cycles_acquisition TEXT,
+    gpu_power_sample_id INTEGER,
+    gpu_power_time_ms REAL,
+    gpu_power_mw REAL,
+    gpu_power_source TEXT,
+    gpu_power_acquisition TEXT,
+    gpu_context_sample_id INTEGER,
+    gpu_context_time_ms REAL,
+    gpu_context_sample_age_ms REAL,
+    gpu_context_acquisition TEXT,
+    gpu_util_gpu_pct INTEGER,
+    gpu_util_mem_pct INTEGER,
+    gpu_pstate INTEGER,
+    gpu_clock_graphics_mhz INTEGER,
+    gpu_clock_memory_mhz INTEGER,
+    gpu_vram_used_mb INTEGER,
+    gpu_vram_total_mb INTEGER,
+    cpu_aperf_delta_allcore REAL,
+    cpu_mperf_delta_allcore REAL,
+    cpu_cycles_window_ms_allcore REAL,
+    cpu_cycles_allcore_sample_id INTEGER,
+    cpu_cycles_allcore_cores INTEGER,
     PRIMARY KEY (run_id, tick_count)
 );
 
@@ -641,6 +662,137 @@ void MigrateSchema(Database& db) {
                 "TEXT");
         }
         SetSchemaVersion(db, 10);
+    }
+    if (version <= 10) {
+        // FEAT-0020 (REQ-PWRLOG-02/-05): additive nullable GPU board-power
+        // evidence columns mirrored from the control-loop CSV
+        // (gpu_power_sample_id, gpu_power_time_ms, gpu_power_mw,
+        // gpu_power_source, gpu_power_acquisition). Old archives lack them;
+        // ingest binds NULL and the report summary skips absent samples (no
+        // false zero). gpu_power_mw is INSTANTANEOUS board milliwatts, not an
+        // accumulating energy counter, so the report derives mean/percentile,
+        // not the CPU Sigma-energy/Sigma-window integral.
+        if (!ColumnExists(db, "tick_samples", "gpu_power_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_sample_id "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_time_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_time_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_mw")) {
+            db.Exec("ALTER TABLE tick_samples ADD COLUMN gpu_power_mw REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_source")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_source TEXT");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_power_acquisition")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_power_acquisition "
+                "TEXT");
+        }
+        SetSchemaVersion(db, 11);
+    }
+    if (version <= 11) {
+        // FEAT-0021 (REQ-GPUCTX-01/-05): additive nullable GPU workload
+        // context columns mirrored from the control-loop CSV. Old archives
+        // lack them; ingest binds NULL and the report summary skips absent
+        // context (no false zero). gpu_context_sample_id can repeat across
+        // rows because the controller mirrors a cached context sample with an
+        // increasing gpu_context_sample_age_ms.
+        if (!ColumnExists(db, "tick_samples", "gpu_context_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_context_sample_id "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_context_time_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_context_time_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples",
+                          "gpu_context_sample_age_ms")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_context_sample_age_ms REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_context_acquisition")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_context_acquisition TEXT");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_util_gpu_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_util_gpu_pct "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_util_mem_pct")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_util_mem_pct "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_pstate")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_pstate INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples",
+                          "gpu_clock_graphics_mhz")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_clock_graphics_mhz INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_clock_memory_mhz")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "gpu_clock_memory_mhz INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_vram_used_mb")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_vram_used_mb "
+                "INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "gpu_vram_total_mb")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN gpu_vram_total_mb "
+                "INTEGER");
+        }
+        SetSchemaVersion(db, 12);
+    }
+    if (version <= 12) {
+        // FEAT-0006 all-core effective-frequency columns (off-thread package
+        // sweep): additive nullable Sigma-dAPERF / Sigma-dMPERF over all
+        // logical processors on their OWN sample-id cadence (independent of the
+        // per-core cpu_cycles_sample_id), the per-sweep window, and the
+        // contributing-core count. Old archives lack them; ingest binds NULL
+        // and the report's second cycle query degrades to "unavailable" (no
+        // false zero). Idempotent via ColumnExists.
+        if (!ColumnExists(db, "tick_samples", "cpu_aperf_delta_allcore")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_aperf_delta_allcore "
+                "REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_mperf_delta_allcore")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_mperf_delta_allcore "
+                "REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_window_ms_allcore")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "cpu_cycles_window_ms_allcore REAL");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_allcore_sample_id")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN "
+                "cpu_cycles_allcore_sample_id INTEGER");
+        }
+        if (!ColumnExists(db, "tick_samples", "cpu_cycles_allcore_cores")) {
+            db.Exec(
+                "ALTER TABLE tick_samples ADD COLUMN cpu_cycles_allcore_cores "
+                "INTEGER");
+        }
+        SetSchemaVersion(db, 13);
     }
 }
 

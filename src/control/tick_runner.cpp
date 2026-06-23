@@ -1,6 +1,7 @@
 #include "tick_runner.h"
 
 #include "amd_reader.h"
+#include "channel_controller.h"
 #include "channel_evaluator.h"
 #include "channel_write.h"
 #include "control_status_writer.h"
@@ -18,6 +19,7 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -25,6 +27,97 @@
 namespace svg_mb_control {
 
 namespace {
+
+std::string BuildCsvWriteFailureDetail(const RuntimeCsvLogger& csv_logger) {
+    std::ostringstream detail;
+    detail << "runtime CSV row write failed";
+    if (!csv_logger.last_error_sink().empty()) {
+        detail << " sink=" << csv_logger.last_error_sink();
+    }
+    if (!csv_logger.last_error_detail().empty()) {
+        detail << " detail=" << csv_logger.last_error_detail();
+    }
+    return detail.str();
+}
+
+void AppendCsvWriteFailureEvent(const ControlRuntimeContext& context,
+                                const RuntimeCsvLogger& csv_logger,
+                                std::uint64_t tick_count,
+                                const std::string& event_log_path) {
+    AppendControlLoopEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .event_type = "runtime_logging.csv_write_failed",
+            .detail = BuildCsvWriteFailureDetail(csv_logger),
+            .tick_count = tick_count,
+            .success = false,
+            .log_csv_path = csv_logger.active_archive_path().string(),
+            .event_log_path = event_log_path,
+        });
+}
+
+void AppendCsvWriteRecoveredEvent(const ControlRuntimeContext& context,
+                                  const RuntimeCsvLogger& csv_logger,
+                                  std::uint64_t tick_count,
+                                  const std::string& event_log_path) {
+    AppendControlLoopEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .event_type = "runtime_logging.csv_write_recovered",
+            .detail = "runtime CSV row writes recovered",
+            .tick_count = tick_count,
+            .success = true,
+            .log_csv_path = csv_logger.active_archive_path().string(),
+            .event_log_path = event_log_path,
+        });
+}
+
+std::string BuildSnapshotPublishFailureDetail(
+    const std::filesystem::path& target_path,
+    const std::string& write_error) {
+    std::string detail =
+        "runtime snapshot publish failed path=" + target_path.string();
+    if (!write_error.empty()) {
+        detail += " detail=" + write_error;
+    }
+    return detail;
+}
+
+void AppendSnapshotPublishFailureEvent(
+    const ControlRuntimeContext& context,
+    const std::filesystem::path& target_path,
+    const std::string& write_error,
+    std::uint64_t tick_count,
+    const std::string& event_log_path) {
+    AppendControlLoopEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .event_type = "runtime_logging.snapshot_publish_failed",
+            .detail =
+                BuildSnapshotPublishFailureDetail(target_path, write_error),
+            .tick_count = tick_count,
+            .success = false,
+            .event_log_path = event_log_path,
+        });
+}
+
+void AppendSnapshotPublishRecoveredEvent(
+    const ControlRuntimeContext& context,
+    const std::filesystem::path& target_path,
+    std::uint64_t tick_count,
+    const std::string& event_log_path) {
+    AppendControlLoopEvent(
+        context.runtime_home,
+        RuntimeLogEvent{
+            .event_type = "runtime_logging.snapshot_publish_recovered",
+            .detail =
+                "runtime snapshot publish recovered path=" +
+                target_path.string(),
+            .tick_count = tick_count,
+            .success = true,
+            .event_log_path = event_log_path,
+        });
+}
 
 bool ChannelMatchesResetRequest(
     const RuntimeBreakerResetRequest& request,
@@ -210,15 +303,43 @@ bool RunControlTick(ControlRuntimeContext& context,
             (now_steady - state.last_snapshot_write_time) >=
                 kSnapshotWriteMinInterval;
         if (snapshot_write_due) {
-            WriteRuntimeSnapshotFile(context.runtime_home,
-                                     state.runtime_snapshot);
-            state.last_snapshot_write_time = now_steady;
-            state.have_last_snapshot_write_time = true;
+            std::string snapshot_write_error;
+            const std::filesystem::path snapshot_path =
+                context.runtime_home / "current_state.json";
+            const bool snapshot_written = WriteRuntimeSnapshotFile(
+                context.runtime_home,
+                state.runtime_snapshot,
+                &snapshot_write_error);
+            if (snapshot_written) {
+                state.last_snapshot_write_time = now_steady;
+                state.have_last_snapshot_write_time = true;
+                if (state.snapshot_publish_failure_active) {
+                    AppendSnapshotPublishRecoveredEvent(
+                        context,
+                        snapshot_path,
+                        state.tick_count,
+                        event_log_path);
+                    state.snapshot_publish_failure_active = false;
+                    state.force_status_write = true;
+                }
+            } else if (!state.snapshot_publish_failure_active) {
+                AppendSnapshotPublishFailureEvent(context,
+                                                  snapshot_path,
+                                                  snapshot_write_error,
+                                                  state.tick_count,
+                                                  event_log_path);
+                state.snapshot_publish_failure_active = true;
+                state.force_status_write = true;
+            }
         }
     }
 
-    // Per-channel decisions.
-    for (auto& channel : context.channels) {
+    // Per-channel decisions. Index-based so each channel dispatches through its
+    // own controllers[i] (FEAT-0003 control-law seam). `controllers` and
+    // `channels` are index-aligned by construction in the ControlRuntimeContext
+    // ctor, which pushes one of each per configured channel in the same loop.
+    for (std::size_t i = 0; i < context.channels.size(); ++i) {
+        ChannelState& channel = context.channels[i];
         const ChannelTimingConfig channel_timing =
             BuildChannelTimingConfig(context.loop, channel, now_steady);
 
@@ -238,7 +359,7 @@ bool RunControlTick(ControlRuntimeContext& context,
             break;
         }
 
-        const ChannelEvaluation evaluation = EvaluateChannel(
+        const ChannelEvaluation evaluation = context.controllers[i]->Evaluate(
             channel, context.loop, temp_inputs, state.runtime_snapshot_index,
             now_steady);
         AppendChannelSensorEvent(context, channel, evaluation,
@@ -254,10 +375,16 @@ bool RunControlTick(ControlRuntimeContext& context,
                                 state.tick_count);
     }
 
-    // Flush any queued pending-write removals once per tick. Upserts
-    // already persisted synchronously inside the loop.
+    // Flush queued pending-write removals and FEAT-0019 deferred same-baseline
+    // upserts once per tick, and — iff the flush persisted — clear any
+    // persist-failure degradation that the deferred write self-healed: a
+    // successful flush rewrites the whole sidecar, so every channel's recovery
+    // record is then on disk and current (REQ-WRITEHOT-06). Identity-change
+    // upserts already persisted synchronously inside the loop and cleared their
+    // own channel's counter. The persist-gated clear lives in
+    // FlushAndClearPersistFailures so it is unit-testable without a full tick.
     try {
-        pending_store.Flush();
+        FlushAndClearPersistFailures(pending_store, context.channels);
     } catch (const std::exception& e) {
         AppendControlLoopEvent(
             context.runtime_home,
@@ -367,13 +494,30 @@ bool RunControlTick(ControlRuntimeContext& context,
 
     if (csv_logger.is_open()) {
         BuildChannelLogStates(context.channels, state.channel_log_states);
-        csv_logger.WriteRow(
+        const bool row_written = csv_logger.WriteRow(
             BuildControlLoopCsvRow(
                 state.runtime_snapshot,
                 state.runtime_snapshot_index,
                 state.tick_count,
                 state.last_timing,
-                state.channel_log_states));
+                state.channel_log_states,
+                context.base.profile_name,
+                context.base.profile_resolution_source));
+        if (!row_written && !state.csv_write_failure_active) {
+            AppendCsvWriteFailureEvent(context,
+                                       csv_logger,
+                                       state.tick_count,
+                                       event_log_path);
+            state.csv_write_failure_active = true;
+            state.force_status_write = true;
+        } else if (row_written && state.csv_write_failure_active) {
+            AppendCsvWriteRecoveredEvent(context,
+                                         csv_logger,
+                                         state.tick_count,
+                                         event_log_path);
+            state.csv_write_failure_active = false;
+            state.force_status_write = true;
+        }
     }
 
     if (context.loop.low_band.enabled) {
@@ -407,12 +551,23 @@ bool RunControlTick(ControlRuntimeContext& context,
            << (timer_resolution.active()
                    ? std::to_string(timer_resolution.period_ms())
                    : std::string("default"));
-        WriteControlLoopStatus(context.runtime_home, "control-loop", "running",
-                        td.str(), state.tick_count, eval_iso,
-                        state.last_timing, context.channels,
-                        state.log_csv_path, state.log_manifest_path,
-                        event_log_path, state.last_successful_restore_iso);
-        state.force_status_write = false;
+        const bool status_written = WriteControlLoopStatus(
+            context.runtime_home,
+            "control-loop",
+            "running",
+            td.str(),
+            state.tick_count,
+            eval_iso,
+            state.last_timing,
+            context.channels,
+            state.log_csv_path,
+            state.log_manifest_path,
+            event_log_path,
+            state.last_successful_restore_iso,
+            context.base.profile_name,
+            context.base.profile_resolution_source,
+            context.hardware_access);
+        state.force_status_write = !status_written;
     }
 
     WaitForNextControlTick(context, tick_started_steady,

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hardware_access_status.h"
+
 #include <nlohmann/json.hpp>
 
 #include <chrono>
@@ -30,6 +32,7 @@ struct RuntimeHealthResult {
     std::string status;
     std::string status_detail;
     std::string last_update;
+    HardwareAccessStatus hardware_access;
     std::int64_t last_update_age_ms = -1;
     std::uint32_t stale_after_ms = 10000u;
     bool stop_request_present = false;
@@ -40,6 +43,17 @@ struct RuntimeHealthResult {
     bool sidecar_quarantined_present = false;
     std::uint32_t degraded_channel_count = 0u;
     std::string last_successful_restore_time;
+    std::filesystem::path logging_health_path;
+    bool logging_health_present = false;
+    bool event_log_failure_active = false;
+    std::uint64_t event_log_failure_count = 0u;
+    std::string event_log_failure_state;
+    std::string event_log_failure_path;
+    std::string event_log_failure_first_time;
+    std::string event_log_failure_last_time;
+    std::string event_log_failure_recovery_time;
+    std::string event_log_failure_sink;
+    std::string event_log_failure_detail;
 
     // Merged from the supervisor-owned control_supervisor.json sidecar.
     bool supervisor_state_present = false;

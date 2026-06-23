@@ -141,6 +141,82 @@ void TestAdvanceWindow_Wrap() {
     ExpectTrue(r.d_mperf == 2000u, "MPERF delta across the window");
 }
 
+// --- Package (all-core) aggregation: FEAT-0006 all-core eff-freq rollup ------
+// AggregatePackageCycles composes already-tested per-core AdvanceCycleWindow
+// results into one package window: Sigma-dAPERF / Sigma-dMPERF over cores with a
+// fresh, non-baseline, non-blanked window, with a package-level no-false-zero
+// blank policy (baseline / all-blanked / package-implausible). Pure; no hardware.
+
+CycleWindowResult MakeContrib(std::uint64_t a, std::uint64_t m) {
+    return CycleWindowResult{
+        .d_aperf = a, .d_mperf = m, .blanked = false, .baseline = false};
+}
+CycleWindowResult MakeBlanked() {
+    return CycleWindowResult{.blanked = true, .baseline = false};
+}
+CycleWindowResult MakeBaseline() {
+    return CycleWindowResult{};  // baseline = true by default
+}
+
+void TestPackage_AllBaseline() {
+    CycleWindowResult cores[4] = {MakeBaseline(), MakeBaseline(),
+                                  MakeBaseline(), MakeBaseline()};
+    const PackageCycleResult p =
+        AggregatePackageCycles(cores, 4, 1000.0, kDtCapMs, kRatioCap);
+    ExpectTrue(p.baseline, "all-baseline package is baseline");
+    ExpectFalse(p.blanked, "all-baseline package is not blanked");
+    ExpectTrue(p.contributing_cores == 0, "no contributing cores at baseline");
+    ExpectTrue(p.sum_d_aperf == 0u && p.sum_d_mperf == 0u, "baseline sums 0");
+}
+
+void TestPackage_MixedSum() {
+    CycleWindowResult cores[5] = {MakeContrib(2560u, 2000u), MakeBaseline(),
+                                  MakeContrib(3000u, 2500u), MakeBaseline(),
+                                  MakeContrib(1000u, 1000u)};
+    const PackageCycleResult p =
+        AggregatePackageCycles(cores, 5, 1000.0, kDtCapMs, kRatioCap);
+    ExpectFalse(p.baseline, "mixed has deltas -> not baseline");
+    ExpectFalse(p.blanked, "plausible package sum -> not blanked");
+    ExpectTrue(p.contributing_cores == 3, "three cores contributed");
+    ExpectTrue(p.sum_d_aperf == 6560u, "sum dAPERF over contributing cores");
+    ExpectTrue(p.sum_d_mperf == 5500u, "sum dMPERF over contributing cores");
+}
+
+void TestPackage_AllBlanked() {
+    CycleWindowResult cores[3] = {MakeBlanked(), MakeBlanked(), MakeBlanked()};
+    const PackageCycleResult p =
+        AggregatePackageCycles(cores, 3, 1000.0, kDtCapMs, kRatioCap);
+    ExpectFalse(p.baseline, "non-baseline cores present -> not baseline");
+    ExpectTrue(p.blanked, "all non-baseline cores blanked -> package blanked");
+    ExpectTrue(p.contributing_cores == 0, "no contributors when all blanked");
+    ExpectTrue(p.sum_d_aperf == 0u && p.sum_d_mperf == 0u, "blanked sums 0");
+}
+
+void TestPackage_SumImplausible() {
+    // Two cores whose summed ratio (18000/2000 = 9.0) exceeds kRatioCap (4.0);
+    // the package-level guard must blank even with contributors present.
+    CycleWindowResult cores[2] = {MakeContrib(9000u, 1000u),
+                                  MakeContrib(9000u, 1000u)};
+    const PackageCycleResult p =
+        AggregatePackageCycles(cores, 2, 1000.0, kDtCapMs, kRatioCap);
+    ExpectTrue(p.contributing_cores == 2, "both summed before the guard");
+    ExpectTrue(p.blanked, "package ratio above cap -> blanked");
+    ExpectFalse(p.baseline, "implausible is a blank, not a baseline");
+}
+
+void TestPackage_RatioCorrectness() {
+    // Sigma-dAPERF / Sigma-dMPERF == 1.28 feeds the existing ratio/eff helpers.
+    CycleWindowResult cores[2] = {MakeContrib(1280u, 1000u),
+                                  MakeContrib(1280u, 1000u)};
+    const PackageCycleResult p =
+        AggregatePackageCycles(cores, 2, 1000.0, kDtCapMs, kRatioCap);
+    ExpectFalse(p.blanked, "plausible package");
+    ExpectNear(AperfMperfRatio(p.sum_d_aperf, p.sum_d_mperf), 1.28, 1e-9,
+               "package ratio = Sigma-a / Sigma-m");
+    ExpectNear(EffectiveFrequencyMhz(p.sum_d_aperf, p.sum_d_mperf, 4300.0),
+               1.28 * 4300.0, 1e-6, "package eff-MHz = ratio * P0");
+}
+
 }  // namespace
 
 int main() {
@@ -155,6 +231,11 @@ int main() {
     TestAdvanceWindow_DeltaAndIncrement();
     TestAdvanceWindow_GuardBlanksButKeepsId();
     TestAdvanceWindow_Wrap();
+    TestPackage_AllBaseline();
+    TestPackage_MixedSum();
+    TestPackage_AllBlanked();
+    TestPackage_SumImplausible();
+    TestPackage_RatioCorrectness();
     if (g_failures > 0) {
         std::cerr << g_failures << " cpu_cycles test failure(s)\n";
         return 1;

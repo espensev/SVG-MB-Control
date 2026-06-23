@@ -1,0 +1,8 @@
+{
+  "0": {"target_c": 72, "kp": 2.0, "ki": 0.05, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200},
+  "4": {"target_c": 75, "kp": 2.0, "ki": 0.05, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200},
+  "3": {"target_c": 75, "kp": 2.0, "ki": 0.05, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200},
+  "2": {"target_c": 75, "kp": 2.0, "ki": 0.05, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200},
+  "5": {"target_c": 72, "kp": 2.0, "ki": 0.05, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200},
+  "1": {"target_c": 72, "kp": 2.0, "ki": 0.05, "kd": 0.0, "feedforward": "curve", "integral_min": -200, "integral_max": 200}
+}

@@ -1,7 +1,7 @@
 # FEAT-0004: Hardware-access dependency health signal (PawnIO availability)
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.2   **Updated:** 2026-06-18
+**Status:** Done   **Version:** 0.4   **Updated:** 2026-06-22
 **Namespace:** `REQ-HWHEALTH-*`
 **Companion to:** `AGENTS.md`, `docs/STRUCTURE_AND_STABILITY.md`, `docs/RUNTIME_HOME.md`, `docs/READ_LOOP.md`, `docs/BUILD_TARGETS_AND_DEPENDENCIES.md`
 **Purpose:** make PawnIO (kernel hardware-access) unavailability a distinct,
@@ -91,31 +91,30 @@ recovery agent can subscribe to in order to perform the only effective recovery
 
 ## 5. Behavior specification
 
-Proposed behavior (not yet implemented):
+Implemented behavior:
 
-- **Distinct availability indicator.** Define a hardware-access availability
-  signal with at least: an overall state, and per-path read (AMD/SMN) and write
-  (SIO/LPC) availability where the init result distinguishes them. It is
-  populated from the existing initialization outcomes: AMD reader availability
-  and `last_warning` (`src/hardware/amd_reader.cpp:553-559, 579-582`) and the SIO
-  writer construction outcome caught at `src/runtime/read_loop.cpp:184-202`
-  (thrown from `src/hardware/sio_fan_writer.cpp:87-108`).
+- **Distinct availability indicator.** `control_runtime.json`, `--status`, and
+  `--health --json` expose an overall `hwaccess_state` plus
+  `hwaccess_read_state` (AMD/SMN) and `hwaccess_write_state` (SIO/LPC). Each
+  state is `available`, `unavailable`, or `unknown`. The read state is populated
+  from `AmdReader::available()` / `init_warning()`, and the write state is
+  populated from successful `CreateFanWriter(...)` construction or its thrown
+  initialization detail.
 - **No false-positive availability.** The signal reports *unknown / unavailable*,
   not *healthy*, when no successful PawnIO open has occurred — mirroring the
   "no false zero" rule in `FEAT-0002`. Availability is asserted only on an
   observed successful open.
-- **Surfaced two ways.** (a) An additive status field in the runtime status /
-  sidecar so an operator can read the current state, and (b) a transition event
-  (e.g. `control_loop.hwaccess_unavailable` / `control_loop.hwaccess_restored`)
-  recording which path(s) and the underlying warning text.
+- **Surfaced two ways.** (a) Additive status fields in the runtime status /
+  health surface, and (b) transition events
+  `control_loop.hwaccess_unavailable` / `control_loop.hwaccess_restored` and
+  `read_loop.hwaccess_unavailable` / `read_loop.hwaccess_restored`, recording
+  each path's state and detail.
 - **Backward-compatible.** The existing terminal status values `failed` and
   `direct-read-failed` are retained with unchanged meaning; the new signal is a
   more specific, additive overlay, not a rename.
-- **Exit-code mapping unchanged in this feature.** Whether the new signal should
-  change the health exit-code mapping (and therefore the watchdog contract) is a
-  direction-setting decision (§9). The default for this feature is additive
-  status + event with exit codes unchanged, because changing exit-code semantics
-  alters the `task_runner` watchdog contract and deserves its own decision.
+- **Exit-code mapping unchanged in this feature.** The signal is additive
+  observability. Health exit codes and the watchdog restart contract are
+  unchanged.
 
 ## 6. Requirements  *(promotion gate 4)*
 
@@ -131,10 +130,13 @@ Proposed behavior (not yet implemented):
 ## 7. Data / schema deltas
 
 - **New status fields** (additive, tri-state — available / unavailable /
-  unknown), e.g. `hwaccess_read_available`, `hwaccess_write_available`, so an
-  operator can confirm which path is down.
+  unknown): `hwaccess_state`, `hwaccess_read_state`,
+  `hwaccess_write_state`, `hwaccess_read_detail`, and
+  `hwaccess_write_detail`.
 - **New event types** `control_loop.hwaccess_unavailable` /
-  `control_loop.hwaccess_restored`, carrying path and warning text.
+  `control_loop.hwaccess_restored` and `read_loop.hwaccess_unavailable` /
+  `read_loop.hwaccess_restored`, carrying path state and warning text in
+  `detail`.
 - **Schema/version impact:** additive only; update `docs/RUNTIME_HOME.md` (status
   fields, events) at implementation. No existing runtime-home file, archive, or
   config becomes invalid.
@@ -220,13 +222,16 @@ Verify legend:
 
 | Requirement | Result (pass/fail) | Evidence (test run / commit / status / note) | Checked (date) |
 |---|---|---|---|
-| REQ-HWHEALTH-01 | | | |
-| REQ-HWHEALTH-02 | | | |
-| REQ-HWHEALTH-03 | | | |
-| REQ-HWHEALTH-04 | | | |
-| REQ-HWHEALTH-05 | | | |
-| REQ-HWHEALTH-06 | | | |
+| REQ-HWHEALTH-01 | pass | `runtime_status_tests`: status JSON + typed status expose `hwaccess_state`, `hwaccess_read_state`, `hwaccess_write_state`, and details; `docs/RUNTIME_HOME.md` updated. `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed 2026-06-21. | 2026-06-21 |
+| REQ-HWHEALTH-02 | pass | `runtime_status_tests`: read and write path states round-trip independently (`read=available`, `write=unavailable`). Startup code sets read from `AmdReader` and write from `CreateFanWriter(...)` success/failure. | 2026-06-21 |
+| REQ-HWHEALTH-03 | pass | Status fields are additive on existing control-loop v4/read-loop v1 schemas; `ReadRuntimeStatus` defaults absent/unknown fields to `unknown`. `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-21 |
+| REQ-HWHEALTH-04 | pass (T, M) | `runtime_status_tests`: transition classifier covers unknown→unavailable and unavailable→available. Live M 2026-06-22: isolated `read-loop` runtime slice emitted `read_loop.hwaccess_restored` with `read=available`, `write=available`, and detail `AMD/SMN reader initialized` / `svg_mb_sio`; final status reported `hwaccess_state=available` after one successful poll. Evidence: `docs/feat-0004-live-hwaccess-event-log-evidence-2026-06-22.md`. | 2026-06-22 |
+| REQ-HWHEALTH-05 | pass | Review: implementation only reads existing `AmdReader` / `CreateFanWriter(...)` initialization outcomes and writes status/events; no driver load/start/restart or watchdog exit-code change was added. | 2026-06-21 |
+| REQ-HWHEALTH-06 | pass | `runtime_status_tests`: default/absent hardware-access fields remain `unknown`; overall state becomes `available` only when both read and write paths report `available`. | 2026-06-21 |
 
-**Spec vs. implementation deltas:** <record anything built differently from this
-spec, and why. Update §5/§6 and the cited contract docs if behavior changes, and
-bump **Updated**.>
+**Spec vs. implementation deltas:** the implemented field names are
+`hwaccess_*_state` rather than the earlier illustrative
+`hwaccess_*_available` names so the tri-state contract is explicit. The
+`*_restored` event is emitted only when a prior status file recorded
+unavailable and the new startup observes both paths available; there is still no
+per-tick PawnIO reconnect loop in this feature.
