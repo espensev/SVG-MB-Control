@@ -122,12 +122,43 @@ bool ResolveAnalyzeRuntimeHome(
 }
 
 bool ParseUint32Option(const wchar_t* text, std::uint32_t& out) {
+    const std::wstring value(text == nullptr ? L"" : text);
+    if (value.empty()) {
+        return false;
+    }
+    for (const wchar_t ch : value) {
+        if (ch < L'0' || ch > L'9') {
+            return false;
+        }
+    }
     try {
-        const unsigned long parsed = std::stoul(std::wstring(text));
+        std::size_t consumed = 0u;
+        const unsigned long parsed = std::stoul(value, &consumed);
+        if (consumed != value.size()) {
+            return false;
+        }
         if (parsed > UINT32_MAX) {
             return false;
         }
         out = static_cast<std::uint32_t>(parsed);
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool ParseDoubleOption(const wchar_t* text, double& out) {
+    const std::wstring value(text == nullptr ? L"" : text);
+    if (value.empty()) {
+        return false;
+    }
+    try {
+        std::size_t consumed = 0u;
+        const double parsed = std::stod(value, &consumed);
+        if (consumed != value.size() || !std::isfinite(parsed)) {
+            return false;
+        }
+        out = parsed;
         return true;
     } catch (const std::exception&) {
         return false;
@@ -249,36 +280,29 @@ int RunAnalyzeCommand(int argc, wchar_t** argv) {
             report_options.idle_seconds = idle_seconds;
         } else if (arg == L"--load-threshold-c") {
             if (!report_only("--load-threshold-c")) return 1;
-            try {
-                report_options.load_threshold_c =
-                    std::stod(std::wstring(require_value(index)));
-            } catch (const std::exception&) {
+            double parsed = 0.0;
+            if (!ParseDoubleOption(require_value(index), parsed)) {
                 std::cerr << "Error: invalid --load-threshold-c value.\n";
                 return 1;
             }
+            report_options.load_threshold_c = parsed;
         } else if (arg == L"--gpu-load-threshold-c") {
             if (!report_only("--gpu-load-threshold-c")) return 1;
-            try {
-                report_options.gpu_load_threshold_c =
-                    std::stod(std::wstring(require_value(index)));
-            } catch (const std::exception&) {
+            double parsed = 0.0;
+            if (!ParseDoubleOption(require_value(index), parsed)) {
                 std::cerr << "Error: invalid --gpu-load-threshold-c value.\n";
                 return 1;
             }
+            report_options.gpu_load_threshold_c = parsed;
         } else if (arg == L"--p0-mhz") {
             if (!report_only("--p0-mhz")) return 1;
-            try {
-                const double parsed =
-                    std::stod(std::wstring(require_value(index)));
-                if (!std::isfinite(parsed) || parsed <= 0.0) {
-                    std::cerr << "Error: invalid --p0-mhz value.\n";
-                    return 1;
-                }
-                report_options.p0_mhz = parsed;
-            } catch (const std::exception&) {
+            double parsed = 0.0;
+            if (!ParseDoubleOption(require_value(index), parsed) ||
+                parsed <= 0.0) {
                 std::cerr << "Error: invalid --p0-mhz value.\n";
                 return 1;
             }
+            report_options.p0_mhz = parsed;
         } else if (arg == L"--out") {
             if (!report_only("--out")) return 1;
             report_options.out_path =

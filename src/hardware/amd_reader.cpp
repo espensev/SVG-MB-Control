@@ -8,11 +8,14 @@
 #include "env_util.h"
 #include "pawnio_binary.h"
 #include "cpu_cycles.h"
+#include "numeric_parse.h"
 #include "rapl_energy.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <condition_variable>
 #include <cstdint>
@@ -96,17 +99,16 @@ std::optional<double> TryParseDoubleEnv(const char* name) {
         }
         return std::nullopt;
     }
-    std::string text(value);
+    double parsed = 0.0;
+    const bool ok = TryParseDoubleStrict(std::string_view(value), parsed);
     std::free(value);
-    try {
-        return std::stod(text);
-    } catch (const std::exception&) {
-        return std::nullopt;
-    }
+    return ok ? std::optional<double>(parsed) : std::nullopt;
 }
 
 std::vector<double> ParseDoubleSequence(std::string_view text) {
     std::vector<double> values;
+    values.reserve(static_cast<std::size_t>(
+        std::count(text.begin(), text.end(), ',') + 1));
     std::size_t cursor = 0u;
     while (cursor < text.size()) {
         while (cursor < text.size() &&
@@ -121,12 +123,12 @@ std::vector<double> ParseDoubleSequence(std::string_view text) {
         while (end < text.size() && text[end] != ',') {
             ++end;
         }
-        try {
-            values.push_back(std::stod(std::string(text.substr(cursor, end - cursor))));
-        } catch (const std::exception&) {
+        double parsed = 0.0;
+        if (!TryParseDoubleStrict(text.substr(cursor, end - cursor), parsed)) {
             values.clear();
             return values;
         }
+        values.push_back(parsed);
         cursor = end;
     }
     return values;
@@ -231,7 +233,7 @@ public:
     PciMutexLock(const PciMutexLock&) = delete;
     PciMutexLock& operator=(const PciMutexLock&) = delete;
 
-    bool acquired() const {
+    bool acquired() const noexcept {
         return acquired_;
     }
 
@@ -334,9 +336,9 @@ bool DetectAmdCpu(std::string* out_name,
     __cpuid(cpu_info, 0);
 
     char vendor[13] = {};
-    reinterpret_cast<int*>(vendor)[0] = cpu_info[1];
-    reinterpret_cast<int*>(vendor)[1] = cpu_info[3];
-    reinterpret_cast<int*>(vendor)[2] = cpu_info[2];
+    std::memcpy(vendor + 0, &cpu_info[1], sizeof(cpu_info[1]));
+    std::memcpy(vendor + 4, &cpu_info[3], sizeof(cpu_info[3]));
+    std::memcpy(vendor + 8, &cpu_info[2], sizeof(cpu_info[2]));
     vendor[12] = '\0';
     if (std::strcmp(vendor, "AuthenticAMD") != 0) {
         return false;
@@ -363,9 +365,12 @@ bool DetectAmdCpu(std::string* out_name,
     __cpuid(cpu_info, 0x80000000);
     const int max_extended = cpu_info[0];
     if (max_extended >= 0x80000004) {
-        __cpuid(reinterpret_cast<int*>(brand + 0), 0x80000002);
-        __cpuid(reinterpret_cast<int*>(brand + 16), 0x80000003);
-        __cpuid(reinterpret_cast<int*>(brand + 32), 0x80000004);
+        __cpuid(cpu_info, 0x80000002);
+        std::memcpy(brand + 0, cpu_info, sizeof(cpu_info));
+        __cpuid(cpu_info, 0x80000003);
+        std::memcpy(brand + 16, cpu_info, sizeof(cpu_info));
+        __cpuid(cpu_info, 0x80000004);
+        std::memcpy(brand + 32, cpu_info, sizeof(cpu_info));
     }
 
     if (out_name != nullptr) {
@@ -1018,7 +1023,7 @@ AmdReader::AmdReader() : impl_(std::make_unique<Impl>()) {
 
 AmdReader::~AmdReader() = default;
 
-bool AmdReader::available() const {
+bool AmdReader::available() const noexcept {
     return impl_ != nullptr && impl_->initialized;
 }
 

@@ -132,24 +132,33 @@ class CalibrationTests(WindowsExeTestCase):
             self.assertEqual([step["duty_pct_target"] for step in steps], [22.0, 24.0, 26.0])
 
     def test_calibrate_rejects_bad_custom_duty_sequence(self) -> None:
-        with tempfile.TemporaryDirectory() as td_str:
-            td = Path(td_str)
-            runtime_home = td / "runtime"
-            runtime_home.mkdir(parents=True, exist_ok=True)
-            config_path = _write_write_once_config(
-                td,
-                runtime_home=runtime_home,
-            )
-            result = _run_control(
-                "--mode",
-                "calibrate",
-                "--config",
-                str(config_path),
-                "--calibrate-channel",
-                "0",
-                "--calibrate-sequence",
-                "52,54",
-                env=_sim_direct_env(channel=0, amd_temp_c=60.0),
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("Invalid --calibrate-sequence", result.stderr)
+        cases = [
+            "52,54",
+            "22x:200",
+            "22:200x",
+            "22:-1",
+            "22:4294967296",
+        ]
+        for sequence in cases:
+            with self.subTest(sequence=sequence):
+                with tempfile.TemporaryDirectory() as td_str:
+                    td = Path(td_str)
+                    runtime_home = td / "runtime"
+                    runtime_home.mkdir(parents=True, exist_ok=True)
+                    config_path = _write_write_once_config(
+                        td,
+                        runtime_home=runtime_home,
+                    )
+                    result = _run_control(
+                        "--mode",
+                        "calibrate",
+                        "--config",
+                        str(config_path),
+                        "--calibrate-channel",
+                        "0",
+                        "--calibrate-sequence",
+                        sequence,
+                        env=_sim_direct_env(channel=0, amd_temp_c=60.0),
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Invalid --calibrate-sequence", result.stderr)

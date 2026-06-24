@@ -1987,3 +1987,17 @@ class AnalyzeReportTests(WindowsExeTestCase):
             absent_db = _run_report(runtime_home, td / "absent.db")
             self.assertEqual(absent_db.returncode, 1)
             self.assertIn("does not exist", absent_db.stderr)
+
+            invalid_numbers = [
+                ("--run", "-1"),
+                ("--run", "1x"),
+                ("--idle-seconds", "10s"),
+                ("--load-threshold-c", "70c"),
+                ("--gpu-load-threshold-c", "66c"),
+                ("--p0-mhz", "4000x"),
+            ]
+            for flag, value in invalid_numbers:
+                with self.subTest(flag=flag, value=value):
+                    result = _run_report(runtime_home, db_path, flag, value)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(f"invalid {flag} value", result.stderr)

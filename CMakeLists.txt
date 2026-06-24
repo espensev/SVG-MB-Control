@@ -377,6 +377,8 @@ if(BUILD_TESTING)
         tests/cpp/control_math_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_analyze_report_tests
         tests/cpp/analyze_report_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_analyze_csv_parse_tests
+        tests/cpp/analyze_csv_parse_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_loop_config_tests
         tests/cpp/control_loop_config_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_csv_rows_tests
@@ -403,6 +405,8 @@ if(BUILD_TESTING)
         tests/cpp/worker_force_terminate_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_amd_decode_tests
         tests/cpp/amd_decode_tests.cpp)
+    svg_mb_control_add_core_test(svg_mb_control_numeric_parse_tests
+        tests/cpp/numeric_parse_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_power_anticipation_tests
         tests/cpp/power_anticipation_tests.cpp)
     svg_mb_control_add_core_test(svg_mb_control_pending_writes_store_tests
