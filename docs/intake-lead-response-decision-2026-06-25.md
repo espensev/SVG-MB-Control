@@ -51,7 +51,7 @@ intake and the slowest-ramping channel, and it feeds the AIO radiator directly.
 ### D-INLEAD-2 — Surge-and-hold (config-only), not a literal overshoot term
 The intakes engage **earlier** (lower `gpu_airflow_start_c` than the exhausts),
 ramp **harder** (raised per-lane rate limiter + raised intake boost ceilings +
-steeper intake `cpu_override` mid-band), and **hold** the resulting airflow while
+a steeper channel `4` `cpu_override` mid-band), and **hold** the resulting airflow while
 the temperature stays up. This is achieved with **config values only**.
 
 A genuine rate-of-rise (dT/dt) "overshoot" term was considered and **declined**:
@@ -90,11 +90,15 @@ No falling-direction value (`fall_rate_pct_per_min`,
 The deliberate slow, quiet spin-down (`docs/COOLING_STRATEGY.md`) is preserved.
 
 ### D-INLEAD-5 — Radiator CPU authority ordering is preserved
-The intake high-end CPU response (`>= 88 C` `cpu_override` knots) stays **below**
-the channel `1`/`5` radiator-exhaust emergency knees, keeping the
-highest-authority high-CPU response on the radiator exhausts per
-`docs/response-evaluation-tuning-plan.md` ("CPU Override"). The intake steepening
-acts on the **onset** of the climb (mid band), not the ceiling.
+Only the channel `4` `cpu_override` mid band (`72-86 C`) is steepened, and only
+the channel `4` curve; its knots at or below `72 C` and at or above `90 C` stay
+byte-unchanged, so the shipped top-end ordering — channels `1`/`5` exceed the
+intakes at `>= 92 C` (`1`/`5` reach `88-100%`, channel `4` `~60-70%`) — is
+preserved exactly (`docs/response-evaluation-tuning-plan.md` "CPU Override"). The
+channel `2`/`3` `cpu_override`s are unchanged (note the shipped `2`/`3` already
+sit above channels `1`/`5` near `88 C`, so this feature does not assert an
+`88 C` intake-below-exhaust ordering). The steepening acts on the **onset** of
+the climb, not the ceiling.
 
 ## 3. Candidate magnitudes (settled by Pass-3)
 
@@ -108,7 +112,7 @@ exact values within the acceptance band.
 | `max_setpoint_step_pct` | 0.7 → **0.95** | 0.7 → **0.95** | 0.6 → **0.95** | raised with the rate so neither becomes the sole binding cap |
 | `gpu_airflow_start_c` | 62 → **58** | 62 → **58** | 64 → **58** | intakes engage ~6 C of GPU rise before the exhausts (which stay 64) |
 | `gpu_airflow_max_boost_pct` | 8 → **12** | 8 → **12** | 5 → **10** | intakes surge harder than the exhausts (4–5) |
-| `cpu_override_curve` 72–86 C | steeper | steeper | steeper (most) | onset of the climb; `<= 72 C` knots unchanged; `>= 88 C` knots stay below ch1/ch5 |
+| `cpu_override_curve` 72–86 C | — | — | steeper | ch4 only (radiator intake, has headroom below its high-end knots); `<= 72 C` and `>= 90 C` knots unchanged; ch2/ch3 unchanged |
 | `demand_smoothing_rise_alpha` | — | — | 0.008 → **0.014** (optional) | shorten ch4's approach tail; fall alpha unchanged |
 
 Effective rise ceiling `min(rise/60, step*1000/250)` rises on every retuned lane:

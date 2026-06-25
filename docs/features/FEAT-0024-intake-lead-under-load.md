@@ -79,9 +79,10 @@ this feature (operator: "idle's basically fine").
 - Make the intakes engage on a GPU climb before the exhausts by lowering the
   intake `gpu_airflow_start_c` below the exhaust value and raising the intake
   `gpu_airflow_max_boost_pct`.
-- Steepen the intake `cpu_override` **mid band** (`72-86 C`) so the intakes climb
-  on load instead of staying parked, keeping the surge level-held (no
-  recover-down).
+- Steepen the front-radiator-intake (`4`) `cpu_override` **mid band** (`72-86 C`)
+  so it climbs earlier on a CPU load (it directly cools the AIO and has the most
+  headroom below its high-end knots), keeping the surge level-held (no
+  recover-down); lanes `2`/`3` lead via the rate raise and `gpu_airflow` onset.
 
 **Non-goals**
 - No change to any intake curve or `cpu_override` knot at or below `72 C`, no idle
@@ -90,7 +91,9 @@ this feature (operator: "idle's basically fine").
   fire at idle).
 - No change to the exhaust lanes `0`/`1`/`5`, to the radiator no-mirror / `>= 2pt`
   GPU stagger / floors-above-rear contracts, or to the radiator-exhaust
-  highest-CPU authority (intake `>= 88 C` knots stay below channels `1`/`5`).
+  highest-CPU authority at the extreme (the channel `4` `cpu_override` knots
+  `>= 90 C` stay unchanged, so channels `1`/`5` keep exceeding the intakes at
+  `>= 92 C`).
 - No faster spin-down: no falling-direction value
   (`fall_rate_pct_per_min`, `demand_smoothing_fall_alpha`,
   `decay_latch_pct_per_min`) is raised on any lane.
@@ -133,10 +136,11 @@ fixtures (§10). Candidate magnitudes are in
   climb the intakes begin boosting before the exhausts and surge to a higher
   ceiling. The onset stays above the idle GPU envelope so it does not fire at
   idle.
-- **Intake mid-band climb.** The intake `cpu_override_curve` is steepened in the
-  `72-86 C` band so the intakes climb on a CPU load instead of parking; knots
-  `<= 72 C` are unchanged (idle untouched) and knots `>= 88 C` stay below the
-  channel `1`/`5` radiator-exhaust knees (authority ordering preserved).
+- **Radiator-intake mid-band climb.** The channel `4` `cpu_override_curve` is
+  steepened in the `72-86 C` band so the radiator intake climbs earlier on a CPU
+  load instead of parking; its knots `<= 72 C` and `>= 90 C` are unchanged (idle
+  untouched; the shipped top-end ordering preserved). Lanes `2`/`3`
+  `cpu_override` are unchanged.
 - **Surge-and-hold.** Because every retuned term is level-based, the intake duty
   rises with temperature and **holds** while temperature stays up; there is no
   rise-above-then-recover. Optionally `demand_smoothing_rise_alpha` is raised on
@@ -151,7 +155,7 @@ fixtures (§10). Candidate magnitudes are in
 |---|---|
 | REQ-INLEAD-01 | On each intake lane (`2`, `3`, `4`), `rise_rate_pct_per_min` and `max_setpoint_step_pct` must both be raised relative to the current shipped value so the effective rise ceiling `min(rise_rate_pct_per_min/60, max_setpoint_step_pct x 1000/write_cooldown_ms)` increases, and neither knob is left as the sole binding cap; lane `4` must receive a rise raise at least as large as lanes `2`/`3`. |
 | REQ-INLEAD-02 | On each intake lane, `gpu_airflow_start_c` must be lower than the exhaust lanes' `gpu_airflow_start_c` and `gpu_airflow_max_boost_pct` must be at least the exhaust lanes' value, so the intakes engage and surge on a GPU climb ahead of the exhausts; the intake `gpu_airflow_start_c` must stay above the idle GPU envelope so it does not fire at idle. |
-| REQ-INLEAD-03 | The intake `cpu_override_curve` must be steepened only in the `72-86 C` band: every knot at or below `72 C` must be byte-unchanged, the curve must stay monotonic non-decreasing, and every intake knot at or above `88 C` must stay at or below the channel `1`/`5` knot at the same temperature (radiator CPU authority preserved). |
+| REQ-INLEAD-03 | The front-radiator-intake channel `4` `cpu_override_curve` must be steepened only in the `72-86 C` band so it climbs earlier on a CPU load: its knots at or below `72 C` and at or above `90 C` must be byte-unchanged (preserving idle and the shipped top-end ordering, where channels `1`/`5` exceed the intakes at `>= 92 C`), and the curve must stay monotonic non-decreasing. The channel `2`/`3` `cpu_override_curve`s are unchanged — those lanes lead via the rate raise and the `gpu_airflow` onset, not via CPU-override steepening. |
 | REQ-INLEAD-04 | The retune must not change any intake curve, `cpu_override`, or soft-floor knot at or below `72 C`, `min_duty_pct`, `temp_blend`, channel membership, `poll_tick_ms`, `write_cooldown_ms`, or `deadband_pct`; the front-200 mm `>= 4%` spacing and soft-floor-not-static contracts and the exhaust-lane no-mirror / stagger / floors-above-rear contracts must stay green, so no measurement-gate boundary is crossed and idle is unchanged. |
 | REQ-INLEAD-05 | The retune must be rise-asymmetric: no `fall_rate_pct_per_min`, `demand_smoothing_fall_alpha`, or `decay_latch_pct_per_min` value is raised on any lane, and the exhaust lanes `0`/`1`/`5` are byte-unchanged. |
 | REQ-INLEAD-06 | Before adoption, a combined CPU+GPU validation pass (`response-evaluation-tuning-plan.md` Pass 3) must show the intake lanes reach first-duty-increase and complete their ramp sooner than the exhaust lanes on a rising load, while CPU Tctl and GPU memory percentiles stay within the plan's acceptance band and no new `control_loop.authority_reasserted` events appear after startup; a Pass-1 idle hold must show idle per-channel setpoint / RPM unchanged versus the pre-change baseline. |
@@ -194,7 +198,7 @@ fixtures (§10). Candidate magnitudes are in
 |---|---|---|
 | REQ-INLEAD-01 | T, R | `.\scripts\Test-LocalCI.ps1` config-contract test asserting each intake lane raised both `rise_rate_pct_per_min` and `max_setpoint_step_pct` (effective ceiling rose) and lane `4`'s rise raise `>=` lanes `2`/`3`; review vs `docs/intake-lead-response-decision-2026-06-25.md` §3. |
 | REQ-INLEAD-02 | T, R | Config-contract test asserting intake `gpu_airflow_start_c` `<` exhaust `gpu_airflow_start_c`, intake `gpu_airflow_max_boost_pct` `>=` exhaust value, and intake onset `>` idle GPU envelope; review. |
-| REQ-INLEAD-03 | T, R | Config-contract test asserting intake `cpu_override_curve` knots `<= 72 C` unchanged, monotonic non-decreasing, and each intake knot `>= 88 C` `<=` the channel `1`/`5` knot; review of the steepened `72-86 C` band. |
+| REQ-INLEAD-03 | T, R | Config-contract test asserting the channel `4` `cpu_override_curve` knots `<= 72 C` and `>= 90 C` are byte-unchanged, the curve is monotonic non-decreasing, the `72-86 C` band is steepened, and the `2`/`3` `cpu_override`s are unchanged; review of the band. |
 | REQ-INLEAD-04 | T | `tests/test_machine_cooling_policy.py` and `tests/test_config_contracts.py` stay green (front-pair `>= 4%`, soft-floor-not-static, no-mirror/stagger/floors-above-rear, topology) plus a contract assertion that no intake knot `<= 72 C`, `min_duty_pct`, cadence, cooldown, or deadband changed. |
 | REQ-INLEAD-05 | T, R | Config-contract test asserting no `fall_rate_pct_per_min` / `demand_smoothing_fall_alpha` / `decay_latch_pct_per_min` raised on any lane and the exhaust lanes `0`/`1`/`5` byte-unchanged; review for rise-asymmetry. |
 | REQ-INLEAD-06 | M | Live Pass-3 combined-load capture analyzed with `svg-mb-control analyze ingest` + `analyze report`: intake first-duty / ramp time precedes the exhausts; CPU Tctl / GPU memory percentiles within the acceptance band; no post-startup authority reasserts; Pass-1 idle hold shows idle unchanged. |
