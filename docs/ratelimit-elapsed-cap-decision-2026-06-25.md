@@ -85,6 +85,38 @@ step size; the cap's specific win is removing the elapsed-driven overshoot-then-
 reverse pattern under slip. Reversal→0 is on the worst-slip window; the live gate
 confirms it across clean windows.)
 
+## 3b. Live mechanism confirmation (CPU-stress, cap-off, 2026-06-25)
+
+A live capture on the **current shipped** config (session `20260625_190530`, build
+`b6770464`, `config_sha256 = c5b5cb21` — i.e. *after* the FEAT-0024 intake-lead
+merge, not the `45a0a1c7` forensic baseline of §1) under operator-driven 100%-busy
+y-cruncher bursts independently reconfirms the §1 mechanism on hardware. This is the
+**cap-off baseline** observation — the cap is not yet implemented — and is *not* the
+REQ-SLEWCAP-05 before/after gate:
+
+- **The elapsed→step coupling is real and monotonic.** Max up-step per tick, binned
+  by `loop_slip_ms`: ≤50 ms → 0.00 % p50 / 0.52 % max; 50–300 ms → 0.53 % p50;
+  300–1000 ms → 0.60 % p50; **>1000 ms → 0.80 % p50 / 0.95 % p90 / 1.16 % max**.
+  Larger slip authorizes a larger step, exactly as §1 predicts.
+- **Slip recurs from a non-sweeper cause** — the §4 durability point, observed. The
+  off-thread sweeper was **off** this session (`cpu_cycles_acquisition = disabled`,
+  `cpu_pkg_energy_acquisition = quarantine`), yet plain CPU saturation drove
+  `loop_achieved_interval_ms` p50 `250.9 → 1127 ms` (slip p50 `877 ms`, max `5.6 s`,
+  cadence ≈ `3.99 → 0.89 Hz`) at `system_cpu_busy_pct ≥ 99 %`, via both read-path
+  block (`loop_work` up to `4.5 s`) and scheduling starvation (wait up to `4.9 s`).
+  Stopping the sweeper does not remove the fragility; CPU contention alone reproduces
+  it.
+- **Bounding the claim — no reversals in this workload.** Under the monotonic CPU
+  rise the inflated steps did **not** reverse: 0 down-steps > deadband (0.25 %) on
+  ch0–4, one 0.31 % on ch5. The `58–72 / 1000` reversals in §3 come from the
+  GPU-confounded loaded band where the curve target oscillates; the step-inflation
+  mechanism is general, but it becomes audible "hunting" only when the target is
+  noisy. The cap remains the right fix (it removes the inflation at the source); the
+  acoustic payoff is largest on oscillating-target workloads.
+
+Source: live control-loop CSV from session `20260625_190530`, not committed
+(`AGENTS.md` §Live Runtime Safety).
+
 ## 4. Why this over the operational alternatives
 
 - **Reduce telemetry / stop the sweeper** (operational): the captures are already

@@ -55,7 +55,12 @@ Grounded in a forensic timeline and a validated replay
 
 The current behavior is correct only when the loop holds its `250 ms` period; it is
 fragile to any source of slip (telemetry, captures, external mutex contention). The
-gap is a latent rate-limiter fragility, surfaced by the timing regression.
+gap is a latent rate-limiter fragility, surfaced by the timing regression. A live
+cap-off capture under CPU-stress (2026-06-25, current config `c5b5cb21`, sweeper off)
+independently reconfirms the elapsed→step coupling on hardware (max up-step `0.80 %`
+p50 / `1.16 %` max at `loop_slip > 1 s` vs `~0 %` at nominal cadence) and shows the
+slip recurs from plain CPU saturation alone — see
+`docs/ratelimit-elapsed-cap-decision-2026-06-25.md` §3b.
 
 ## 3. Goals & non-goals
 
