@@ -212,9 +212,16 @@ git commit -m "test(feat-0024): pin intake-lead invariants (REQ-INLEAD-01/02/03/
 
 Covers REQ-INLEAD-01, -02, -03, -04, -05. Channels appear in `config/control.release.json` / `release/control.json` in the order `[0, 4, 3, 2, 5, 1]`; edit inside the channel-2, channel-3, channel-4 objects only.
 
+> **Correction (during execution 2026-06-25):** `release/control.json` is gitignored
+> (a build/deploy artifact, absent from a clean checkout), so Task 2 edits and commits
+> ONLY the tracked source `config/control.release.json`. The deployed `release/control.json`
+> is regenerated from the source at deploy time (Task 5) and is kept at shipped values
+> meanwhile so an unplanned restart cannot pick up unvalidated duties. The Step 4 "identical"
+> check and the Step 8 `git add release/control.json` below are superseded by this note.
+
 **Files:**
-- Modify: `config/control.release.json` (channels 2, 3, 4)
-- Modify: `release/control.json` (channels 2, 3, 4 — identical edits)
+- Modify: `config/control.release.json` (channels 2, 3, 4) — the tracked source of truth
+- (Deploy artifact `release/control.json` is gitignored; updated in Task 5, not here)
 
 **Interfaces:**
 - Consumes: the candidate-magnitudes table above.
@@ -334,7 +341,7 @@ This is an explicit live-runtime task (`AGENTS.md` §Live Runtime Safety). It ca
 Operator-authorized. Deploys the validated config and verifies, with a clean rollback path.
 
 - [ ] **Step 1: Snapshot rollback copy** — back up the current live `release/control.json` (e.g. `release/control.json.pre-feat0024`).
-- [ ] **Step 2: Deploy** — put the candidate `release/control.json` in place (already edited in Task 2) and restart the controller via the documented path (the control loop reads config at start; FEAT-0023/0003 switch by restart).
+- [ ] **Step 2: Deploy** — regenerate the gitignored deploy artifact from the validated source: `cp config/control.release.json release/control.json` (or run `build-release`), confirm the intake-lane values match, then restart the controller via the documented path (the control loop reads config at start; FEAT-0023/0003 switch by restart). `release/control.json` is gitignored and is NOT pre-staged in Task 2 — it is updated here, at deploy time, under live authorization.
 - [ ] **Step 3: Verify** — confirm `control_runtime.json` is healthy (6 channels, no open breakers, no sensor/write failures, `loop_slip_ms` within budget), then run the Task 4 Pass-1/Pass-3 re-capture.
 - [ ] **Step 4: Rollback if needed** — if the intake-lead margin is wrong, idle changed, or any stop condition fires (`docs/response-evaluation-tuning-plan.md` Stop Conditions), restore the snapshot and restart.
 - [ ] **Step 5: Record the deploy** — note the deployed git hash / config sha256 and the verify result in the evidence doc.

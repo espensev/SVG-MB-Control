@@ -116,6 +116,14 @@ owes the floor characterization pass (it crosses `docs/MEASUREMENT_GATE.md`).
   rise-asymmetric (spin-down not made faster). Direction settled in
   `docs/intake-lead-response-decision-2026-06-25.md`; owes the candidate-magnitude
   selection and a response-evaluation Pass-1/Pass-3 validation before promotion.
+- **FEAT-0025** (`Draft`) — rate-limiter elapsed cap (loop-jitter-robust slew).
+  Bounds the `elapsed_since_last_write` used in the `RateLimitSetpoint` rate budget
+  by a new `control_loop.rate_limit_max_elapsed_ms` so a slipped/overrun tick cannot
+  produce an oversized, overshooting fan step (the 2026-06-25 "less tight under load"
+  regression — a loop-timing, not config, change). Inert at nominal cadence
+  (identity); validated in replay (reversals 58–72/1000 → ~0, up-response unchanged).
+  Direction in `docs/ratelimit-elapsed-cap-decision-2026-06-25.md`; owes the shipped
+  cap value and a live before/after gate. Independent of FEAT-0024.
 
 **`Done` 2026-06-22:** **FEAT-0003** —
 restart-selected control-law profile seam (PID / P / PI / PD plus the current
@@ -275,3 +283,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
 | [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M REQ-MPROFILE-10 PASS 2026-06-25 via Option A2) |
 | [FEAT-0024](FEAT-0024-intake-lead-under-load.md) | Intake-lead fan response under load (config-only surge-and-hold: intake-lane joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band; idle unchanged, rise-asymmetric) | `REQ-INLEAD-*` | Draft (held — candidate magnitudes pending a response-evaluation Pass-3 validation; idle out of scope) |
+| [FEAT-0025](FEAT-0025-rate-limit-elapsed-cap.md) | Rate-limiter elapsed cap (bound `elapsed_since_last_write` in the `RateLimitSetpoint` rate budget so loop-timing slip cannot produce oversized/overshooting fan steps; inert at nominal cadence) | `REQ-SLEWCAP-*` | Draft (held — shipped cap value + live before/after gate pending) |

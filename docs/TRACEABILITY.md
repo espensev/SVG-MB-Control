@@ -75,6 +75,7 @@ Result values:
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
 | `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M deferred) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. Only the on-hardware live M (REQ-10) is deferred. The control-law/PID seam stays FEAT-0003, sequenced after. |
 | `FEAT-0024` Intake-lead fan response under load | Draft (held) | Not buildable; design capture (`docs/intake-lead-response-decision-2026-06-25.md`, Current for direction). Config-only surge-and-hold retune of the intake lanes `2`/`3`/`4` (joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band); idle and the exhaust lanes unchanged; rise-asymmetric. Held pending candidate-magnitude selection and a response-evaluation Pass-1/Pass-3 validation. Does not cross the measurement gate. |
+| `FEAT-0025` Rate-limiter elapsed cap (loop-jitter-robust slew) | Draft (held) | Not buildable; design capture (`docs/ratelimit-elapsed-cap-decision-2026-06-25.md`, Current). Bounds the `elapsed_since_last_write` used in the `RateLimitSetpoint` rate budget via `control_loop.rate_limit_max_elapsed_ms` so loop-timing slip cannot produce oversized/overshooting fan steps (the 2026-06-25 tightness regression). Inert at nominal cadence (identity); amends `CONTROL_PIPELINE_MATH.md` §8.1. Held pending the shipped cap value and a live before/after gate. Does not cross the measurement gate. |
 
 ## 3. Requirement map
 
@@ -391,6 +392,23 @@ owning spec's §14 verification log.
 | `REQ-INLEAD-04` | T | `tests/test_machine_cooling_policy.py` + `tests/test_config_contracts.py` stay green (front `>= 4%`, soft-floor-not-static, no-mirror/stagger/floors-above-rear, topology) plus a contract assertion that no intake knot `<= 72 C`, `min_duty_pct`, cadence, cooldown, or deadband changed. | pending (held-Draft) |
 | `REQ-INLEAD-05` | T, R | Config-contract test: no `fall_rate_pct_per_min` / `demand_smoothing_fall_alpha` / `decay_latch_pct_per_min` raised on any lane; exhaust lanes `0`/`1`/`5` byte-unchanged; review for rise-asymmetry. | pending (held-Draft) |
 | `REQ-INLEAD-06` | M | Live Pass-3 combined-load capture (intake first-duty / ramp precedes the exhausts; CPU Tctl / GPU memory percentiles in the acceptance band; no post-startup authority reasserts) plus a Pass-1 idle-unchanged hold, via `svg-mb-control analyze ingest` + `analyze report`. | pending (held-Draft) |
+
+### FEAT-0025 - Rate-limiter elapsed cap (loop-jitter-robust slew)
+
+Draft (held). Direction settled in
+`docs/ratelimit-elapsed-cap-decision-2026-06-25.md` (Current); forensic + replay
+evidence in `docs/intake-lead-grounding-2026-06-25.md`. The shipped cap value and the
+live before/after gate are pending. A `RateLimitSetpoint` change (control-computation
+identity), so `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. Results
+mirror the owning spec's §14 verification log.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-SLEWCAP-01` | T, R | C++ unit test of `RateLimitSetpoint`: budget uses `min(elapsed, cap)` when the cap is finite/positive; cap unset reproduces the pre-feature result across a value matrix; review vs `CONTROL_PIPELINE_MATH.md` §8.1. | pending (held-Draft) |
+| `REQ-SLEWCAP-02` | T, R | Config-contract + unit test: only the rate-budget elapsed is bounded (deadband/cooldown/cadence/channels/curves/`max_setpoint_step_pct`/EMA unchanged; fall rate not raised); review of the diff. | pending (held-Draft) |
+| `REQ-SLEWCAP-03` | T | `RateLimitSetpoint` unit test: for `elapsed <= cap` the output equals the uncapped path bit-for-bit across the input matrix. | pending (held-Draft) |
+| `REQ-SLEWCAP-04` | T, R | Unit/integration test that the curve, PID, and low-band callers pass the cap through; review that `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. | pending (held-Draft) |
+| `REQ-SLEWCAP-05` | M | Live before/after capture (cap off->on) via `svg-mb-control analyze ingest` + `analyze report` (with the validated replay in `docs/intake-lead-grounding-2026-06-25.md` as supporting evidence): loaded-band reversal / step-irregularity drops, up-response unchanged, no post-startup authority reasserts. | pending (held-Draft) |
 
 ### FEAT-0007 — Reserved (parked)
 
