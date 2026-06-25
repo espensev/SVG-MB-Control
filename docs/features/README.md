@@ -20,7 +20,7 @@ a feature's status or the decision queue changes. A fuller standing review is
 
 **Recently implemented:**
 
-- **FEAT-0021** (`Implemented`, T/R verified; live M pending) — standard
+- **FEAT-0021** (`Implemented`, T/R verified; live M PASS-with-finding 2026-06-25) — standard
   control-loop GPU workload context logging beside FEAT-0020 GPU power. The
   control CSV now includes a cached, additive context slice for utilization,
   pstate, graphics/memory clocks, VRAM used/total, and sample identity/time/age.
@@ -252,6 +252,6 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0018](FEAT-0018-adaptive-cadence-enablement.md) | Adaptive-cadence enablement under thermal transient (engage the dormant `poll_tick_floor_ms` engine) | `REQ-CADENCE-*` | Draft (held — crosses the measurement gate; pending the floor characterization pass) |
 | [FEAT-0019](FEAT-0019-sidecar-persist-off-hot-path.md) | Sidecar persistence off the actuation hot path (identity-gated `Persist()`) | `REQ-WRITEHOT-*` | Implemented (2026-06-18; T/R verified, C++ tests green) |
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
-| [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M pending) |
+| [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M PASS-with-finding 2026-06-25, `docs/feat-0021-live-cadence-evidence-2026-06-25.md`) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
 | [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M deferred) |

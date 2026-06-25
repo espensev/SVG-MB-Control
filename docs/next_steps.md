@@ -126,13 +126,24 @@ exists in the control-loop CSV
   comparisons. `scripts/analyze_cpu_temp_power.py` now turns those windows into
   package-power-banded CPU temperature summaries; the 2026-06-20 trend/method
   summary is folded into `docs/cpu-temp-comparison-harness.md`. PR #20.
-- **FEAT-0021** (`REQ-GPUCTX-*`, Implemented 2026-06-20; T/R verified, live M
-  pending) — GPU workload context now logs beside GPU power as a cached 1000 ms
-  context slice: utilization, clocks, pstate, VRAM used/total, and explicit
-  sample identity/time/age/acquisition. Analyzer schema v12 ingests and reports
-  the optional context block while older archives report it unavailable. The
-  live deployment check remains REQ-GPUCTX-04: compare achieved interval,
-  slip/overrun, process CPU%, and health against the current 250 ms envelope.
+- **FEAT-0021** (`REQ-GPUCTX-*`, Implemented 2026-06-20; T/R verified; **live M
+  PASS-with-finding 2026-06-25**) — GPU workload context logs beside GPU power as a
+  cached 1000 ms context slice: utilization, clocks, pstate, VRAM used/total, and
+  explicit sample identity/time/age/acquisition. Analyzer schema v12 ingests and
+  reports the optional context block while older archives report it unavailable.
+  The REQ-GPUCTX-04 live cadence M ran 2026-06-25
+  (`docs/feat-0021-live-cadence-evidence-2026-06-25.md`): the section-10-named
+  envelope holds on the deployed loop (achieved-interval p99 251.97 ms, slip p99
+  1.97 ms, overrun frac 7e-05, `process_cpu_pct` p99 0.156 %), and the wide NVML
+  context read costs ~41 ms once per ~1000 ms inside the 250 ms budget.
+  - **Follow-up (non-blocking, from the M finding):** the context read runs in-line
+    on the control thread (~41 ms / ~17 % of the budget on the refresh tick), and
+    multi-second stalls concentrate on the `age==0` read tick beyond chance (LIVE
+    P<0.0001). Two optional improvements, neither required for the closed M: (a)
+    move the GPU context read off-thread (the FEAT-0006 all-core-sweeper precedent)
+    to remove the refresh-tick residual; (b) capture a longer clean LIVE window to
+    bound the multi-second tail. (a) crosses runtime code, so it goes through the
+    Feature Intake Gate (`AGENTS.md`) if pursued.
 
 CPU temperature / power-evaluation follow-ups (todo; analysis-only unless a
 feature spec authorizes new runtime fields):
