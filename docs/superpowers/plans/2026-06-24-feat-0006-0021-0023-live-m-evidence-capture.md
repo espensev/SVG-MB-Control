@@ -171,7 +171,24 @@ python scripts\score_loop_timing_gate.py --baseline <pre-0021-archive>.csv --can
 
 ## Runbook 2 — FEAT-0006 (§12): off-thread-sweeper loop-timing gate + marker decision
 
-> **PREP VERIFIED 2026-06-25 — ready; the 3 captures need live-runtime authorization (cool idle window).**
+> **STATUS: DONE 2026-06-25 — §12 gate PASS (provisional).** Three attended
+> captures (sweeper-off-A/B + sweeper-on, 28-thread load) executed via
+> `Capture-EnergySession.ps1`. Result: ON `loop_work_duration_ms` p99-bulk
+> 72.15 ms < both OFF baselines (86.28 / 81.56), 0 buckets moved (default +
+> calibrated `rel_tol=0.12 / abs_tol_ms=10`, off-vs-off drift 4.72 ms); CPU-phase
+> split idle p50 2.779 ms lowest of three; sweeper ran (5084/5084 rows × 32 cores);
+> criterion-4 all-core derived idle 5339 / load 5278 MHz @ P0 4300 (MANUAL);
+> 6-skeptic adversarial workflow all `pass_holds`. Evidence:
+> `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md` (+ energy note
+> `docs/cpu-energy-quarantine-exit-evidence-2026-06-25-s4.md`). FEAT-0006 §12/§14,
+> TRACEABILITY, README, next_steps updated; `test_feature_specs` 5/5.
+> **Governance decision recorded 2026-06-25: cycle/all-core marker
+> (`cpu_cycles_acquisition`) promoted `quarantine → validated`** (acquisition
+> decision doc §Quarantine-exit decision). Non-blocking remainder: optional
+> Option-B locked-clock criterion-4 cross-check, cycles-per-Joule join, more
+> baselines (n=2 provisional tolerance), GPU-busy capture. **Runbook 2 COMPLETE.**
+>
+> **Prep notes (executed):**
 > - Off-thread sweeper IS in the live 2026-06-23 binary — all `cpu_*_allcore` columns present in the live CSV header → **no new build**.
 > - Env steady state: `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`, `SVG_MB_CONTROL_CPU_CYCLES_MODE=disabled`, so an `-EnergyOnly` run is a true sweeper-OFF baseline.
 > - Load tool present at `release\runtime\experiments\energy-quarantine\cpu-synth-load.exe` — pass via `-SynthLoadExe` to skip a rebuild.
@@ -192,7 +209,7 @@ net-new captures (the 06-10/12/14 energy sessions predate it).
 - The §12 tolerance is **provisional** until calibrated off-vs-off; the script header records ~0.03 ms p99-bulk idle drift on 2026-06-21 as a sanity reference.
 
 **Artifacts:**
-- Create: `docs/feat-0006-loop-timing-gate-evidence-2026-06-24.md`
+- Create: `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md` (written; capture date)
 - Produces (per run): `release\runtime\experiments\energy-quarantine\<stamp>\{baseline_disabled.csv, session.csv, reference_sensors.csv, manifest.json}`
 - Update at close: FEAT-0006 §14 REQ-CPUEFF-01 row + the §12 narrative, `docs/TRACEABILITY.md` REQ-CPUEFF-01, `docs/features/README.md` FEAT-0006 line + `docs/next_steps.md` "FEAT-0006 downstream work".
 
@@ -248,7 +265,7 @@ release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db 
 
 - [ ] **Step 10: Confirm the box returned to steady state.** After the harness's `finally` revert: energy `enabled` (marker `quarantine`), cycles `disabled`, watchdog running, `health_state == healthy`. (The "did not return to 'disabled'" warning is expected — see Shared procedure.)
 
-- [ ] **Step 11: Write `docs/feat-0006-loop-timing-gate-evidence-2026-06-24.md`** (calibration drift, the OFF-vs-ON per-bucket table + verdict, the sweeper-confirm counts, criterion-4 effective-MHz, and the marker recommendation). Update FEAT-0006 §14 / TRACEABILITY / README / next_steps.
+- [x] **Step 11: Write `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`** (calibration drift, the OFF-vs-ON per-bucket table + verdict, the sweeper-confirm counts, criterion-4 effective-MHz, and the marker recommendation). Update FEAT-0006 §14 / TRACEABILITY / README / next_steps. **DONE 2026-06-25.**
 
 > **Out of scope (do not fold in):** REQ-CPUEFF-08, the CPU-setting label, is a
 > separate **unimplemented code** item, not gated by this capture. Note it as

@@ -304,11 +304,31 @@ rows in `docs\TRACEABILITY.md`.
   `scripts\cpu_config_fingerprint.py`) prefer the package columns with a per-core
   fallback. The work numerator (ΔAPERF) and effective frequency are reachable with
   the shipped bin (the 2026-06-07 `#GP` was a probe-index error, corrected
-  2026-06-09). Remaining: the operator M-evidence **capture** — deploy, enable
-  `SVG_MB_CONTROL_CPU_CYCLES_MODE=enabled` under load, then run
-  `scripts\score_loop_timing_gate.py` (cycles-on vs an OFF baseline) to clear the
-  section-12 loop-timing gate, followed by the `quarantine → validated` marker
-  decision.
+  2026-06-09). **§12 loop-timing gate: ran live 2026-06-25 — PASS.** Three
+  attended captures (two cycles-OFF baselines + one cycles-ON candidate, 28-thread
+  load) show the off-thread sweeper does not move the 250 ms profile: ON
+  `loop_work_duration_ms` p99-bulk 72.15 ms < both OFF baselines (86.28 / 81.56),
+  0 buckets moved (default + calibrated), CPU-phase-split idle p50 2.779 ms lowest
+  of three; sweeper confirmed running (5084/5084 rows × 32 cores); 6-skeptic
+  adversarial verify all `pass_holds`
+  (`docs\feat-0006-loop-timing-gate-evidence-2026-06-25.md`). **Marker decision
+  recorded 2026-06-25: the cycle/all-core acquisition marker (`cpu_cycles_acquisition`)
+  is promoted `quarantine → validated`** (governance decision in
+  `docs\cpu-work-energy-acquisition-decision-2026-06-07.md` §Quarantine-exit
+  decision; recorded outcome, logged marker stays `quarantine`, analyzer does not
+  branch). Remaining (non-blocking):
+  - Optional Option-B locked-clock criterion-4 cross-check (validates the derived
+    all-core idle 5339 / load 5278 MHz @ P0 4300 against a locked setpoint and the
+    P0 base) — a future strengthening, not a promotion blocker (decision-doc §4 was
+    met by plausibility + affinity stability).
+  - The cycles-per-Joule energy↔cycle join (the two paths carry separate sample
+    ids and no join rule is specified; options doc 2026-06-16 recommends Option C).
+  - Non-blocking gate-tooling follow-up: `score_loop_timing_gate.py` is coarse
+    (p99-bulk only, ~10 ms MDE; GPU bucketing inert under GPU-idle). The wall-clock
+    CPU-phase split + median is the sensitive analysis and could be folded into the
+    gate tooling or evidence procedure. The 2026-06-25 evidence used n=2 baselines
+    (one off-vs-off spread estimate); more baselines would harden the threshold,
+    and a GPU-busy capture would extend coverage beyond the GPU-idle regime.
 
 ### FEAT-0008 (watchdog hung-worker recovery) post-v1 only
 

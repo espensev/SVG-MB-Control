@@ -75,12 +75,17 @@ a feature's status or the decision queue changes. A fuller standing review is
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. The
   package-energy + cycle slices are landed; the all-core **package**
   effective-frequency rollup (off-thread sweeper, analyze schema v13) and its
-  section-12 loop-timing gate harness merged 2026-06-21 (PRs #25/#26). Remaining
-  is evidence/promotion, not new code: the operator M-evidence capture for the
-  off-thread sweeper (run `scripts/score_loop_timing_gate.py`), the
-  `quarantine → validated` marker decision (manual), and the deferred
-  CPU-setting label. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006
-  downstream work).
+  section-12 loop-timing gate harness merged 2026-06-21 (PRs #25/#26). The **§12
+  off-thread-sweeper loop-timing gate ran live 2026-06-25 — PASS** (sweeper does
+  not move the 250 ms profile; ON p99-bulk 72.15 < OFF 86.28/81.56; 6-skeptic
+  adversarial verify all `pass_holds`; `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`),
+  clearing the §12 precondition. The cycle/all-core acquisition marker
+  (`cpu_cycles_acquisition`) was then promoted **`quarantine → validated` by
+  governance decision 2026-06-25** (`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`
+  §Quarantine-exit decision; recorded outcome, not a code/CSV change). Remaining is
+  non-blocking: the cycles-per-Joule join, an optional Option-B locked-clock
+  criterion-4 cross-check, and the deferred CPU-setting label. See FEAT-0006 §14 and
+  `docs/next_steps.md` (FEAT-0006 downstream work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
 - **FEAT-0005** (`Accepted`) — write actuation confirmation, Phase-1 RPM-based
