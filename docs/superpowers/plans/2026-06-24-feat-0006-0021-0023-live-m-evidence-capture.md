@@ -171,6 +171,30 @@ python scripts\score_loop_timing_gate.py --baseline <pre-0021-archive>.csv --can
 
 ## Runbook 2 — FEAT-0006 (§12): off-thread-sweeper loop-timing gate + marker decision
 
+> **STATUS: DONE 2026-06-25 — §12 gate PASS (provisional).** Three attended
+> captures (sweeper-off-A/B + sweeper-on, 28-thread load) executed via
+> `Capture-EnergySession.ps1`. Result: ON `loop_work_duration_ms` p99-bulk
+> 72.15 ms < both OFF baselines (86.28 / 81.56), 0 buckets moved (default +
+> calibrated `rel_tol=0.12 / abs_tol_ms=10`, off-vs-off drift 4.72 ms); CPU-phase
+> split idle p50 2.779 ms lowest of three; sweeper ran (5084/5084 rows × 32 cores);
+> criterion-4 all-core derived idle 5339 / load 5278 MHz @ P0 4300 (MANUAL);
+> 6-skeptic adversarial workflow all `pass_holds`. Evidence:
+> `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md` (+ energy note
+> `docs/cpu-energy-quarantine-exit-evidence-2026-06-25-s4.md`). FEAT-0006 §12/§14,
+> TRACEABILITY, README, next_steps updated; `test_feature_specs` 5/5.
+> **Governance decision recorded 2026-06-25: cycle/all-core marker
+> (`cpu_cycles_acquisition`) promoted `quarantine → validated`** (acquisition
+> decision doc §Quarantine-exit decision). Non-blocking remainder: optional
+> Option-B locked-clock criterion-4 cross-check, cycles-per-Joule join, more
+> baselines (n=2 provisional tolerance), GPU-busy capture. **Runbook 2 COMPLETE.**
+>
+> **Prep notes (executed):**
+> - Off-thread sweeper IS in the live 2026-06-23 binary — all `cpu_*_allcore` columns present in the live CSV header → **no new build**.
+> - Env steady state: `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`, `SVG_MB_CONTROL_CPU_CYCLES_MODE=disabled`, so an `-EnergyOnly` run is a true sweeper-OFF baseline.
+> - Load tool present at `release\runtime\experiments\energy-quarantine\cpu-synth-load.exe` — pass via `-SynthLoadExe` to skip a rebuild.
+> - Capture order (elevated): `-EnergyOnly` ×2 (sweeper-off A/B for calibration), then default ×1 (sweeper-on), `-LoadThreads 28`; score with `score_loop_timing_gate.py` — calibrate A-vs-B, then gate A-vs-ON with the calibrated `--rel-tol`/`--abs-tol-ms`. Use each run's `session.csv` (not `baseline_disabled.csv`).
+> - The revert warning "marker did not return to 'disabled'" is expected (energy stays live-`enabled`; the harness restores the pre-run env → end state energy `quarantine` + cycles `disabled`).
+
 **What it must show (spec §12/§14):** enabling the all-core **off-thread
 sweeper** does **not** move the shipped 250 ms control-loop profile —
 `loop_work_duration_ms` p99-of-bulk unchanged within tolerance, bucketed by GPU
@@ -185,7 +209,7 @@ net-new captures (the 06-10/12/14 energy sessions predate it).
 - The §12 tolerance is **provisional** until calibrated off-vs-off; the script header records ~0.03 ms p99-bulk idle drift on 2026-06-21 as a sanity reference.
 
 **Artifacts:**
-- Create: `docs/feat-0006-loop-timing-gate-evidence-2026-06-24.md`
+- Create: `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md` (written; capture date)
 - Produces (per run): `release\runtime\experiments\energy-quarantine\<stamp>\{baseline_disabled.csv, session.csv, reference_sensors.csv, manifest.json}`
 - Update at close: FEAT-0006 §14 REQ-CPUEFF-01 row + the §12 narrative, `docs/TRACEABILITY.md` REQ-CPUEFF-01, `docs/features/README.md` FEAT-0006 line + `docs/next_steps.md` "FEAT-0006 downstream work".
 
@@ -241,7 +265,7 @@ release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db 
 
 - [ ] **Step 10: Confirm the box returned to steady state.** After the harness's `finally` revert: energy `enabled` (marker `quarantine`), cycles `disabled`, watchdog running, `health_state == healthy`. (The "did not return to 'disabled'" warning is expected — see Shared procedure.)
 
-- [ ] **Step 11: Write `docs/feat-0006-loop-timing-gate-evidence-2026-06-24.md`** (calibration drift, the OFF-vs-ON per-bucket table + verdict, the sweeper-confirm counts, criterion-4 effective-MHz, and the marker recommendation). Update FEAT-0006 §14 / TRACEABILITY / README / next_steps.
+- [x] **Step 11: Write `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`** (calibration drift, the OFF-vs-ON per-bucket table + verdict, the sweeper-confirm counts, criterion-4 effective-MHz, and the marker recommendation). Update FEAT-0006 §14 / TRACEABILITY / README / next_steps. **DONE 2026-06-25.**
 
 > **Out of scope (do not fold in):** REQ-CPUEFF-08, the CPU-setting label, is a
 > separate **unimplemented code** item, not gated by this capture. Note it as
@@ -250,6 +274,17 @@ release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db 
 ---
 
 ## Runbook 3 — FEAT-0023 (REQ-MPROFILE-10): deployed default profile reproduces baseline
+
+> **STATUS: DONE 2026-06-25 — REQ-MPROFILE-10 live M PASS via Option A2. Runbook 3 COMPLETE.** Maintainer chose Option A2 (reversible task `--config` repoint). Executed: repointed worker+watchdog task `--config` to `config\profiles\snd-desk-composed.json`, restarted, hard gate PASS (`active_profile_name=snd-desk-composed`, healthy, no fall-through to `control`), ~5.5-min idle window (cadence 250 ms, achieved p50 250.9/p99 252.0 ms, 0 overruns, 6 channels, `primary_temp_source=gpu` all, write policy true), resolved control config **byte-identical to `release\control.json` across all 89 `--show-config` lines**, rolled back to `control.json` (healthy), transient `config\runtime` removed. Step 4 (live `--set-profile`) skipped (optional; behavior already characterized). Evidence: `docs/feat-0023-live-default-profile-evidence-2026-06-25.md`; FEAT-0023 §14 (REQ-MPROFILE-10 partial→pass) + TRACEABILITY + README + next_steps updated; `test_feature_specs` 5/5. Option B (productize catalog into `release\`) = optional follow-up, not a blocker.
+>
+> **Prep notes (executed):** PREP VERIFIED 2026-06-25 (CORRECTED) — pre-check PASS for control identity; the literal `--profile` Option A was INVALID (task_runner is `--config`-only), so Option A2 used `--config` repoint.
+> - **Resolution pre-check PASS:** `release\svg-mb-control.exe --show-config --profile snd-desk-composed` resolves (from any CWD, incl. `release\`) to repo `config\profiles\snd-desk-composed.json`: source `profile_flag`, tick 250 ms, write cooldown 250 ms, 6 channels, ch0–5 `curve_overlay`/`max_cpu_gpu_source_aware` with matching curves/boosts — reproduces the shipped *control* config on this box.
+> - **Runtime-path caveat:** the profile resolves `Runtime home` to repo `config\runtime` and the runtime policy to the repo path, whereas deployed `--config release\control.json` resolves to `release\runtime`. The catalog is NOT in `release\config` (only `control.example.json`, `machines\`, `runtime_policy_write_live.json`).
+> - **PLUMBING FINDING — literal Option A (`--profile` task args) false-fails.** `task_runner.cpp` parses ONLY `--config` (`ParseConfigPath` L161-167; empty → `ResolveDefaultConfig`) and its `--start`/`--watchdog-run` handlers forward a fixed `{--start}`/`{--health}` + `--config <path>`. **`--profile` is never read or forwarded.** Setting the task args to `--profile snd-desk-composed` makes the runner ignore it, fall back to the default config, and bring the worker up as `active_profile_name=control` — false-failing the Step-2 hard gate. (`--profile` only works when the control exe is invoked directly, which is why `--show-config --profile` succeeds — it bypasses the runner.) The supervisor always re-spawns the worker with `--config <resolved>` (`control_supervisor.cpp` `BuildManagedCommandLine` L262-272) and sets `active_profile_name` = the config file STEM (L558-560).
+> - **Revised options (maintainer call, DEFERRED 2026-06-25):**
+>   - **A2 (reversible, no build):** repoint the worker + watchdog task `--config` to `…\config\profiles\snd-desk-composed.json` (NOT `--profile`). The runner forwards it; `active_profile_name` = `snd-desk-composed` (gate passes); control identity matches. Caveat: runtime state relocates to repo `config\runtime` for the window and the live deploy transiently depends on the dev tree.
+>   - **B (faithful productization):** deploy `config/profiles` + `config/overlays` into `release\` with release-rewritten runtime paths via Build-Release/installer — Feature Intake Gate + clean tree. The true "deployed default" the M gates.
+>   - `SVG_MB_PROFILE` env and a manual foreground `--profile` instance remain rejected. Build the exact revert from the live `(Get-ScheduledTask).Actions` before editing.
 
 **What it must show (spec §6/§10/§12/§14):** a profile-**resolved** default
 (`snd-desk-composed`, proven byte-identical to `control.release.json` by
@@ -267,18 +302,26 @@ would read `control`, silently false-passing while measuring the wrong thing.
 Choose one (this is a maintainer call; it changes the steps below and has
 different permanence/risk):
 
-- **Option A — temporary task reconfig (recommended for the M).** Edit the
-  `SVG-MB Control` and `SVG-MB Control Watchdog` task arguments from
-  `--config "…\control.json"` to `--profile snd-desk-composed` for the
-  measurement window, then revert. Reversible, no build, isolates the resolution
-  path. First verify `--profile` flows through the task-runner → supervisor →
-  worker (Step 2).
+- **Option A2 — temporary task reconfig (reversible, no build).** Edit the
+  `SVG-MB Control` and `SVG-MB Control Watchdog` task arguments to point
+  `--config` at the composed profile JSON
+  (`--config "…\config\profiles\snd-desk-composed.json"`) for the measurement
+  window, then revert. **The plan's original `--profile snd-desk-composed` form is
+  INVALID** — `task_runner.cpp` is `--config`-only and drops `--profile` (verified
+  2026-06-25; see the PREP-VERIFIED note above), so it would false-fail the Step-2
+  gate. Reversible. Caveat: runtime state relocates to repo `config\runtime` and
+  the live deploy transiently depends on the dev tree.
 - **Option B — wire the catalog into Build-Release/installer.** Deploy
-  `config/profiles/` + `config/overlays/` into `release\` and launch via
-  `--profile` (or machine-identity). Permanent; is itself a config/deploy change
-  that must go through the Feature Intake Gate (`AGENTS.md`) on a clean tree.
-  This is the productization the spec says this M "gates" — usually done **after**
-  Option A confirms the M.
+  `config/profiles/` + `config/overlays/` into `release\` (with release-rewritten
+  runtime paths) and select it at launch. **Same task-runner constraint applies:**
+  the supervised tasks go through `svg-mb-control-task-runner.exe`, which forces an
+  explicit `--config` and ignores `--profile`/machine-identity — so Option B must
+  either teach the runner to forward `--profile` / omit `--config` (product code)
+  or generate the composed profile as the `--config` target (what Build-Release
+  already does for `release\control.json`). Permanent; a config/deploy change that
+  must go through the Feature Intake Gate (`AGENTS.md`) on a clean tree. This is the
+  productization the spec says this M "gates" — usually done **after** Option A2
+  confirms the M.
 
 `SVG_MB_PROFILE` env: **rejected** (config wins → false pass). Manual foreground
 `--profile` instance: **rejected** (a second process writing fans alongside the
@@ -296,9 +339,9 @@ release\svg-mb-control.exe --show-config --profile snd-desk-composed
 ```
   Expect: resolved name `snd-desk-composed`, a resolution source, and a config path; the reported `ControlLoopConfig` matches `control.release.json` (cadence 250, cooldown 250, 6 channels, curves/boosts). (`profile_composition_tests` already proves byte-identity; this confirms it on the live box.)
 
-- [ ] **Step 2 (Option A): Verify `--profile` flows end-to-end, then deploy.** Edit both task arguments (worker `--start --profile snd-desk-composed`, watchdog `--watchdog-run --profile snd-desk-composed`), apply the Shared restart sequence, then **hard gate:** read `active_profile_name` from the live control-loop CSV / `control_runtime.json`.
+- [ ] **Step 2 (Option A2): Deploy via `--config` to the profile JSON.** Edit both task arguments to `--config "…\config\profiles\snd-desk-composed.json"` (worker keeps `--start`, watchdog keeps `--watchdog-run`). Do **not** use `--profile` — the task-runner drops it (verified 2026-06-25; `ParseConfigPath` is `--config`-only). Apply the Shared restart sequence, then **hard gate:** read `active_profile_name` from the live control-loop CSV / `control_runtime.json`.
   - **PASS gate:** `active_profile_name == snd-desk-composed`.
-  - **FAIL/STOP:** if it reads `control` or `control.release`, `--profile` did not flow through (task-runner did not forward it) — revert immediately and resolve the wiring before any measurement. Do not proceed.
+  - **FAIL/STOP:** if it reads `control` or `control.release`, the wrong config is loaded (default fell through) — revert immediately and resolve before any measurement. Do not proceed.
 
 - [ ] **Step 3: Capture a live window under the composed default** (representative conditions; ≥ ~30 min; a CPU/GPU-busy stretch strengthens identity evidence). Confirm against the shipped baseline:
   - `loop_intended_interval_ms == 250`, `loop_achieved_interval_ms` p50 ≈ 250 (cadence unchanged).
@@ -314,7 +357,7 @@ release\svg-mb-control.exe --set-profile snd-desk-composed
 ```
   Observe: `profile.switch.request.json` taken by the supervisor → `supervisor.profile_switch_signaled` → graceful worker cycle (fans → captured BIOS auto during the ~1–2 s gap; **note RPM rises under load — the switch is not acoustically seamless, by design**) → `supervisor.profile_applied`, `active_profile_name` flips. This documents REQ-MPROFILE-06/08 behavior on hardware (REQ-10 itself only needs Steps 1–3).
 
-- [ ] **Step 5: Roll back.** Restore the task arguments to `--config "…\control.json"` (Option A) or restore the shipped installer (Option B); apply the Shared restart; confirm `active_profile_name == control` and `health_state == healthy`.
+- [ ] **Step 5: Roll back.** Restore the task arguments to `--config "…\control.json"` (Option A2) or restore the shipped installer (Option B); apply the Shared restart; confirm `active_profile_name == control` and `health_state == healthy`.
 
 - [ ] **Step 6: Write `docs/feat-0023-live-default-profile-evidence-2026-06-24.md`** (deploy mechanism used, the Step 1 resolution output, the Step 2 gate result, the Step 3 cadence/channel/identity comparison, any Step 4 switch observations, rollback confirmation). Update FEAT-0023 §14 / TRACEABILITY / README.
 

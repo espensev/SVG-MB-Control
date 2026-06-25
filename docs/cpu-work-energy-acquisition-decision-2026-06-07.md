@@ -387,6 +387,53 @@ at ~200 W), and cooldown. Use the in-tree analyzer
    fixed against the chosen baseline at validation time, not invented here.) If
    timing regresses, fix the read placement/cadence before promotion.
 
+## Quarantine-exit decision — cycle/all-core path (`cpu_cycles_acquisition`) — 2026-06-25
+
+**Decision (maintainer, recorded governance): the cycle / all-core acquisition
+path is promoted `quarantine → validated`.** This is a recorded evaluation
+outcome, not a code/CSV change — the worker still only ever writes
+`disabled`/`unavailable`/`quarantine`, the analyzer does not branch on the marker,
+and the logged data stays `quarantine`. Scope: the **cycle/all-core** marker only;
+the package-energy marker (`cpu_pkg_energy_acquisition`) is governed by the same
+criteria and its quarantine-exit evidence (sessions 1–3) is complete, but its
+promotion is a separate maintainer decision, not made here.
+
+Basis against the §Evaluation criteria above (evidence from enabled sessions 1–3
+on 2026-06-10/12/14 plus session 4 = the all-core sweeper-on capture 2026-06-25):
+
+1. **Counter continuity** — APERF/MPERF/energy deltas continuous; 0 negative
+   deltas, 1.82 energy wraps over 119 476 J, guard does not false-fire (s4).
+2. **Plausible range + load tracking** — effective frequency tracks load (idle
+   5339 / load 5278 MHz) and energy tracks (idle 67.5 / load 165.7 W).
+3. **External cross-check** — energy RAPL 165.9 W vs HWiNFO SMU 165.0 W = **+0.5%**
+   (≤ ±15%), 412 SMU samples (s4). (Cross-checks the energy MSR path; the cycle
+   path has no independent runtime source — see §4.)
+4. **Effective-frequency validity** — `ΔAPERF/ΔMPERF` gives a plausible effective
+   clock between idle and rated boost (5278–5339 MHz ∈ [base 4300, ~5700]) and is
+   **stable while affinity is held** (the all-core sweeper spin-verifies
+   `GetCurrentProcessorNumber` per core; 5084/5084 rows × 32 cores). The §4
+   criterion (plausibility + affinity stability) is **met**. The `score_energy_session.py`
+   criterion-4 `MANUAL` label is its stricter *optional* Option-B locked-clock
+   cross-check (validates the P0 base too) — a future strengthening, **not** a
+   §Evaluation blocker.
+5. **Fault behavior** — no false zeros across 5268 quarantine rows; unsupported
+   reads blank cleanly (s4).
+6. **No-disturbance gate** — the **§12 off-thread-sweeper loop-timing gate PASS**
+   (2026-06-25) is this criterion for the new sweeper thread: candidate
+   `loop_work_duration_ms` p99-bulk 72.15 ms below both cycles-OFF baselines
+   (86.28 / 81.56), 0 buckets moved, CPU-phase-split idle p50 2.779 ms lowest of
+   three (off-vs-off floor 0.091 ms); the in-line energy read's criterion-6 also
+   passes (p95 1.73 → 1.78 ms). Independently re-derived by a 6-skeptic adversarial
+   workflow (all `pass_holds`). Evidence:
+   [`feat-0006-loop-timing-gate-evidence-2026-06-25.md`](feat-0006-loop-timing-gate-evidence-2026-06-25.md),
+   [`cpu-energy-quarantine-exit-evidence-2026-06-25-s4.md`](cpu-energy-quarantine-exit-evidence-2026-06-25-s4.md).
+
+**Recorded caveats (do not invalidate the decision; bound future strengthening):**
+the §12 tolerance is provisional from n=2 off-vs-off baselines; coverage is the
+GPU-idle / low-power regime only (mid/load GPU buckets not exercised); the optional
+Option-B locked-clock criterion-4 cross-check and the cycles-per-Joule
+energy↔cycle join remain open future work, not promotion blockers.
+
 ## Apply order (normative for implementation)
 
 1. **Helper.** Add the read-only MSR helper (allow-list; `#GP`→blank; field-level

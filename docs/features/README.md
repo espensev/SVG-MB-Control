@@ -67,20 +67,30 @@ a feature's status or the decision queue changes. A fuller standing review is
   proven to reproduce `control.release.json`) + active-profile CSV/status fields +
   a revert integration test. The 2026-06-22 Rust local UI helper
   (`tools/profile_switch_ui`) wraps the existing status/health/`--set-profile`
-  CLI path without adding runtime semantics. Only the on-hardware live M
-  (REQ-10) is deferred.
+  CLI path without adding runtime semantics. The on-hardware live M (REQ-MPROFILE-10)
+  was **closed PASS 2026-06-25** via Option A2 (temporary task `--config` repoint to
+  the composed default, reverted): the live worker ran `active_profile_name=snd-desk-composed`
+  healthy with the resolved control config byte-identical to `release\control.json`
+  on hardware (`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`).
+  Productizing the catalog into `release\` (Option B) is the remaining optional
+  follow-up.
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
 - **FEAT-0006** (`Accepted`) — CPU work/energy efficiency evidence. The
   package-energy + cycle slices are landed; the all-core **package**
   effective-frequency rollup (off-thread sweeper, analyze schema v13) and its
-  section-12 loop-timing gate harness merged 2026-06-21 (PRs #25/#26). Remaining
-  is evidence/promotion, not new code: the operator M-evidence capture for the
-  off-thread sweeper (run `scripts/score_loop_timing_gate.py`), the
-  `quarantine → validated` marker decision (manual), and the deferred
-  CPU-setting label. See FEAT-0006 §14 and `docs/next_steps.md` (FEAT-0006
-  downstream work).
+  section-12 loop-timing gate harness merged 2026-06-21 (PRs #25/#26). The **§12
+  off-thread-sweeper loop-timing gate ran live 2026-06-25 — PASS** (sweeper does
+  not move the 250 ms profile; ON p99-bulk 72.15 < OFF 86.28/81.56; 6-skeptic
+  adversarial verify all `pass_holds`; `docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`),
+  clearing the §12 precondition. The cycle/all-core acquisition marker
+  (`cpu_cycles_acquisition`) was then promoted **`quarantine → validated` by
+  governance decision 2026-06-25** (`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`
+  §Quarantine-exit decision; recorded outcome, not a code/CSV change). Remaining is
+  non-blocking: the cycles-per-Joule join, an optional Option-B locked-clock
+  criterion-4 cross-check, and the deferred CPU-setting label. See FEAT-0006 §14 and
+  `docs/next_steps.md` (FEAT-0006 downstream work).
 - **FEAT-0001** (`Accepted`) — hot-swap write policy. Spec accepted; not yet
   implemented; build when authorized.
 - **FEAT-0005** (`Accepted`) — write actuation confirmation, Phase-1 RPM-based
@@ -97,6 +107,15 @@ The two latency held-Drafts also owe gate decisions and live in
 `docs/next_steps.md` (latency-reduction section): **FEAT-0017** owes the
 lanes/target-ceiling decision plus a response-evaluation Pass-3, and **FEAT-0018**
 owes the floor characterization pass (it crosses `docs/MEASUREMENT_GATE.md`).
+
+- **FEAT-0024** (`Draft`) — intake-lead fan response under load. Config-only
+  surge-and-hold retune of the intake lanes (`2`/`3`/`4`): joint rise-rate +
+  step-cap raise (largest on the slowest lane `4`), intake-first `gpu_airflow`
+  onset, and a steeper intake `cpu_override` mid-band, so the intakes supply
+  airflow ahead of the exhausts under load. Idle is out of scope and unchanged;
+  rise-asymmetric (spin-down not made faster). Direction settled in
+  `docs/intake-lead-response-decision-2026-06-25.md`; owes the candidate-magnitude
+  selection and a response-evaluation Pass-1/Pass-3 validation before promotion.
 
 **`Done` 2026-06-22:** **FEAT-0003** —
 restart-selected control-law profile seam (PID / P / PI / PD plus the current
@@ -254,4 +273,5 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M PASS-with-finding 2026-06-25, `docs/feat-0021-live-cadence-evidence-2026-06-25.md`) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
-| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M deferred) |
+| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M REQ-MPROFILE-10 PASS 2026-06-25 via Option A2) |
+| [FEAT-0024](FEAT-0024-intake-lead-under-load.md) | Intake-lead fan response under load (config-only surge-and-hold: intake-lane joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band; idle unchanged, rise-asymmetric) | `REQ-INLEAD-*` | Draft (held — candidate magnitudes pending a response-evaluation Pass-3 validation; idle out of scope) |

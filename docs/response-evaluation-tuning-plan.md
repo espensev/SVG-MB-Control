@@ -73,6 +73,34 @@ Outstanding measurements:
 - a Cinebench + max-CUDA combined pass against the current config to verify
   the CPU + GPU response together.
 
+### FEAT-0024 intake-lead retune (2026-06-25) — config-only; validation owed
+
+`config/control.release.json` is retuned as of 2026-06-25 (commit on branch
+`docs/feat-0024-intake-lead-under-load`) to make the intake lanes engage
+earlier and ramp faster than the exhaust lanes on a rising thermal load.
+The change is config-only (no `src/` behavior change) and rise-asymmetric
+(falling-direction values are unchanged on every lane).
+
+Intake-lane deltas (source: `docs/intake-lead-response-decision-2026-06-25.md` §3):
+
+| Field | ch2 | ch3 | ch4 |
+|---|---|---|---|
+| `rise_rate_pct_per_min` | 90.0 → **125.0** | 90.0 → **125.0** | 60.0 → **120.0** |
+| `max_setpoint_step_pct` | 0.7 → **0.95** | 0.7 → **0.95** | 0.6 → **0.95** |
+| `gpu_airflow_start_c` | 62.0 → **58.0** | 62.0 → **58.0** | 64.0 → **58.0** |
+| `gpu_airflow_max_boost_pct` | 8.0 → **12.0** | 8.0 → **12.0** | 5.0 → **10.0** |
+| `demand_smoothing_rise_alpha` | 0.018 (unchanged) | 0.018 (unchanged) | 0.008 → **0.014** |
+| `cpu_override_curve` | unchanged | unchanged | 82 C: 42 → **50**; 86 C: 46 → **53** (≤ 72 C and ≥ 90 C knots unchanged) |
+
+Idle knots, `min_duty_pct`, `temp_blend`, cadence, and deadband are
+unchanged. Exhaust lanes `0`/`1`/`5` are byte-unchanged. These values are
+release-config candidates; the intended effect (intake-first engagement and
+ramp on a rising load) is pending live validation.
+
+**Pass-1 (idle unchanged) and Pass-3 (intake-lead margin) are owed before
+live adoption** (FEAT-0024 REQ-INLEAD-06). Do not treat this section as
+evidence of measured improvement; it records the config state only.
+
 ## Goals
 
 1. Hold idle noise low by keeping hard minima modest and letting the

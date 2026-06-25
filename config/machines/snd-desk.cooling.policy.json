@@ -128,6 +128,7 @@
         "idle_low_load_leader": true,
         "gpu_airflow": "strong",
         "cpu_assist": "moderate",
+        "intake_lead_note": "FEAT-0024 release-config retune (2026-06-25): gpu_airflow_start_c lowered to 58 C (exhaust lanes 64 C) and rise_rate_pct_per_min raised to 125 (exhaust lanes 75) so this lane is intended to engage and ramp before the exhaust lanes on a rising load; rise-asymmetric (fall unchanged); idle unchanged; intended effect pending Pass-3 validation.",
         "soft_floor_curve": [
           {"temp_c": 35.0, "duty_pct": 42.0},
           {"temp_c": 50.0, "duty_pct": 46.0},
@@ -151,6 +152,7 @@
         "idle_low_load_leader": true,
         "gpu_airflow": "strong",
         "cpu_assist": "moderate",
+        "intake_lead_note": "FEAT-0024 release-config retune (2026-06-25): gpu_airflow_start_c lowered to 58 C (exhaust lanes 64 C) and rise_rate_pct_per_min raised to 125 (exhaust lanes 75) so this lane is intended to engage and ramp before the exhaust lanes on a rising load; rise-asymmetric (fall unchanged); idle unchanged; intended effect pending Pass-3 validation.",
         "soft_floor_curve": [
           {"temp_c": 35.0, "duty_pct": 38.0},
           {"temp_c": 50.0, "duty_pct": 42.0},
@@ -174,6 +176,7 @@
         "idle_low_load_support": true,
         "gpu_airflow": "moderate",
         "cpu_assist": "secondary_radiator_authority",
+        "intake_lead_note": "FEAT-0024 release-config retune (2026-06-25): gpu_airflow_start_c lowered to 58 C (exhaust lanes 64 C), rise_rate_pct_per_min raised to 120 (exhaust lanes 75), demand_smoothing_rise_alpha raised to 0.014, and cpu_override_curve steepened in the 72–86 C band (82 C: 42 → 50; 86 C: 46 → 53; ≤ 72 C and ≥ 90 C knots unchanged) so this lane is intended to engage, ramp faster, and climb earlier under load than the exhaust lanes; rise-asymmetric (fall unchanged); idle unchanged; intended effect pending Pass-3 validation.",
         "soft_floor_curve": [
           {"temp_c": 35.0, "duty_pct": 24.0},
           {"temp_c": 50.0, "duty_pct": 27.0},
