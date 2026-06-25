@@ -171,6 +171,13 @@ python scripts\score_loop_timing_gate.py --baseline <pre-0021-archive>.csv --can
 
 ## Runbook 2 — FEAT-0006 (§12): off-thread-sweeper loop-timing gate + marker decision
 
+> **PREP VERIFIED 2026-06-25 — ready; the 3 captures need live-runtime authorization (cool idle window).**
+> - Off-thread sweeper IS in the live 2026-06-23 binary — all `cpu_*_allcore` columns present in the live CSV header → **no new build**.
+> - Env steady state: `SVG_MB_CONTROL_RAPL_ENERGY_MODE=enabled`, `SVG_MB_CONTROL_CPU_CYCLES_MODE=disabled`, so an `-EnergyOnly` run is a true sweeper-OFF baseline.
+> - Load tool present at `release\runtime\experiments\energy-quarantine\cpu-synth-load.exe` — pass via `-SynthLoadExe` to skip a rebuild.
+> - Capture order (elevated): `-EnergyOnly` ×2 (sweeper-off A/B for calibration), then default ×1 (sweeper-on), `-LoadThreads 28`; score with `score_loop_timing_gate.py` — calibrate A-vs-B, then gate A-vs-ON with the calibrated `--rel-tol`/`--abs-tol-ms`. Use each run's `session.csv` (not `baseline_disabled.csv`).
+> - The revert warning "marker did not return to 'disabled'" is expected (energy stays live-`enabled`; the harness restores the pre-run env → end state energy `quarantine` + cycles `disabled`).
+
 **What it must show (spec §12/§14):** enabling the all-core **off-thread
 sweeper** does **not** move the shipped 250 ms control-loop profile —
 `loop_work_duration_ms` p99-of-bulk unchanged within tolerance, bucketed by GPU
@@ -250,6 +257,11 @@ release\svg-mb-control.exe analyze report --runtime-home .\release\runtime --db 
 ---
 
 ## Runbook 3 — FEAT-0023 (REQ-MPROFILE-10): deployed default profile reproduces baseline
+
+> **PREP VERIFIED 2026-06-25 — deploy mechanism = Option A; the deploy + rollback restarts need live-runtime authorization.**
+> - `release\svg-mb-control.exe --show-config --profile snd-desk-composed` resolves cleanly: source `profile_flag`, control-loop tick 250 ms, write cooldown 250 ms, 6 channels, ch0 `curve_overlay` min 15.5 % — reproduces the shipped config on this box.
+> - The catalog resolves to `config\profiles\snd-desk-composed.json` even with CWD=`release\` (the task's WorkingDirectory), so **Option A needs no catalog copy into `release\config`** — just repoint the task args.
+> - The live worker + watchdog tasks bake `--config "…\release\control.json"` (confirmed via `Get-ScheduledTask`), so `SVG_MB_PROFILE` stays ruled out (config wins). Option A repoints both to `--profile snd-desk-composed`. Hard gate at execute: `active_profile_name == snd-desk-composed` (not `control`). Build the exact revert from the live `(Get-ScheduledTask).Actions` before editing.
 
 **What it must show (spec §6/§10/§12/§14):** a profile-**resolved** default
 (`snd-desk-composed`, proven byte-identical to `control.release.json` by
