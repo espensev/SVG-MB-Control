@@ -78,7 +78,7 @@ class AmdReader {
     AmdReader(const AmdReader&) = delete;
     AmdReader& operator=(const AmdReader&) = delete;
 
-    bool available() const;
+    bool available() const noexcept;
     std::string init_warning() const;
 
     // Samples current AMD temperatures. The returned reference aliases an

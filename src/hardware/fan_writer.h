@@ -19,12 +19,12 @@ enum class FanWriteError {
     kRestoreFailed,
 };
 
-struct FanWriteResult {
+struct [[nodiscard]] FanWriteResult {
     FanWriteError error = FanWriteError::kNone;
     std::string detail;
 
-    bool ok() const { return error == FanWriteError::kNone; }
-    explicit operator bool() const { return ok(); }
+    bool ok() const noexcept { return error == FanWriteError::kNone; }
+    explicit operator bool() const noexcept { return ok(); }
 };
 
 struct FanChannelState {
@@ -42,22 +42,22 @@ struct FanChannelState {
     std::string label;
 };
 
-struct FanReadResult {
+struct [[nodiscard]] FanReadResult {
     FanWriteError error = FanWriteError::kNone;
     std::string detail;
     FanChannelState state;
 
-    bool ok() const { return error == FanWriteError::kNone; }
-    explicit operator bool() const { return ok(); }
+    bool ok() const noexcept { return error == FanWriteError::kNone; }
+    explicit operator bool() const noexcept { return ok(); }
 };
 
-struct FanScanResult {
+struct [[nodiscard]] FanScanResult {
     FanWriteError error = FanWriteError::kNone;
     std::string detail;
     std::vector<FanChannelState> fans;
 
-    bool ok() const { return error == FanWriteError::kNone; }
-    explicit operator bool() const { return ok(); }
+    bool ok() const noexcept { return error == FanWriteError::kNone; }
+    explicit operator bool() const noexcept { return ok(); }
 };
 
 struct FanTachEvidenceState {
@@ -66,13 +66,13 @@ struct FanTachEvidenceState {
     std::uint8_t tach_lo_raw = 0u;
 };
 
-struct FanTachEvidenceScanResult {
+struct [[nodiscard]] FanTachEvidenceScanResult {
     FanWriteError error = FanWriteError::kNone;
     std::string detail;
     std::vector<FanTachEvidenceState> fans;
 
-    bool ok() const { return error == FanWriteError::kNone; }
-    explicit operator bool() const { return ok(); }
+    bool ok() const noexcept { return error == FanWriteError::kNone; }
+    explicit operator bool() const noexcept { return ok(); }
 };
 
 struct SioVoltageState {
@@ -82,13 +82,13 @@ struct SioVoltageState {
     std::string label;
 };
 
-struct SioVoltageScanResult {
+struct [[nodiscard]] SioVoltageScanResult {
     FanWriteError error = FanWriteError::kNone;
     std::string detail;
     std::vector<SioVoltageState> voltages;
 
-    bool ok() const { return error == FanWriteError::kNone; }
-    explicit operator bool() const { return ok(); }
+    bool ok() const noexcept { return error == FanWriteError::kNone; }
+    explicit operator bool() const noexcept { return ok(); }
 };
 
 struct SioTemperatureState {
@@ -100,13 +100,13 @@ struct SioTemperatureState {
     std::string label;
 };
 
-struct SioTemperatureScanResult {
+struct [[nodiscard]] SioTemperatureScanResult {
     FanWriteError error = FanWriteError::kNone;
     std::string detail;
     std::vector<SioTemperatureState> temperatures;
 
-    bool ok() const { return error == FanWriteError::kNone; }
-    explicit operator bool() const { return ok(); }
+    bool ok() const noexcept { return error == FanWriteError::kNone; }
+    explicit operator bool() const noexcept { return ok(); }
 };
 
 class FanWriter {

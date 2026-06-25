@@ -79,22 +79,29 @@ std::optional<std::string> AsText(const std::string& text) {
     return text;
 }
 
-const std::string& GetField(const std::vector<std::string>& fields,
-                            const CsvHeader& header,
-                            const std::string& name) {
+const std::string& GetFieldByIndex(const std::vector<std::string>& fields,
+                                   int index) {
     static const std::string kEmpty;
-    auto it = header.column_index.find(name);
-    if (it == header.column_index.end()) {
+    if (index < 0 || static_cast<std::size_t>(index) >= fields.size()) {
         return kEmpty;
     }
-    if (it->second >= fields.size()) {
-        return kEmpty;
-    }
-    return fields[it->second];
+    return fields[static_cast<std::size_t>(index)];
 }
 
 bool HasColumn(const CsvHeader& header, const std::string& name) {
     return header.column_index.find(name) != header.column_index.end();
+}
+
+// Resolves a column name to its field index (TickRowParsePlan::kAbsent when the
+// column is missing), so the per-name hashing happens once at plan-build time
+// instead of on every row. Mirrors GetField's old absent-column handling: a
+// missing name yields kAbsent, which GetFieldByIndex then reads as empty.
+int ColumnIndex(const CsvHeader& header, const std::string& name) {
+    auto it = header.column_index.find(name);
+    if (it == header.column_index.end()) {
+        return TickRowParsePlan::kAbsent;
+    }
+    return static_cast<int>(it->second);
 }
 
 void SetChannelSampleField(ParsedChannelSample& ch,
@@ -225,8 +232,134 @@ CsvHeader ParseCsvHeader(const std::string& header_line) {
     return header;
 }
 
+TickRowParsePlan BuildTickRowParsePlan(const CsvHeader& header) {
+    TickRowParsePlan plan;
+    plan.wall_clock = ColumnIndex(header, "wall_clock");
+    plan.loop_tick_count = ColumnIndex(header, "loop_tick_count");
+    plan.mode = ColumnIndex(header, "mode");
+    plan.snapshot_time = ColumnIndex(header, "snapshot_time");
+    plan.snapshot_age_ms = ColumnIndex(header, "snapshot_age_ms");
+    plan.amd_sensor_count = ColumnIndex(header, "amd_sensor_count");
+    plan.amd_sensor_summary = ColumnIndex(header, "amd_sensor_summary");
+    plan.cpu_tctl_c = ColumnIndex(header, "cpu_tctl_c");
+    plan.cpu_max_c = ColumnIndex(header, "cpu_max_c");
+    plan.gpu_available = ColumnIndex(header, "gpu_available");
+    plan.gpu_name = ColumnIndex(header, "gpu_name");
+    plan.gpu_last_warning = ColumnIndex(header, "gpu_last_warning");
+    plan.gpu_core_c = ColumnIndex(header, "gpu_core_c");
+    plan.gpu_memjn_c = ColumnIndex(header, "gpu_memjn_c");
+    plan.gpu_hotspot_c = ColumnIndex(header, "gpu_hotspot_c");
+    plan.gpu_envelope_c = ColumnIndex(header, "gpu_envelope_c");
+    plan.fan_count = ColumnIndex(header, "fan_count");
+    plan.policy_writes_enabled_present =
+        ColumnIndex(header, "policy_writes_enabled_present");
+    plan.policy_writes_enabled = ColumnIndex(header, "policy_writes_enabled");
+    plan.loop_started_wall_clock =
+        ColumnIndex(header, "loop_started_wall_clock");
+    plan.loop_finished_wall_clock =
+        ColumnIndex(header, "loop_finished_wall_clock");
+    plan.loop_work_duration_ms = ColumnIndex(header, "loop_work_duration_ms");
+    plan.loop_intended_interval_ms =
+        ColumnIndex(header, "loop_intended_interval_ms");
+    plan.loop_achieved_interval_ms =
+        ColumnIndex(header, "loop_achieved_interval_ms");
+    plan.loop_slip_ms = ColumnIndex(header, "loop_slip_ms");
+    plan.loop_overrun = ColumnIndex(header, "loop_overrun");
+    plan.process_cpu_delta_ms = ColumnIndex(header, "process_cpu_delta_ms");
+    plan.process_cpu_pct = ColumnIndex(header, "process_cpu_pct");
+    plan.process_working_set_bytes =
+        ColumnIndex(header, "process_working_set_bytes");
+    plan.process_private_bytes = ColumnIndex(header, "process_private_bytes");
+    plan.cadence_transient = ColumnIndex(header, "cadence_transient");
+    plan.cpu_power_sample_id = ColumnIndex(header, "cpu_power_sample_id");
+    plan.cpu_power_window_ms = ColumnIndex(header, "cpu_power_window_ms");
+    plan.cpu_pkg_energy_delta_uj =
+        ColumnIndex(header, "cpu_pkg_energy_delta_uj");
+    plan.cpu_pkg_energy_acquisition =
+        ColumnIndex(header, "cpu_pkg_energy_acquisition");
+    plan.cpu_cycles_sample_id = ColumnIndex(header, "cpu_cycles_sample_id");
+    plan.cpu_cycles_window_ms = ColumnIndex(header, "cpu_cycles_window_ms");
+    plan.cpu_aperf_delta = ColumnIndex(header, "cpu_aperf_delta");
+    plan.cpu_mperf_delta = ColumnIndex(header, "cpu_mperf_delta");
+    plan.cpu_cycles_acquisition = ColumnIndex(header, "cpu_cycles_acquisition");
+    plan.cpu_aperf_delta_allcore =
+        ColumnIndex(header, "cpu_aperf_delta_allcore");
+    plan.cpu_mperf_delta_allcore =
+        ColumnIndex(header, "cpu_mperf_delta_allcore");
+    plan.cpu_cycles_window_ms_allcore =
+        ColumnIndex(header, "cpu_cycles_window_ms_allcore");
+    plan.cpu_cycles_allcore_sample_id =
+        ColumnIndex(header, "cpu_cycles_allcore_sample_id");
+    plan.cpu_cycles_allcore_cores =
+        ColumnIndex(header, "cpu_cycles_allcore_cores");
+    plan.gpu_power_sample_id = ColumnIndex(header, "gpu_power_sample_id");
+    plan.gpu_power_time_ms = ColumnIndex(header, "gpu_power_time_ms");
+    plan.gpu_power_mw = ColumnIndex(header, "gpu_power_mw");
+    plan.gpu_power_source = ColumnIndex(header, "gpu_power_source");
+    plan.gpu_power_acquisition = ColumnIndex(header, "gpu_power_acquisition");
+    plan.gpu_context_sample_id = ColumnIndex(header, "gpu_context_sample_id");
+    plan.gpu_context_time_ms = ColumnIndex(header, "gpu_context_time_ms");
+    plan.gpu_context_sample_age_ms =
+        ColumnIndex(header, "gpu_context_sample_age_ms");
+    plan.gpu_context_acquisition =
+        ColumnIndex(header, "gpu_context_acquisition");
+    plan.gpu_util_gpu_pct = ColumnIndex(header, "gpu_util_gpu_pct");
+    plan.gpu_util_mem_pct = ColumnIndex(header, "gpu_util_mem_pct");
+    plan.gpu_pstate = ColumnIndex(header, "gpu_pstate");
+    plan.gpu_clock_graphics_mhz = ColumnIndex(header, "gpu_clock_graphics_mhz");
+    plan.gpu_clock_memory_mhz = ColumnIndex(header, "gpu_clock_memory_mhz");
+    plan.gpu_vram_used_mb = ColumnIndex(header, "gpu_vram_used_mb");
+    plan.gpu_vram_total_mb = ColumnIndex(header, "gpu_vram_total_mb");
+
+    for (std::uint32_t fi = 0u; fi < 64u; ++fi) {
+        const std::string prefix = "fan" + std::to_string(fi) + "_";
+        if (!HasColumn(header, prefix + "present")) {
+            break;
+        }
+        TickRowParsePlan::FanColumns fan_cols;
+        fan_cols.fan_index = fi;
+        fan_cols.present = ColumnIndex(header, prefix + "present");
+        fan_cols.label = ColumnIndex(header, prefix + "label");
+        fan_cols.rpm = ColumnIndex(header, prefix + "rpm");
+        fan_cols.tach_raw = ColumnIndex(header, prefix + "tach_raw");
+        fan_cols.tach_valid = ColumnIndex(header, prefix + "tach_valid");
+        fan_cols.duty_raw = ColumnIndex(header, prefix + "duty_raw");
+        fan_cols.duty_pct = ColumnIndex(header, prefix + "duty_pct");
+        fan_cols.mode_raw = ColumnIndex(header, prefix + "mode_raw");
+        fan_cols.manual_override =
+            ColumnIndex(header, prefix + "manual_override");
+        fan_cols.write_allowed = ColumnIndex(header, prefix + "write_allowed");
+        fan_cols.policy_blocked = ColumnIndex(header, prefix + "policy_blocked");
+        fan_cols.effective_write_allowed =
+            ColumnIndex(header, prefix + "effective_write_allowed");
+        plan.fans.push_back(fan_cols);
+    }
+
+    const auto& channel_specs = TickChannelSampleColumns();
+    const char* const observed_temp_name = TickChannelSampleColumnById(
+        TickChannelSampleColumn::ObservedTempC).name;
+    for (std::uint32_t ci = 0u; ci < 64u; ++ci) {
+        if (!HasColumn(header,
+                       TickChannelCsvFieldName(ci, observed_temp_name))) {
+            break;
+        }
+        TickRowParsePlan::ChannelColumns chan_cols;
+        chan_cols.channel = ci;
+        chan_cols.field_index.reserve(channel_specs.size());
+        for (const auto& spec : channel_specs) {
+            chan_cols.field_index.push_back(
+                ColumnIndex(header, TickChannelCsvFieldName(ci, spec.name)));
+        }
+        plan.channels.push_back(std::move(chan_cols));
+    }
+
+    return plan;
+}
+
 std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
+                                          const TickRowParsePlan& plan,
                                           const std::string& line) {
+    (void)header;  // Column resolution is precomputed in `plan`.
     if (line.empty()) {
         return std::nullopt;
     }
@@ -236,169 +369,170 @@ std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
     }
 
     ParsedTickRow row;
-    row.wall_clock = GetField(fields, header, "wall_clock");
+    row.wall_clock = GetFieldByIndex(fields, plan.wall_clock);
     if (row.wall_clock.empty()) {
         return std::nullopt;
     }
-    if (auto tick = AsInt(GetField(fields, header, "loop_tick_count"));
+    if (auto tick = AsInt(GetFieldByIndex(fields, plan.loop_tick_count));
         tick.has_value()) {
         row.tick_count = *tick;
     } else {
         return std::nullopt;
     }
 
-    row.mode = AsText(GetField(fields, header, "mode"));
-    row.snapshot_time = AsText(GetField(fields, header, "snapshot_time"));
-    row.snapshot_age_ms = AsInt(GetField(fields, header, "snapshot_age_ms"));
-    row.amd_sensor_count = AsInt(GetField(fields, header, "amd_sensor_count"));
+    row.mode = AsText(GetFieldByIndex(fields, plan.mode));
+    row.snapshot_time = AsText(GetFieldByIndex(fields, plan.snapshot_time));
+    row.snapshot_age_ms = AsInt(GetFieldByIndex(fields, plan.snapshot_age_ms));
+    row.amd_sensor_count = AsInt(GetFieldByIndex(fields, plan.amd_sensor_count));
     row.amd_sensor_summary = AsText(
-        GetField(fields, header, "amd_sensor_summary"));
-    row.cpu_tctl_c = AsDouble(GetField(fields, header, "cpu_tctl_c"));
-    row.cpu_max_c = AsDouble(GetField(fields, header, "cpu_max_c"));
-    row.gpu_available = AsInt(GetField(fields, header, "gpu_available"));
-    row.gpu_name = AsText(GetField(fields, header, "gpu_name"));
+        GetFieldByIndex(fields, plan.amd_sensor_summary));
+    row.cpu_tctl_c = AsDouble(GetFieldByIndex(fields, plan.cpu_tctl_c));
+    row.cpu_max_c = AsDouble(GetFieldByIndex(fields, plan.cpu_max_c));
+    row.gpu_available = AsInt(GetFieldByIndex(fields, plan.gpu_available));
+    row.gpu_name = AsText(GetFieldByIndex(fields, plan.gpu_name));
     row.gpu_last_warning = AsText(
-        GetField(fields, header, "gpu_last_warning"));
-    row.gpu_core_c = AsDouble(GetField(fields, header, "gpu_core_c"));
-    row.gpu_memjn_c = AsDouble(GetField(fields, header, "gpu_memjn_c"));
-    row.gpu_hotspot_c = AsDouble(GetField(fields, header, "gpu_hotspot_c"));
-    row.gpu_envelope_c = AsDouble(GetField(fields, header, "gpu_envelope_c"));
+        GetFieldByIndex(fields, plan.gpu_last_warning));
+    row.gpu_core_c = AsDouble(GetFieldByIndex(fields, plan.gpu_core_c));
+    row.gpu_memjn_c = AsDouble(GetFieldByIndex(fields, plan.gpu_memjn_c));
+    row.gpu_hotspot_c = AsDouble(GetFieldByIndex(fields, plan.gpu_hotspot_c));
+    row.gpu_envelope_c = AsDouble(GetFieldByIndex(fields, plan.gpu_envelope_c));
     if (!row.gpu_envelope_c.has_value()) {
         row.gpu_envelope_c = GpuEnvelopeC(
             row.gpu_core_c, row.gpu_memjn_c, row.gpu_hotspot_c);
     }
-    row.fan_count = AsInt(GetField(fields, header, "fan_count"));
+    row.fan_count = AsInt(GetFieldByIndex(fields, plan.fan_count));
     row.policy_writes_enabled_present = AsInt(
-        GetField(fields, header, "policy_writes_enabled_present"));
+        GetFieldByIndex(fields, plan.policy_writes_enabled_present));
     row.policy_writes_enabled = AsInt(
-        GetField(fields, header, "policy_writes_enabled"));
+        GetFieldByIndex(fields, plan.policy_writes_enabled));
     row.loop_started_wall_clock = AsText(
-        GetField(fields, header, "loop_started_wall_clock"));
+        GetFieldByIndex(fields, plan.loop_started_wall_clock));
     row.loop_finished_wall_clock = AsText(
-        GetField(fields, header, "loop_finished_wall_clock"));
+        GetFieldByIndex(fields, plan.loop_finished_wall_clock));
     row.loop_work_duration_ms = AsDouble(
-        GetField(fields, header, "loop_work_duration_ms"));
+        GetFieldByIndex(fields, plan.loop_work_duration_ms));
     row.loop_intended_interval_ms = AsInt(
-        GetField(fields, header, "loop_intended_interval_ms"));
+        GetFieldByIndex(fields, plan.loop_intended_interval_ms));
     row.loop_achieved_interval_ms = AsDouble(
-        GetField(fields, header, "loop_achieved_interval_ms"));
-    row.loop_slip_ms = AsDouble(GetField(fields, header, "loop_slip_ms"));
-    row.loop_overrun = AsInt(GetField(fields, header, "loop_overrun"));
+        GetFieldByIndex(fields, plan.loop_achieved_interval_ms));
+    row.loop_slip_ms = AsDouble(GetFieldByIndex(fields, plan.loop_slip_ms));
+    row.loop_overrun = AsInt(GetFieldByIndex(fields, plan.loop_overrun));
     row.process_cpu_delta_ms = AsDouble(
-        GetField(fields, header, "process_cpu_delta_ms"));
+        GetFieldByIndex(fields, plan.process_cpu_delta_ms));
     row.process_cpu_pct = AsDouble(
-        GetField(fields, header, "process_cpu_pct"));
+        GetFieldByIndex(fields, plan.process_cpu_pct));
     row.process_working_set_bytes = AsInt(
-        GetField(fields, header, "process_working_set_bytes"));
+        GetFieldByIndex(fields, plan.process_working_set_bytes));
     row.process_private_bytes = AsInt(
-        GetField(fields, header, "process_private_bytes"));
+        GetFieldByIndex(fields, plan.process_private_bytes));
     row.cadence_transient = AsDouble(
-        GetField(fields, header, "cadence_transient"));
+        GetFieldByIndex(fields, plan.cadence_transient));
     row.cpu_power_sample_id = AsInt(
-        GetField(fields, header, "cpu_power_sample_id"));
+        GetFieldByIndex(fields, plan.cpu_power_sample_id));
     row.cpu_power_window_ms = AsDouble(
-        GetField(fields, header, "cpu_power_window_ms"));
+        GetFieldByIndex(fields, plan.cpu_power_window_ms));
     row.cpu_pkg_energy_delta_uj = AsDouble(
-        GetField(fields, header, "cpu_pkg_energy_delta_uj"));
+        GetFieldByIndex(fields, plan.cpu_pkg_energy_delta_uj));
     row.cpu_pkg_energy_acquisition = AsText(
-        GetField(fields, header, "cpu_pkg_energy_acquisition"));
+        GetFieldByIndex(fields, plan.cpu_pkg_energy_acquisition));
     row.cpu_cycles_sample_id = AsInt(
-        GetField(fields, header, "cpu_cycles_sample_id"));
+        GetFieldByIndex(fields, plan.cpu_cycles_sample_id));
     row.cpu_cycles_window_ms = AsDouble(
-        GetField(fields, header, "cpu_cycles_window_ms"));
+        GetFieldByIndex(fields, plan.cpu_cycles_window_ms));
     row.cpu_aperf_delta = AsDouble(
-        GetField(fields, header, "cpu_aperf_delta"));
+        GetFieldByIndex(fields, plan.cpu_aperf_delta));
     row.cpu_mperf_delta = AsDouble(
-        GetField(fields, header, "cpu_mperf_delta"));
+        GetFieldByIndex(fields, plan.cpu_mperf_delta));
     row.cpu_cycles_acquisition = AsText(
-        GetField(fields, header, "cpu_cycles_acquisition"));
+        GetFieldByIndex(fields, plan.cpu_cycles_acquisition));
     row.cpu_aperf_delta_allcore = AsDouble(
-        GetField(fields, header, "cpu_aperf_delta_allcore"));
+        GetFieldByIndex(fields, plan.cpu_aperf_delta_allcore));
     row.cpu_mperf_delta_allcore = AsDouble(
-        GetField(fields, header, "cpu_mperf_delta_allcore"));
+        GetFieldByIndex(fields, plan.cpu_mperf_delta_allcore));
     row.cpu_cycles_window_ms_allcore = AsDouble(
-        GetField(fields, header, "cpu_cycles_window_ms_allcore"));
+        GetFieldByIndex(fields, plan.cpu_cycles_window_ms_allcore));
     row.cpu_cycles_allcore_sample_id = AsInt(
-        GetField(fields, header, "cpu_cycles_allcore_sample_id"));
+        GetFieldByIndex(fields, plan.cpu_cycles_allcore_sample_id));
     row.cpu_cycles_allcore_cores = AsInt(
-        GetField(fields, header, "cpu_cycles_allcore_cores"));
+        GetFieldByIndex(fields, plan.cpu_cycles_allcore_cores));
     row.gpu_power_sample_id = AsInt(
-        GetField(fields, header, "gpu_power_sample_id"));
+        GetFieldByIndex(fields, plan.gpu_power_sample_id));
     row.gpu_power_time_ms = AsDouble(
-        GetField(fields, header, "gpu_power_time_ms"));
+        GetFieldByIndex(fields, plan.gpu_power_time_ms));
     row.gpu_power_mw = AsDouble(
-        GetField(fields, header, "gpu_power_mw"));
+        GetFieldByIndex(fields, plan.gpu_power_mw));
     row.gpu_power_source = AsText(
-        GetField(fields, header, "gpu_power_source"));
+        GetFieldByIndex(fields, plan.gpu_power_source));
     row.gpu_power_acquisition = AsText(
-        GetField(fields, header, "gpu_power_acquisition"));
+        GetFieldByIndex(fields, plan.gpu_power_acquisition));
     row.gpu_context_sample_id = AsInt(
-        GetField(fields, header, "gpu_context_sample_id"));
+        GetFieldByIndex(fields, plan.gpu_context_sample_id));
     row.gpu_context_time_ms = AsDouble(
-        GetField(fields, header, "gpu_context_time_ms"));
+        GetFieldByIndex(fields, plan.gpu_context_time_ms));
     row.gpu_context_sample_age_ms = AsDouble(
-        GetField(fields, header, "gpu_context_sample_age_ms"));
+        GetFieldByIndex(fields, plan.gpu_context_sample_age_ms));
     row.gpu_context_acquisition = AsText(
-        GetField(fields, header, "gpu_context_acquisition"));
+        GetFieldByIndex(fields, plan.gpu_context_acquisition));
     row.gpu_util_gpu_pct = AsInt(
-        GetField(fields, header, "gpu_util_gpu_pct"));
+        GetFieldByIndex(fields, plan.gpu_util_gpu_pct));
     row.gpu_util_mem_pct = AsInt(
-        GetField(fields, header, "gpu_util_mem_pct"));
-    row.gpu_pstate = AsInt(GetField(fields, header, "gpu_pstate"));
+        GetFieldByIndex(fields, plan.gpu_util_mem_pct));
+    row.gpu_pstate = AsInt(GetFieldByIndex(fields, plan.gpu_pstate));
     row.gpu_clock_graphics_mhz = AsInt(
-        GetField(fields, header, "gpu_clock_graphics_mhz"));
+        GetFieldByIndex(fields, plan.gpu_clock_graphics_mhz));
     row.gpu_clock_memory_mhz = AsInt(
-        GetField(fields, header, "gpu_clock_memory_mhz"));
+        GetFieldByIndex(fields, plan.gpu_clock_memory_mhz));
     row.gpu_vram_used_mb = AsInt(
-        GetField(fields, header, "gpu_vram_used_mb"));
+        GetFieldByIndex(fields, plan.gpu_vram_used_mb));
     row.gpu_vram_total_mb = AsInt(
-        GetField(fields, header, "gpu_vram_total_mb"));
+        GetFieldByIndex(fields, plan.gpu_vram_total_mb));
 
-    for (std::uint32_t fi = 0u; fi < 64u; ++fi) {
-        const std::string prefix = "fan" + std::to_string(fi) + "_";
-        if (!HasColumn(header, prefix + "present")) {
-            break;
-        }
+    row.fans.reserve(plan.fans.size());
+    for (const auto& fan_cols : plan.fans) {
         ParsedFanSample fan;
-        fan.fan_index = fi;
-        fan.present = AsInt(GetField(fields, header, prefix + "present"));
-        fan.label = AsText(GetField(fields, header, prefix + "label"));
-        fan.rpm = AsInt(GetField(fields, header, prefix + "rpm"));
-        fan.tach_raw = AsInt(GetField(fields, header, prefix + "tach_raw"));
-        fan.tach_valid = AsInt(GetField(fields, header, prefix + "tach_valid"));
-        fan.duty_raw = AsInt(GetField(fields, header, prefix + "duty_raw"));
-        fan.duty_pct = AsDouble(GetField(fields, header, prefix + "duty_pct"));
-        fan.mode_raw = AsInt(GetField(fields, header, prefix + "mode_raw"));
+        fan.fan_index = fan_cols.fan_index;
+        fan.present = AsInt(GetFieldByIndex(fields, fan_cols.present));
+        fan.label = AsText(GetFieldByIndex(fields, fan_cols.label));
+        fan.rpm = AsInt(GetFieldByIndex(fields, fan_cols.rpm));
+        fan.tach_raw = AsInt(GetFieldByIndex(fields, fan_cols.tach_raw));
+        fan.tach_valid = AsInt(GetFieldByIndex(fields, fan_cols.tach_valid));
+        fan.duty_raw = AsInt(GetFieldByIndex(fields, fan_cols.duty_raw));
+        fan.duty_pct = AsDouble(GetFieldByIndex(fields, fan_cols.duty_pct));
+        fan.mode_raw = AsInt(GetFieldByIndex(fields, fan_cols.mode_raw));
         fan.manual_override = AsInt(
-            GetField(fields, header, prefix + "manual_override"));
+            GetFieldByIndex(fields, fan_cols.manual_override));
         fan.write_allowed = AsInt(
-            GetField(fields, header, prefix + "write_allowed"));
+            GetFieldByIndex(fields, fan_cols.write_allowed));
         fan.policy_blocked = AsInt(
-            GetField(fields, header, prefix + "policy_blocked"));
+            GetFieldByIndex(fields, fan_cols.policy_blocked));
         fan.effective_write_allowed = AsInt(
-            GetField(fields, header, prefix + "effective_write_allowed"));
+            GetFieldByIndex(fields, fan_cols.effective_write_allowed));
         row.fans.push_back(std::move(fan));
     }
 
-    const char* const observed_temp_name = TickChannelSampleColumnById(
-        TickChannelSampleColumn::ObservedTempC).name;
-    for (std::uint32_t ci = 0u; ci < 64u; ++ci) {
-        if (!HasColumn(header,
-                       TickChannelCsvFieldName(ci, observed_temp_name))) {
-            break;
-        }
+    const auto& channel_specs = TickChannelSampleColumns();
+    row.channels.reserve(plan.channels.size());
+    for (const auto& chan_cols : plan.channels) {
         ParsedChannelSample ch;
-        ch.channel = ci;
-        for (const auto& spec : TickChannelSampleColumns()) {
-            SetChannelSampleField(
-                ch, spec.id,
-                GetField(fields, header,
-                         TickChannelCsvFieldName(ci, spec.name)));
+        ch.channel = chan_cols.channel;
+        for (std::size_t si = 0u; si < channel_specs.size(); ++si) {
+            const int field_index =
+                si < chan_cols.field_index.size()
+                    ? chan_cols.field_index[si]
+                    : TickRowParsePlan::kAbsent;
+            SetChannelSampleField(ch, channel_specs[si].id,
+                                  GetFieldByIndex(fields, field_index));
         }
         row.channels.push_back(std::move(ch));
     }
 
     return row;
+}
+
+std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
+                                          const std::string& line) {
+    const TickRowParsePlan plan = BuildTickRowParsePlan(header);
+    return ParseTickRow(header, plan, line);
 }
 
 ParsedCsv ParseControlLoopCsv(const std::filesystem::path& path) {
@@ -410,6 +544,7 @@ ParsedCsv ParseControlLoopCsv(const std::filesystem::path& path) {
 
     std::string line;
     bool header_parsed = false;
+    TickRowParsePlan plan;
     while (std::getline(stream, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
@@ -431,10 +566,12 @@ ParsedCsv ParseControlLoopCsv(const std::filesystem::path& path) {
         }
         if (!header_parsed) {
             result.header = ParseCsvHeader(line);
+            plan = BuildTickRowParsePlan(result.header);
             header_parsed = true;
             continue;
         }
-        if (auto row = ParseTickRow(result.header, line); row.has_value()) {
+        if (auto row = ParseTickRow(result.header, plan, line);
+            row.has_value()) {
             result.rows.push_back(std::move(*row));
         }
     }

@@ -5,6 +5,7 @@
 #endif
 
 #include "env_util.h"
+#include "numeric_parse.h"
 
 #include <algorithm>
 #include <cctype>
@@ -99,11 +100,8 @@ double GetDoubleEnvOrDefault(const char* name, double fallback) {
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return std::stod(value);
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    double parsed = 0.0;
+    return TryParseDoubleStrict(value, parsed) ? parsed : fallback;
 }
 
 std::uint32_t GetUint32EnvOrDefault(const char* name,
@@ -112,11 +110,8 @@ std::uint32_t GetUint32EnvOrDefault(const char* name,
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return static_cast<std::uint32_t>(std::stoul(value));
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    std::uint32_t parsed = 0u;
+    return TryParseIntegralStrict(value, parsed) ? parsed : fallback;
 }
 
 std::int32_t GetInt32EnvOrDefault(const char* name, std::int32_t fallback) {
@@ -124,11 +119,8 @@ std::int32_t GetInt32EnvOrDefault(const char* name, std::int32_t fallback) {
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return static_cast<std::int32_t>(std::stol(value));
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    std::int32_t parsed = 0;
+    return TryParseIntegralStrict(value, parsed) ? parsed : fallback;
 }
 
 std::uint64_t GetUint64EnvOrDefault(const char* name,
@@ -137,11 +129,8 @@ std::uint64_t GetUint64EnvOrDefault(const char* name,
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return static_cast<std::uint64_t>(std::stoull(value));
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    std::uint64_t parsed = 0u;
+    return TryParseIntegralStrict(value, parsed) ? parsed : fallback;
 }
 
 std::int64_t GetInt64EnvOrDefault(const char* name, std::int64_t fallback) {
@@ -149,11 +138,8 @@ std::int64_t GetInt64EnvOrDefault(const char* name, std::int64_t fallback) {
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return static_cast<std::int64_t>(std::stoll(value));
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    std::int64_t parsed = 0;
+    return TryParseIntegralStrict(value, parsed) ? parsed : fallback;
 }
 
 // Monotonic milliseconds since the first call, used to stamp the GPU power read

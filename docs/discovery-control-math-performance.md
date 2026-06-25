@@ -2,8 +2,8 @@
 
 **Goal:** Find new behavior-preserving simplification and performance opportunities in the control path/math and the rest of the code; flag math/policy changes as evidence-gated proposals rather than applying them blind.
 **Date:** 2026-05-30
-**Status:** complete; first behavior-preserving cleanup batch implemented
-**Recommended next:** if more performance work is needed, build the analyzer `CsvParsePlan`; keep policy/math tuning changes behind runtime evidence.
+**Status:** complete; first behavior-preserving cleanup batch implemented; analyzer `CsvParsePlan` slice implemented 2026-06-20
+**Recommended next:** remaining offline analyzer report assembly (ordered maps / per-channel vectors in `analyze_report_queries.cpp`) is the next code-only candidate; keep policy/math tuning changes behind runtime evidence.
 
 ## Follow-up implementation - 2026-05-30
 
@@ -12,6 +12,14 @@
 - Removed the intermediate escaped-string allocation from `AppendCsvString`; emitted CSV fields and escaping semantics remain unchanged.
 - Added a `std::from_chars` fast path for analyzer double parsing with the previous `std::stod` behavior retained as fallback.
 - Validation: `.\scripts\Test-LocalCI.ps1 -KeepBuildDir` passed, including CTest and 114 hermetic Python tests.
+
+## Follow-up implementation - 2026-06-20 (analyzer CsvParsePlan)
+
+- Replaced the per-row, per-field name-key construction + hash lookups in `ParseTickRow` (`src/analyze/analyze_csv.cpp`) with a precomputed `TickRowParsePlan` (`src/analyze/analyze_csv.h`). `BuildTickRowParsePlan` resolves every fixed column, fan block, and channel block to its split-field index once per header; rows are then read by index via `GetFieldByIndex`. This removes the `"fan" + index + "_" + suffix` and `TickChannelCsvFieldName(...)` string allocations and the per-field `unordered_map` lookups that previously ran on every data row (dozens of fixed columns + ~12 fields/fan + ~16 fields/channel).
+- `ParseControlLoopCsv` builds the plan once after parsing the header and reuses it for all rows. The legacy two-argument `ParseTickRow(header, line)` overload is retained as a thin wrapper (builds a one-shot plan) so external callers are unaffected.
+- Behavior is byte-identical: absent-column and ragged-row reads still yield the empty string (now via index sentinel `kAbsent`), `true`/`false`->int, blank `gpu_envelope_c` fallback, and the fan/channel block-run termination at the first absent header block are all preserved.
+- Tests: added `tests/cpp/analyze_csv_parse_tests.cpp` (registered in `CMakeLists.txt`) asserting plan-path == legacy-path equality plus absent/ragged/true-false/envelope-fallback/block-run cases.
+- Validation: full CTest suite 26/26 passed; `tests/test_analyze_ingest.py` hermetic suite 27 passed + 6 subtests (full CSV->DB parity on real fixtures).
 
 ---
 
@@ -73,7 +81,7 @@
 - `src/analyze/analyze_report_queries.cpp:405` and `src/analyze/analyze_report_queries.cpp:687` - report assembly uses ordered maps and per-channel vectors over DB-loaded samples; this is offline, but can matter on multi-hour captures.
 
 **Implications:**
-- Remaining: build a `CsvParsePlan` from the header once, containing column indexes for common fields, fan groups, and channel groups. Then parse rows by index instead of rebuilding field names.
+- Implemented (2026-06-20): a `TickRowParsePlan` is built from the header once (column indexes for fixed fields, fan groups, and channel groups); rows are parsed by index instead of rebuilding field names. See the 2026-06-20 follow-up entry above.
 - Implemented: analyzer double parsing now uses `std::from_chars` as a fast path and keeps the previous `std::stod` path as fallback for broader compatibility.
 - Keep the analyzer channel descriptor as the source for channel field order; do not add a separate schema engine.
 

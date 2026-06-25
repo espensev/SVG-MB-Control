@@ -138,8 +138,126 @@ std::vector<std::string> ParseCsvLine(const std::string& line);
 // Parses the header of a control-loop CSV (the first non-comment line).
 CsvHeader ParseCsvHeader(const std::string& header_line);
 
+// Pre-resolved column->field-index plan for ParseTickRow. The header column
+// layout is fixed for the whole file, so every column name is resolved to its
+// position in the split-field vector exactly once (here) instead of building a
+// string key and hashing it per field, per fan, and per channel on every row.
+// An index of -1 means the column is absent; reads of an absent (or
+// out-of-range) column yield the empty string, matching the legacy
+// name-lookup behaviour. Build once via BuildTickRowParsePlan, then reuse for
+// every data row.
+struct TickRowParsePlan {
+    static constexpr int kAbsent = -1;
+
+    // One resolved field index per fixed (non-repeating) column. Names match
+    // the corresponding ParsedTickRow members.
+    int wall_clock = kAbsent;
+    int loop_tick_count = kAbsent;
+    int mode = kAbsent;
+    int snapshot_time = kAbsent;
+    int snapshot_age_ms = kAbsent;
+    int amd_sensor_count = kAbsent;
+    int amd_sensor_summary = kAbsent;
+    int cpu_tctl_c = kAbsent;
+    int cpu_max_c = kAbsent;
+    int gpu_available = kAbsent;
+    int gpu_name = kAbsent;
+    int gpu_last_warning = kAbsent;
+    int gpu_core_c = kAbsent;
+    int gpu_memjn_c = kAbsent;
+    int gpu_hotspot_c = kAbsent;
+    int gpu_envelope_c = kAbsent;
+    int fan_count = kAbsent;
+    int policy_writes_enabled_present = kAbsent;
+    int policy_writes_enabled = kAbsent;
+    int loop_started_wall_clock = kAbsent;
+    int loop_finished_wall_clock = kAbsent;
+    int loop_work_duration_ms = kAbsent;
+    int loop_intended_interval_ms = kAbsent;
+    int loop_achieved_interval_ms = kAbsent;
+    int loop_slip_ms = kAbsent;
+    int loop_overrun = kAbsent;
+    int process_cpu_delta_ms = kAbsent;
+    int process_cpu_pct = kAbsent;
+    int process_working_set_bytes = kAbsent;
+    int process_private_bytes = kAbsent;
+    int cadence_transient = kAbsent;
+    int cpu_power_sample_id = kAbsent;
+    int cpu_power_window_ms = kAbsent;
+    int cpu_pkg_energy_delta_uj = kAbsent;
+    int cpu_pkg_energy_acquisition = kAbsent;
+    int cpu_cycles_sample_id = kAbsent;
+    int cpu_cycles_window_ms = kAbsent;
+    int cpu_aperf_delta = kAbsent;
+    int cpu_mperf_delta = kAbsent;
+    int cpu_cycles_acquisition = kAbsent;
+    int cpu_aperf_delta_allcore = kAbsent;
+    int cpu_mperf_delta_allcore = kAbsent;
+    int cpu_cycles_window_ms_allcore = kAbsent;
+    int cpu_cycles_allcore_sample_id = kAbsent;
+    int cpu_cycles_allcore_cores = kAbsent;
+    int gpu_power_sample_id = kAbsent;
+    int gpu_power_time_ms = kAbsent;
+    int gpu_power_mw = kAbsent;
+    int gpu_power_source = kAbsent;
+    int gpu_power_acquisition = kAbsent;
+    int gpu_context_sample_id = kAbsent;
+    int gpu_context_time_ms = kAbsent;
+    int gpu_context_sample_age_ms = kAbsent;
+    int gpu_context_acquisition = kAbsent;
+    int gpu_util_gpu_pct = kAbsent;
+    int gpu_util_mem_pct = kAbsent;
+    int gpu_pstate = kAbsent;
+    int gpu_clock_graphics_mhz = kAbsent;
+    int gpu_clock_memory_mhz = kAbsent;
+    int gpu_vram_used_mb = kAbsent;
+    int gpu_vram_total_mb = kAbsent;
+
+    // Resolved indices for each present fanN_* block, in fan order. Only the
+    // contiguous leading run of fans whose `present` column exists is recorded,
+    // matching the legacy loop that breaks at the first absent fan block.
+    struct FanColumns {
+        std::uint32_t fan_index = 0u;
+        int present = kAbsent;
+        int label = kAbsent;
+        int rpm = kAbsent;
+        int tach_raw = kAbsent;
+        int tach_valid = kAbsent;
+        int duty_raw = kAbsent;
+        int duty_pct = kAbsent;
+        int mode_raw = kAbsent;
+        int manual_override = kAbsent;
+        int write_allowed = kAbsent;
+        int policy_blocked = kAbsent;
+        int effective_write_allowed = kAbsent;
+    };
+    std::vector<FanColumns> fans;
+
+    // Resolved indices for each present channelN_* block, in channel order.
+    // Each inner vector is parallel to TickChannelSampleColumns(); entry i is
+    // the field index for that spec's column (kAbsent if missing). Only the
+    // contiguous leading run of channels whose observed-temp column exists is
+    // recorded, matching the legacy loop.
+    struct ChannelColumns {
+        std::uint32_t channel = 0u;
+        std::vector<int> field_index;  // size == TickChannelSampleColumns()
+    };
+    std::vector<ChannelColumns> channels;
+};
+
+// Resolves every control-loop CSV column name to its field index once, so
+// ParseTickRow can avoid per-row string-key construction and hashing.
+TickRowParsePlan BuildTickRowParsePlan(const CsvHeader& header);
+
+// Parses one data row using a pre-resolved column->index plan (preferred for
+// bulk parsing). Returns nullopt if the row is empty or malformed.
+std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
+                                          const TickRowParsePlan& plan,
+                                          const std::string& line);
+
 // Parses one data row using the precomputed header. Returns nullopt if the row
-// is empty or malformed.
+// is empty or malformed. Convenience overload that builds a one-shot parse plan
+// internally; prefer the plan overload when parsing many rows from one header.
 std::optional<ParsedTickRow> ParseTickRow(const CsvHeader& header,
                                           const std::string& line);
 
