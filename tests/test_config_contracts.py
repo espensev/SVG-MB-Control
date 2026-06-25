@@ -133,12 +133,13 @@ class ConfigContractTests(unittest.TestCase):
     def test_feat0024_intake_lanes_lead_under_load(self) -> None:
         # FEAT-0024 (REQ-INLEAD-*): intake lanes 2/3/4 lead the exhausts under
         # load — config-only surge-and-hold, rise-asymmetric, idle unchanged.
+        # Asserts on config/control.release.json only — the tracked source of
+        # truth. release/control.json is a gitignored deploy artifact that
+        # build-release regenerates from this file, so a unit test must not
+        # depend on it (it is absent in a clean checkout).
         release = _read_json(REPO_ROOT / "config" / "control.release.json")
-        deployed = _read_json(REPO_ROOT / "release" / "control.json")
         self.assertIsNotNone(release)
-        self.assertIsNotNone(deployed)
         rel = {c["channel"]: c for c in release["control_loop"]["channels"]}
-        dep = {c["channel"]: c for c in deployed["control_loop"]["channels"]}
         cooldown = release["control_loop"]["write_cooldown_ms"]
         intakes = (2, 3, 4)
         exhausts = (0, 1, 5)
@@ -149,22 +150,6 @@ class ConfigContractTests(unittest.TestCase):
                 ch["rise_rate_pct_per_min"] / 60.0,
                 ch["max_setpoint_step_pct"] * 1000.0 / cooldown,
             )
-
-        # Deployed mirror stays in sync with the source for the edited lanes.
-        for cid in intakes:
-            for key in (
-                "rise_rate_pct_per_min",
-                "max_setpoint_step_pct",
-                "gpu_airflow_start_c",
-                "gpu_airflow_max_boost_pct",
-                "demand_smoothing_rise_alpha",
-                "cpu_override_curve",
-            ):
-                self.assertEqual(
-                    rel[cid][key],
-                    dep[cid][key],
-                    msg=f"release/control.json channel {cid} {key} out of sync",
-                )
 
         # REQ-INLEAD-01: intakes ramp faster than every exhaust; ch4's rise
         # *raise* is at least as large as the 200mm intakes' raise.
