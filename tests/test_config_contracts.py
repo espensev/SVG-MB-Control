@@ -230,16 +230,21 @@ class ConfigContractTests(unittest.TestCase):
             self.assertLessEqual(rel[cid]["fall_rate_pct_per_min"], fr)
             self.assertLessEqual(rel[cid]["demand_smoothing_fall_alpha"], fa)
             self.assertLessEqual(rel[cid]["decay_latch_pct_per_min"], dl)
+        # Exhaust lanes 0/1/5 must be byte-unchanged, including fall-direction:
+        # (rise_rate, max_step, gpu_start, gpu_max_boost, fall_rate, fall_alpha, decay_latch)
         shipped_exhaust = {
-            0: (75.0, 0.6, 64.0, 4.0),
-            1: (75.0, 0.8, 64.0, 5.0),
-            5: (75.0, 0.8, 64.0, 5.0),
+            0: (75.0, 0.6, 64.0, 4.0, 45.0, 0.004, 90.0),
+            1: (75.0, 0.8, 64.0, 5.0, 25.0, 0.003, 90.0),
+            5: (75.0, 0.8, 64.0, 5.0, 25.0, 0.003, 90.0),
         }
-        for cid, (rr, ms, gs, gm) in shipped_exhaust.items():
+        for cid, (rr, ms, gs, gm, fr, fa, dl) in shipped_exhaust.items():
             self.assertEqual(rel[cid]["rise_rate_pct_per_min"], rr)
             self.assertEqual(rel[cid]["max_setpoint_step_pct"], ms)
             self.assertEqual(rel[cid]["gpu_airflow_start_c"], gs)
             self.assertEqual(rel[cid]["gpu_airflow_max_boost_pct"], gm)
+            self.assertEqual(rel[cid]["fall_rate_pct_per_min"], fr)
+            self.assertEqual(rel[cid]["demand_smoothing_fall_alpha"], fa)
+            self.assertEqual(rel[cid]["decay_latch_pct_per_min"], dl)
 
     def test_shipped_control_loop_configs_scope_to_live_airflow_lanes(self) -> None:
         expected_channels = [0, 1, 2, 3, 4, 5]
