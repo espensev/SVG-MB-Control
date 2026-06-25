@@ -130,6 +130,132 @@ class ConfigContractTests(unittest.TestCase):
                 msg=f"channel {channel_id} CPU low-end curve drifted",
             )
 
+    def test_feat0024_intake_lanes_lead_under_load(self) -> None:
+        # FEAT-0024 (REQ-INLEAD-*): intake lanes 2/3/4 lead the exhausts under
+        # load — config-only surge-and-hold, rise-asymmetric, idle unchanged.
+        release = _read_json(REPO_ROOT / "config" / "control.release.json")
+        deployed = _read_json(REPO_ROOT / "release" / "control.json")
+        self.assertIsNotNone(release)
+        self.assertIsNotNone(deployed)
+        rel = {c["channel"]: c for c in release["control_loop"]["channels"]}
+        dep = {c["channel"]: c for c in deployed["control_loop"]["channels"]}
+        cooldown = release["control_loop"]["write_cooldown_ms"]
+        intakes = (2, 3, 4)
+        exhausts = (0, 1, 5)
+        shipped_rise = {2: 90.0, 3: 90.0, 4: 60.0}
+
+        def ceiling(ch: dict) -> float:
+            return min(
+                ch["rise_rate_pct_per_min"] / 60.0,
+                ch["max_setpoint_step_pct"] * 1000.0 / cooldown,
+            )
+
+        # Deployed mirror stays in sync with the source for the edited lanes.
+        for cid in intakes:
+            for key in (
+                "rise_rate_pct_per_min",
+                "max_setpoint_step_pct",
+                "gpu_airflow_start_c",
+                "gpu_airflow_max_boost_pct",
+                "demand_smoothing_rise_alpha",
+                "cpu_override_curve",
+            ):
+                self.assertEqual(
+                    rel[cid][key],
+                    dep[cid][key],
+                    msg=f"release/control.json channel {cid} {key} out of sync",
+                )
+
+        # REQ-INLEAD-01: intakes ramp faster than every exhaust; ch4's rise
+        # *raise* is at least as large as the 200mm intakes' raise.
+        fastest_exhaust = max(ceiling(rel[c]) for c in exhausts)
+        for cid in intakes:
+            self.assertGreater(
+                ceiling(rel[cid]),
+                fastest_exhaust,
+                msg=f"intake {cid} must ramp faster than the exhausts",
+            )
+            self.assertGreater(rel[cid]["rise_rate_pct_per_min"], shipped_rise[cid])
+            self.assertGreater(rel[cid]["max_setpoint_step_pct"], 0.0)
+            self.assertLess(rel[cid]["max_setpoint_step_pct"], 1.0)
+        self.assertGreaterEqual(
+            rel[4]["rise_rate_pct_per_min"] - shipped_rise[4],
+            min(
+                rel[2]["rise_rate_pct_per_min"] - shipped_rise[2],
+                rel[3]["rise_rate_pct_per_min"] - shipped_rise[3],
+            ),
+            msg="ch4 (slowest fan) must get a rise raise >= the 200mm intakes",
+        )
+
+        # REQ-INLEAD-02: intakes engage and surge on a GPU climb ahead of exhausts.
+        latest_intake_onset = max(rel[c]["gpu_airflow_start_c"] for c in intakes)
+        earliest_exhaust_onset = min(rel[c]["gpu_airflow_start_c"] for c in exhausts)
+        self.assertLess(
+            latest_intake_onset,
+            earliest_exhaust_onset,
+            msg="intakes must begin gpu_airflow before the exhausts",
+        )
+        smallest_intake_ceiling = min(
+            rel[c]["gpu_airflow_max_boost_pct"] for c in intakes
+        )
+        largest_exhaust_ceiling = max(
+            rel[c]["gpu_airflow_max_boost_pct"] for c in exhausts
+        )
+        self.assertGreaterEqual(
+            smallest_intake_ceiling,
+            largest_exhaust_ceiling,
+            msg="intake gpu_airflow ceilings must be >= the exhausts",
+        )
+        for cid in intakes:  # stays above true idle (existing [55,64] band holds)
+            self.assertGreaterEqual(rel[cid]["gpu_airflow_start_c"], 55.0)
+
+        # REQ-INLEAD-03: ch4 cpu_override steepened only in 72-86 C; <=72 and
+        # >=90 unchanged; monotonic. ch2/ch3 cpu_override unchanged.
+        ch4 = {p["temp_c"]: p["duty_pct"] for p in rel[4]["cpu_override_curve"]}
+        self.assertEqual(ch4[35], 24.0)
+        self.assertEqual(ch4[50], 27.0)
+        self.assertEqual(ch4[62], 31.0)
+        self.assertEqual(ch4[72], 38.0)
+        self.assertEqual(ch4[90], 54.0)
+        self.assertEqual(ch4[95], 70.0)
+        self.assertGreater(ch4[82], 42.0)
+        self.assertGreater(ch4[86], 46.0)
+        ch4_duties = [p["duty_pct"] for p in rel[4]["cpu_override_curve"]]
+        self.assertEqual(
+            ch4_duties, sorted(ch4_duties), msg="ch4 cpu_override must stay monotonic"
+        )
+        self.assertEqual(
+            [p["duty_pct"] for p in rel[2]["cpu_override_curve"]],
+            [42.0, 46.0, 54.0, 64.0, 64.0, 66.0, 74.0, 86.0],
+            msg="ch2 cpu_override must be unchanged",
+        )
+        self.assertEqual(
+            [p["duty_pct"] for p in rel[3]["cpu_override_curve"]],
+            [38.0, 42.0, 50.0, 60.0, 60.0, 62.0, 70.0, 82.0],
+            msg="ch3 cpu_override must be unchanged",
+        )
+
+        # REQ-INLEAD-05: rise-asymmetric (fall not raised) + exhausts unchanged.
+        shipped_fall = {
+            2: (45.0, 0.006, 120.0),
+            3: (45.0, 0.006, 120.0),
+            4: (25.0, 0.003, 90.0),
+        }
+        for cid, (fr, fa, dl) in shipped_fall.items():
+            self.assertLessEqual(rel[cid]["fall_rate_pct_per_min"], fr)
+            self.assertLessEqual(rel[cid]["demand_smoothing_fall_alpha"], fa)
+            self.assertLessEqual(rel[cid]["decay_latch_pct_per_min"], dl)
+        shipped_exhaust = {
+            0: (75.0, 0.6, 64.0, 4.0),
+            1: (75.0, 0.8, 64.0, 5.0),
+            5: (75.0, 0.8, 64.0, 5.0),
+        }
+        for cid, (rr, ms, gs, gm) in shipped_exhaust.items():
+            self.assertEqual(rel[cid]["rise_rate_pct_per_min"], rr)
+            self.assertEqual(rel[cid]["max_setpoint_step_pct"], ms)
+            self.assertEqual(rel[cid]["gpu_airflow_start_c"], gs)
+            self.assertEqual(rel[cid]["gpu_airflow_max_boost_pct"], gm)
+
     def test_shipped_control_loop_configs_scope_to_live_airflow_lanes(self) -> None:
         expected_channels = [0, 1, 2, 3, 4, 5]
         for rel_path in (
