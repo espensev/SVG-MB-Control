@@ -219,7 +219,17 @@ contract docs, was completed 2026-06-21 (source-grounded names taken from
   `machine_identity`), `runtime_lifecycle` request-file lifecycle, the extended
   `control_supervisor` entry, and the `config/overlays` / `config/profiles` artifacts.
 
-The on-hardware live M (`REQ-MPROFILE-10`) remains the only open FEAT-0023 item.
+The on-hardware live M (`REQ-MPROFILE-10`) was **closed PASS 2026-06-25** via
+Option A2 (temporary worker+watchdog task `--config` repoint to
+`config/profiles/snd-desk-composed.json`, reverted): the live worker ran
+`active_profile_name=snd-desk-composed` healthy at 250 ms cadence with the resolved
+control config byte-identical to `release\control.json` across all 89 `--show-config`
+lines on hardware (`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`).
+The literal `--profile` task-arg form was proven invalid (`task_runner` is
+`--config`-only). Remaining optional follow-up: **Option B** — productize
+`config/profiles` + `config/overlays` into `release\` via Build-Release/installer
+(Feature Intake Gate + clean tree) so the composed default deploys without depending
+on the dev tree; not a REQ-MPROFILE-10 blocker.
 
 ### `--set-profile` CLI mutual-exclusion guard (FEAT-0023 follow-up)
 

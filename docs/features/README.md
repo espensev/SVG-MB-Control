@@ -67,8 +67,13 @@ a feature's status or the decision queue changes. A fuller standing review is
   proven to reproduce `control.release.json`) + active-profile CSV/status fields +
   a revert integration test. The 2026-06-22 Rust local UI helper
   (`tools/profile_switch_ui`) wraps the existing status/health/`--set-profile`
-  CLI path without adding runtime semantics. Only the on-hardware live M
-  (REQ-10) is deferred.
+  CLI path without adding runtime semantics. The on-hardware live M (REQ-MPROFILE-10)
+  was **closed PASS 2026-06-25** via Option A2 (temporary task `--config` repoint to
+  the composed default, reverted): the live worker ran `active_profile_name=snd-desk-composed`
+  healthy with the resolved control config byte-identical to `release\control.json`
+  on hardware (`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`).
+  Productizing the catalog into `release\` (Option B) is the remaining optional
+  follow-up.
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
@@ -259,4 +264,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0020](FEAT-0020-standard-control-loop-power-logging.md) | Standard control-loop power logging (CPU package energy + GPU power in the same control-loop CSV, logging-only) | `REQ-PWRLOG-*` | Implemented (2026-06-18; T/B/R/M verified, full Test-LocalCI green; per-tick 5-field GPU power slice; live flip deployed + validated, gate 6 closed) |
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M PASS-with-finding 2026-06-25, `docs/feat-0021-live-cadence-evidence-2026-06-25.md`) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
-| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M deferred) |
+| [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M REQ-MPROFILE-10 PASS 2026-06-25 via Option A2) |
