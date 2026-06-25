@@ -108,6 +108,15 @@ The two latency held-Drafts also owe gate decisions and live in
 lanes/target-ceiling decision plus a response-evaluation Pass-3, and **FEAT-0018**
 owes the floor characterization pass (it crosses `docs/MEASUREMENT_GATE.md`).
 
+- **FEAT-0024** (`Draft`) — intake-lead fan response under load. Config-only
+  surge-and-hold retune of the intake lanes (`2`/`3`/`4`): joint rise-rate +
+  step-cap raise (largest on the slowest lane `4`), intake-first `gpu_airflow`
+  onset, and a steeper intake `cpu_override` mid-band, so the intakes supply
+  airflow ahead of the exhausts under load. Idle is out of scope and unchanged;
+  rise-asymmetric (spin-down not made faster). Direction settled in
+  `docs/intake-lead-response-decision-2026-06-25.md`; owes the candidate-magnitude
+  selection and a response-evaluation Pass-1/Pass-3 validation before promotion.
+
 **`Done` 2026-06-22:** **FEAT-0003** —
 restart-selected control-law profile seam (PID / P / PI / PD plus the current
 curve law). Built across slices F3-1..F3-5: the `IChannelController` seam +
@@ -265,3 +274,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0021](FEAT-0021-standard-control-loop-gpu-workload-context-logging.md) | Standard control-loop GPU workload context logging (utilization, clocks, pstate, and VRAM beside GPU power, logging-only) | `REQ-GPUCTX-*` | Implemented (2026-06-20; cached 1000 ms context sample, analyzer schema v12, T/R verified; REQ-GPUCTX-04 live M PASS-with-finding 2026-06-25, `docs/feat-0021-live-cadence-evidence-2026-06-25.md`) |
 | [FEAT-0022](FEAT-0022-runtime-logging-failure-visibility.md) | Runtime logging failure visibility (CSV/archive/mirror/manifest/status/event evidence-sink failures) | `REQ-LOGHEALTH-*` | Implemented (2026-06-20; CSV write failure/recovery events + logger sink detail + `logging_health.json` event-log fallback + status/snapshot retry events + analyzer consistency diagnostics) |
 | [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M REQ-MPROFILE-10 PASS 2026-06-25 via Option A2) |
+| [FEAT-0024](FEAT-0024-intake-lead-under-load.md) | Intake-lead fan response under load (config-only surge-and-hold: intake-lane joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band; idle unchanged, rise-asymmetric) | `REQ-INLEAD-*` | Draft (held — candidate magnitudes pending a response-evaluation Pass-3 validation; idle out of scope) |

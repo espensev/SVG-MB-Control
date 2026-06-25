@@ -74,6 +74,7 @@ Result values:
 | `FEAT-0021` Standard control-loop GPU workload context logging | Implemented (live M PASS-with-finding 2026-06-25) | D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Current. Implemented 2026-06-20 as an additive cached 1000 ms GPU context slice beside FEAT-0020 GPU power; analyzer schema v12 ingests/reports context optionally. Live cadence M ran 2026-06-25 (PASS-with-finding): the section-10-named envelope holds and the ~41 ms context read fires once per ~1000 ms inside the 250 ms budget; non-breaching finding = refresh-tick overrun ~3–4× cached, stalls concentrate on the `age==0` read tick. Evidence `docs/feat-0021-live-cadence-evidence-2026-06-25.md`. |
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
 | `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M deferred) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. Only the on-hardware live M (REQ-10) is deferred. The control-law/PID seam stays FEAT-0003, sequenced after. |
+| `FEAT-0024` Intake-lead fan response under load | Draft (held) | Not buildable; design capture (`docs/intake-lead-response-decision-2026-06-25.md`, Current for direction). Config-only surge-and-hold retune of the intake lanes `2`/`3`/`4` (joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band); idle and the exhaust lanes unchanged; rise-asymmetric. Held pending candidate-magnitude selection and a response-evaluation Pass-1/Pass-3 validation. Does not cross the measurement gate. |
 
 ## 3. Requirement map
 
@@ -373,6 +374,23 @@ CLI path without adding runtime semantics.
 | `REQ-MPROFILE-08` | T, R | The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing restore runs; no latch/watchdog added; `test_profile_switch.py` + review vs D-MPROFILE-2. | pass |
 | `REQ-MPROFILE-09` | T, R | Switch events emitted; active profile name in `control_supervisor.json` AND name + resolution source in the worker status (`control_runtime.json`) and additive control-loop-only CSV columns `active_profile_name`/`active_profile_source` (threaded from `ControlConfig`, never read by control); `csv_rows_tests` + `test_profile_switch.py`. | pass |
 | `REQ-MPROFILE-10` | T, R, M | T+R pass: `profile_composition_tests` proves the composed snd-desk default reproduces `control.release.json` field-by-field incl. resolved runtime paths (byte-identical drop-in); the no-`compose` default path is untouched. **Live M PASS 2026-06-25** (Option A2 task `--config` repoint, reverted): live worker ran `active_profile_name=snd-desk-composed`, healthy, cadence 250 ms (achieved p50 250.9/p99 252.0 ms, 0 overruns), 6 channels, `primary_temp_source=gpu`, write policy true; resolved control config **byte-identical to `release\control.json` across all 89 `--show-config` lines** on hardware; hard gate confirmed no fall-through to `control` (literal `--profile` task-arg is invalid — runner is `--config`-only); rolled back healthy. Evidence: `docs/feat-0023-live-default-profile-evidence-2026-06-25.md`. Catalog productization into `release\` (Option B) is separate future work. | pass |
+
+### FEAT-0024 - Intake-lead fan response under load
+
+Draft (held). Direction settled in
+`docs/intake-lead-response-decision-2026-06-25.md` (Current); candidate magnitudes
+and the Pass-1/Pass-3 validation are pending. Config-only retune of the intake
+lanes (`2`/`3`/`4`); idle and the exhaust lanes are unchanged. Results mirror the
+owning spec's §14 verification log.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-INLEAD-01` | T, R | Config-contract test: intake lanes `2`/`3`/`4` raised both `rise_rate_pct_per_min` and `max_setpoint_step_pct` (effective ceiling rose), lane `4` rise raise `>=` lanes `2`/`3`; review vs the decision §3. | pending (held-Draft) |
+| `REQ-INLEAD-02` | T, R | Config-contract test: intake `gpu_airflow_start_c` `<` exhaust onset, intake `gpu_airflow_max_boost_pct` `>=` exhaust, onset `>` idle GPU envelope; review. | pending (held-Draft) |
+| `REQ-INLEAD-03` | T, R | Config-contract test: intake `cpu_override_curve` knots `<= 72 C` unchanged + monotonic non-decreasing + every `>= 88 C` knot `<=` the channel `1`/`5` knot; review of the `72-86 C` steepening. | pending (held-Draft) |
+| `REQ-INLEAD-04` | T | `tests/test_machine_cooling_policy.py` + `tests/test_config_contracts.py` stay green (front `>= 4%`, soft-floor-not-static, no-mirror/stagger/floors-above-rear, topology) plus a contract assertion that no intake knot `<= 72 C`, `min_duty_pct`, cadence, cooldown, or deadband changed. | pending (held-Draft) |
+| `REQ-INLEAD-05` | T, R | Config-contract test: no `fall_rate_pct_per_min` / `demand_smoothing_fall_alpha` / `decay_latch_pct_per_min` raised on any lane; exhaust lanes `0`/`1`/`5` byte-unchanged; review for rise-asymmetry. | pending (held-Draft) |
+| `REQ-INLEAD-06` | M | Live Pass-3 combined-load capture (intake first-duty / ramp precedes the exhausts; CPU Tctl / GPU memory percentiles in the acceptance band; no post-startup authority reasserts) plus a Pass-1 idle-unchanged hold, via `svg-mb-control analyze ingest` + `analyze report`. | pending (held-Draft) |
 
 ### FEAT-0007 — Reserved (parked)
 
