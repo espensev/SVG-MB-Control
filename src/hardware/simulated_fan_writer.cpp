@@ -4,9 +4,9 @@
 
 #include "env_util.h"
 #include "fan_writer_internal.h"
+#include "numeric_parse.h"
 
 #include <chrono>
-#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -26,15 +26,8 @@ std::uint32_t ParseEnvUInt32(const char* name, std::uint32_t fallback) {
     if (value.empty()) {
         return fallback;
     }
-    try {
-        const unsigned long parsed = std::stoul(value);
-        if (parsed > static_cast<unsigned long>(UINT32_MAX)) {
-            return fallback;
-        }
-        return static_cast<std::uint32_t>(parsed);
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    std::uint32_t parsed = 0u;
+    return TryParseIntegralStrict(value, parsed) ? parsed : fallback;
 }
 
 std::uint32_t ParseEnvUInt32(const char* primary_name,
@@ -54,11 +47,8 @@ double ParseEnvDouble(const char* name, double fallback) {
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return std::stod(value);
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    double parsed = 0.0;
+    return TryParseDoubleStrict(value, parsed) ? parsed : fallback;
 }
 
 class SimulatedFanWriter final : public FanWriter {

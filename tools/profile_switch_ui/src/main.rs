@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+mod runtime;
+
 #[derive(Clone, Debug)]
 struct AppConfig {
     repo: PathBuf,
@@ -38,6 +40,7 @@ struct RuntimeState {
     active_profile: Option<String>,
     active_source: Option<String>,
     status_text: String,
+    fans: Vec<runtime::FanRow>,
 }
 
 #[derive(Debug)]
@@ -94,6 +97,7 @@ fn real_main() -> Result<(), String> {
                             active_profile: None,
                             active_source: None,
                             status_text: err.to_string(),
+                            fans: Vec::new(),
                         },
                         Some(&format!("Request failed: {err}")),
                     );
@@ -332,7 +336,7 @@ fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 fn read_profile_comment(path: &Path) -> Option<String> {
     fs::read_to_string(path)
         .ok()
-        .and_then(|text| extract_json_string_field(&text, "_comment"))
+        .and_then(|text| runtime::parse_profile_comment(&text))
         .map(|comment| compact_whitespace(&comment))
 }
 
@@ -340,12 +344,14 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
     let health = run_control(cfg, &["--health", "--json"]);
     let status = run_control(cfg, &["--status"]);
 
+    let health_info = runtime::parse_health(&health.stdout);
     let health_summary = if health.ok {
-        let state = extract_json_string_field(&health.stdout, "state")
-            .or_else(|| extract_json_string_field(&health.stdout, "health"));
-        let worker = extract_json_string_field(&health.stdout, "worker_pid");
-        match (state, worker) {
-            (Some(state), Some(worker)) => format!("{state}; worker PID {worker}"),
+        let state = health_info
+            .health_state
+            .clone()
+            .or_else(|| health_info.status.clone());
+        match (state, health_info.process_id) {
+            (Some(state), Some(pid)) => format!("{state}; worker PID {pid}"),
             (Some(state), None) => state,
             _ => "Health command succeeded".to_string(),
         }
@@ -358,7 +364,8 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
         )
     };
 
-    let (active_profile, active_source) = read_active_profile_from_runtime(&health.stdout);
+    let (active_profile, active_source) =
+        read_active_profile_from_runtime(health_info.runtime_home.as_deref());
     let status_text = if status.ok {
         status.stdout
     } else {
@@ -368,16 +375,26 @@ fn read_runtime_state(cfg: &AppConfig) -> RuntimeState {
         )
     };
 
+    let fans = if let Some(home) = health_info.runtime_home.as_deref() {
+        let home = PathBuf::from(home);
+        let snapshot = fs::read_to_string(home.join("current_state.json")).ok();
+        let control = fs::read_to_string(home.join("control_runtime.json")).ok();
+        runtime::build_fan_rows(snapshot.as_deref(), control.as_deref())
+    } else {
+        Vec::new()
+    };
+
     RuntimeState {
         health_summary,
         active_profile,
         active_source,
         status_text,
+        fans,
     }
 }
 
-fn read_active_profile_from_runtime(health_json: &str) -> (Option<String>, Option<String>) {
-    let Some(runtime_home) = extract_json_string_field(health_json, "runtime_home") else {
+fn read_active_profile_from_runtime(runtime_home: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(runtime_home) = runtime_home else {
         return (None, None);
     };
     let runtime_home = PathBuf::from(runtime_home);
@@ -390,9 +407,9 @@ fn read_active_profile_from_runtime(health_json: &str) -> (Option<String>, Optio
         let Ok(text) = fs::read_to_string(candidate) else {
             continue;
         };
-        let name = extract_json_string_field(&text, "active_profile_name")
-            .or_else(|| extract_json_string_field(&text, "requested_profile_name"));
-        let source = extract_json_string_field(&text, "active_profile_source");
+        let rt = runtime::parse_runtime(&text);
+        let name = rt.active_profile_name.or(rt.requested_profile_name);
+        let source = rt.active_profile_source;
         if name.is_some() || source.is_some() {
             return (name, source);
         }
@@ -598,6 +615,16 @@ fn render_page(
         }
     }
 
+    let fan_rows = if state.fans.is_empty() {
+        "<tr><td colspan=\"5\" class=\"empty\">Fan data unavailable.</td></tr>".to_string()
+    } else {
+        let mut out = String::new();
+        for fan in &state.fans {
+            out.push_str(&render_fan_row(fan));
+        }
+        out
+    };
+
     let message_html = message
         .map(|msg| format!("<section class=\"notice\">{}</section>", html_escape(msg)))
         .unwrap_or_default();
@@ -608,6 +635,7 @@ fn render_page(
          <head>\
          <meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <meta http-equiv=\"refresh\" content=\"3\">\
          <title>SVG-MB Profile Switch</title>\
          <style>{}</style>\
          </head>\
@@ -622,6 +650,12 @@ fn render_page(
          <div><span>Health</span><strong>{}</strong></div>\
          <div><span>Active profile</span><strong>{}</strong></div>\
          <div><span>Source</span><strong>{}</strong></div>\
+         </section>\
+         <section class=\"table-wrap fans\">\
+         <table>\
+         <thead><tr><th>Fan</th><th>Duty %</th><th>RPM</th><th>Temp</th><th>Controller</th></tr></thead>\
+         <tbody>{fan_rows}</tbody>\
+         </table>\
          </section>\
          <p class=\"consequence\">Switching profiles uses the existing <code>--set-profile</code> path. The supervisor restarts the worker, so fans can briefly return to firmware control during the handoff.</p>\
          <section class=\"table-wrap\">\
@@ -645,6 +679,30 @@ fn render_page(
         html_escape(&state.status_text),
         html_escape(&cfg.repo.display().to_string()),
         html_escape(&cfg.exe.display().to_string())
+    )
+}
+
+fn render_fan_row(fan: &runtime::FanRow) -> String {
+    let duty = match fan.duty_percent {
+        Some(v) => format!("{v:.1}%"),
+        None => "&mdash;".to_string(),
+    };
+    let rpm = match (fan.tach_valid, fan.rpm) {
+        (true, Some(v)) => v.to_string(),
+        _ => "&mdash;".to_string(),
+    };
+    let temp = match (fan.observed_temp_c, fan.temp_source.as_deref()) {
+        (Some(t), Some(src)) => format!("{t:.0} &deg;C ({})", html_escape(src)),
+        (Some(t), None) => format!("{t:.0} &deg;C"),
+        _ => "&mdash;".to_string(),
+    };
+    let controller = match fan.controller_kind.as_deref() {
+        Some(k) => html_escape(k),
+        None => "&mdash;".to_string(),
+    };
+    format!(
+        "<tr><td class=\"name\">ch{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+        fan.channel, duty, rpm, temp, controller
     )
 }
 
@@ -802,6 +860,7 @@ footer {
   header { align-items: flex-start; flex-direction: column; }
   .state-grid { grid-template-columns: 1fr; }
 }
+.fans { margin: 12px 0 16px; }
 "#
 }
 
@@ -935,60 +994,6 @@ fn is_windows_reserved_stem(stem: &str) -> bool {
     false
 }
 
-fn extract_json_string_field(text: &str, field: &str) -> Option<String> {
-    let needle = format!("\"{field}\"");
-    let start = text.find(&needle)?;
-    let after_name = &text[start + needle.len()..];
-    let colon = after_name.find(':')?;
-    let after_colon = after_name[colon + 1..].trim_start();
-    parse_json_string(after_colon).map(|(value, _)| value)
-}
-
-fn parse_json_string(text: &str) -> Option<(String, usize)> {
-    let mut chars = text.char_indices();
-    let (_, first) = chars.next()?;
-    if first != '"' {
-        return None;
-    }
-
-    let mut out = String::new();
-    while let Some((index, ch)) = chars.next() {
-        match ch {
-            '\\' => {
-                let (_, esc) = chars.next()?;
-                match esc {
-                    '"' => out.push('"'),
-                    '\\' => out.push('\\'),
-                    '/' => out.push('/'),
-                    'b' => out.push('\u{0008}'),
-                    'f' => out.push('\u{000c}'),
-                    'n' => out.push('\n'),
-                    'r' => out.push('\r'),
-                    't' => out.push('\t'),
-                    'u' => {
-                        let mut hex = String::new();
-                        for _ in 0..4 {
-                            if let Some((_, h)) = chars.next() {
-                                hex.push(h);
-                            }
-                        }
-                        let decoded = u32::from_str_radix(&hex, 16)
-                            .ok()
-                            .and_then(char::from_u32)
-                            .unwrap_or('\u{FFFD}');
-                        out.push(decoded);
-                    }
-                    other => out.push(other),
-                }
-            }
-            '"' => return Some((out, index + 1)),
-            other => out.push(other),
-        }
-    }
-
-    None
-}
-
 fn compact_whitespace(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -1043,15 +1048,6 @@ mod tests {
     }
 
     #[test]
-    fn extracts_simple_json_string_field() {
-        let text = r#"{ "state": "healthy", "runtime_home": "D:\\release\\runtime" }"#;
-        assert_eq!(
-            extract_json_string_field(text, "runtime_home").as_deref(),
-            Some("D:\\release\\runtime")
-        );
-    }
-
-    #[test]
     fn rejects_path_like_profile_names() {
         assert!(profile_name_allowed("snd-desk-composed"));
         assert!(profile_name_allowed("quiet.1"));
@@ -1076,30 +1072,6 @@ mod tests {
         assert!(profile_name_allowed("console"));
         assert!(profile_name_allowed("com10"));
         assert!(profile_name_allowed("nul-backup"));
-    }
-
-    #[test]
-    fn decodes_unicode_escape_in_json_string() {
-        let bs = char::from_u32(0x5C).unwrap(); // '\'
-
-        // Build `{ "_comment": "abAcd" }` so the parser sees a real
-        // \uXXXX sequence; A must decode to 'A'.
-        let mut text = String::from(r#"{ "_comment": "ab"#);
-        text.push(bs);
-        text.push_str(r#"u0041cd" }"#);
-        assert_eq!(
-            extract_json_string_field(&text, "_comment").as_deref(),
-            Some("abAcd")
-        );
-
-        // Invalid hex digits fall back to U+FFFD with all 4 units consumed.
-        let mut bad = String::from(r#"{ "_comment": "x"#);
-        bad.push(bs);
-        bad.push_str(r#"uZZZZy" }"#);
-        assert_eq!(
-            extract_json_string_field(&bad, "_comment").as_deref(),
-            Some("x\u{FFFD}y")
-        );
     }
 
     #[test]
@@ -1150,5 +1122,74 @@ mod tests {
             html_escape("<profile name=\"x\">"),
             "&lt;profile name=&quot;x&quot;&gt;"
         );
+    }
+
+    #[test]
+    fn render_fan_row_full() {
+        let row = runtime::FanRow {
+            channel: 0,
+            duty_percent: Some(15.66),
+            rpm: Some(604),
+            tach_valid: true,
+            observed_temp_c: Some(44.0),
+            temp_source: Some("gpu".to_string()),
+            controller_kind: Some("curve_overlay".to_string()),
+        };
+        let html = render_fan_row(&row);
+        assert!(html.contains("<td class=\"name\">ch0</td>"));
+        assert!(html.contains("<td>15.7%</td>")); // 1-decimal rounding
+        assert!(html.contains("<td>604</td>"));
+        assert!(html.contains("44 &deg;C (gpu)"));
+        assert!(html.contains("<td>curve_overlay</td>"));
+    }
+
+    #[test]
+    fn render_fan_row_partial_and_invalid_tach_use_dashes() {
+        let row = runtime::FanRow {
+            channel: 6,
+            duty_percent: Some(82.0),
+            rpm: Some(2777),
+            tach_valid: false, // invalid tach -> rpm dash even though rpm is Some
+            observed_temp_c: None,
+            temp_source: None,
+            controller_kind: None,
+        };
+        let html = render_fan_row(&row);
+        assert!(html.contains("<td>82.0%</td>"));
+        // rpm, temp, controller all dash
+        assert_eq!(html.matches("&mdash;").count(), 3);
+
+        // duty None also dashes
+        let row2 = runtime::FanRow {
+            channel: 1,
+            duty_percent: None,
+            rpm: None,
+            tach_valid: false,
+            observed_temp_c: Some(50.0),
+            temp_source: None,
+            controller_kind: Some("pid".to_string()),
+        };
+        let html2 = render_fan_row(&row2);
+        assert!(html2.contains("<td>&mdash;</td>")); // duty dash
+        assert!(html2.contains("50 &deg;C")); // temp without source, no parens
+        assert!(!html2.contains("&deg;C (")); // no empty (source)
+        assert!(html2.contains("<td>pid</td>"));
+    }
+
+    #[test]
+    fn render_fan_row_escapes_runtime_strings() {
+        let row = runtime::FanRow {
+            channel: 2,
+            duty_percent: None,
+            rpm: None,
+            tach_valid: false,
+            observed_temp_c: Some(50.0),
+            temp_source: Some("<b>".to_string()),
+            controller_kind: Some("a&b".to_string()),
+        };
+        let html = render_fan_row(&row);
+        assert!(html.contains("&lt;b&gt;"));
+        assert!(html.contains("a&amp;b"));
+        assert!(!html.contains("<b>")); // raw tag must not leak
     }
 }

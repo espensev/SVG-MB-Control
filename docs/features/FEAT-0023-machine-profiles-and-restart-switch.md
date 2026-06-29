@@ -19,8 +19,10 @@ different profile (a supervised restart, not an in-process swap).
 > seven promotion gates are met and the decision record is Current. FEAT-0023
 > shipped first; the control-law/PID seam (FEAT-0003) is sequenced after it and
 > was itself promoted to Accepted 2026-06-21. Live runtime switching still
-> requires explicit live-runtime authorization when tested on hardware (the
-> on-hardware live M, REQ-MPROFILE-10, stays deferred).
+> requires explicit live-runtime authorization when tested on hardware. The
+> on-hardware live M (REQ-MPROFILE-10) was **closed PASS 2026-06-25** via Option A2
+> (temporary task `--config` repoint to the composed default, reverted) — see §14
+> and `docs/feat-0023-live-default-profile-evidence-2026-06-25.md`.
 >
 > **Operator-helper update 2026-06-22.** A minimal Rust local browser helper
 > (`tools/profile_switch_ui`) may wrap the existing `--status`, `--health`, and
@@ -324,7 +326,7 @@ Verify legend:
 | REQ-MPROFILE-07 | pass | T,R (`9a78a11`/`e431dfd`). `DecideAfterStartupOutcome` last-known-good promotion + revert is unit-tested and wired in the supervisor (revert before the supervisor-killing guard; `!have_seen_good_worker`). A double-gated sim hook (`SVG_MB_CONTROL_SIM_FAIL_STARTUP_CONFIG_STEM` + matching `--config` stem) now forces a switched-in candidate to fail its own startup; `test_profile_switch.py::test_failed_switch_reverts_to_last_known_good` asserts a `supervisor.profile_reverted` event, that the active profile returns to the baseline, and that the supervisor self-heals (respawns a worker). On-hardware bind-failure M deferred. | 2026-06-21 |
 | REQ-MPROFILE-08 | pass | T,R (`9a78a11`). The worker (`control_loop` + `read_loop`) breaks on the cycle signal so the existing graceful restore runs (fans → captured BIOS baseline); no no-restore latch path or fan watchdog added; `test_profile_switch.py` cycles the worker; review vs decision D-MPROFILE-2. | 2026-06-21 |
 | REQ-MPROFILE-09 | pass | T,R (`9a78a11`/`79145e4`). Switch events emitted; active profile name in `control_supervisor.json` (supervisor state) AND name + resolution source in the worker runtime status (`control_runtime.json`, both schemas) and as additive control-loop-only CSV columns `active_profile_name`/`active_profile_source` (threaded from `ControlConfig`, never read by control). Under supervision the worker is launched with `--config`, so the name falls back to the config stem (= the switched profile name). `csv_rows_tests` locks the columns; `test_profile_switch.py` asserts the worker status records name + source on a live switch. | 2026-06-21 |
-| REQ-MPROFILE-10 | partial | T,R (`fb70be5`). T+R satisfied: `profile_composition_tests` proves the composed snd-desk profile reproduces `control.release.json` field-by-field — full `ControlLoopConfig` (cadence, cooldown, channel set, curves, boosts, low-band) AND the resolved top-level `ControlConfig` incl. runtime paths — so a composed default is a byte-identical drop-in; the no-`compose` default path is untouched. Live **M** on a deployed default profile remains the only open item (and gates wiring the host identity + catalog into Build-Release). | 2026-06-21 |
+| REQ-MPROFILE-10 | pass | T,R (`fb70be5`): `profile_composition_tests` proves the composed snd-desk profile reproduces `control.release.json` field-by-field — full `ControlLoopConfig` (cadence, cooldown, channel set, curves, boosts, low-band) AND the resolved top-level `ControlConfig` incl. runtime paths — a byte-identical drop-in; the no-`compose` default path is untouched. **Live M PASS 2026-06-25** (Option A2 task `--config` repoint to `config/profiles/snd-desk-composed.json`, reverted): live worker ran `active_profile_name=snd-desk-composed`, healthy, cadence 250 ms (achieved p50 250.9 / p99 252.0 ms, 0 overruns), 6 channels (0–5), `primary_temp_source=gpu` all, write policy `true` — matching a `control.json` reference window; the resolved control config is **byte-identical to `release\control.json` across all 89 `--show-config` lines** on hardware. Hard gate confirmed `active_profile_name` did not fall through to `control` (the literal `--profile` task-arg form is invalid — `task_runner` is `--config`-only). Rolled back to `control.json` (healthy). Evidence: [`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`](../feat-0023-live-default-profile-evidence-2026-06-25.md). Productizing the catalog into `release\` (Option B) remains separate future work, not gating this M. | 2026-06-25 |
 
 2026-06-22 helper note: `tools/profile_switch_ui` is a local Rust browser UI
 that wraps the existing CLI surface. Its validation is build/unit-test plus a
@@ -346,5 +348,9 @@ signal (distinct from the global stop) consumed by both `control_loop` and
 `read_loop`, plus a supervisor bounded-wait + force-terminate fallback for a
 wedged worker (advisor review) and exit-code discrimination so a coincident crash
 is not mistaken for a cycle. The auto-revert path is exercised by a double-gated
-startup-fault sim hook (`SVG_MB_CONTROL_SIM_FAIL_STARTUP_CONFIG_STEM`). The only
-remaining item is the on-hardware live **M** (REQ-MPROFILE-10).
+startup-fault sim hook (`SVG_MB_CONTROL_SIM_FAIL_STARTUP_CONFIG_STEM`). The
+on-hardware live **M** (REQ-MPROFILE-10) was **closed PASS 2026-06-25** via Option
+A2 (temporary task `--config` repoint to the composed profile, reverted) — see the
+§14 row and `docs/feat-0023-live-default-profile-evidence-2026-06-25.md`.
+Productizing the catalog into `release\` (Option B) is the remaining optional
+follow-up, not a REQ-MPROFILE-10 blocker.

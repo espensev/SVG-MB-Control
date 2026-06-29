@@ -1,4 +1,4 @@
-# FEAT-0024: AMD GPU telemetry backend
+# FEAT-0025: AMD GPU telemetry backend
 
 **Project:** svg-mb-control
 **Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-22

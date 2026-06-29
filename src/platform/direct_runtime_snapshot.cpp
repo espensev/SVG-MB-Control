@@ -5,6 +5,7 @@
 #include "env_util.h"
 #include "fan_writer.h"
 #include "gpu_reader.h"
+#include "numeric_parse.h"
 
 #include <array>
 #include <chrono>
@@ -39,11 +40,8 @@ long GetLongEnvOrDefault(const char* name, long fallback) {
     if (value.empty()) {
         return fallback;
     }
-    try {
-        return std::stol(value);
-    } catch (const std::exception&) {
-        return fallback;
-    }
+    long parsed = 0;
+    return TryParseIntegralStrict(value, parsed) ? parsed : fallback;
 }
 
 struct SimRuntimeOverrides {

@@ -1,0 +1,65 @@
+name: Windows CI
+
+# The repo builds and tests only on Windows (MSVC + the Windows resource
+# compiler; Win32 / PawnIO / Super I/O source). This runs the documented local
+# CI entrypoint on a windows-latest runner: scripts/Test-LocalCI.ps1, which calls
+# scripts/Build-Release.ps1 -NoPublish to build and run the CTest unit lane plus
+# the hermetic Python lane. The MSVC environment is bootstrapped by the repo's
+# own scripts/Build.VsEnv.ps1 (vswhere + VsDevShell), so no separate compiler
+# setup step is needed. Hardware-dependent live paths (real fan writes, AMD/SIO
+# reads) cannot run on a cloud runner and stay manual evidence on the deployed
+# machine.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  local-ci:
+    name: Release build + CTest + Python lane (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure vcpkg
+        shell: pwsh
+        run: |
+          if ($env:VCPKG_ROOT) {
+            "VCPKG_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
+            exit 0
+          }
+
+          $candidates = @(
+            $env:VCPKG_INSTALLATION_ROOT,
+            'C:\vcpkg'
+          ) | Where-Object { $_ }
+
+          foreach ($candidate in $candidates) {
+            $toolchain = Join-Path $candidate 'scripts\buildsystems\vcpkg.cmake'
+            if (Test-Path -LiteralPath $toolchain) {
+              "VCPKG_ROOT=$candidate" >> $env:GITHUB_ENV
+              exit 0
+            }
+          }
+
+          throw 'VCPKG_ROOT is not set and no hosted-runner vcpkg checkout was found.'
+
+      - name: Local CI (Test-LocalCI.ps1)
+        shell: pwsh
+        run: .\scripts\Test-LocalCI.ps1 -KeepBuildDir

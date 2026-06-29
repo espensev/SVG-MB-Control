@@ -284,6 +284,17 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
   calibrated against the off-vs-off variance of two cycles-OFF captures (measured
   ~0.03 ms p99-bulk drift on 2026-06-21 idle-bucket captures — see the script's
   header).
+- **Gate run 2026-06-25 — PASS (provisional).** Three attended live captures
+  (two cycles-OFF baselines + one cycles-ON candidate, 28-thread load) show the
+  sweeper does not move the 250 ms profile: candidate `loop_work_duration_ms`
+  p99-of-bulk **72.15 ms is below both OFF baselines (86.28 / 81.56)**, with
+  fewer overruns (8 vs 37 / 30); 0 buckets moved at default and at a calibrated
+  `rel_tol=0.12 / abs_tol_ms=10` (off-vs-off drift 4.72 ms / 5.5%). A wall-clock
+  CPU-phase split confirms it in the low-noise idle phase (ON idle p50 2.779 ms,
+  the lowest of the three; off-vs-off floor 0.091 ms). Independently re-derived by
+  a 6-skeptic adversarial workflow (all `pass_holds`). This satisfies the §12
+  promotion precondition for the all-core/cycle path. Evidence:
+  [`docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`](../feat-0006-loop-timing-gate-evidence-2026-06-25.md).
 - **Depends on:** FEAT-0002 (whole-system busy time is the time-normalization
   context); the PawnIO transport (`src/hardware/amd_reader.cpp`) and its
   availability signal (FEAT-0004, recommended operational context, not a build
@@ -406,9 +417,42 @@ pytest); **B** build/release gate; **M** manual runtime measurement (read-only,
 > power-feedforward result is NO-GO). Enabling the cycle path live still requires
 > the measurement gate of §12; this change only lands the default-off code.
 
+> **§12 loop-timing gate ran live 2026-06-25 — PASS (provisional).** The
+> off-thread sweeper obligation (§12) is satisfied. Three attended captures on the
+> live binary (SHA `65972F12…`, built 2026-06-23, clean tree) — two cycles-OFF
+> baselines and one cycles-ON candidate under 28-thread load, energy enabled
+> throughout — show enabling the all-core sweeper does **not** move the 250 ms
+> profile. Candidate `loop_work_duration_ms` p99-of-bulk **72.15 ms < both OFF
+> baselines (86.28 / 81.56)**; overruns 8 vs 37 / 30; max 1203 vs 1963 / 3578;
+> `score_loop_timing_gate.py` PASS with 0 buckets moved at default and calibrated
+> (`rel_tol=0.12 / abs_tol_ms=10`, off-vs-off drift 4.72 ms / 5.5%) tolerances. A
+> wall-clock CPU-phase split confirms no movement in the low-noise idle phase (ON
+> idle p50 **2.779 ms**, lowest of the three; off-vs-off idle-p50 floor 0.091 ms).
+> The sweeper provably ran in the candidate (`cpu_cycles_allcore_cores>0` on
+> 5084/5084 cycle rows, 32 cores, `acquisition=quarantine`; both baselines
+> `disabled`). Criterion-4 effective frequency derived all-core idle 5339 / load
+> 5278 MHz @ P0 4300 (plausible 9950X3D all-core; stays MANUAL — no locked-clock
+> reference). A 6-skeptic adversarial workflow independently re-derived every
+> figure and all returned `pass_holds`. Evidence:
+> [`docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`](../feat-0006-loop-timing-gate-evidence-2026-06-25.md).
+> This cleared the last technical blocker for the all-core/cycle path. **Maintainer
+> governance decision recorded 2026-06-25: the cycle/all-core acquisition path
+> (`cpu_cycles_acquisition`) is promoted `quarantine → validated`** — a recorded
+> evaluation outcome (the logged marker stays `quarantine`; the worker never
+> auto-sets `validated`; the analyzer does not branch on it). Mapped to the
+> §Evaluation criteria in
+> [`docs/cpu-work-energy-acquisition-decision-2026-06-07.md`](../cpu-work-energy-acquisition-decision-2026-06-07.md)
+> (§Quarantine-exit decision — cycle/all-core path); decision-doc §4 is met by
+> plausibility + affinity stability, the scorer's criterion-4 MANUAL being its
+> stricter optional locked-clock cross-check. The package-energy marker is a
+> separate maintainer decision (not promoted here). Recorded caveats (future
+> strengthening, non-blocking): provisional tolerance from n=2 baselines; coarse
+> gate tooling (p99-bulk only, ~10 ms MDE — the phase-split p50 supplies the
+> sensitivity); GPU-idle regime only (mid/load GPU buckets not exercised).
+
 | Requirement | Result (pass/fail) | Evidence (test run / commit / CSV / note) | Checked (date) |
 |---|---|---|---|
-| REQ-CPUEFF-01 | partial (cycle logger + analyzer derivation landed; enabled live CSV sessions captured; cycle promotion pending) | Cycle logger landed: `cpu_cycles.h` pure math (allow-list {MPERF_RO `0xC00000E7`, APERF_RO `0xC00000E8`}, 64-bit modular delta, ratio + effective-freq, implausibility guard, `AdvanceCycleWindow`) + `cpu_cycles_tests`; `amd_reader` reads APERF/MPERF per-core under a transient affinity pin and logs `cpu_aperf_delta`/`cpu_mperf_delta` + `cpu_cycles_*` (default-off `SVG_MB_CONTROL_CPU_CYCLES_MODE`). Analyzer effective-frequency derivation landed 2026-06-10 (schema v10). Enabled sessions 1-3 captured `cpu_cycles_acquisition=quarantine`; evidence criterion 4 remains MANUAL, so cycle promotion and the cycles-per-Joule join remain pending. `INST_RETIRED` stays out of scope (PMC writes). | 2026-06-14 |
+| REQ-CPUEFF-01 | partial (cycle logger + analyzer derivation landed; enabled live CSV sessions captured; §12 sweeper gate PASS + cycle/all-core marker promoted `quarantine → validated` by governance decision 2026-06-25; cycles-per-Joule join + optional Option-B locked-clock criterion-4 remain) | Cycle logger landed: `cpu_cycles.h` pure math (allow-list {MPERF_RO `0xC00000E7`, APERF_RO `0xC00000E8`}, 64-bit modular delta, ratio + effective-freq, implausibility guard, `AdvanceCycleWindow`) + `cpu_cycles_tests`; `amd_reader` reads APERF/MPERF per-core under a transient affinity pin and logs `cpu_aperf_delta`/`cpu_mperf_delta` + `cpu_cycles_*` (default-off `SVG_MB_CONTROL_CPU_CYCLES_MODE`). Analyzer effective-frequency derivation landed 2026-06-10 (schema v10); all-core off-thread sweeper roll-up landed 2026-06-21 (schema v13). Enabled sessions 1-3 captured `cpu_cycles_acquisition=quarantine`; evidence criterion 4 remains MANUAL. **§12 off-thread-sweeper loop-timing gate ran live 2026-06-25 — PASS**: cycles-ON candidate `loop_work_duration_ms` p99-bulk 72.15 ms < both cycles-OFF baselines (86.28 / 81.56), 0 buckets moved (default + calibrated), phase-split idle p50 2.779 ms lowest of three; sweeper ran (5084/5084 rows, 32 cores); 6-skeptic adversarial verify all `pass_holds` — [`docs/feat-0006-loop-timing-gate-evidence-2026-06-25.md`](../feat-0006-loop-timing-gate-evidence-2026-06-25.md). **Governance decision recorded 2026-06-25: the cycle/all-core acquisition marker (`cpu_cycles_acquisition`) is promoted `quarantine → validated`** (recorded outcome; logged marker stays `quarantine`, analyzer does not branch — see `docs/cpu-work-energy-acquisition-decision-2026-06-07.md` §Quarantine-exit decision). Decision-doc §4 met by plausibility + affinity stability; the scorer's criterion-4 MANUAL is its stricter optional locked-clock cross-check. Still open (non-blocking): the cycles-per-Joule join, the optional Option-B locked-clock cross-check, more baselines (n=2 provisional tolerance), and a GPU-busy capture. `INST_RETIRED` stays out of scope (PMC writes). | 2026-06-25 |
 | REQ-CPUEFF-02 | pass (marker promotion pending) | `rapl_energy` unit tests — ESU decode, 32-bit modular wrap, multi-wrap→guard-blank, avg-watts, and the `AdvanceEnergyWindow` transition (baseline / id-increment / guard-blank-keeps-id / wrap) — + CTest via Test-LocalCI; logger landed (`amd_reader.cpp`, `runtime_csv_rows.cpp`). Analyzer landed 2026-06-09: schema v9 columns (`analyze_db`, `analyze_csv`, `analyze_ingest_db`), time-weighted `ComputePackagePower` with sample-id de-duplication + per-window watt percentiles (`analyze_report_*`), `ComputePackagePower` unit tests + `test_analyze_ingest` end-to-end (dedup over mirrored ticks, blank-delta exclusion, no-false-zero "unavailable"). Enabled sessions 1-3 captured `cpu_pkg_energy_acquisition=quarantine` and each scored 5 PASS / 0 FAIL / 1 MANUAL, with the MANUAL item limited to cycle effective-frequency validity. The unsupported fixed >=7-day span was removed 2026-06-14; energy quarantine-exit evidence is complete across 3 independent sessions. Flipping `cpu_pkg_energy_acquisition` to `validated` remains a manual maintainer decision. | 2026-06-14 |
 | REQ-CPUEFF-03 | pass (v1 scope) | Temperature stays aligned with the window; energy and cycle provenance markers are independent; effective-frequency inputs are emitted only when the default-off cycle path is enabled and are derived by analyzer schema v10 rather than guessed; control-loop / `csv_rows` tests pass. | 2026-06-11 |
 | REQ-CPUEFF-04 | pass | Additive nullable columns; `test_analyze_ingest` ingests subset/old archives; no-false-zero via the implausibility-guard tests. | 2026-06-07 |

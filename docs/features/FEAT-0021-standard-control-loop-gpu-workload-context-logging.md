@@ -1,7 +1,7 @@
 # FEAT-0021: Standard control-loop GPU workload context logging
 
 **Project:** svg-mb-control
-**Status:** Implemented (T/R; live M pending)   **Version:** 0.2   **Updated:** 2026-06-20
+**Status:** Implemented (T/R verified; live M PASS-with-finding 2026-06-25)   **Version:** 0.3   **Updated:** 2026-06-25
 **Namespace:** `REQ-GPUCTX-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -210,7 +210,7 @@ Verify legend:
 | REQ-GPUCTX-01 | pass | T+R. `runtime_csv_rows.cpp` emits the 11 additive context fields; `csv_rows_tests` locks header/row alignment and values; `test_control_loop.py::test_control_loop_logs_gpu_board_power` verifies simulated live rows include context fields. `Test-LocalCI.ps1 -KeepBuildDir` passed. | 2026-06-20 |
 | REQ-GPUCTX-02 | pass | T+R. `GpuReader::Sample()` owns the context cache and sources values from the in-repo GPU reader fast/rare sample family; simulation uses the same in-repo reader seam. No `evidence-log` foreground process, sibling repo, or subprocess bridge is required. | 2026-06-20 |
 | REQ-GPUCTX-03 | pass | T+R. Context fields are copied only into `RuntimeGpuSnapshot` and the control CSV/analyzer; `channel_evaluator` still consumes only GPU temperatures via `GpuControlEnvelopeC`. `test_control_loop.py` keeps `channel0_response_source=primary_curve` with GPU power/context present. | 2026-06-20 |
-| REQ-GPUCTX-04 | partial | T+R pass: implementation keeps the existing per-tick thermal/power sample and refreshes context at most once per 1000 ms; full `Test-LocalCI.ps1 -KeepBuildDir` passed with no timing-resource regressions in simulated runs. Live 250 ms runtime M evidence was not collected in this change and remains a deployment check. | 2026-06-20 |
+| REQ-GPUCTX-04 | pass (with finding) | T+R+M. T/R: per-tick thermal/power sample unchanged, context refreshed at most once per 1000 ms; full `Test-LocalCI.ps1 -KeepBuildDir` passed. M (live, clean-tree build 2026-06-23): PRIMARY `archive/svg_mb_control_control-loop_20260624_180903.csv` (57363 rows) holds the section-10-named envelope — `loop_achieved_interval_ms` p99 251.97 ms (baseline 251.92), `loop_slip_ms` p99 1.97 ms, `loop_overrun` frac 7e-05 (baseline 0), `process_cpu_pct` p99 0.156 % (baseline 0.146). Context read isolated by `gpu_context_sample_age_ms` band: refresh-tick `loop_work_duration_ms` p50 42.71 / p99-bulk 61.40 ms vs cached p50 1.615 ms == pre-FEAT-0021 baseline 1.582 ms — the ~41 ms read fires once per ~1000 ms, inside the 250 ms budget. Finding (non-breaching): refresh-tick overrun ~3–4× cached, stalls concentrate on the `age==0` read tick (LIVE P<0.0001), largest stalls on cached no-read ticks (pre-existing FEAT-0020 environmental class). `docs/feat-0021-live-cadence-evidence-2026-06-25.md`. | 2026-06-25 |
 | REQ-GPUCTX-05 | pass | T+R. Analyzer schema v12 adds nullable context columns; `test_analyze_ingest.py::test_report_derives_gpu_context_distribution` verifies ingest/report summary, `...old archive...` coverage verifies missing fields report unavailable, and the v9 migration test now migrates through v12. | 2026-06-20 |
 | REQ-GPUCTX-06 | pass | T+R. CSV header tests and review confirm v1 standard rows include only utilization, pstate, graphics/memory clocks, VRAM used/total, identity/time/age/acquisition. Wide fields such as throttle reasons, PCIe, voltage, GPU fans, power rails, and raw thermal slots remain out of the standard row. | 2026-06-20 |
 
@@ -218,5 +218,10 @@ Verify legend:
 per-tick FEAT-0020 power sample for context. It keeps FEAT-0020 power per tick
 and adds a separate cached FEAT-0021 context sample with a 1000 ms minimum
 refresh interval and explicit `gpu_context_sample_age_ms`. `REQ-GPUCTX-04`
-therefore remains `partial` until live runtime cadence evidence is reviewed at
-deployment.
+was `partial` until the live cadence M ran 2026-06-25 and is now `pass (with
+finding)`: the section-10-named envelope holds (achieved-interval p99 251.97 ms,
+slip p99 1.97 ms, overrun frac 7e-05, `process_cpu_pct` p99 0.156 %) and the
+~41 ms context read fires once per ~1000 ms inside the 250 ms budget; the
+non-breaching finding (refresh-tick overrun ~3–4× cached; multi-second stalls
+concentrate on the `age==0` read tick, LIVE P<0.0001) is recorded in
+`docs/feat-0021-live-cadence-evidence-2026-06-25.md`.

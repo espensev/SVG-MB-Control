@@ -1,8 +1,8 @@
 # AMD GPU Telemetry Decision - 2026-06-22
 
 Status: **Proposed** (not yet Current). This record settles the direction for
-`docs/features/FEAT-0024-amd-gpu-telemetry.md` (D-AMDGPU-1). It is the
-direction-setting decision the FEAT-0024 §9 gate depends on; the feature must not
+`docs/features/FEAT-0025-amd-gpu-telemetry.md` (D-AMDGPU-1). It is the
+direction-setting decision the FEAT-0025 §9 gate depends on; the feature must not
 be implemented until this is promoted to Current.
 
 ## Problem
@@ -62,7 +62,7 @@ is an AMD Radeon GPU with a Ryzen 9 9950X3D (operator iCUE telemetry,
   logging-only. No new CSV column or analyzer schema version in v1.
 - **Ship order (the key safety gate):** ship the AMD backend **logging-only
   first**. AMD temperature is routed into `GpuControlEnvelopeC` (making it a
-  control input) **only after** the FEAT-0024 §12 measurement evidence: (a) the
+  control input) **only after** the FEAT-0025 §12 measurement evidence: (a) the
   added per-tick read keeps the shipped 250 ms loop-timing/process-resource
   envelope, and (b) on-hardware AMD temperature is shown valid and stable. Until
   then the envelope contribution is suppressed and a GPU-primary channel relies
@@ -88,6 +88,6 @@ load on real hardware with zero control risk, then promoted through the unchange
 
 ## Promotion
 
-Promote this record to **Current** and check FEAT-0024 §13 gate 3 only after the
+Promote this record to **Current** and check FEAT-0025 §13 gate 3 only after the
 ADLX-vs-ADL choice and the logging-only-first ship order are confirmed by the
-maintainer. FEAT-0024 stays **Draft** until then.
+maintainer. FEAT-0025 stays **Draft** until then.

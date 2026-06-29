@@ -37,7 +37,9 @@ void TestSha256OfAbc() {
 void TestSha256HexIsLowercase() {
     const std::uint8_t data[] = {0xFFu, 0x00u, 0xAAu};
     std::string hex;
-    svg_mb_control::ComputeSha256Hex(data, sizeof(data), &hex);
+    const bool ok = svg_mb_control::ComputeSha256Hex(
+        data, sizeof(data), &hex);
+    ExpectTrue(ok, "ComputeSha256Hex returns true for lowercase check input");
     const bool all_lower = std::all_of(hex.begin(), hex.end(), [](char c) {
         return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
     });

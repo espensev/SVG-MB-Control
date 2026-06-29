@@ -126,13 +126,24 @@ exists in the control-loop CSV
   comparisons. `scripts/analyze_cpu_temp_power.py` now turns those windows into
   package-power-banded CPU temperature summaries; the 2026-06-20 trend/method
   summary is folded into `docs/cpu-temp-comparison-harness.md`. PR #20.
-- **FEAT-0021** (`REQ-GPUCTX-*`, Implemented 2026-06-20; T/R verified, live M
-  pending) — GPU workload context now logs beside GPU power as a cached 1000 ms
-  context slice: utilization, clocks, pstate, VRAM used/total, and explicit
-  sample identity/time/age/acquisition. Analyzer schema v12 ingests and reports
-  the optional context block while older archives report it unavailable. The
-  live deployment check remains REQ-GPUCTX-04: compare achieved interval,
-  slip/overrun, process CPU%, and health against the current 250 ms envelope.
+- **FEAT-0021** (`REQ-GPUCTX-*`, Implemented 2026-06-20; T/R verified; **live M
+  PASS-with-finding 2026-06-25**) — GPU workload context logs beside GPU power as a
+  cached 1000 ms context slice: utilization, clocks, pstate, VRAM used/total, and
+  explicit sample identity/time/age/acquisition. Analyzer schema v12 ingests and
+  reports the optional context block while older archives report it unavailable.
+  The REQ-GPUCTX-04 live cadence M ran 2026-06-25
+  (`docs/feat-0021-live-cadence-evidence-2026-06-25.md`): the section-10-named
+  envelope holds on the deployed loop (achieved-interval p99 251.97 ms, slip p99
+  1.97 ms, overrun frac 7e-05, `process_cpu_pct` p99 0.156 %), and the wide NVML
+  context read costs ~41 ms once per ~1000 ms inside the 250 ms budget.
+  - **Follow-up (non-blocking, from the M finding):** the context read runs in-line
+    on the control thread (~41 ms / ~17 % of the budget on the refresh tick), and
+    multi-second stalls concentrate on the `age==0` read tick beyond chance (LIVE
+    P<0.0001). Two optional improvements, neither required for the closed M: (a)
+    move the GPU context read off-thread (the FEAT-0006 all-core-sweeper precedent)
+    to remove the refresh-tick residual; (b) capture a longer clean LIVE window to
+    bound the multi-second tail. (a) crosses runtime code, so it goes through the
+    Feature Intake Gate (`AGENTS.md`) if pursued.
 
 CPU temperature / power-evaluation follow-ups (todo; analysis-only unless a
 feature spec authorizes new runtime fields):
@@ -208,7 +219,17 @@ contract docs, was completed 2026-06-21 (source-grounded names taken from
   `machine_identity`), `runtime_lifecycle` request-file lifecycle, the extended
   `control_supervisor` entry, and the `config/overlays` / `config/profiles` artifacts.
 
-The on-hardware live M (`REQ-MPROFILE-10`) remains the only open FEAT-0023 item.
+The on-hardware live M (`REQ-MPROFILE-10`) was **closed PASS 2026-06-25** via
+Option A2 (temporary worker+watchdog task `--config` repoint to
+`config/profiles/snd-desk-composed.json`, reverted): the live worker ran
+`active_profile_name=snd-desk-composed` healthy at 250 ms cadence with the resolved
+control config byte-identical to `release\control.json` across all 89 `--show-config`
+lines on hardware (`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`).
+The literal `--profile` task-arg form was proven invalid (`task_runner` is
+`--config`-only). Remaining optional follow-up: **Option B** — productize
+`config/profiles` + `config/overlays` into `release\` via Build-Release/installer
+(Feature Intake Gate + clean tree) so the composed default deploys without depending
+on the dev tree; not a REQ-MPROFILE-10 blocker.
 
 ### `--set-profile` CLI mutual-exclusion guard (FEAT-0023 follow-up)
 
@@ -293,11 +314,31 @@ rows in `docs\TRACEABILITY.md`.
   `scripts\cpu_config_fingerprint.py`) prefer the package columns with a per-core
   fallback. The work numerator (ΔAPERF) and effective frequency are reachable with
   the shipped bin (the 2026-06-07 `#GP` was a probe-index error, corrected
-  2026-06-09). Remaining: the operator M-evidence **capture** — deploy, enable
-  `SVG_MB_CONTROL_CPU_CYCLES_MODE=enabled` under load, then run
-  `scripts\score_loop_timing_gate.py` (cycles-on vs an OFF baseline) to clear the
-  section-12 loop-timing gate, followed by the `quarantine → validated` marker
-  decision.
+  2026-06-09). **§12 loop-timing gate: ran live 2026-06-25 — PASS.** Three
+  attended captures (two cycles-OFF baselines + one cycles-ON candidate, 28-thread
+  load) show the off-thread sweeper does not move the 250 ms profile: ON
+  `loop_work_duration_ms` p99-bulk 72.15 ms < both OFF baselines (86.28 / 81.56),
+  0 buckets moved (default + calibrated), CPU-phase-split idle p50 2.779 ms lowest
+  of three; sweeper confirmed running (5084/5084 rows × 32 cores); 6-skeptic
+  adversarial verify all `pass_holds`
+  (`docs\feat-0006-loop-timing-gate-evidence-2026-06-25.md`). **Marker decision
+  recorded 2026-06-25: the cycle/all-core acquisition marker (`cpu_cycles_acquisition`)
+  is promoted `quarantine → validated`** (governance decision in
+  `docs\cpu-work-energy-acquisition-decision-2026-06-07.md` §Quarantine-exit
+  decision; recorded outcome, logged marker stays `quarantine`, analyzer does not
+  branch). Remaining (non-blocking):
+  - Optional Option-B locked-clock criterion-4 cross-check (validates the derived
+    all-core idle 5339 / load 5278 MHz @ P0 4300 against a locked setpoint and the
+    P0 base) — a future strengthening, not a promotion blocker (decision-doc §4 was
+    met by plausibility + affinity stability).
+  - The cycles-per-Joule energy↔cycle join (the two paths carry separate sample
+    ids and no join rule is specified; options doc 2026-06-16 recommends Option C).
+  - Non-blocking gate-tooling follow-up: `score_loop_timing_gate.py` is coarse
+    (p99-bulk only, ~10 ms MDE; GPU bucketing inert under GPU-idle). The wall-clock
+    CPU-phase split + median is the sensitive analysis and could be folded into the
+    gate tooling or evidence procedure. The 2026-06-25 evidence used n=2 baselines
+    (one off-vs-off spread estimate); more baselines would harden the threshold,
+    and a GPU-busy capture would extend coverage beyond the GPU-idle regime.
 
 ### FEAT-0008 (watchdog hung-worker recovery) post-v1 only
 

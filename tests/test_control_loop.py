@@ -351,7 +351,13 @@ class ControlLoopTests(WindowsExeTestCase):
             )
             with RuntimeProbe(
                 ["--mode", "control-loop", "--config", str(config_path)],
-                env=_sim_direct_env(channel=0, amd_temp_c=86.0),
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=86.0),
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_MEMJN_C": "50.0",
+                    "SVG_MB_CONTROL_SIM_GPU_HOTSPOT_C": "50.0",
+                },
             ):
                 status = _wait_for(
                     lambda: (
@@ -1477,6 +1483,56 @@ class ControlLoopTests(WindowsExeTestCase):
         self.assertTrue(
             all(float(r["cadence_transient"]) < 1e-6 for r in rows)
         )
+
+    def test_cadence_malformed_tctl_sequence_falls_back_to_single_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            _, _, rows = self._run_cadence_loop(
+                Path(td_str), tctl_sequence="62.0x,63.0", min_ticks=8
+            )
+        self.assertTrue(rows)
+        self.assertTrue(
+            all(float(r["cpu_tctl_c"]) == 50.0 for r in rows),
+            msg="malformed sequence should fall back to SVG_MB_CONTROL_SIM_AMD_TCTL_C",
+        )
+
+    def test_control_loop_sim_env_rejects_trailing_junk(self) -> None:
+        with tempfile.TemporaryDirectory() as td_str:
+            td = Path(td_str)
+            runtime_home = td / "runtime"
+            config_path = _write_control_loop_config(
+                td,
+                runtime_home=runtime_home,
+                channel=0,
+                poll_tick_ms=50,
+                write_cooldown_ms=50,
+                deadband_pct=0.35,
+                control_hold_ms=0,
+            )
+            with RuntimeProbe(
+                ["--mode", "control-loop", "--config", str(config_path)],
+                env={
+                    **_sim_direct_env(channel=0, amd_temp_c=50.0),
+                    "SVG_MB_CONTROL_SIM_GPU_MODE": "enabled",
+                    "SVG_MB_CONTROL_SIM_GPU_CORE_C": "88.0x",
+                    "SVG_MB_CONTROL_SIM_READ_FAN_RPM": "999x",
+                    "SVG_MB_CONTROL_SIM_SNAPSHOT_OFFSET_MS": "5000x",
+                },
+            ):
+                status = _wait_for(
+                    lambda: _read_runtime_status(runtime_home),
+                    timeout_s=5.0,
+                )
+                self.assertIsNotNone(status)
+                rows = _wait_for(
+                    lambda: _read_runtime_csv_rows(Path(status["log_csv_path"])),
+                    timeout_s=5.0,
+                )
+                self.assertTrue(rows, msg="control-loop CSV rows missing")
+
+        row = rows[-1]
+        self.assertEqual(float(row["gpu_core_c"]), 62.5)
+        self.assertEqual(int(row["fan0_rpm"]), 1200)
+        self.assertLess(abs(float(row["snapshot_age_ms"])), 2000.0)
 
     def test_cadence_tightens_under_ramp_within_bounds(self) -> None:
         ramp = ",".join([f"{50 + 3 * i}" for i in range(25)] + ["95"] * 40)

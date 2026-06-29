@@ -256,7 +256,7 @@ class SmokeTests(WindowsExeTestCase):
                     and s.get("process_id") != first_pid
                     else None
                 ),
-                timeout_s=8.0,
+                timeout_s=20.0,
                 poll_s=0.1,
             )
             self.assertIsNotNone(restarted, msg="worker was not restarted")

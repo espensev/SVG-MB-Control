@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -67,9 +68,25 @@ std::vector<CalibrationStepSpec> ParseCalibrationSequence(
         double duty_pct = 0.0;
         std::uint32_t hold_ms = 0u;
         try {
-            duty_pct = std::stod(token.substr(0u, colon));
+            const std::wstring duty_text = token.substr(0u, colon);
+            std::size_t consumed = 0u;
+            duty_pct = std::stod(duty_text, &consumed);
+            if (consumed != duty_text.size()) {
+                throw std::invalid_argument("trailing duty characters");
+            }
+
+            const std::wstring hold_text = token.substr(colon + 1u);
+            for (const wchar_t ch : hold_text) {
+                if (ch < L'0' || ch > L'9') {
+                    throw std::invalid_argument("non-digit hold_ms");
+                }
+            }
+            consumed = 0u;
             const unsigned long parsed_hold =
-                std::stoul(token.substr(colon + 1u));
+                std::stoul(hold_text, &consumed);
+            if (consumed != hold_text.size() || parsed_hold > UINT32_MAX) {
+                throw std::out_of_range("hold_ms out of range");
+            }
             hold_ms = static_cast<std::uint32_t>(parsed_hold);
         } catch (const std::exception&) {
             throw std::runtime_error(

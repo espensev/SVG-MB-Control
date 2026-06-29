@@ -795,6 +795,23 @@ points but does not change the mathematical control identity in this file.
   rejected because a historical CPU-heavy trace would have removed
   `68.83` duty-points/tick in CPU-hot/GPU-cool rows.
 
+2026-06-25 FEAT-0024 intake-lane coefficient change (config-only):
+
+- The per-channel `rise_rate_pct_per_min`, `max_setpoint_step_pct`,
+  `gpu_airflow_start_c`, `gpu_airflow_max_boost_pct`,
+  `demand_smoothing_rise_alpha` (ch4 only), and `cpu_override_curve`
+  72–86 C band (ch4 only) were updated on intake lanes `2`/`3`/`4` in
+  `config/control.release.json` as the FEAT-0024 release-config retune.
+  The control-computation identity documented in §1–12 is unchanged:
+  `RateLimitSetpoint`, `ApplyDemandSmoothing`, and `UpdateBoostStage` in
+  `src/control/channel_evaluator.cpp` and `src/control/boost_stage.cpp`
+  are unmodified; only their per-channel config inputs changed. Falling-
+  direction values and exhaust-lane values are byte-unchanged.
+  Validation: pending Pass-3 (combined CPU+GPU load; see
+  `docs/response-evaluation-tuning-plan.md` FEAT-0024 retune section).
+  Direction record: `docs/intake-lead-response-decision-2026-06-25.md`.
+  Spec: `docs/features/FEAT-0024-intake-lead-under-load.md`.
+
 ### 13.2 Per-run checks to keep current
 
 For every real-data pass, use the active runtime manifest/status to identify
