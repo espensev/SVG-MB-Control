@@ -1128,12 +1128,27 @@ const AmdSnapshot& AmdReader::Sample() {
         return snapshot;
     }
 
-    snapshot.samples.push_back(AmdTemperatureSample{
-        .label = "Tctl/Tdie",
-        .temperature_c = amd::DecodeTctl(raw),
-        .sensor_index = 0u,
-        .raw_value = raw,
-    });
+    bool tctl_valid = false;
+    const double tctl_temp = amd::DecodeTctl(raw, &tctl_valid);
+    if (tctl_valid) {
+        snapshot.samples.push_back(AmdTemperatureSample{
+            .label = "Tctl/Tdie",
+            .temperature_c = tctl_temp,
+            .sensor_index = 0u,
+            .raw_value = raw,
+        });
+    } else {
+        // A successful-but-implausible SMN read (e.g. a zero temperature field
+        // decoding to ~0 C, or an out-of-range value) must not surface as a
+        // valid CPU control input. Drop the sample so the channel sees the CPU
+        // input as absent and the sensor-failure safe-mode trip can run,
+        // mirroring the per-CCD validity gate below.
+        char detail[72];
+        std::snprintf(detail, sizeof(detail),
+                      "read_tctl_tdie rejected implausible value (raw=0x%08X)",
+                      static_cast<unsigned>(raw));
+        snapshot.last_warning = detail;
+    }
 
     if (impl_->supports_ccd) {
         std::uint32_t valid_ccds = 0u;
