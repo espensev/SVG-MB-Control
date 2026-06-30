@@ -4,9 +4,9 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace svg_mb_control::analyze {
@@ -291,7 +291,8 @@ void InsertTickRows(Database& db,
 int InsertEventsAttributed(Database& db,
                            const std::vector<EventData>& events,
                            const std::vector<RunWindow>& runs) {
-    std::map<std::string, std::int64_t> start_to_run;
+    std::unordered_map<std::string, std::int64_t> start_to_run;
+    start_to_run.reserve(runs.size());
     for (const auto& r : runs) {
         start_to_run.emplace(r.session_start, r.run_id);
     }

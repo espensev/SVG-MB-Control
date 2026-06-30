@@ -13,6 +13,8 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace svg_mb_control::analyze::report_detail {
@@ -411,7 +413,8 @@ GpuResponseSummary SummariseGpuResponse(
         summary.peak_elapsed_s = peak->elapsed_s;
     }
 
-    std::set<std::int64_t> hot_ticks;
+    std::unordered_set<std::int64_t> hot_ticks;
+    hot_ticks.reserve(ticks.size());
     if (options.gpu_load_threshold_c) {
         const double threshold = *options.gpu_load_threshold_c;
         summary.threshold_c = threshold;
@@ -459,7 +462,7 @@ GpuResponseSummary SummariseGpuResponse(
             if (peak && tick == peak_tick) {
                 at_peak[channel] = setpoint;
             }
-            if (hot_ticks.count(tick) != 0u) {
+            if (hot_ticks.find(tick) != hot_ticks.end()) {
                 load_setpoints[channel].push_back(setpoint);
             }
         }
@@ -1038,7 +1041,8 @@ std::map<int, double> ComputeIdleSetpointBaselines(
     stmt.BindInt(1, run_id);
     const int setpoint_idx = TickChannelSampleSelectIndex(
         TickChannelSampleColumn::SetpointPct);
-    std::map<std::int64_t, Band> tick_band;
+    std::unordered_map<std::int64_t, Band> tick_band;
+    tick_band.reserve(ticks.size());
     for (const auto& t : ticks) {
         tick_band[t.tick] = t.band;
     }
@@ -1086,7 +1090,8 @@ ResponseDelay DetectResponseDelay(
         return result;
     }
 
-    std::map<std::int64_t, double> tick_elapsed;
+    std::unordered_map<std::int64_t, double> tick_elapsed;
+    tick_elapsed.reserve(ticks.size());
     for (const auto& t : ticks) {
         tick_elapsed[t.tick] = t.elapsed_s;
     }
