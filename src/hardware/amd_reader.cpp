@@ -1143,7 +1143,11 @@ const AmdSnapshot& AmdReader::Sample() {
         // valid CPU control input. Drop the sample so the channel sees the CPU
         // input as absent and the sensor-failure safe-mode trip can run,
         // mirroring the per-CCD validity gate below.
-        snapshot.last_warning = "read_tctl_tdie rejected implausible value";
+        char detail[72];
+        std::snprintf(detail, sizeof(detail),
+                      "read_tctl_tdie rejected implausible value (raw=0x%08X)",
+                      static_cast<unsigned>(raw));
+        snapshot.last_warning = detail;
     }
 
     if (impl_->supports_ccd) {
