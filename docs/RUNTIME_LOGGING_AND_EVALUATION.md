@@ -155,6 +155,12 @@ logging replacement.
 - Foreground `evidence-log` CSV rows include per-backend read durations, poll
   interval, and change flags for runtime snapshot, AMD, GPU thermal, fan state,
   SIO evidence, and GPU evidence fields.
+- `Set-SVG-MB-ControlRuntimeWindow.ps1 -Pause -For <duration> -EvidenceLog`
+  uses that foreground `evidence-log` plane during a bounded intentional
+  control-off window. This is the supported way to keep read-only telemetry
+  logging active while Control is stopped; it writes separate
+  `svg_mb_control_evidence.*` CSV/events/manifest files and is stopped before
+  Control resumes.
 - JSONL runtime events include normalized `severity` and `error_code` fields.
   Non-fault events use `severity=info` and `error_code=none`; warning, error,
   and critical rows use stable uppercase codes derived from `event_type` unless

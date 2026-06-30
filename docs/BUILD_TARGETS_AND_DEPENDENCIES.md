@@ -79,7 +79,8 @@ dependency-free.
 
 ## Operator Helper Tools
 
-These tools are not CMake targets and are not part of the release package.
+These tools are not CMake targets. Some are packaged scripts; others are local
+developer/operator tools.
 
 - `tools\profile_switch_ui` (`svg-mb-profile-ui`) — a small Rust local HTTP UI
   for profile switching. It is run manually through
@@ -88,6 +89,13 @@ These tools are not CMake targets and are not part of the release package.
   by invoking the shipped `svg-mb-control.exe --set-profile <name>` operator
   path. It adds no runtime protocol and does not participate in scheduled-task
   process lifetime.
+- `Set-SVG-MB-ControlRuntimeWindow.ps1` — packaged PowerShell helper for
+  intentional stop/restart/pause/resume windows. It uses the packaged lifecycle
+  CLI plus the repo-defined main/watchdog scheduled-task names, registers
+  one-shot resume/evidence-log tasks for bounded windows, and does not write fan
+  duty directly. `-Status -Json` is the process-boundary status surface for
+  future external coordinators such as SQ-control; the helper does not create a
+  runtime dependency on sibling repos.
 
 ## Runtime Processes
 

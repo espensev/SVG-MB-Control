@@ -98,6 +98,7 @@ Release-script outputs:
 - `release\Install-SVG-MB-ControlShortcut.ps1`
 - `release\Install-SVG-MB-ControlScheduledTask.ps1`
 - `release\Install-SVG-MB-ControlWatchdogScheduledTask.ps1`
+- `release\Set-SVG-MB-ControlRuntimeWindow.ps1`
 - `release\scripts\Compare-CpuTemps.ps1`
 - `release\scripts\Install-CpuTempBaselineTask.ps1`
 - `release\scripts\analyze_cpu_temp_power.py`
@@ -228,6 +229,31 @@ Task manager commands:
 .\Install-SVG-MB-ControlScheduledTask.ps1 -Restart
 .\Install-SVG-MB-ControlScheduledTask.ps1 -Remove
 ```
+
+Intentional stop/pause windows:
+
+```powershell
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Status
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Status -Json
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Pause -For 1h
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Pause -For 45m -EvidenceLog
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Resume
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Restart
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Stop
+```
+
+`-Pause` disables the main and watchdog tasks, requests a cooperative stop, and
+registers a one-shot resume task for the requested duration or `-Until` time.
+`-EvidenceLog` starts read-only `evidence-log` during the bounded window and
+stops it before Control resumes; it writes `svg_mb_control_evidence.*` files
+instead of control-loop CSV rows. Add `-DryRun` to review the planned task and
+runtime actions without changing the live system. `-Status -Json` is the
+machine-readable helper/task/window state for future external coordinators such
+as SQ-control; this repo remains standalone and the contract is the packaged
+script/exe process boundary.
+
+See `docs\OPERATOR_RUNTIME_WINDOWS.md` for the full operator and coordinator
+contract.
 
 Start Menu shortcut:
 

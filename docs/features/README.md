@@ -1,7 +1,7 @@
 # svg-mb-control — Feature specs
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-22
+**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-30
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
 `docs/MEASUREMENT_GATE.md`
@@ -74,6 +74,13 @@ a feature's status or the decision queue changes. A fuller standing review is
   on hardware (`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`).
   Productizing the catalog into `release\` (Option B) is the remaining optional
   follow-up.
+- **FEAT-0026** (`Implemented` 2026-06-30; dry-run verified) — packaged
+  operator runtime-window helper for `-Status`, `-Restart`, `-Stop`, bounded
+  `-Pause`, and `-Resume`. It disables the watchdog/main task before an
+  intentional off window, registers a one-shot resume task, and can run
+  read-only `evidence-log` during the window so logging still has a supported
+  path while Control is off. `-Status -Json` is the future SQ-control
+  coordination surface at the packaged process boundary.
 
 **Active — `Accepted`, buildable when implementation is authorized:**
 
@@ -284,3 +291,4 @@ is parked under [`_parked/`](_parked/) and the row rejoins the enforced set
 | [FEAT-0023](FEAT-0023-machine-profiles-and-restart-switch.md) | Machine profiles and restart-based profile switch (machine-base/overlay composition + identity resolution + supervisor switch-by-restart, accepting the BIOS-auto gap; optional Rust local helper UI wraps the existing CLI) | `REQ-MPROFILE-*` | Implemented (2026-06-21; composition + active-profile CSV/status + revert integration test done; 2026-06-22 helper UI added; on-hardware live M REQ-MPROFILE-10 PASS 2026-06-25 via Option A2) |
 | [FEAT-0024](FEAT-0024-intake-lead-under-load.md) | Intake-lead fan response under load (config-only surge-and-hold: intake-lane joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band; idle unchanged, rise-asymmetric) | `REQ-INLEAD-*` | Draft (held — candidate magnitudes pending a response-evaluation Pass-3 validation; idle out of scope) |
 | [FEAT-0025](FEAT-0025-rate-limit-elapsed-cap.md) | Rate-limiter elapsed cap (bound `elapsed_since_last_write` in the `RateLimitSetpoint` rate budget so loop-timing slip cannot produce oversized/overshooting fan steps; inert at nominal cadence) | `REQ-SLEWCAP-*` | Draft (held — shipped cap value + live before/after gate pending) |
+| [FEAT-0026](FEAT-0026-operator-runtime-windows.md) | Operator runtime windows (packaged helper for stop/restart/pause/resume windows plus optional evidence-log during bounded control-off windows; `-Status -Json` process-boundary status for future coordinators) | `REQ-OPWINDOW-*` | Implemented (2026-06-30; operator helper + dry-run tests; live execution not exercised) |

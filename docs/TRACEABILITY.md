@@ -1,7 +1,7 @@
 # svg-mb-control - Traceability
 
 **Project:** svg-mb-control
-**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-22
+**Status:** Accepted   **Version:** 0.6   **Updated:** 2026-06-30
 **Companion to:** `AGENTS.md`, `docs/features/README.md`
 **Purpose:** central `REQ-*` to verification map for feature specs.
 
@@ -73,9 +73,10 @@ Result values:
 | `FEAT-0020` Standard control-loop power logging | Implemented | Implemented 2026-06-18 (D-PWRLOG-1 Current; full Test-LocalCI green — CTest + 169 hermetic). CPU side reuses the FEAT-0006 RAPL path (env flip only, no worker code); GPU side adds a per-tick cadence-agnostic 5-field power slice with a read-timestamp, summarized by the analyzer (v11) as mean/percentile (not an energy integral). `T`/`B`/`R`/`M` verified; the live flip executed under explicit live-runtime authorization and gate 6 is closed. Current comparison evidence is `docs/feat-0020-live-flip-validation-results-2026-06-18.md` plus `docs/power-temp-comparison-snapshot-2026-06-18.md`. Archived implementation plan: `docs/archive/implemented-plans/feat-0020-power-logging-implementation-plan-2026-06-18.md`. |
 | `FEAT-0021` Standard control-loop GPU workload context logging | Implemented (live M PASS-with-finding 2026-06-25) | D-GPUCTX-1 (`docs/logging-next-targets-2026-06-18.md`) is Current. Implemented 2026-06-20 as an additive cached 1000 ms GPU context slice beside FEAT-0020 GPU power; analyzer schema v12 ingests/reports context optionally. Live cadence M ran 2026-06-25 (PASS-with-finding): the section-10-named envelope holds and the ~41 ms context read fires once per ~1000 ms inside the 250 ms budget; non-breaching finding = refresh-tick overrun ~3–4× cached, stalls concentrate on the `age==0` read tick. Evidence `docs/feat-0021-live-cadence-evidence-2026-06-25.md`. |
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
-| `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M deferred) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. Only the on-hardware live M (REQ-10) is deferred. The control-law/PID seam stays FEAT-0003, sequenced after. |
+| `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M PASS 2026-06-25) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. The on-hardware live M (REQ-10) closed PASS 2026-06-25 via Option A2 in `docs/feat-0023-live-default-profile-evidence-2026-06-25.md`; productizing the catalog into `release\` remains an optional follow-up, not a REQ-10 blocker. The control-law/PID seam stays FEAT-0003, sequenced after. |
 | `FEAT-0024` Intake-lead fan response under load | Draft (held) | Not buildable; design capture (`docs/intake-lead-response-decision-2026-06-25.md`, Current for direction). Config-only surge-and-hold retune of the intake lanes `2`/`3`/`4` (joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band); idle and the exhaust lanes unchanged; rise-asymmetric. Held pending candidate-magnitude selection and a response-evaluation Pass-1/Pass-3 validation. Does not cross the measurement gate. |
 | `FEAT-0025` Rate-limiter elapsed cap (loop-jitter-robust slew) | Draft (held) | Not buildable; design capture (`docs/ratelimit-elapsed-cap-decision-2026-06-25.md`, Current). Bounds the `elapsed_since_last_write` used in the `RateLimitSetpoint` rate budget via `control_loop.rate_limit_max_elapsed_ms` so loop-timing slip cannot produce oversized/overshooting fan steps (the 2026-06-25 tightness regression). Inert at nominal cadence (identity); amends `CONTROL_PIPELINE_MATH.md` §8.1. Held pending the shipped cap value and a live before/after gate. Does not cross the measurement gate. |
+| `FEAT-0026` Operator runtime windows | Implemented (dry-run verified; live execution not exercised) | Implemented 2026-06-30: packaged `Set-SVG-MB-ControlRuntimeWindow.ps1` helper for status, restart, stop, bounded pause, resume, optional read-only evidence-log during bounded control-off windows, and `-Status -Json` machine-readable helper state for future external coordinators such as SQ-control. It uses the packaged lifecycle CLI plus the repo-defined main/watchdog task names, writes helper-owned `runtime\operator_windows` state, registers a one-shot resume task, and is covered by dry-run tests. |
 
 ## 3. Requirement map
 
@@ -361,7 +362,10 @@ switch; `79145e4` CSV/status fields; `e431dfd` revert test; `fb70be5`
 composition). Results mirror the owning spec's §14 verification log. The
 control-law/PID seam stays FEAT-0003, restart-selected and sequenced after. The
 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile`
-CLI path without adding runtime semantics.
+CLI path without adding runtime semantics. The on-hardware live M
+(`REQ-MPROFILE-10`) closed PASS 2026-06-25 via Option A2 in
+`docs/feat-0023-live-default-profile-evidence-2026-06-25.md`; productizing the
+catalog into `release\` remains an optional follow-up, not a REQ-10 blocker.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
@@ -409,6 +413,22 @@ mirror the owning spec's §14 verification log.
 | `REQ-SLEWCAP-03` | T | `RateLimitSetpoint` unit test: for `elapsed <= cap` the output equals the uncapped path bit-for-bit across the input matrix. | pending (held-Draft) |
 | `REQ-SLEWCAP-04` | T, R | Unit/integration test that the curve, PID, and low-band callers pass the cap through; review that `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. | pending (held-Draft) |
 | `REQ-SLEWCAP-05` | M | Live before/after capture (cap off->on) via `svg-mb-control analyze ingest` + `analyze report` (with the validated replay in `docs/intake-lead-grounding-2026-06-25.md` as supporting evidence): loaded-band reversal / step-irregularity drops, up-response unchanged, no post-startup authority reasserts. | pending (held-Draft) |
+
+### FEAT-0026 - Operator runtime windows
+
+Implemented 2026-06-30. Results mirror the owning spec's §14 verification log.
+Live scheduled-task execution was not exercised in this change; verification is
+dry-run and review only.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-OPWINDOW-01` | T, R | `tests/test_runtime_window_script.py` covers restart dry-run command shape; script review confirms packaged exe/common scheduled-task names. | pass |
+| `REQ-OPWINDOW-02` | T, R | Dry-run pause test asserts watchdog/main disable, stop request, state write, and resume-task registration. | pass |
+| `REQ-OPWINDOW-03` | T, R | Review of `Resume-ControlFromState` and `Stop-EvidenceLogIfNeeded`: evidence-log stop is requested and waited before Control start; prior task-enabled state is restored when known. | pass |
+| `REQ-OPWINDOW-04` | T, R | Dry-run pause with `-EvidenceLog` asserts `--mode evidence-log --config`; review task limit and resume cleanup. | pass |
+| `REQ-OPWINDOW-05` | T | `tests/test_runtime_window_script.py` passes using `-DryRun`, `-NoElevate`, and nonexistent explicit exe/config paths. | pass |
+| `REQ-OPWINDOW-06` | T, R | `scripts/Build-Release.ps1` packages the helper; README, `CONTROL_LOOP.md`, `RUNTIME_HOME.md`, `RUNTIME_LOGGING_AND_EVALUATION.md`, and `OPERATOR_RUNTIME_WINDOWS.md` document the workflow. | pass |
+| `REQ-OPWINDOW-07` | T, R | Dry-run `-Status -Json` test parses the output as JSON and asserts `process-boundary` / no sibling dependency; `OPERATOR_RUNTIME_WINDOWS.md` records the SQ-control coordination boundary. | pass |
 
 ### FEAT-0007 — Reserved (parked)
 

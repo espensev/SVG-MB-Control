@@ -70,6 +70,7 @@ $DistExtras          = @(
     'Install-SVG-MB-ControlShortcut.ps1'
     'Install-SVG-MB-ControlScheduledTask.ps1'
     'Install-SVG-MB-ControlWatchdogScheduledTask.ps1'
+    'Set-SVG-MB-ControlRuntimeWindow.ps1'
     'docs'
     'scripts\Start-EvalDashboard.ps1'
     'scripts\Common-Python.ps1'

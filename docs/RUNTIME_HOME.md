@@ -54,6 +54,21 @@ writes, so it is not part of the Control-owned set above:
   config. `ResolveMachineId` reads this file from the resolved runtime home;
   Control only reads it and never creates or rewrites it.
 
+Packaged operator helpers can also keep their own state under the runtime home.
+These files are not Control-owned runtime schema and are not read by the worker:
+
+- `operator_windows\active_window.json` is written by
+  `Set-SVG-MB-ControlRuntimeWindow.ps1` while an intentional stop/pause window is
+  active. It records the resolved exe/config/runtime paths, task names, previous
+  task-enabled states, resume time, and whether read-only evidence logging was
+  started.
+- `operator_windows\last_window.json` is written by the same helper after a
+  successful resume, preserving the last completed window for operator review.
+
+`Set-SVG-MB-ControlRuntimeWindow.ps1 -Status -Json` reads this helper-owned
+state and scheduled-task metadata for external coordinators. That JSON status is
+an operator-helper contract, not a Control-owned runtime schema.
+
 ## current_state.json
 
 Published by `one-shot`, `read-loop`, and `control-loop` payload builders.

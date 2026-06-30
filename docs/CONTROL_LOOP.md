@@ -300,6 +300,26 @@ through `svg-mb-control-task-runner.exe`. The task checks health at logon and
 every minute. It restarts only `stale` or `stopped` states; `degraded` is
 visible but not restarted, and `failed` is left for operator review.
 
+`Set-SVG-MB-ControlRuntimeWindow.ps1` is the packaged helper for intentional
+operator stop/pause windows. `-Pause -For <duration>` or `-Pause -Until
+<datetime>` disables the watchdog and main task, requests the normal cooperative
+`--stop`, writes helper-owned state under `runtime\operator_windows`, and
+registers a one-shot resume task. `-Resume` starts Control again and restores the
+previous task-enabled state when it was recorded. The helper never writes fan
+duty directly and never resets breakers; it only orchestrates existing lifecycle
+commands and scheduled tasks. `-DryRun` prints the planned actions without
+touching Task Scheduler or runtime files.
+
+`-Status -Json` exposes the helper/task/window state as machine-readable JSON
+for future external coordinators such as SQ-control. That coordination remains a
+process-boundary contract against the packaged script and executable; this repo
+does not import code from or depend on the coordinator repo at runtime.
+
+During a bounded pause, `-EvidenceLog` can run read-only `--mode evidence-log`
+so telemetry still has a supported logging path while Control is off. The
+evidence logger writes its separate `svg_mb_control_evidence.*` artifacts and is
+stopped before the resume path starts Control again.
+
 Passing `--mode control-loop --config <path>` keeps the loop attached to the
 current terminal and does not add supervisor restart behavior.
 
