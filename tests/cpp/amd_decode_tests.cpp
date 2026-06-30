@@ -47,6 +47,42 @@ void TestDecodeTctl_LowBitsIgnored() {
                "DecodeTctl ignores sub-step low bits");
 }
 
+void TestDecodeTctl_ValidityGate() {
+    using svg_mb_control::amd::DecodeTctl;
+    // A zero temperature field (e.g. a successful-but-zero SMN read) decodes to
+    // 0 C but must be flagged invalid so it is not used as a CPU control input.
+    bool valid = true;
+    ExpectNear(DecodeTctl(0u, &valid), 0.0, kEps, "DecodeTctl(0) magnitude");
+    ExpectFalse(valid, "DecodeTctl raw 0 (zero temp field) is invalid");
+    // Offset flag set over a zero temperature field -> -49 C, still invalid
+    // because the field is unpopulated.
+    valid = true;
+    ExpectNear(DecodeTctl(0x80000u, &valid), -49.0, kEps,
+               "DecodeTctl offset-only magnitude");
+    ExpectFalse(valid, "DecodeTctl zero field with offset flag is invalid");
+    // A populated, in-range reading (520 steps -> 65 C) is valid.
+    valid = false;
+    ExpectNear(DecodeTctl(0x41000000u, &valid), 65.0, kEps,
+               "DecodeTctl 65 C magnitude");
+    ExpectTrue(valid, "DecodeTctl 65 C is valid");
+    // temp must be strictly below 125 C. 1000 steps -> exactly 125 C -> invalid.
+    valid = true;
+    DecodeTctl(0x7D000000u, &valid);
+    ExpectFalse(valid, "DecodeTctl exactly 125 C is invalid");
+    // 999 steps -> 124.875 C -> valid.
+    valid = false;
+    ExpectNear(DecodeTctl(0x7CE00000u, &valid), 124.875, kEps,
+               "DecodeTctl 999 steps == 124.875 C");
+    ExpectTrue(valid, "DecodeTctl just under 125 C is valid");
+}
+
+void TestDecodeTctl_NullValid() {
+    using svg_mb_control::amd::DecodeTctl;
+    // A null out_valid must not be dereferenced; existing callers pass nothing.
+    ExpectNear(DecodeTctl(0x41000000u, nullptr), 65.0, kEps,
+               "DecodeTctl null out_valid returns temperature");
+}
+
 void TestDecodeCcdTemp_Magnitude() {
     using svg_mb_control::amd::DecodeCcdTemp;
     bool valid = false;
@@ -140,6 +176,8 @@ int main() {
     TestDecodeTctl_Magnitude();
     TestDecodeTctl_OffsetFlag();
     TestDecodeTctl_LowBitsIgnored();
+    TestDecodeTctl_ValidityGate();
+    TestDecodeTctl_NullValid();
     TestDecodeCcdTemp_Magnitude();
     TestDecodeCcdTemp_MasksHighBits();
     TestDecodeCcdTemp_ValidityGate();
