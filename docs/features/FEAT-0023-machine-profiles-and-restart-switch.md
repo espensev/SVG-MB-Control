@@ -1,7 +1,7 @@
 # FEAT-0023: Machine profiles and restart-based profile switch
 
 **Project:** svg-mb-control
-**Status:** Implemented (composition + active-profile CSV/status fields + revert integration test done; on-hardware live M deferred)   **Version:** 0.5   **Updated:** 2026-06-22
+**Status:** Implemented (composition + active-profile CSV/status fields + revert integration test done; on-hardware live M PASS 2026-06-25)   **Version:** 0.5   **Updated:** 2026-06-26
 **Namespace:** `REQ-MPROFILE-*`
 **Companion to:** `AGENTS.md`, `docs/TRACEABILITY.md`,
 `docs/FEATURE_VERIFICATION_CHECKLIST.md`, `docs/STRUCTURE_AND_STABILITY.md`,
@@ -309,8 +309,9 @@ Verify legend:
 > `0952e3d` / `1195d84` / `9a78a11` startup resolution + live switch; `79145e4`
 > active-profile CSV/status fields, REQ-09; `e431dfd` revert integration test,
 > REQ-07; `fb70be5` machine-base/overlay composition, REQ-01). REQ-01/04/05/06/07/
-> 08/09 pass; REQ-02/03 pass; REQ-10 is T+R-pass with only the on-hardware live M
-> deferred (which also gates wiring the host identity + catalog into Build-Release).
+> 08/09 pass; REQ-02/03 pass; REQ-10 is T+R+M-pass as of 2026-06-25 via
+> Option A2. Wiring the host identity + catalog into Build-Release remains
+> optional release-catalog productization, not a REQ-10 blocker.
 > FEAT-0003's control-law/PID seam remains a later phase.
 
 ## 14. Verification log  *(fill in after the feature is built — "check against the spec later")*
