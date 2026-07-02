@@ -75,8 +75,9 @@ Result values:
 | `FEAT-0022` Runtime logging failure visibility | Implemented | D-LOGHEALTH-1 (`docs/runtime-logging-health-decision-2026-06-20.md`) is Current for FEAT-0022. Implemented 2026-06-20: CSV/archive/mirror/manifest sink failures now expose logger sink detail; control-loop/read-loop/evidence-log emit rate-limited `runtime_logging.csv_write_failed` / `runtime_logging.csv_write_recovered` events; event-log append failure writes sticky `logging_health.json` and degrades health while active; status/snapshot publish failures emit sticky failure/recovery events and failed control publishes retry promptly; analyzer reports classify running CSV manifest/archive/latest-mirror row-count mismatches as warnings and closed mismatches as suspect evidence. |
 | `FEAT-0023` Machine profiles and restart-based profile switch | Implemented (live M PASS 2026-06-25) | Implemented 2026-06-21 (commits `0952e3d`/`1195d84`/`9a78a11`/`79145e4`/`e431dfd`/`fb70be5`): startup profile resolution, the live restart-based switch (accepts the BIOS-auto gap), machine-base/overlay composition (REQ-01), active-profile CSV/status fields (REQ-09), and the revert integration test (REQ-07). The 2026-06-22 Rust local UI helper wraps the existing status/health/`--set-profile` CLI path without adding runtime semantics. The on-hardware live M (REQ-10) closed PASS 2026-06-25 via Option A2 in `docs/feat-0023-live-default-profile-evidence-2026-06-25.md`; productizing the catalog into `release\` remains an optional follow-up, not a REQ-10 blocker. The control-law/PID seam stays FEAT-0003, sequenced after. |
 | `FEAT-0024` Intake-lead fan response under load | Draft (held) | Not buildable; design capture (`docs/intake-lead-response-decision-2026-06-25.md`, Current for direction). Config-only surge-and-hold retune of the intake lanes `2`/`3`/`4` (joint rise-rate + step-cap raise, intake-first `gpu_airflow` onset, steeper intake `cpu_override` mid-band); idle and the exhaust lanes unchanged; rise-asymmetric. Held pending candidate-magnitude selection and a response-evaluation Pass-1/Pass-3 validation. Does not cross the measurement gate. |
-| `FEAT-0025` Rate-limiter elapsed cap (loop-jitter-robust slew) | Draft (held) | Not buildable; design capture (`docs/ratelimit-elapsed-cap-decision-2026-06-25.md`, Current). Bounds the `elapsed_since_last_write` used in the `RateLimitSetpoint` rate budget via `control_loop.rate_limit_max_elapsed_ms` so loop-timing slip cannot produce oversized/overshooting fan steps (the 2026-06-25 tightness regression). Inert at nominal cadence (identity); amends `CONTROL_PIPELINE_MATH.md` §8.1. Held pending the shipped cap value and a live before/after gate. Does not cross the measurement gate. |
+| `FEAT-0025` AMD GPU telemetry backend | Draft | Not buildable yet; intake spec landed 2026-06-22. D-AMDGPU-1 (`docs/amd-gpu-telemetry-decision-2026-06-22.md`) is **Proposed** — lean is AMD ADLX, read-only, vendored, dynamically loaded, behind a `GpuReader` vendor-selection seam, reusing the FEAT-0020/0021 logging slices and widening `*_source`/`*_acquisition` with an additive `adlx` value. AMD temperature ships logging-only until the §12 measurement gate (loop-timing impact + on-hardware AMD-temp validity) authorizes it as a `GpuControlEnvelopeC` control input. Owes the §9 decision promotion and §12 evidence. |
 | `FEAT-0026` Operator runtime windows | Implemented (dry-run verified; live execution not exercised) | Implemented 2026-06-30: packaged `Set-SVG-MB-ControlRuntimeWindow.ps1` helper for status, restart, stop, bounded pause, resume, optional read-only evidence-log during bounded control-off windows, and `-Status -Json` machine-readable helper state for future external coordinators such as SQ-control. It uses the packaged lifecycle CLI plus the repo-defined main/watchdog task names, writes helper-owned `runtime\operator_windows` state, registers a one-shot resume task, and is covered by dry-run tests. |
+| `FEAT-0027` Rate-limiter elapsed cap (loop-jitter-robust slew) | Draft (held) | Not buildable; design capture (`docs/ratelimit-elapsed-cap-decision-2026-06-25.md`, Current). Bounds the `elapsed_since_last_write` used in the `RateLimitSetpoint` rate budget via `control_loop.rate_limit_max_elapsed_ms` so loop-timing slip cannot produce oversized/overshooting fan steps (the 2026-06-25 tightness regression). Inert at nominal cadence (identity); amends `CONTROL_PIPELINE_MATH.md` §8.1. Held pending the shipped cap value and a live before/after gate. Does not cross the measurement gate. |
 
 ## 3. Requirement map
 
@@ -397,22 +398,25 @@ owning spec's §14 verification log.
 | `REQ-INLEAD-05` | T, R | Config-contract test: no `fall_rate_pct_per_min` / `demand_smoothing_fall_alpha` / `decay_latch_pct_per_min` raised on any lane; exhaust lanes `0`/`1`/`5` byte-unchanged; review for rise-asymmetry. | pending (held-Draft) |
 | `REQ-INLEAD-06` | M | Live Pass-3 combined-load capture (intake first-duty / ramp precedes the exhausts; CPU Tctl / GPU memory percentiles in the acceptance band; no post-startup authority reasserts) plus a Pass-1 idle-unchanged hold, via `svg-mb-control analyze ingest` + `analyze report`. | pending (held-Draft) |
 
-### FEAT-0025 - Rate-limiter elapsed cap (loop-jitter-robust slew)
+### FEAT-0025 - AMD GPU telemetry backend
 
-Draft (held). Direction settled in
-`docs/ratelimit-elapsed-cap-decision-2026-06-25.md` (Current); forensic + replay
-evidence in `docs/intake-lead-grounding-2026-06-25.md`. The shipped cap value and the
-live before/after gate are pending. A `RateLimitSetpoint` change (control-computation
-identity), so `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. Results
-mirror the owning spec's §14 verification log.
+Draft intake spec, 2026-06-22 (`docs/features/FEAT-0025-amd-gpu-telemetry.md`).
+Adds a read-only AMD (ADLX, proposed) GPU backend behind the existing `GpuReader`
+seam so the GPU control envelope (`GpuControlEnvelopeC`,
+`src/control/channel_evaluator.cpp:449`) and the FEAT-0020/0021 logging slices
+work on an AMD GPU machine. Not implemented; results are `pending`. AMD
+temperature is logging-only until the §12 measurement gate authorizes it as a
+control input. D-AMDGPU-1 (`docs/amd-gpu-telemetry-decision-2026-06-22.md`) is
+Proposed.
 
 | Requirement | Verify | Verification home | Result |
 |---|---|---|---|
-| `REQ-SLEWCAP-01` | T, R | C++ unit test of `RateLimitSetpoint`: budget uses `min(elapsed, cap)` when the cap is finite/positive; cap unset reproduces the pre-feature result across a value matrix; review vs `CONTROL_PIPELINE_MATH.md` §8.1. | pending (held-Draft) |
-| `REQ-SLEWCAP-02` | T, R | Config-contract + unit test: only the rate-budget elapsed is bounded (deadband/cooldown/cadence/channels/curves/`max_setpoint_step_pct`/EMA unchanged; fall rate not raised); review of the diff. | pending (held-Draft) |
-| `REQ-SLEWCAP-03` | T | `RateLimitSetpoint` unit test: for `elapsed <= cap` the output equals the uncapped path bit-for-bit across the input matrix. | pending (held-Draft) |
-| `REQ-SLEWCAP-04` | T, R | Unit/integration test that the curve, PID, and low-band callers pass the cap through; review that `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. | pending (held-Draft) |
-| `REQ-SLEWCAP-05` | M | Live before/after capture (cap off->on) via `svg-mb-control analyze ingest` + `analyze report` (with the validated replay in `docs/intake-lead-grounding-2026-06-25.md` as supporting evidence): loaded-band reversal / step-irregularity drops, up-response unchanged, no post-startup authority reasserts. | pending (held-Draft) |
+| `REQ-AMDGPU-01` | B, R | Offline-reproducible release build with the AMD compile gate; review the vendored backend has pinned provenance + SHA-256 and loads in-process with no sibling-repo/subprocess dependency. | pending |
+| `REQ-AMDGPU-02` | T, R | `GpuReader` vendor-selection test via `SVG_MB_CONTROL_SIM_GPU_MODE` AMD mode (`available=true`, mapped temps, `gpu_name`); review NVIDIA-path output and public interface unchanged, one active backend. | pending |
+| `REQ-AMDGPU-03` | T, M, R | Test AMD temps stay out of the envelope until enabled; review `GpuControlEnvelopeC` + `CONTROL_PIPELINE_MATH.md` unchanged; live M of AMD-temp validity + 250 ms loop-timing before any control-input promotion. | pending |
+| `REQ-AMDGPU-04` | T, R | CSV header/row test for the additive `adlx` marker (single vendor marker, no false zero); analyzer ingest test that older `nvml`/`unavailable` archives still bind by header name. | pending |
+| `REQ-AMDGPU-05` | T, R | Analyzer ingest/report test that AMD power/context reuse the FEAT-0020/0021 columns, summarize only when present, degrade older archives; review no new schema version in v1. | pending |
+| `REQ-AMDGPU-06` | T, R | Test an unavailable/implausible AMD read trips the FEAT-0013 source-aware dropout/safe-mode path and never writes fan duty; review the `SVG_MB_CONTROL_SIM_GPU_MODE` AMD hook runs `Test-LocalCI` without Radeon hardware. | pending |
 
 ### FEAT-0026 - Operator runtime windows
 
@@ -429,6 +433,23 @@ dry-run and review only.
 | `REQ-OPWINDOW-05` | T | `tests/test_runtime_window_script.py` passes using `-DryRun`, `-NoElevate`, and nonexistent explicit exe/config paths. | pass |
 | `REQ-OPWINDOW-06` | T, R | `scripts/Build-Release.ps1` packages the helper; README, `CONTROL_LOOP.md`, `RUNTIME_HOME.md`, `RUNTIME_LOGGING_AND_EVALUATION.md`, and `OPERATOR_RUNTIME_WINDOWS.md` document the workflow. | pass |
 | `REQ-OPWINDOW-07` | T, R | Dry-run `-Status -Json` test parses the output as JSON and asserts `process-boundary` / no sibling dependency; `OPERATOR_RUNTIME_WINDOWS.md` records the SQ-control coordination boundary. | pass |
+
+### FEAT-0027 - Rate-limiter elapsed cap (loop-jitter-robust slew)
+
+Draft (held). Direction settled in
+`docs/ratelimit-elapsed-cap-decision-2026-06-25.md` (Current); forensic + replay
+evidence in `docs/intake-lead-grounding-2026-06-25.md`. The shipped cap value and the
+live before/after gate are pending. A `RateLimitSetpoint` change (control-computation
+identity), so `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. Results
+mirror the owning spec's §14 verification log.
+
+| Requirement | Verify | Verification home | Result |
+|---|---|---|---|
+| `REQ-SLEWCAP-01` | T, R | C++ unit test of `RateLimitSetpoint`: budget uses `min(elapsed, cap)` when the cap is finite/positive; cap unset reproduces the pre-feature result across a value matrix; review vs `CONTROL_PIPELINE_MATH.md` §8.1. | pending (held-Draft) |
+| `REQ-SLEWCAP-02` | T, R | Config-contract + unit test: only the rate-budget elapsed is bounded (deadband/cooldown/cadence/channels/curves/`max_setpoint_step_pct`/EMA unchanged; fall rate not raised); review of the diff. | pending (held-Draft) |
+| `REQ-SLEWCAP-03` | T | `RateLimitSetpoint` unit test: for `elapsed <= cap` the output equals the uncapped path bit-for-bit across the input matrix. | pending (held-Draft) |
+| `REQ-SLEWCAP-04` | T, R | Unit/integration test that the curve, PID, and low-band callers pass the cap through; review that `CONTROL_PIPELINE_MATH.md` §8.1 is amended in the same change. | pending (held-Draft) |
+| `REQ-SLEWCAP-05` | M | Live before/after capture (cap off->on) via `svg-mb-control analyze ingest` + `analyze report` (with the validated replay in `docs/intake-lead-grounding-2026-06-25.md` as supporting evidence): loaded-band reversal / step-irregularity drops, up-response unchanged, no post-startup authority reasserts. | pending (held-Draft) |
 
 ### FEAT-0007 — Reserved (parked)
 

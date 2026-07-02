@@ -1,8 +1,8 @@
 # Rate-limiter elapsed-cap — decision (2026-06-25)
 
 **Status:** Current (direction). The shipped cap value and the live before/after
-evidence are settled by the FEAT-0025 validation gate.
-**Owns the direction for:** `docs/features/FEAT-0025-rate-limit-elapsed-cap.md`
+evidence are settled by the FEAT-0027 validation gate.
+**Owns the direction for:** `docs/features/FEAT-0027-rate-limit-elapsed-cap.md`
 (`REQ-SLEWCAP-*`).
 **Companion to:** `docs/CONTROL_PIPELINE_MATH.md` §8 (the identity it amends),
 `docs/COOLING_STRATEGY.md`, `docs/response-evaluation-tuning-plan.md`,
@@ -131,7 +131,7 @@ Source: live control-loop CSV from session `20260625_190530`, not committed
 ## 5. Scope boundary
 
 - This is **independent of FEAT-0024** (intake-lead, merged PR #32, not deployed,
-  disposition still open). FEAT-0025 fixes the steady-load tightness regression;
+  disposition still open). FEAT-0027 fixes the steady-load tightness regression;
   FEAT-0024 is about up-response lead.
 - The earlier **demand-hysteresis / delta-rise** idea is **shelved**: the validated
   data (`docs/intake-lead-grounding-2026-06-25.md`) showed steady-state was already

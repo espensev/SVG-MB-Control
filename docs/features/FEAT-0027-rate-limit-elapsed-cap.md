@@ -1,4 +1,4 @@
-# FEAT-0025: Rate-limiter elapsed cap (loop-jitter-robust slew)
+# FEAT-0027: Rate-limiter elapsed cap (loop-jitter-robust slew)
 
 **Project:** svg-mb-control
 **Status:** Draft   **Version:** 0.1   **Updated:** 2026-06-25

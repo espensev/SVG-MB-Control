@@ -23,11 +23,18 @@ inline constexpr std::uint32_t kCcdTempZen4Base = 0x00059B08u;
 
 // Decodes the Tctl/Tdie SMN register: bits [31:21] are the temperature in
 // 0.125 C steps, with a fixed -49 C offset applied when kTctlTempOffsetFlag is
-// set.
-inline double DecodeTctl(std::uint32_t raw) {
-    double temp = static_cast<double>(((raw >> 21) * 125u) * 0.001);
+// set. *out_valid (when non-null) reports whether the reading is a populated,
+// in-range sensor (non-zero temperature field and below 125 C); callers skip
+// samples that fail this gate so a successful-but-zero SMN read does not
+// surface as a valid ~0 C CPU control input. Mirrors the DecodeCcdTemp gate.
+inline double DecodeTctl(std::uint32_t raw, bool* out_valid = nullptr) {
+    const std::uint32_t temp_field = raw >> 21;
+    double temp = static_cast<double>((temp_field * 125u) * 0.001);
     if ((raw & kTctlTempOffsetFlag) != 0u) {
         temp -= 49.0;
+    }
+    if (out_valid != nullptr) {
+        *out_valid = (temp_field > 0u && temp < 125.0);
     }
     return temp;
 }
