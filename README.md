@@ -1,9 +1,41 @@
 # SVG-MB-Control
 
+[![Windows CI](https://github.com/espensev/SVG-MB-Control/actions/workflows/ci-windows.yml/badge.svg)](https://github.com/espensev/SVG-MB-Control/actions/workflows/ci-windows.yml)
+
 `SVG-MB-Control` is the standalone runtime repo for motherboard telemetry and
 fan control. This repo owns the executable, packaged configs, runtime state,
 vendored dependencies, and release artifacts. It does not depend on sibling
 repos at runtime.
+
+## Quick Start
+
+Use these as the default entry points:
+
+```powershell
+.\scripts\Test-LocalCI.ps1 -KeepBuildDir
+.\build-release.ps1
+```
+
+Packaged operator commands run from `release\` after a release build:
+
+```powershell
+cd .\release
+.\svg-mb-control.exe --status
+.\svg-mb-control.exe --health --json
+.\svg-mb-control.exe --show-config
+```
+
+For runtime pause/resume windows:
+
+```powershell
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Status
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Pause -For 45m -EvidenceLog
+.\Set-SVG-MB-ControlRuntimeWindow.ps1 -Resume
+```
+
+Start with [docs/README.md](docs/README.md) for the local documentation map.
+Use [docs/features/README.md](docs/features/README.md) before adding new
+features or changing runtime behavior.
 
 ## Scope
 
@@ -642,41 +674,37 @@ traceability, promotion-gate, and verification-log consistency.
 
 ## Documentation
 
-Current contract and operator references:
+The local docs index is [docs/README.md](docs/README.md).
 
-- `docs\MEASUREMENT_GATE.md`
-- `docs\TRACEABILITY.md`
-- `docs\FEATURE_VERIFICATION_CHECKLIST.md`
-- `docs\CONTROL_LOOP.md`
-- `docs\CONTROL_PIPELINE_MATH.md`
-- `docs\READ_LOOP.md`
-- `docs\WRITE_ORCHESTRATION.md`
-- `docs\RUNTIME_HOME.md`
-- `docs\RUNTIME_LOGGING_AND_EVALUATION.md`
-- `docs\STRUCTURE_AND_STABILITY.md`
-- `docs\COOLING_STRATEGY.md`
-- `docs\NORMAL_RUNTIME_AIRFLOW_PROFILE.md`
-- `docs\response-evaluation-tuning-plan.md`
+Current authority surfaces:
 
-Compacted implementation records, kept separate from the current operator
-workflow:
+- [docs/STRUCTURE_AND_STABILITY.md](docs/STRUCTURE_AND_STABILITY.md) for module
+  ownership and remaining structural polish.
+- [docs/BUILD_TARGETS_AND_DEPENDENCIES.md](docs/BUILD_TARGETS_AND_DEPENDENCIES.md)
+  for executables, scheduled-task processes, and vendored dependencies.
+- [docs/RUNTIME_HOME.md](docs/RUNTIME_HOME.md) for runtime sidecars, status,
+  health, logs, manifests, and archive retention.
+- [docs/CONTROL_LOOP.md](docs/CONTROL_LOOP.md),
+  [docs/READ_LOOP.md](docs/READ_LOOP.md), and
+  [docs/WRITE_ORCHESTRATION.md](docs/WRITE_ORCHESTRATION.md) for mode-specific
+  runtime behavior.
+- [docs/CONTROL_PIPELINE_MATH.md](docs/CONTROL_PIPELINE_MATH.md) for the
+  maintained numerical reference.
+- [docs/COOLING_STRATEGY.md](docs/COOLING_STRATEGY.md) and
+  [config/machines/snd-desk.cooling.policy.json](config/machines/snd-desk.cooling.policy.json)
+  for shipped cooling policy.
+- [docs/features/README.md](docs/features/README.md),
+  [docs/TRACEABILITY.md](docs/TRACEABILITY.md), and
+  [docs/FEATURE_VERIFICATION_CHECKLIST.md](docs/FEATURE_VERIFICATION_CHECKLIST.md)
+  for feature intake and verification.
 
-- `docs\archive\implemented-plans\CONTROL_SIMPLIFICATION_TARGETS.md`
-- `docs\archive\implemented-plans\LOGGING_IMPROVEMENT_PLAN.md`
-- `docs\archive\implemented-plans\SCRIPT_STACK_REVIEW.md`
-- `docs\bench-logging-history.md`
+Controller tuning work starts from [docs/MEASUREMENT_GATE.md](docs/MEASUREMENT_GATE.md),
+[docs/RUNTIME_LOGGING_AND_EVALUATION.md](docs/RUNTIME_LOGGING_AND_EVALUATION.md),
+and [docs/response-evaluation-tuning-plan.md](docs/response-evaluation-tuning-plan.md).
+The current shipped configs assert a `250 ms` control/write profile; lowering
+cadence, enabling an adaptive floor below that profile, adding live channels, or
+broader controller strategy changes still require fresh measurement evidence
+before changing defaults.
 
-Use `docs\MEASUREMENT_GATE.md`, `docs\response-evaluation-tuning-plan.md`, and
-`docs\RUNTIME_LOGGING_AND_EVALUATION.md` as the controller tuning workflow.
-Use `docs\CONTROL_PIPELINE_MATH.md` as the maintained numerical reference for
-curve lookup, smoothing, boost composition, low-band behavior, cadence scoring,
-and CSV/status identities. The current shipped configs assert a `250 ms`
-control/write profile; lowering cadence, enabling an adaptive floor below that
-profile, adding live channels, or broader controller strategy changes still
-require fresh measurement evidence before changing defaults.
-
-Do not merge completed implementation records into the operator docs unless a
-topic is reopened; keep the current docs as the source of truth and keep closed
-records short.
-
-Older point-in-time review and discovery notes live under `docs\archive\`.
+Point-in-time discovery, review, and completed implementation records live under
+`docs/archive/` unless a current doc links them as active context.
