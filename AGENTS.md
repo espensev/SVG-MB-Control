@@ -1,10 +1,11 @@
-# ⚠️ RETIRED — SVG-MB-Control is no longer in active duty
+# ℹ️ CONSOLIDATED into SQ-control
 
-Active development and operation of motherboard telemetry and fan control have
-moved to **SQ-control**, which now owns this responsibility. This repo's runtime
-is expected to be **off** by design — that is intentional, not a fault. The
-agent contract below applies only when intentionally working on this archived
-repo.
+This standalone repo is no longer the active runtime for motherboard telemetry
+and fan control — that functionality has been combined into **SQ-control**,
+which now owns operation. The code here is retained and still in use through
+SQ-control; it is not abandoned, and this repo's runtime is expected to be
+**off** by design (intentional, not a fault). The agent contract below still
+applies when working on this repo.
 
 ---
 

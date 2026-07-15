@@ -1,10 +1,11 @@
 # SVG-MB-Control
 
-> **⚠️ RETIRED — no longer in active duty.**
-> Active development and operation of motherboard telemetry and fan control have
-> moved to **SQ-control**, which now owns this responsibility. This repo's
-> runtime is expected to be **off** by design — that is intentional, not a
-> fault. Keep this repo for historical reference only.
+> **ℹ️ CONSOLIDATED into SQ-control.**
+> This standalone repo is no longer the active runtime for motherboard telemetry
+> and fan control — that functionality has been combined into **SQ-control**,
+> which now owns operation. The code here is retained and still in use through
+> SQ-control; it is not abandoned. This repo's own runtime is expected to be
+> **off** by design — that is intentional, not a fault.
 
 [![Windows CI](https://github.com/espensev/SVG-MB-Control/actions/workflows/ci-windows.yml/badge.svg)](https://github.com/espensev/SVG-MB-Control/actions/workflows/ci-windows.yml)
 
