@@ -1,3 +1,13 @@
+# ⚠️ RETIRED — SVG-MB-Control is no longer in active duty
+
+Active development and operation of motherboard telemetry and fan control have
+moved to **SQ-control**, which now owns this responsibility. This repo's runtime
+is expected to be **off** by design — that is intentional, not a fault. The
+agent contract below applies only when intentionally working on this archived
+repo.
+
+---
+
 ## Build Workflow
 
 - Use `.\build-release.ps1` or `scripts\Build-Release.ps1` as the default build entrypoint for this repo.
