@@ -32,7 +32,7 @@ response. No live runtime control action was taken.
 
 ## Current Point-In-Time State
 
-Sidecars read at `2026-06-26T06:57:35` reported:
+Historical sidecars read at `2026-06-26T06:57:35` reported:
 
 - Runtime status: `running`, `control-loop`, tick `8280`.
 - Timing: `loop_achieved_interval_ms=250.4491`,
@@ -62,16 +62,10 @@ Historical same-temperature distribution:
 | fan5 RPM | 260,459 | 736 | 750 | 776 | 1906 |
 | channel5 setpoint % | 260,458 | 20.001 | 20.202 | 20.618 | 62.4 |
 
-Interpretation:
-
-- The current fan-B point, `20.0% / 734 RPM`, is essentially at the historical
-  same-temperature median.
-- Median same-temperature fan-B behavior is stable by day: duty stays at
-  `20.0%`, RPM stays about `734-736`, and setpoint stays near `20.0%`.
-- The upper tail widened on `2026-06-25` (`same-temp p95 duty 25.49%`,
-  p95 RPM `919`) because the same temperature band can include load-transient
-  rows where boost or prior heat history had not decayed yet. That is a
-  transient/context effect, not a median drift of fan B.
+Daily medians stayed at `20.0%` duty, about `734-736 RPM`, and near `20.0%`
+setpoint. The June 25 upper tail widened (`same-temp p95 duty 25.49%`,
+p95 RPM `919`); the band includes load transients and undecayed heat history,
+so that tail does not establish median drift.
 
 ## Overall Fan Response
 
@@ -243,27 +237,12 @@ Active event file only:
 
 ## Findings
 
-1. Fan B is behaving normally at the current thermal point. Its present
-   `20.0% / 734 RPM` is the expected floor behavior for `56 C` CPU /
-   `44 C` GPU-memory conditions.
-2. Historical fan-B median drift is not visible. At the same temperature band,
-   the median stays at `20.0%` and roughly `734-736 RPM`; the high tail comes
-   from transient load/response context, especially on `2026-06-25`.
-3. Controlled fan duty follows setpoint. Channel 5 p95 setpoint-duty error is
-   about `0.39 pct`, so the actuator path is not the weak link in this data.
-4. Intake bias is strong at low load. The flow proxy median is about `2.0x`
-   intake/exhaust against a `1.1x` target, with below-target rows under `0.1%`.
-5. GPU power logging is strong and useful. NVML board power is present across
-   nearly all current archives and can explain the GPU memory-temperature tail.
-6. CPU package power is useful but still provisional. It is populated, but its
-   acquisition state is `quarantine`, not `validated`.
-7. CPU load can be characterized, but CPU efficiency cannot be finalized from
-   this archive set. `system_cpu_busy_pct` and package watts give load context;
-   APERF/MPERF cycle data is too sparse for robust work-per-energy evaluation.
-8. The previous shutdown-adjacent behavior remains a scheduling/load problem
-   more than a fan authority problem: process CPU is tiny, but host CPU reaches
-   near saturation in the tail windows, and fan response starts once the loop is
-   scheduled.
+The dated distributions show stable fan-B medians, duty following setpoint,
+and low-load intake bias. They do not establish current runtime acceptance.
+CPU package power remains provisional (`quarantine`); sparse cycle coverage
+prevents a work-per-energy verdict. Shutdown-adjacent traces suggest scheduling
+or host load rather than fan authority: controller CPU was low, host CPU reached
+near saturation, and response began once the loop was scheduled.
 
 ## Recommended Next Read-Only Checks
 
